@@ -1076,6 +1076,49 @@ describe('AI financial grounding', () => {
     expect(result.message).toContain(insight)
     expect(result.toolCalls).toEqual(['upcoming_commitments'])
   })
+  it('omits advice to sacrifice the cushion, known bills, or take on debt from every narrative field', async () => {
+    const { agent } = setup()
+    const data = await state(agent)
+    const unsafeAdvice = [
+      'Waiting until after the paycheck or lowering your cushion would change the picture.',
+      'You could reduce your cushion to make room.',
+      'Relaxing the buffer would improve the fit.',
+      'Skipping known bills could leave room for the camera.',
+      'Defer rent to create room for the camera.',
+      'Borrowing could close the gap.',
+      'A loan could help with the purchase.',
+      'Using credit could make the purchase work.',
+    ]
+    for (const advice of unsafeAdvice) {
+      const { provider } = mockModel([answer(advice, 'affordability', [advice])])
+      const result = await provider.reply(
+        { message: 'Can I afford a $1199 camera?', history: [] },
+        data,
+      )
+      expect(result.intro).not.toContain(advice)
+      expect(result.message).not.toContain(advice)
+      expect(result.suggestions).not.toContain(advice)
+      expect(result.assessment?.outcome).toBe('tight')
+      expect(result.assessment?.amountCents).toBe(119900)
+      expect(result.message).toContain('$1,199')
+    }
+  })
+  it('preserves qualitative waiting and cheaper-alternative advice without changing the assessment', async () => {
+    const { agent } = setup()
+    const data = await state(agent)
+    const insight = 'Waiting for your paycheck or choosing a cheaper option could improve the fit.'
+    const nextQuestions = ['What if I wait for my paycheck?', 'Could I compare a lower price?']
+    const { provider } = mockModel([answer(insight, 'affordability', nextQuestions)])
+    const result = await provider.reply(
+      { message: 'Can I afford a $1199 camera?', history: [] },
+      data,
+    )
+    expect(result.intro).toBe(insight)
+    expect(result.message).toContain(insight)
+    expect(result.suggestions).toEqual(nextQuestions)
+    expect(result.assessment?.outcome).toBe('tight')
+    expect(result.assessment?.purchaseDate).toBe(data.today)
+  })
   it.each([
     'You would have nine hundred dollars left.',
     'Your balance leaves several hundred in reserve.',
