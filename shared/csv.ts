@@ -1,0 +1,503 @@
+import Papa from 'papaparse'
+import type { Cadence, ImportPreview, ScheduledFlow, Transaction } from './types.ts'
+import { addDays, todayInTimezone } from './finance.ts'
+
+const MAX_ROWS = 10_000
+const aliases = {
+  date: ['date', 'transactiondate', 'transactiondatetime'],
+  time: ['time', 'transactiontime'],
+  name: [
+    'name',
+    'merchantname',
+    'merchant',
+    'recipientname',
+    'sendername',
+    'description',
+    'itemtitle',
+    'subject',
+  ],
+  amount: ['net', 'netamount', 'amount', 'gross', 'grossamount', 'transactionamount'],
+  currency: ['currency', 'currencycode', 'transactioncurrency'],
+  type: ['type', 'transactiontype'],
+  status: ['status', 'transactionstatus'],
+  id: ['transactionid', 'transactionidd', 'txn id', 'txnid'],
+  reference: ['referencetxnid', 'referencetransactionid', 'referenceid'],
+} satisfies Record<string, string[]>
+
+function key(value: string): string {
+  return value
+    .replace(/^\uFEFF/, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+}
+function hash(value: string): string {
+  // Stable non-secret identifier. This is for identity, not cryptography.
+  let first = 2166136261
+  let second = 5381
+  for (let index = 0; index < value.length; index++) {
+    first = Math.imul(first ^ value.charCodeAt(index), 16777619)
+    second = Math.imul(second, 33) ^ value.charCodeAt(index)
+  }
+  return `${(first >>> 0).toString(36)}${(second >>> 0).toString(36)}`
+}
+
+function parseDate(value: string): string | null {
+  let candidate: string
+  const iso = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T].*)?$/)
+  const us = value.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (iso) candidate = `${iso[1]}-${iso[2]}-${iso[3]}`
+  else if (us) candidate = `${us[3]}-${us[1]!.padStart(2, '0')}-${us[2]!.padStart(2, '0')}`
+  else return null
+  const date = new Date(`${candidate}T12:00:00Z`)
+  return Number.isFinite(date.valueOf()) && date.toISOString().slice(0, 10) === candidate
+    ? candidate
+    : null
+}
+
+function parseCents(value: string): number | null {
+  let cleaned = value.trim().replace(/^\$/, '')
+  const parentheses = /^\(.*\)$/.test(cleaned)
+  if (parentheses) cleaned = cleaned.slice(1, -1).replace(/^\$/, '')
+  if (!/^[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d{1,2})?$/.test(cleaned)) return null
+  const negative = parentheses || cleaned.startsWith('-')
+  cleaned = cleaned.replace(/^[+-]/, '').replace(/,/g, '')
+  const [whole, fraction = ''] = cleaned.split('.')
+  const cents = Number(whole) * 100 + Number(fraction.padEnd(2, '0'))
+  if (!Number.isSafeInteger(cents)) return null
+  return negative ? -cents : cents
+}
+
+function classify(
+  name: string,
+  type: string,
+  amount: number,
+): Pick<Transaction, 'category' | 'kind' | 'color'> {
+  const content = `${name} ${type}`.toLowerCase()
+  if (
+    /\b(transfer|deposit|withdrawal|conversion|top.?up|funding)\b/.test(type.toLowerCase()) ||
+    /\btransfer (from|to)\b/.test(name.toLowerCase())
+  )
+    return { kind: 'transfer', category: 'Transfers', color: '#c4c6bb' }
+  if (/refund|reimbursement|reversal/.test(content))
+    return {
+      kind: 'refund',
+      category: /reimbursement/.test(content) ? 'Reimbursements' : 'Refunds',
+      color: '#c4c6bb',
+    }
+  if (amount > 0 && /\b(salary|payroll|paycheck|wages)\b/.test(content))
+    return { kind: 'income', category: 'Income', color: '#b6d58d' }
+  if (amount >= 0) return { kind: 'unknown', category: 'Review incoming payment', color: '#c4c6bb' }
+  if (
+    /\brent\b|mortgage|internet|electric|utility|utilities|water bill|insurance|comcast|verizon/.test(
+      content,
+    )
+  )
+    return { kind: 'expense', category: 'Home', color: '#d6af8e' }
+  if (/spotify|netflix|hulu|disney|youtube|apple music/.test(content))
+    return { kind: 'expense', category: 'Entertainment', color: '#b8d99c' }
+  if (
+    /adobe|icloud|dropbox|notion|github|microsoft|subscription|recurring|automatic payment|preapproved/.test(
+      content,
+    )
+  )
+    return { kind: 'expense', category: 'Software', color: '#c4bee0' }
+  if (/grocery|groceries|whole foods|trader joe|supermarket|market/.test(content))
+    return { kind: 'expense', category: 'Groceries', color: '#b6ce9f' }
+  if (
+    /coffee|cafe|café|restaurant|kitchen|sweetgreen|doordash|uber eats|starbucks|dining|food/.test(
+      content,
+    )
+  )
+    return { kind: 'expense', category: 'Food & drink', color: '#d7b897' }
+  if (/transit|uber|lyft|train|metro|parking|shell|chevron|gas station/.test(content))
+    return { kind: 'expense', category: 'Transport', color: '#b1c8d9' }
+  if (/gym|fitness|health|pharmacy|walgreens/.test(content))
+    return { kind: 'expense', category: 'Health', color: '#b9cddd' }
+  return { kind: 'expense', category: 'Shopping', color: '#e7cbb1' }
+}
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b)
+  return sorted.length % 2
+    ? sorted[Math.floor(sorted.length / 2)]!
+    : Math.round((sorted[sorted.length / 2 - 1]! + sorted[sorted.length / 2]!) / 2)
+}
+function dateDistance(first: string, last: string): number {
+  return Math.round(
+    (Date.parse(`${last}T12:00:00Z`) - Date.parse(`${first}T12:00:00Z`)) / 86_400_000,
+  )
+}
+function nextOccurrence(date: string, cadence: Cadence, count: number): string {
+  if (cadence === 'weekly' || cadence === 'biweekly')
+    return addDays(date, count * (cadence === 'weekly' ? 7 : 14))
+  const [year, month, day] = date.split('-').map(Number)
+  const target = new Date(
+    Date.UTC(year, month - 1 + count * (cadence === 'yearly' ? 12 : 1), 1, 12),
+  )
+  const lastDay = new Date(
+    Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0, 12),
+  ).getUTCDate()
+  return new Date(
+    Date.UTC(target.getUTCFullYear(), target.getUTCMonth(), Math.min(day, lastDay), 12),
+  )
+    .toISOString()
+    .slice(0, 10)
+}
+
+function recurringSuggestions(
+  transactions: Transaction[],
+  today: string,
+): { flows: ScheduledFlow[]; ids: Set<string> } {
+  const groups = new Map<string, Transaction[]>()
+  for (const transaction of transactions) {
+    if (transaction.status !== 'completed' || !['income', 'expense'].includes(transaction.kind))
+      continue
+    const groupKey = `${transaction.kind}:${transaction.name.toLowerCase().trim().replace(/\s+/g, ' ')}`
+    groups.set(groupKey, [...(groups.get(groupKey) ?? []), transaction])
+  }
+  const flows: ScheduledFlow[] = []
+  const ids = new Set<string>()
+  for (const [groupKey, group] of groups) {
+    if (group.length < 2) continue
+    const sorted = [...group].sort((a, b) => a.date.localeCompare(b.date))
+    const intervals = sorted
+      .slice(1)
+      .map((item, index) => dateDistance(sorted[index]!.date, item.date))
+    const days = median(intervals)
+    const cadence: Cadence | undefined =
+      days >= 6 && days <= 8
+        ? 'weekly'
+        : days >= 12 && days <= 16
+          ? 'biweekly'
+          : days >= 25 && days <= 35
+            ? 'monthly'
+            : days >= 360 && days <= 370
+              ? 'yearly'
+              : undefined
+    if (
+      !cadence ||
+      intervals.some(
+        (value) =>
+          Math.abs(value - days) > (cadence === 'monthly' ? 5 : cadence === 'yearly' ? 10 : 2),
+      )
+    )
+      continue
+    const amount = median(sorted.map((item) => Math.abs(item.amountCents)))
+    if (
+      !amount ||
+      sorted.some(
+        (item) => Math.abs(Math.abs(item.amountCents) - amount) > Math.max(100, amount * 0.12),
+      )
+    )
+      continue
+    const latest = sorted[sorted.length - 1]!
+    // Repeated groceries/coffee are variable spending, not a subscription proposal.
+    const bill =
+      latest.category === 'Home' ||
+      /\brent\b|insurance|loan|debt|internet|utility/.test(latest.name.toLowerCase())
+    const knownSubscription =
+      ['Entertainment', 'Software'].includes(latest.category) ||
+      /gym|fitness|membership/.test(latest.name.toLowerCase())
+    if (latest.kind !== 'income' && !bill && !knownSubscription) continue
+    let nextDate = nextOccurrence(latest.date, cadence, 1)
+    for (let count = 2; nextDate < today && count < 1000; count++)
+      nextDate = nextOccurrence(latest.date, cadence, count)
+    sorted.forEach((item) => ids.add(item.id))
+    flows.push({
+      id: `suggested:${hash(groupKey)}`,
+      name: latest.name,
+      amountCents: amount,
+      nextDate,
+      cadence,
+      kind: latest.kind === 'income' ? 'income' : bill ? 'bill' : 'subscription',
+      category: latest.category,
+      confirmed: false,
+      active: true,
+      color: latest.color,
+    })
+  }
+  return { flows: flows.sort((a, b) => a.nextDate.localeCompare(b.nextDate)), ids }
+}
+
+export function parsePayPalCsv(text: string, existing: Transaction[] = []): ImportPreview {
+  const result: ImportPreview = {
+    transactions: [],
+    errors: [],
+    duplicates: 0,
+    excluded: 0,
+    coverageDays: 0,
+    totalRows: 0,
+    suggestedDailySpendCents: 0,
+    recurring: [],
+    warnings: [],
+  }
+  if (!text.trim()) {
+    result.errors.push({ row: 1, message: 'The file is empty.' })
+    return result
+  }
+  if (text.length > 5_000_000) {
+    result.errors.push({ row: 1, message: 'Use a CSV smaller than 5 MB.' })
+    return result
+  }
+  const parsed = Papa.parse<Record<string, string>>(text, {
+    header: true,
+    skipEmptyLines: 'greedy',
+    transformHeader: (header) => key(header.trim()),
+  })
+  for (const error of parsed.errors)
+    result.errors.push({ row: (error.row ?? 0) + 2, message: error.message })
+  const fields = parsed.meta.fields ?? []
+  const selected = Object.fromEntries(
+    Object.entries(aliases).map(([field, options]) => [
+      field,
+      options.find((alias) => fields.includes(alias)),
+    ]),
+  ) as Record<keyof typeof aliases, string | undefined>
+  for (const required of ['date', 'amount', 'currency'] as const)
+    if (!selected[required])
+      result.errors.push({
+        row: 1,
+        message: `Missing ${required} column. Use a PayPal English-language activity export with Date, Currency, and Net, Amount, or Gross.`,
+      })
+  result.totalRows = parsed.data.length
+  if (result.errors.some((error) => error.row === 1)) return result
+  if (parsed.data.length > MAX_ROWS) {
+    result.errors.push({
+      row: 1,
+      message: `Use at most ${MAX_ROWS.toLocaleString('en-US')} transactions per import.`,
+    })
+    return result
+  }
+  const get = (row: Record<string, string>, field: keyof typeof aliases) =>
+    (selected[field] ? (row[selected[field]!] ?? '') : '').trim()
+  const knownById = new Map(existing.map((transaction) => [transaction.id, transaction]))
+  const capturedPurchases = new Map(
+    existing
+      .filter((transaction) => transaction.source === 'purchase' && transaction.referenceId)
+      .map((transaction) => [transaction.referenceId!.replace(/^paypal:/, ''), transaction]),
+  )
+  const occurrences = new Map<string, number>()
+  let noIds = 0
+  const today = todayInTimezone('America/New_York')
+  for (let index = 0; index < parsed.data.length; index++) {
+    const row = parsed.data[index]!
+    const rowNumber = index + 2
+    const date = parseDate(get(row, 'date'))
+    const amount = parseCents(get(row, 'amount'))
+    const currency = get(row, 'currency').toUpperCase()
+    const name = get(row, 'name').slice(0, 180) || 'PayPal transaction'
+    const type = get(row, 'type')
+    if (!date) {
+      result.errors.push({
+        row: rowNumber,
+        message: 'Invalid date. Use YYYY-MM-DD or the US MM/DD/YYYY format.',
+      })
+      continue
+    }
+    if (date > today) {
+      result.errors.push({
+        row: rowNumber,
+        message: 'Future-dated history needs review before import.',
+      })
+      continue
+    }
+    if (amount === null) {
+      result.errors.push({
+        row: rowNumber,
+        message: 'Invalid amount. Use signed USD amounts with at most two decimal places.',
+      })
+      continue
+    }
+    if (currency !== 'USD') {
+      result.errors.push({
+        row: rowNumber,
+        message: currency
+          ? `Unsupported currency ${currency}. Only USD can be forecast; no conversion is applied.`
+          : 'Currency is missing. Confirm this row is USD before importing.',
+      })
+      continue
+    }
+    if (
+      amount > 0 &&
+      /payment sent|purchase|debit card payment/i.test(type) &&
+      !/refund|reversal/i.test(type)
+    ) {
+      result.errors.push({
+        row: rowNumber,
+        message: 'An outgoing payment has a positive amount. Confirm its sign before importing.',
+      })
+      continue
+    }
+    const nativeId = get(row, 'id')
+    const fingerprint = hash([date, get(row, 'time'), name, type, amount, currency].join('|'))
+    const ordinal = (occurrences.get(fingerprint) ?? 0) + 1
+    occurrences.set(fingerprint, ordinal)
+    const id = nativeId ? `paypal:${nativeId}` : `import:${fingerprint}:${ordinal}`
+    const statusText = get(row, 'status').toLowerCase()
+    const status: Transaction['status'] =
+      /pending|held|hold|processing|unclaimed|in.?progress/.test(statusText)
+        ? 'pending'
+        : /denied|cancel|failed|void|expired|removed|reversed/.test(statusText)
+          ? 'excluded'
+          : statusText === '' ||
+              /^(completed|complete|cleared|paid|processed|refunded|partially refunded|success|successful)$/.test(
+                statusText,
+              )
+            ? 'completed'
+            : 'excluded'
+    if (
+      statusText &&
+      status === 'excluded' &&
+      !/denied|cancel|failed|void|expired|removed|reversed/.test(statusText)
+    )
+      result.warnings.push(
+        `Row ${rowNumber}: unrecognized status “${statusText}” is excluded from estimates.`,
+      )
+    const classification = classify(name, type, amount)
+    const reference = get(row, 'reference')
+    const transaction: Transaction = {
+      id,
+      date,
+      name,
+      amountCents: amount,
+      currency,
+      ...classification,
+      status,
+      source: 'import',
+      ...(reference ? { referenceId: `paypal:${reference}` } : {}),
+    }
+    const capturedPurchase = nativeId ? capturedPurchases.get(nativeId) : undefined
+    if (capturedPurchase) {
+      const dayDifference = Math.abs(dateDistance(capturedPurchase.date, date))
+      if (
+        capturedPurchase.amountCents !== amount ||
+        capturedPurchase.currency !== currency ||
+        !Number.isFinite(dayDifference) ||
+        dayDifference > 1 ||
+        classification.kind !== 'expense'
+      ) {
+        result.errors.push({
+          row: rowNumber,
+          message: `Capture ${nativeId} matches a Worth purchase but its amount, currency, date, or payment type conflicts. Resolve this row before importing.`,
+        })
+        continue
+      }
+      // The capture reference is the identity. A merchant name or amount alone never establishes a match.
+      // App captures use UTC dates; an export's local date can legitimately differ by one day.
+      if (dayDifference === 1)
+        result.warnings.push(
+          `Row ${rowNumber}: capture ${nativeId} is already recorded in Worth. Its one-day date difference is treated as a time-zone difference.`,
+        )
+      result.duplicates++
+      continue
+    }
+    const previous = knownById.get(id)
+    if (previous) {
+      if (
+        previous.amountCents !== amount ||
+        previous.date !== date ||
+        previous.currency !== currency
+      ) {
+        result.errors.push({
+          row: rowNumber,
+          message: `Transaction ${nativeId || id} appears with conflicting amounts or dates. Resolve the conflict before importing.`,
+        })
+        continue
+      }
+      if (previous.status === status || (status === 'pending' && previous.status !== 'pending')) {
+        result.duplicates++
+        continue
+      }
+      // A later settled/failed row replaces its pending representation; never add a second payment.
+      const previousIndex = result.transactions.findIndex((item) => item.id === id)
+      if (previousIndex >= 0) {
+        result.transactions[previousIndex] = transaction
+        result.duplicates++
+      } else result.transactions.push(transaction)
+    } else {
+      result.transactions.push(transaction)
+      if (!nativeId) noIds++
+    }
+    knownById.set(id, transaction)
+  }
+  // Return only inserted/updated rows, but analyze the complete retained personal history.
+  const combined = [...knownById.values()].filter((transaction) => transaction.source === 'import')
+  const chronological = combined.sort((a, b) => a.date.localeCompare(b.date))
+  result.coverageDays = chronological.length
+    ? dateDistance(chronological[0]!.date, chronological[chronological.length - 1]!.date) + 1
+    : 0
+  const suggestions = recurringSuggestions(combined, today)
+  result.recurring = suggestions.flows
+  const refunded = new Map<string, number>()
+  for (const transaction of combined)
+    if (
+      transaction.kind === 'refund' &&
+      transaction.status === 'completed' &&
+      transaction.amountCents > 0 &&
+      transaction.referenceId
+    )
+      refunded.set(
+        transaction.referenceId,
+        (refunded.get(transaction.referenceId) ?? 0) + transaction.amountCents,
+      )
+  const ordinarySpend = combined.filter(
+    (transaction) =>
+      transaction.kind === 'expense' &&
+      transaction.status === 'completed' &&
+      !suggestions.ids.has(transaction.id),
+  )
+  const ordinaryTotal = ordinarySpend.reduce(
+    (sum, transaction) =>
+      sum + Math.max(0, Math.abs(transaction.amountCents) - (refunded.get(transaction.id) ?? 0)),
+    0,
+  )
+  result.suggestedDailySpendCents = result.coverageDays
+    ? Math.round(ordinaryTotal / result.coverageDays)
+    : 0
+  result.excluded = result.transactions.filter(
+    (transaction) =>
+      transaction.status !== 'completed' ||
+      ['transfer', 'refund', 'unknown'].includes(transaction.kind) ||
+      transaction.amountCents === 0,
+  ).length
+  const unknownIncoming = combined.filter(
+    (transaction) => transaction.kind === 'unknown' && transaction.amountCents > 0,
+  ).length
+  const pending = combined.filter((transaction) => transaction.status === 'pending').length
+  if (result.errors.length)
+    result.warnings.push(
+      'Some rows could not be imported. Correct them or explicitly review the missing spending before trusting a forecast.',
+    )
+  if (result.coverageDays < 60)
+    result.warnings.push(
+      'This history covers fewer than 60 days. Confirm an everyday spending estimate that includes spending outside PayPal.',
+    )
+  if (
+    chronological.length &&
+    dateDistance(chronological[chronological.length - 1]!.date, today) > 7
+  )
+    result.warnings.push(
+      'The latest transaction is more than a week old. Review changes in your current bills and spending.',
+    )
+  if (noIds)
+    result.warnings.push(
+      `${noIds} rows have no transaction ID. Identical rows are retained separately; check for duplicate entries before confirming.`,
+    )
+  if (unknownIncoming)
+    result.warnings.push(
+      `${unknownIncoming} incoming payments are not classified as salary. Confirm dependable income separately.`,
+    )
+  if (pending)
+    result.warnings.push(
+      `${pending} pending payments are excluded from spending history. Add any outstanding commitments to your financial picture.`,
+    )
+  if (result.recurring.length)
+    result.warnings.push(
+      'Likely recurring items are suggestions, not confirmed commitments. Their historical amounts are excluded from the everyday spending estimate; confirm each item or adjust that estimate.',
+    )
+  result.warnings.push(
+    'Transfers and refunds do not count as salary or everyday spending. Historical transactions never change your current available-funds snapshot.',
+  )
+  result.transactions.sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id))
+  return result
+}
