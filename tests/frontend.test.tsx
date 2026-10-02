@@ -4,7 +4,7 @@ import { act, cleanup, render, screen, waitFor, within } from '@testing-library/
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
-import { Assistant } from '../src/Assistant'
+import { Assistant, AssessmentCard } from '../src/Assistant'
 import { PurchaseDialog } from '../src/PurchaseDialog'
 import { api, ApiError } from '../src/api'
 import { loadPayPalSdk, type PayPalSessionCallbacks } from '../src/paypalSdk'
@@ -553,4 +553,24 @@ describe('PayPal SDK confirmation boundary', () => {
       } else expect(screen.getByRole('button', { name: /Return to PayPal approval/ })).toBeTruthy()
     },
   )
+})
+
+describe('stale assessment review', () => {
+  it('rechecks a previous-day result using the current date', async () => {
+    const user = userEvent.setup()
+    const state = makeState()
+    const assessment = assessPurchase(state.profile, [], { amountCents: 34900, today: TODAY })
+    const onScenario = vi.fn()
+    render(
+      <AssessmentCard
+        assessment={assessment}
+        stale
+        recheckDate="2026-10-04"
+        onPlan={vi.fn()}
+        onScenario={onScenario}
+      />,
+    )
+    await user.click(screen.getByRole('button', { name: 'Check again' }))
+    expect(onScenario).toHaveBeenCalledWith('2026-10-04')
+  })
 })

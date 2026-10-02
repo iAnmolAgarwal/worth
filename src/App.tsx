@@ -228,9 +228,13 @@ export default function App() {
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <button className="nav-item" onClick={() => setDialog('import')}>
+          <button
+            className="nav-item"
+            aria-label="Import PayPal activity"
+            onClick={() => setDialog('import')}
+          >
             <ArrowDownLeft size={18} />
-            <span>Import PayPal activity</span>
+            <span>Import activity</span>
           </button>
           <button className="nav-item" onClick={() => setDialog('plan')}>
             <Settings2 size={18} />
@@ -401,7 +405,11 @@ export default function App() {
                   label="Available funds"
                   value={money(state.profile.balanceCents)}
                   icon={<Wallet size={18} />}
-                  note={`Confirmed snapshot · ${shortDate(state.profile.snapshotDate)}`}
+                  note={
+                    state.profile.confirmed
+                      ? `Confirmed snapshot · ${shortDate(state.profile.snapshotDate)}`
+                      : 'Confirm your current balance'
+                  }
                   onClick={() => setDialog('plan')}
                 />
                 <Stat

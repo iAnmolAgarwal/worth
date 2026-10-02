@@ -775,7 +775,7 @@ export function PlanDialog({
             <div className="plan-review-step">
               <div className="plan-review-summary">
                 <div className="plan-review-heading">
-                  <span>{name}’s plan</span>
+                  <span>{name === 'Your plan' ? 'Your plan' : `${name}’s plan`}</span>
                   <button type="button" onClick={() => goTo(0)} disabled={locked}>
                     Edit funds
                     <ChevronRight size={13} />

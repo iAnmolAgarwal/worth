@@ -4727,3 +4727,7 @@ button svg {
   cursor: pointer;
   color: var(--muted);
 }
+
+.worth-message {
+  scroll-margin-top: 90px;
+}

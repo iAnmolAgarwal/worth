@@ -50,6 +50,7 @@ export function Assistant({
   const lastPrompt = useRef<number>(0)
   const inFlight = useRef(false)
   const bottom = useRef<HTMLDivElement>(null)
+  const latestAnswer = useRef<HTMLDivElement>(null)
   const entriesRef = useRef(entries)
   const contextRef = useRef(context)
   useEffect(() => {
@@ -112,11 +113,11 @@ export function Assistant({
   }, [initialPrompt, busy, send])
   useEffect(() => {
     if (entries.length && visible)
-      bottom.current?.scrollIntoView({
+      (busy ? bottom.current : (latestAnswer.current ?? bottom.current))?.scrollIntoView({
         behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
           ? 'instant'
           : 'smooth',
-        block: 'end',
+        block: busy ? 'end' : 'start',
       })
   }, [entries.length, busy, visible])
   async function scenario(
@@ -182,6 +183,11 @@ export function Assistant({
             {entries.map((entry) => (
               <div
                 key={entry.id}
+                ref={
+                  entry.role === 'assistant' && entry.id === entries.at(-1)?.id
+                    ? latestAnswer
+                    : undefined
+                }
                 className={cx('message', entry.role === 'user' ? 'user-message' : 'worth-message')}
               >
                 {entry.role === 'assistant' && (
@@ -212,6 +218,7 @@ export function Assistant({
                     <AssessmentCard
                       assessment={entry.reply.assessment}
                       chartsVisible={visible}
+                      recheckDate={state.today}
                       stale={
                         entry.reply.assessment.profileVersion !== state.profile.version ||
                         entry.reply.assessment.today !== state.today
@@ -229,7 +236,16 @@ export function Assistant({
                       <span>
                         Checked{' '}
                         {Array.from(new Set(entry.reply.toolCalls))
-                          .map((t) => t.replaceAll('_', ' '))
+                          .map(
+                            (t) =>
+                              ({
+                                assess_purchase: 'purchase forecast',
+                                upcoming_commitments: 'upcoming bills',
+                                spending_summary: 'spending patterns',
+                              })[
+                                t as 'assess_purchase' | 'upcoming_commitments' | 'spending_summary'
+                              ] ?? 'your plan',
+                          )
                           .join(' · ')}
                       </span>
                     </div>
@@ -361,7 +377,11 @@ export function Assistant({
             <div className="context-title">
               <span className="context-avatar">{state.profile.name.slice(0, 1)}</span>
               <div>
-                <strong>{state.profile.name}’s plan</strong>
+                <strong>
+                  {state.profile.name === 'Your plan'
+                    ? 'Your plan'
+                    : `${state.profile.name}’s plan`}
+                </strong>
                 <small>
                   {state.profile.source === 'demo'
                     ? 'Synthetic demo persona'
@@ -421,6 +441,7 @@ export function AssessmentCard({
   stale = false,
   compact = false,
   chartsVisible = true,
+  recheckDate,
 }: {
   assessment: Assessment
   onPlan: () => void
@@ -429,6 +450,7 @@ export function AssessmentCard({
   stale?: boolean
   compact?: boolean
   chartsVisible?: boolean
+  recheckDate?: string
 }) {
   const [details, setDetails] = useState(false)
   const [stress, setStress] = useState(false)
@@ -458,7 +480,9 @@ export function AssessmentCard({
               ? 'Your plan needs a few details.'
               : positive
                 ? 'This fits your plan.'
-                : 'A better fit later.'}
+                : a.earliestDate && a.earliestDate > a.purchaseDate
+                  ? 'A better fit later.'
+                  : 'This would cross your cushion.'}
           </h3>
           <p>
             {missing
@@ -473,7 +497,11 @@ export function AssessmentCard({
       {stale && (
         <div className="notice notice-warning">
           This result uses an earlier plan.{' '}
-          <button className="inline-link" disabled={disabled} onClick={() => onScenario?.(a.today)}>
+          <button
+            className="inline-link"
+            disabled={disabled}
+            onClick={() => onScenario?.(recheckDate ?? a.today)}
+          >
             Check again
           </button>
         </div>
