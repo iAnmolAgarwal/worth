@@ -22,10 +22,10 @@ const assess = (amountCents: number, purchaseDate = TODAY) =>
 describe('verdict template', () => {
   it('states the engine outcome, the earliest fitting date and the most that fits', () => {
     expect(verdictFor(assess(119900))).toBe(
-      'Camera at $1,199 would dip below your cushion if you buy it today. The earliest date that fits is Fri, Oct 16. The most you could spend today and keep your cushion is $850.52.',
+      'Camera at $1,199 would dip below your cushion if you buy it today. The earliest date that fits is Fri, Oct 23. The most you could spend today and keep your cushion is $440.01.',
     )
-    expect(verdictFor(assess(119900, '2026-10-16'))).toBe(
-      'Camera at $1,199 fits your plan if you buy it on Fri, Oct 16.',
+    expect(verdictFor(assess(34900, '2026-10-16'))).toBe(
+      'Camera at $349 fits your plan if you buy it on Fri, Oct 16.',
     )
   })
 })
@@ -34,22 +34,22 @@ describe('fact catalogs', () => {
   it('writes every purchase fact from engine values, with its role in the sentence', () => {
     expect(purchaseFacts(assess(119900), data)).toEqual({
       low_point:
-        'Your lowest balance would be $651.52 on Thu, Oct 15, $348.48 below your $1,000 cushion.',
-      cause: 'Apartment rent ($1,750) is due Thu, Oct 8, before that low point.',
-      income: 'Your next income, Monthly paycheck ($4,200), arrives Thu, Oct 15.',
-      wait: 'Waiting until Fri, Oct 16 would keep your cushion for the full $1,199.',
-      spend_less: 'Up to $850.52 would keep your cushion if you buy today.',
+        'Your lowest balance would be -$458.99 on Thu, Oct 22, $758.99 below your $300 cushion.',
+      cause: 'Apartment rent ($1,450) is due Fri, Oct 16, before that low point.',
+      income: 'Your next income, Biweekly paycheck ($2,100), arrives Thu, Oct 8.',
+      wait: 'Waiting until Fri, Oct 23 would keep your cushion for the full $1,199.',
+      spend_less: 'Up to $440.01 would keep your cushion if you buy today.',
       stress:
-        'With 20% higher everyday spending, your lowest balance would be $550.12, below your $1,000 cushion.',
+        'With 20% higher everyday spending, your lowest balance would be -$578.99, below your $300 cushion.',
       bills_before:
-        'Due before your low point: Music streaming $11.99 (Oct 5), Apartment rent $1,750 (Oct 8), Video streaming $15.49 (Oct 10).',
+        'Due before your low point: Car insurance $128 (Oct 5), Gym membership $35 (Oct 10), Phone plan $65 (Oct 12).',
     })
   })
 
   it('offers no waiting fact for a purchase that already fits', () => {
     const facts = purchaseFacts(assess(34900), data)
     expect(facts.wait).toBeUndefined()
-    expect(facts.low_point).toContain('above your $1,000 cushion')
+    expect(facts.low_point).toContain('above your $300 cushion')
   })
 
   it('offers no facts while the plan is incomplete', () => {
@@ -59,11 +59,11 @@ describe('fact catalogs', () => {
   })
 
   it('writes plan, commitment and spending facts', () => {
-    expect(planFacts(data).room_today).toBe('Up to $850.52 today would keep your $1,000 cushion.')
+    expect(planFacts(data).room_today).toBe('Up to $440.01 today would keep your $300 cushion.')
     expect(commitmentFacts(data, 'subscriptions')).toMatchObject({
-      total: '4 subscriptions are due in the next 30 days, $60.46 in all.',
-      largest: 'The largest is Design software at $29.99.',
-      other_total: 'Bills that are not subscriptions add $1,815 over the same 30 days.',
+      total: '3 subscriptions are due in the next 30 days, $62.48 in all.',
+      largest: 'The largest is Gym membership at $35.',
+      other_total: 'Bills that are not subscriptions add $2,008 over the same 30 days.',
     })
     expect(spendingFacts30(data).total).toMatch(
       /^You spent \$[\d,.]+ across \d+ completed purchases/,

@@ -1,11 +1,11 @@
 import type { ChatIntent, ChatReply, PurchaseContext } from '../shared/types.ts'
 
 // AI eval probes. The persona is the seeded demo plan pinned to EVAL_TODAY, so every
-// expectation below is a fixed fact of the engine:
-//   funds $4,200, cushion $1,000, everyday spending $39/day, rent $1,750 on Oct 8,
-//   paycheck $4,200 on Oct 15, subscriptions for music (Oct 5), video (Oct 10),
-//   cloud storage (Oct 21) and design software (Oct 26), internet bill (Oct 11).
-//   A $1,199 camera today is tight; it first fits on Oct 16; max today is $850.52.
+// expectation below is a fixed fact of the engine (Maya, a 60-day window):
+//   funds $1,300, cushion $300, everyday spending $30/day, a $2,100 paycheck every two
+//   weeks from Oct 8, rent $1,450 on Oct 16, three subscriptions, other bills and an
+//   existing Pay in 4 plan. A $1,199 camera today is tight; it first fits on Oct 23;
+//   the most that fits today is $440.01.
 //
 // The split is fixed before any live run. Prompts and guards may be tuned against
 // `train` failures only; `test` is held out and reported separately.

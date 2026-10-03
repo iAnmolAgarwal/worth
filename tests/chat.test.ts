@@ -115,7 +115,7 @@ describe('Claude interprets, the server validates (C-12)', () => {
       source: 'ai',
     })
     expect(reply.verdict).toBe(
-      'Laptop at $1,500 would dip below your cushion if you buy it today. The earliest date that fits is Fri, Oct 16. The most you could spend today and keep your cushion is $850.52.',
+      'Laptop at $1,500 would dip below your cushion if you buy it today. The earliest date that fits is Fri, Oct 23. The most you could spend today and keep your cushion is $440.01.',
     )
   })
 
@@ -352,7 +352,7 @@ describe('dates are resolved by Claude and checked by the server (C-12)', () => 
     const { provider } = model([
       interpret([item('camera', 119900)], {
         date_phrase: 'after my next paycheck',
-        date: '2026-10-16',
+        date: '2026-10-09',
       }),
       final(),
     ])
@@ -360,7 +360,7 @@ describe('dates are resolved by Claude and checked by the server (C-12)', () => 
       ask('Can I buy a $1199 camera after my next paycheck?'),
       demo(),
     )
-    expect(reply.assessment?.purchaseDate).toBe('2026-10-16')
+    expect(reply.assessment?.purchaseDate).toBe('2026-10-09')
     const none = model([
       interpret([item('camera', 90000)], { date_phrase: 'on payday', date: '2026-10-16' }),
       final('clarify'),
@@ -390,8 +390,8 @@ describe('dates are resolved by Claude and checked by the server (C-12)', () => 
       final(),
     ])
     const reply = await provider.reply(ask('When can I afford a $1199 camera?'), demo())
-    expect(reply.assessment).toMatchObject({ purchaseDate: TODAY, earliestDate: '2026-10-16' })
-    expect(reply.verdict).toContain('The earliest date that fits is Fri, Oct 16.')
+    expect(reply.assessment).toMatchObject({ purchaseDate: TODAY, earliestDate: '2026-10-23' })
+    expect(reply.verdict).toContain('The earliest date that fits is Fri, Oct 23.')
   })
 })
 
@@ -443,13 +443,13 @@ describe('conversation context (C-14, AI-4, UX-1)', () => {
     expect(create).toHaveBeenCalledTimes(1)
     expect(reply.intent).toBe('subscriptions')
     expect(reply.assessment).toBeUndefined()
-    expect(reply.message).toContain('Music streaming, $11.99 on Oct 5')
-    expect(reply.message).toContain('Total: $60.46.')
+    expect(reply.message).toContain('Gym membership, $35 on Oct 10')
+    expect(reply.message).toContain('Total: $62.48.')
     expect(reply.message).not.toContain('Apartment rent')
     expect(reply.message).not.toContain('Home internet')
     expect(reply.points).toEqual([
-      { id: 'total', text: '4 subscriptions are due in the next 30 days, $60.46 in all.' },
-      { id: 'next', text: 'The next is Music streaming, $11.99 on Mon, Oct 5.' },
+      { id: 'total', text: '3 subscriptions are due in the next 30 days, $62.48 in all.' },
+      { id: 'next', text: 'The next is Gym membership, $35 on Sat, Oct 10.' },
     ])
     expect(reply.toolCalls).toEqual(['list_commitments'])
   })
@@ -495,18 +495,18 @@ describe('Claude picks engine facts; the server writes them (C-13)', () => {
     expect(reply.points).toEqual([
       {
         id: 'wait',
-        text: 'Waiting until Fri, Oct 16 would keep your cushion for the full $1,199.',
+        text: 'Waiting until Fri, Oct 23 would keep your cushion for the full $1,199.',
       },
       {
         id: 'cause',
-        text: 'Apartment rent ($1,750) is due Thu, Oct 8, before that low point.',
+        text: 'Apartment rent ($1,450) is due Fri, Oct 16, before that low point.',
       },
-      { id: 'spend_less', text: 'Up to $850.52 would keep your cushion if you buy today.' },
+      { id: 'spend_less', text: 'Up to $440.01 would keep your cushion if you buy today.' },
     ])
     expect(reply.message.split('\n\n')).toEqual([
       reply.verdict,
       [reply.lead, ...reply.points!.map((p) => p.text)].join(' '),
-      expect.stringContaining('projected low point to $651.52 on Oct 15'),
+      expect.stringContaining('projected low point to -$458.99 on Oct 22'),
     ])
     expect(reply.suggestions).toEqual(['What if I wait?'])
   })
@@ -518,17 +518,17 @@ describe('Claude picks engine facts; the server writes them (C-13)', () => {
     ).toEqual([
       {
         id: 'low_point',
-        text: 'Your lowest balance would be $651.52 on Thu, Oct 15, $348.48 below your $1,000 cushion.',
+        text: 'Your lowest balance would be -$458.99 on Thu, Oct 22, $758.99 below your $300 cushion.',
       },
       {
         id: 'stress',
-        text: 'With 20% higher everyday spending, your lowest balance would be $550.12, below your $1,000 cushion.',
+        text: 'With 20% higher everyday spending, your lowest balance would be -$578.99, below your $300 cushion.',
       },
     ])
     const fits = model([interpret([item('headphones', 34900)], { points: ['low_point'] })])
     const reply = await fits.provider.reply(ask('Can I afford $349 headphones?'), demo())
     expect(reply.points?.[0]!.text).toBe(
-      'Your lowest balance would be $1,501.52 on Thu, Oct 15, $501.52 above your $1,000 cushion.',
+      'Your lowest balance would be $391.01 on Thu, Oct 22, $91.01 above your $300 cushion.',
     )
   })
 
@@ -608,10 +608,10 @@ describe('request shape and reliability (C-14)', () => {
     expect(create).toHaveBeenCalledTimes(1)
     expect(reply.intent).toBe('overview')
     expect(reply.points).toEqual([
-      { id: 'room_today', text: 'Up to $850.52 today would keep your $1,000 cushion.' },
+      { id: 'room_today', text: 'Up to $440.01 today would keep your $300 cushion.' },
       {
         id: 'cause',
-        text: 'Apartment rent ($1,750) is due Thu, Oct 8, before that low point.',
+        text: 'Apartment rent ($1,450) is due Fri, Oct 16, before that low point.',
       },
     ])
   })
