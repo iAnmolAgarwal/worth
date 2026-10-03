@@ -105,8 +105,8 @@ export function createDemoState(
         icon: 'briefcase',
       },
       {
-        id: 'spotify',
-        name: 'Spotify Premium',
+        id: 'music',
+        name: 'Music streaming',
         amountCents: 1199,
         nextDate: addDays(today, 2),
         cadence: 'monthly',
@@ -118,8 +118,8 @@ export function createDemoState(
         icon: 'music',
       },
       {
-        id: 'netflix',
-        name: 'Netflix',
+        id: 'video',
+        name: 'Video streaming',
         amountCents: 1549,
         nextDate: addDays(today, 7),
         cadence: 'monthly',
@@ -131,8 +131,8 @@ export function createDemoState(
         icon: 'tv',
       },
       {
-        id: 'icloud',
-        name: 'iCloud+',
+        id: 'cloud-storage',
+        name: 'Cloud storage',
         amountCents: 299,
         nextDate: addDays(today, 18),
         cadence: 'monthly',
@@ -144,8 +144,8 @@ export function createDemoState(
         icon: 'cloud',
       },
       {
-        id: 'adobe',
-        name: 'Adobe Creative Cloud',
+        id: 'design-software',
+        name: 'Design software',
         amountCents: 2999,
         nextDate: addDays(today, 23),
         cadence: 'monthly',
@@ -173,10 +173,10 @@ export function createDemoState(
   }
   const transactions: Transaction[] = []
   const shops = [
-    { name: 'Whole Foods Market', category: 'Groceries', color: '#b6ce9f' },
-    { name: 'Trader Joe’s', category: 'Groceries', color: '#b6ce9f' },
-    { name: 'Blue Bottle Coffee', category: 'Food & drink', color: '#d7b897' },
-    { name: 'Sweetgreen', category: 'Food & drink', color: '#bfd49e' },
+    { name: 'Grocery market', category: 'Groceries', color: '#b6ce9f' },
+    { name: 'Corner grocer', category: 'Groceries', color: '#b6ce9f' },
+    { name: 'Coffee bar', category: 'Food & drink', color: '#d7b897' },
+    { name: 'Salad bar', category: 'Food & drink', color: '#bfd49e' },
     { name: 'Neighborhood Market', category: 'Groceries', color: '#b6ce9f' },
     { name: 'City transit', category: 'Transport', color: '#b1c8d9' },
     { name: 'Local kitchen', category: 'Food & drink', color: '#e4c8aa' },
@@ -200,7 +200,7 @@ export function createDemoState(
       transactions.push({
         id: `demo:coffee:${date}`,
         date,
-        name: daysAgo % 2 ? 'Blue Bottle Coffee' : 'City transit',
+        name: daysAgo % 2 ? 'Coffee bar' : 'City transit',
         amountCents: -(daysAgo % 2 ? 675 : 580),
         currency: 'USD',
         category: daysAgo % 2 ? 'Food & drink' : 'Transport',
@@ -253,7 +253,7 @@ export function createDemoState(
     {
       id: 'demo:refund',
       date: addDays(today, -16),
-      name: 'Uniqlo · returned item',
+      name: 'Clothing store · returned item',
       amountCents: 4900,
       currency: 'USD',
       category: 'Refunds',
@@ -261,12 +261,12 @@ export function createDemoState(
       status: 'completed',
       source: 'demo',
       color: '#c4c6bb',
-      referenceId: 'demo:uniqlo',
+      referenceId: 'demo:clothing',
     },
     {
-      id: 'demo:uniqlo',
+      id: 'demo:clothing',
       date: addDays(today, -22),
-      name: 'Uniqlo',
+      name: 'Clothing store',
       amountCents: -4900,
       currency: 'USD',
       category: 'Shopping',

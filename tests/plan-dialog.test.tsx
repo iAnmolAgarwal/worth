@@ -19,7 +19,7 @@ function makeState(): AppState {
     ...seed,
     profile: {
       ...seed.profile,
-      flows: seed.profile.flows.filter((flow) => ['salary', 'rent', 'spotify'].includes(flow.id)),
+      flows: seed.profile.flows.filter((flow) => ['salary', 'rent', 'music'].includes(flow.id)),
     },
     products: PRODUCTS,
     today: TODAY,
@@ -105,13 +105,13 @@ describe('financial picture wizard', () => {
     await continueStep(user)
     await user.click(screen.getByRole('button', { name: 'Edit Apartment rent' }))
     expect(screen.getAllByRole('group')).toHaveLength(1)
-    await user.click(screen.getByRole('button', { name: 'Edit Spotify Premium' }))
+    await user.click(screen.getByRole('button', { name: 'Edit Music streaming' }))
     expect(screen.getAllByRole('group')).toHaveLength(1)
     expect((screen.getByRole('textbox', { name: 'Item name' }) as HTMLInputElement).value).toBe(
-      'Spotify Premium',
+      'Music streaming',
     )
-    await user.click(screen.getByRole('button', { name: 'Remove Spotify Premium' }))
-    expect(screen.queryByRole('button', { name: 'Edit Spotify Premium' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Remove Music streaming' }))
+    expect(screen.queryByRole('button', { name: 'Edit Music streaming' })).toBeNull()
 
     await user.click(screen.getByRole('button', { name: 'Add a bill or subscription' }))
     await user.type(screen.getByRole('textbox', { name: 'Item name' }), 'Annual insurance')
@@ -173,7 +173,7 @@ describe('financial picture wizard', () => {
     expect(screen.getByRole('alert').textContent).toContain('Review and confirm Apartment rent')
     expect(screen.queryByRole('button', { name: 'Save my plan' })).toBeNull()
     await user.click(screen.getByRole('button', { name: 'Confirm item' }))
-    await user.click(screen.getByRole('button', { name: 'Confirm Spotify Premium' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm Music streaming' }))
     await continueStep(user)
     const save = (await screen.findByRole('button', { name: 'Save my plan' })) as HTMLButtonElement
     expect(save.disabled).toBe(true)

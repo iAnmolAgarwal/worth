@@ -635,7 +635,9 @@ export function PlanDialog({
                                   updateFlow(flow.id, { name: event.target.value })
                                 }
                                 placeholder={
-                                  step === 1 ? 'e.g. Monthly paycheck' : 'e.g. Rent or Spotify'
+                                  step === 1
+                                    ? 'e.g. Monthly paycheck'
+                                    : 'e.g. Rent or music streaming'
                                 }
                               />
                             </Field>
