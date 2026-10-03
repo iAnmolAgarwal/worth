@@ -734,7 +734,7 @@ function FlowCard({
             onClick={onToggle}
             disabled={locked}
             aria-expanded={editing}
-            aria-label={`Edit ${flow.name || 'new item'}`}
+            aria-label={`${editing ? 'Close' : 'Edit'} ${flow.name || 'new item'}`}
           >
             {editing ? 'Close' : 'Edit'}
           </button>
