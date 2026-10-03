@@ -27,22 +27,49 @@ export interface PayPalPaymentSession {
   hasReturned(): boolean
   resume(): Promise<void>
 }
-export interface PayPalSdkInstance {
-  findEligibleMethods(options: { currencyCode: 'USD'; amount?: string }): Promise<{
-    isEligible(method: 'paypal'): boolean
-  }>
-  createPayPalOneTimePaymentSession(options: PayPalSessionCallbacks): PayPalPaymentSession
+export interface PayPalEligibility {
+  isEligible(method: 'paypal' | 'paylater'): boolean
+  /** Pay Later details, such as `{ productCode: 'PAY_IN_4', countryCode: 'US' }`. */
+  getDetails?(method: 'paylater'): { productCode?: string; countryCode?: string } | undefined
 }
+export interface PayPalSdkInstance {
+  /** The amount is passed so PayPal can judge Pay Later for this price (C-9). */
+  findEligibleMethods(options: { currencyCode: 'USD'; amount?: string }): Promise<PayPalEligibility>
+  createPayPalOneTimePaymentSession(options: PayPalSessionCallbacks): PayPalPaymentSession
+  /** Present when the instance loaded the `paypal-messages` component. */
+  createPayPalMessages?(): unknown
+}
+type Component = 'paypal-payments' | 'paypal-messages'
 interface PayPalGlobal {
   createInstance(options: {
     clientId: string
-    components: ['paypal-payments']
+    components: Component[]
     pageType: 'checkout'
   }): Promise<PayPalSdkInstance>
 }
 declare global {
   interface Window {
     paypal?: PayPalGlobal
+  }
+}
+/** PayPal's own web components, mounted unmodified (brief §9). */
+type PayPalElement = import('react').DetailedHTMLProps<
+  import('react').HTMLAttributes<HTMLElement>,
+  HTMLElement
+> & { type?: string; hidden?: boolean }
+declare module 'react' {
+  // oxlint-disable-next-line typescript/no-namespace
+  namespace JSX {
+    interface IntrinsicElements {
+      'paypal-button': PayPalElement
+      'paypal-message': PayPalElement & {
+        amount?: string
+        'currency-code'?: string
+        'auto-bootstrap'?: boolean | string
+        'logo-position'?: string
+        'text-color'?: string
+      }
+    }
   }
 }
 
@@ -140,15 +167,16 @@ export function loadPayPalSdk(clientId: string): Promise<PayPalSdkInstance> {
   if (!clientId.trim()) return Promise.reject(new Error('PayPal sandbox is not configured.'))
   const cached = instancePromises.get(clientId)
   if (cached) return cached
+  const create = (paypal: PayPalGlobal, components: Component[]) =>
+    bounded(
+      paypal.createInstance({ clientId, components, pageType: 'checkout' }),
+      'PayPal checkout took too long to initialize. You can retry or use the approval link.',
+    )
   const initializing = loadCore()
+    // Messages are optional: checkout must still load if this client cannot show them.
     .then((paypal) =>
-      bounded(
-        paypal.createInstance({
-          clientId,
-          components: ['paypal-payments'],
-          pageType: 'checkout',
-        }),
-        'PayPal checkout took too long to initialize. You can retry or use the approval link.',
+      create(paypal, ['paypal-payments', 'paypal-messages']).catch(() =>
+        create(paypal, ['paypal-payments']),
       ),
     )
     .then((instance) => {
