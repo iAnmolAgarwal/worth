@@ -127,6 +127,15 @@ export interface Purchase {
   archived?: boolean
   paymentPlan?: PaymentPlan
   refunds?: PurchaseRefund[]
+  /** The PayPal approval or payer-action link, present only while approval is needed. */
+  approveUrl?: string
+  /**
+   * True after PayPal declined the capture (INSTRUMENT_DECLINED or PAYER_ACTION_REQUIRED). The
+   * buyer chooses another way to pay in PayPal, then confirms again.
+   */
+  needsReapproval?: boolean
+  /** The last problem with this checkout, written for the user; never raw PayPal output. */
+  lastError?: { code: string; message: string }
 }
 /** Something the user must confirm before Worth changes how a purchase affects their plan. */
 export type PurchaseReview =

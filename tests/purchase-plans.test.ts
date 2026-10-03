@@ -3,7 +3,8 @@ import request from 'supertest'
 import { createApp } from '../server/app.ts'
 import { Store } from '../server/store.ts'
 import type { StoredPurchase } from '../server/store.ts'
-import type { PayPalGateway, PayPalOrder } from '../server/paypal.ts'
+import { PayPalError } from '../server/paypal.ts'
+import type { PayPalGateway, PayPalOrder, PayPalRefund } from '../server/paypal.ts'
 import { addDays, payIn4Schedule } from '../shared/finance.ts'
 import type { AppState, Comparison, Purchase } from '../shared/types.ts'
 
@@ -14,6 +15,7 @@ type Agent = ReturnType<typeof request.agent>
 
 function fakePayPal(): PayPalGateway {
   const orders = new Map<string, PayPalOrder>()
+  const refunds = new Map<string, PayPalRefund>()
   return {
     create: vi.fn(async (p: StoredPurchase) => {
       const order: PayPalOrder = {
@@ -51,6 +53,16 @@ function fakePayPal(): PayPalGateway {
       return structuredClone(order)
     }),
     verify: vi.fn(async () => true),
+    getRefund: vi.fn(async (id: string) => {
+      const refund = refunds.get(id)
+      if (!refund) throw new PayPalError(404, 'RESOURCE_NOT_FOUND')
+      return structuredClone(refund)
+    }),
+    eligibility: vi.fn(async () => ({
+      payLater: true,
+      productCode: 'PAYLATER',
+      countryCode: 'US',
+    })),
   }
 }
 function setup(paypal?: PayPalGateway) {

@@ -130,8 +130,8 @@ describe('hosted PayPal return', () => {
     const id = encodeURIComponent(created.body.purchase.id)
     expect(bodies).toEqual([
       expect.objectContaining({
-        return_url: `${origin}/?checkout=${id}&paypal=approved`,
-        cancel_url: `${origin}/?checkout=${id}&paypal=cancelled`,
+        return_url: `${origin}/api/checkout/${id}/return?paypal=approved`,
+        cancel_url: `${origin}/api/checkout/${id}/return?paypal=cancelled`,
       }),
     ])
     store.close()

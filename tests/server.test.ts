@@ -4,7 +4,8 @@ import request from 'supertest'
 import { createApp } from '../server/app.ts'
 import { Store } from '../server/store.ts'
 import type { StoredPurchase } from '../server/store.ts'
-import type { PayPalGateway, PayPalOrder } from '../server/paypal.ts'
+import { PayPalError } from '../server/paypal.ts'
+import type { PayPalGateway, PayPalOrder, PayPalRefund } from '../server/paypal.ts'
 import type { AppState } from '../shared/types.ts'
 import { createChatProvider, fallbackReply } from '../server/chat.ts'
 import { addDays } from '../shared/finance.ts'
@@ -60,6 +61,7 @@ async function simpleProfile(
 }
 function fakePayPal() {
   const orders = new Map<string, PayPalOrder>()
+  const refunds = new Map<string, PayPalRefund>()
   const gateway: PayPalGateway = {
     create: vi.fn(async (p: StoredPurchase) => {
       const order: PayPalOrder = {
@@ -97,8 +99,30 @@ function fakePayPal() {
       return structuredClone(order)
     }),
     verify: vi.fn(async () => true),
+    getRefund: vi.fn(async (id: string) => {
+      const refund = refunds.get(id)
+      if (!refund) throw new PayPalError(404, 'RESOURCE_NOT_FOUND')
+      return structuredClone(refund)
+    }),
+    eligibility: vi.fn(async () => ({
+      payLater: true,
+      productCode: 'PAYLATER',
+      countryCode: 'US',
+    })),
   }
-  return { gateway, orders }
+  return { gateway, orders, refunds }
+}
+/** A refund as PayPal sends it: no order ID, and an `up` link to the refunded capture. */
+function refundResource(id: string, captureId: string, value: string): PayPalRefund {
+  return {
+    id,
+    status: 'COMPLETED',
+    amount: { currency_code: 'USD', value },
+    links: [
+      { rel: 'self', href: `https://api.sandbox.paypal.com/v2/payments/refunds/${id}` },
+      { rel: 'up', href: `https://api.sandbox.paypal.com/v2/payments/captures/${captureId}` },
+    ],
+  }
 }
 afterEach(() => {
   for (const store of stores.splice(0)) store.close()
@@ -678,7 +702,7 @@ describe('checkout reservations and payment reconciliation', () => {
     ).toHaveLength(1)
   })
   it('keeps completed captures after a late approval and flags subsequent refunds for review', async () => {
-    const { gateway, orders } = fakePayPal()
+    const { gateway, orders, refunds } = fakePayPal()
     const { app, agent } = setup({ paypal: gateway })
     await simpleProfile(agent)
     const created = await post(agent, '/api/checkout/create', { productId: 'headphones' })
@@ -694,17 +718,24 @@ describe('checkout reservations and payment reconciliation', () => {
         resource: { id: created.body.orderId },
       })
     expect((await state(agent)).purchases[0]?.status).toBe('completed')
+    const before = await post(agent, '/api/assess', { amountCents: 0 })
+    refunds.set('REFUND-A', refundResource('REFUND-A', `CAPTURE${created.body.orderId}`, '100.00'))
     await request(app)
       .post('/api/paypal/webhook')
       .send({
         id: 'REFUND1',
         event_type: 'PAYMENT.CAPTURE.REFUNDED',
-        resource: { supplementary_data: { related_ids: { order_id: created.body.orderId } } },
+        resource: refundResource('REFUND-A', `CAPTURE${created.body.orderId}`, '100.00'),
       })
     const current = await state(agent)
     expect(current.purchases[0]?.status).toBe('completed')
-    expect(current.profile.confirmed).toBe(false)
-    expect(current.profile.missingFields.join(' ')).toContain('payment changed')
+    // A refund is a review item; it changes spending room by $0 until the user confirms it.
+    expect(current.profile.confirmed).toBe(true)
+    expect(current.reviews).toContainEqual(
+      expect.objectContaining({ kind: 'refund', refundId: 'REFUND-A', refundedCents: 10000 }),
+    )
+    const after = await post(agent, '/api/assess', { amountCents: 0 })
+    expect(after.body.baselineLowestCents).toBe(before.body.baselineLowestCents)
   })
   it('rejects unverified webhooks before touching stored purchases', async () => {
     const { gateway } = fakePayPal()
@@ -715,6 +746,267 @@ describe('checkout reservations and payment reconciliation', () => {
       .send({ id: 'EVENT1', event_type: 'PAYMENT.CAPTURE.COMPLETED', resource: {} })
     expect(result.status).toBe(401)
     expect(gateway.get).not.toHaveBeenCalled()
+  })
+})
+
+describe('payment lifecycle: declines, cancels and late events (C-8)', () => {
+  async function checkout(agent: ReturnType<typeof request.agent>, productId = 'headphones') {
+    await simpleProfile(agent)
+    const created = await post(agent, '/api/checkout/create', { productId })
+    expect(created.status).toBe(200)
+    return created.body as { purchase: { id: string }; orderId: string }
+  }
+  it('reopens approval after INSTRUMENT_DECLINED, without a lockout, and captures once with a new request ID', async () => {
+    const { gateway } = fakePayPal()
+    const original = gateway.capture
+    gateway.capture = vi.fn(async (orderId, requestId, options) => {
+      if (vi.mocked(gateway.capture).mock.calls.length === 1)
+        throw new PayPalError(422, 'INSTRUMENT_DECLINED', 'debug-1', [
+          { rel: 'redirect', href: 'https://www.sandbox.paypal.com/checkoutnow?token=again' },
+        ])
+      return original(orderId, requestId, options)
+    })
+    const { agent } = setup({ paypal: gateway })
+    const created = await checkout(agent)
+    const id = created.purchase.id
+    const declined = await post(agent, `/api/checkout/${id}/capture`)
+    expect(declined.status).toBe(409)
+    expect(declined.body.code).toBe('PAYMENT_DECLINED')
+    expect(declined.body.error).toBe(
+      'Your payment method was declined. Choose another way to pay in PayPal.',
+    )
+    expect(declined.body.purchase).toMatchObject({
+      status: 'created',
+      needsReapproval: true,
+      approveUrl: 'https://www.sandbox.paypal.com/checkoutnow?token=again',
+      lastError: { code: 'INSTRUMENT_DECLINED' },
+    })
+    expect(JSON.stringify(declined.body)).not.toContain('debug-1')
+    const stored = (await state(agent)).purchases[0]!
+    expect(stored).toMatchObject({ status: 'created', needsReapproval: true })
+    // The buyer chooses another funding source; the next capture is a new PayPal request.
+    const captured = await post(agent, `/api/checkout/${id}/capture`)
+    expect(captured.body.purchase.status).toBe('completed')
+    expect(captured.body.purchase.needsReapproval).toBeUndefined()
+    expect(captured.body.purchase.lastError).toBeUndefined()
+    expect(captured.body.purchase.approveUrl).toBeUndefined()
+    const requestIds = vi.mocked(gateway.capture).mock.calls.map((call) => call[1])
+    expect(requestIds).toEqual([`capture-${id}`, `capture-${id}-1`])
+    expect(
+      captured.body.state.transactions.filter((t: { source: string }) => t.source === 'purchase'),
+    ).toHaveLength(1)
+  })
+  it('lets a declined checkout be cancelled and the plan edited straight away', async () => {
+    const { gateway } = fakePayPal()
+    gateway.capture = vi.fn(async () => {
+      throw new PayPalError(422, 'PAYER_ACTION_REQUIRED', undefined, [
+        { rel: 'payer-action', href: 'https://www.sandbox.paypal.com/checkoutnow?token=action' },
+      ])
+    })
+    const { agent } = setup({ paypal: gateway })
+    const created = await checkout(agent)
+    const declined = await post(agent, `/api/checkout/${created.purchase.id}/capture`)
+    expect(declined.body.purchase).toMatchObject({
+      approveUrl: 'https://www.sandbox.paypal.com/checkoutnow?token=action',
+      lastError: { code: 'PAYER_ACTION_REQUIRED' },
+    })
+    expect((await post(agent, `/api/checkout/${created.purchase.id}/cancel`)).status).toBe(200)
+    expect((await post(agent, '/api/reset')).status).toBe(200)
+  })
+  it('passes the sandbox decline mock to PayPal only when negative testing is on', async () => {
+    const { gateway } = fakePayPal()
+    const { agent } = setup({ paypal: gateway })
+    const created = await checkout(agent)
+    await post(agent, `/api/checkout/${created.purchase.id}/capture`, { mockDecline: true })
+    expect(vi.mocked(gateway.capture).mock.calls[0]![2]).toEqual({ mockDecline: true })
+    const hosted = fakePayPal()
+    const origin = 'https://worth.example.com'
+    const prod = setup({
+      paypal: hosted.gateway,
+      config: { ...config, production: true, trustProxy: 1, origin, paypalNegativeTesting: false },
+    })
+    const first = await request(prod.app).get('/api/state')
+    const cookie = (first.headers['set-cookie'][0] as string).split(';')[0]!
+    const send = (path: string, body: object) =>
+      request(prod.app)
+        .post(path)
+        .set('Cookie', cookie)
+        .set('X-Worth-Client', 'web')
+        .set('Origin', origin)
+        .send(body)
+    const refused = await send('/api/checkout/anything/capture', { mockDecline: true })
+    expect(refused.status).toBe(400)
+    expect(refused.body.code).toBe('NEGATIVE_TESTING_DISABLED')
+    expect(hosted.gateway.capture).not.toHaveBeenCalled()
+  })
+  it('releases the attempt when PayPal says the order is not approved', async () => {
+    const { gateway } = fakePayPal()
+    gateway.capture = vi.fn(async () => {
+      throw new PayPalError(422, 'ORDER_NOT_APPROVED')
+    })
+    const { agent } = setup({ paypal: gateway })
+    const created = await checkout(agent)
+    const result = await post(agent, `/api/checkout/${created.purchase.id}/capture`)
+    expect(result.status).toBe(409)
+    expect(result.body.code).toBe('BUYER_APPROVAL_REQUIRED')
+    expect((await state(agent)).purchases[0]?.status).toBe('created')
+    expect((await post(agent, `/api/checkout/${created.purchase.id}/cancel`)).status).toBe(200)
+  })
+  it('settles ORDER_ALREADY_CAPTURED from the order instead of leaving it uncertain', async () => {
+    const { gateway } = fakePayPal()
+    const original = gateway.capture
+    gateway.capture = vi.fn(async (orderId, requestId) => {
+      await original(orderId, requestId)
+      throw new PayPalError(422, 'ORDER_ALREADY_CAPTURED')
+    })
+    const { agent } = setup({ paypal: gateway })
+    const created = await checkout(agent)
+    const result = await post(agent, `/api/checkout/${created.purchase.id}/capture`)
+    expect(result.body.purchase.status).toBe('completed')
+  })
+  it('makes one order lookup per capture request', async () => {
+    const { gateway } = fakePayPal()
+    const { agent } = setup({ paypal: gateway })
+    const created = await checkout(agent)
+    await post(agent, `/api/checkout/${created.purchase.id}/capture`)
+    expect(gateway.get).toHaveBeenCalledTimes(1)
+  })
+  it('cancels locally when PayPal no longer has an order Worth never captured', async () => {
+    const { gateway } = fakePayPal()
+    const { agent } = setup({ paypal: gateway })
+    const created = await checkout(agent)
+    gateway.get = vi.fn(async () => {
+      throw new PayPalError(404, 'RESOURCE_NOT_FOUND')
+    })
+    const cancelled = await post(agent, `/api/checkout/${created.purchase.id}/cancel`)
+    expect(cancelled.status).toBe(200)
+    expect(cancelled.body.purchases[0].status).toBe('cancelled')
+    expect((await post(agent, '/api/checkout/create', { productId: 'chair' })).status).toBe(200)
+  })
+  it('keeps the reservation on a 404 after a capture attempt', async () => {
+    const { gateway } = fakePayPal()
+    gateway.capture = vi.fn(async () => {
+      throw new Error('socket hang up')
+    })
+    const { agent } = setup({ paypal: gateway })
+    const created = await checkout(agent)
+    expect((await post(agent, `/api/checkout/${created.purchase.id}/capture`)).status).toBe(502)
+    gateway.get = vi.fn(async () => {
+      throw new PayPalError(404, 'RESOURCE_NOT_FOUND')
+    })
+    const cancel = await post(agent, `/api/checkout/${created.purchase.id}/cancel`)
+    expect(cancel.status).toBe(502)
+    expect((await state(agent)).purchases[0]).toMatchObject({
+      status: 'unknown',
+      lastError: { code: 'PAYPAL_UNCERTAIN' },
+    })
+  })
+  it('never revives a cancelled checkout from a late APPROVED event, even with another checkout active', async () => {
+    const { gateway, orders } = fakePayPal()
+    const { app, agent } = setup({ paypal: gateway })
+    const first = await checkout(agent)
+    expect((await post(agent, `/api/checkout/${first.purchase.id}/cancel`)).status).toBe(200)
+    const second = await post(agent, '/api/checkout/create', { productId: 'chair' })
+    expect(second.status).toBe(200)
+    orders.get(first.orderId)!.status = 'APPROVED'
+    for (const id of ['LATE-A', 'LATE-B']) {
+      const event = await request(app)
+        .post('/api/paypal/webhook')
+        .send({ id, event_type: 'CHECKOUT.ORDER.APPROVED', resource: { id: first.orderId } })
+      expect(event.status).toBe(200)
+    }
+    const purchases = (await state(agent)).purchases
+    expect(purchases.find((p) => p.id === first.purchase.id)?.status).toBe('cancelled')
+    expect(purchases.find((p) => p.id === second.body.purchase.id)?.status).toBe('created')
+  })
+  it('records a buyer’s cancel or approval on the PayPal return and opens the app', async () => {
+    const { gateway } = fakePayPal()
+    const { app, agent } = setup({ paypal: gateway })
+    const created = await checkout(agent)
+    const id = created.purchase.id
+    const cancelled = await agent.get(`/api/checkout/${id}/return?paypal=cancelled`)
+    expect(cancelled.status).toBe(303)
+    expect(cancelled.headers.location).toBe(`/?checkout=${id}&paypal=cancelled`)
+    expect((await state(agent)).purchases[0]).toMatchObject({
+      status: 'created',
+      lastError: { code: 'PAYPAL_CANCELLED' },
+      approveUrl: 'https://www.sandbox.paypal.com/checkoutnow?token=fake',
+    })
+    const approved = await agent.get(`/api/checkout/${id}/return?paypal=approved`)
+    expect(approved.headers.location).toBe(`/?checkout=${id}&paypal=approved`)
+    expect((await state(agent)).purchases[0]?.lastError).toBeUndefined()
+    // Another session's return changes nothing.
+    const stranger = await request(app).get(`/api/checkout/${id}/return?paypal=cancelled`)
+    expect(stranger.status).toBe(303)
+    expect((await state(agent)).purchases[0]?.lastError).toBeUndefined()
+  })
+})
+
+describe('PayPal webhooks (PP-5, SB-9)', () => {
+  it('verifies the raw body exactly as delivered', async () => {
+    const { gateway } = fakePayPal()
+    const { app } = setup({ paypal: gateway })
+    const raw =
+      '{ "id" : "EV-RAW", "event_type":"CHECKOUT.ORDER.APPROVED","resource":{"id":"NONE"} }'
+    const result = await request(app)
+      .post('/api/paypal/webhook')
+      .set('Content-Type', 'application/json')
+      .send(raw)
+    expect(result.status).toBe(200)
+    expect(vi.mocked(gateway.verify).mock.calls[0]![1]).toBe(raw)
+  })
+  it('rate-limits deliveries before any verification call', async () => {
+    const { gateway } = fakePayPal()
+    gateway.verify = vi.fn(async () => false)
+    const { app } = setup({ paypal: gateway })
+    const statuses: number[] = []
+    for (let i = 0; i < 62; i++)
+      statuses.push(
+        (
+          await request(app)
+            .post('/api/paypal/webhook')
+            .send({ id: `E${i}` })
+        ).status,
+      )
+    expect(statuses.filter((s) => s === 401)).toHaveLength(60)
+    expect(statuses.slice(-2)).toEqual([429, 429])
+    expect(gateway.verify).toHaveBeenCalledTimes(60)
+  })
+  it('maps a refund to its capture through links[rel=up] and records it once for review', async () => {
+    const { gateway, refunds } = fakePayPal()
+    const { app, agent } = setup({ paypal: gateway })
+    await simpleProfile(agent)
+    const created = await post(agent, '/api/checkout/create', { productId: 'headphones' })
+    await post(agent, `/api/checkout/${created.body.purchase.id}/capture`)
+    const captureId = `CAPTURE${created.body.orderId}`
+    // The verified event says $349; PayPal's own refund record says $50, and that is what counts.
+    refunds.set('R-50', refundResource('R-50', captureId, '50.00'))
+    const send = (id: string) =>
+      request(app)
+        .post('/api/paypal/webhook')
+        .send({
+          id,
+          event_type: 'PAYMENT.CAPTURE.REFUNDED',
+          resource: refundResource('R-50', captureId, '349.00'),
+        })
+    expect((await send('EV-R1')).body).toEqual({ received: true })
+    expect((await send('EV-R1')).body.duplicate).toBe(true)
+    expect((await send('EV-R2')).status).toBe(200)
+    const current = await state(agent)
+    expect(current.purchases[0]?.refunds).toEqual([
+      expect.objectContaining({ id: 'R-50', amountCents: 5000, status: 'review' }),
+    ])
+    expect(current.reviews.filter((r) => r.kind === 'refund')).toHaveLength(1)
+    expect(gateway.getRefund).toHaveBeenCalledWith('R-50')
+  })
+  it('ignores a refund for an unknown capture or in another currency', async () => {
+    const { gateway, refunds } = fakePayPal()
+    const { app } = setup({ paypal: gateway })
+    refunds.set('R-X', refundResource('R-X', 'NOPE', '5.00'))
+    const result = await request(app)
+      .post('/api/paypal/webhook')
+      .send({ id: 'EV-X', event_type: 'PAYMENT.CAPTURE.REFUNDED', resource: { id: 'R-X' } })
+    expect(result.body.ignored).toBe(true)
   })
 })
 
@@ -976,7 +1268,7 @@ describe('demo purchases stay out of imported finances', () => {
       suggestions: [],
       toolCalls: [],
     }))
-    const { gateway } = fakePayPal()
+    const { gateway, refunds } = fakePayPal()
     const { app, agent } = setup({ chat: { reply }, paypal: gateway })
     await state(agent)
     const created = await post(agent, '/api/checkout/create', { productId: 'headphones' })
@@ -1021,14 +1313,13 @@ describe('demo purchases stay out of imported finances', () => {
     await post(agent, '/api/chat', { message: 'What is coming up?', history: [] })
     expect(reply.mock.calls[0]![1].purchases).toEqual([])
     // A late refund for the archived sandbox payment does not unsettle the user's plan.
+    const refund = refundResource('REFUND-OLD', `CAPTURE${created.body.orderId}`, '349.00')
+    refunds.set(refund.id, refund)
     await request(app)
       .post('/api/paypal/webhook')
-      .send({
-        id: 'REFUND-ARCHIVED',
-        event_type: 'PAYMENT.CAPTURE.REFUNDED',
-        resource: { supplementary_data: { related_ids: { order_id: created.body.orderId } } },
-      })
+      .send({ id: 'REFUND-ARCHIVED', event_type: 'PAYMENT.CAPTURE.REFUNDED', resource: refund })
     expect((await state(agent)).profile.confirmed).toBe(true)
+    expect((await state(agent)).reviews).toEqual([])
     // Purchases made with the user's own plan still count.
     const own = await post(agent, '/api/checkout/create', { productId: 'chair' })
     expect(own.status).toBe(200)

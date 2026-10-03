@@ -23,6 +23,11 @@ export interface AppConfig {
   paypalClientId?: string
   paypalSecret?: string
   paypalWebhookId?: string
+  /**
+   * Allows the sandbox decline demo (`PayPal-Mock-Response: INSTRUMENT_DECLINED` on capture). On by
+   * default in development; production needs PAYPAL_NEGATIVE_TESTING=true.
+   */
+  paypalNegativeTesting: boolean
   anthropicKey?: string
   anthropicModel: string
 }
@@ -95,6 +100,9 @@ export function loadConfig(env: Env = process.env, overrides: Partial<AppConfig>
     paypalClientId: setting(env, 'PAYPAL_CLIENT_ID'),
     paypalSecret: setting(env, 'PAYPAL_CLIENT_SECRET'),
     paypalWebhookId: setting(env, 'PAYPAL_WEBHOOK_ID'),
+    paypalNegativeTesting: production
+      ? setting(env, 'PAYPAL_NEGATIVE_TESTING') === 'true'
+      : setting(env, 'PAYPAL_NEGATIVE_TESTING') !== 'false',
     anthropicKey: setting(env, 'ANTHROPIC_API_KEY'),
     anthropicModel: setting(env, 'ANTHROPIC_MODEL') ?? 'claude-sonnet-5-5',
     ...overrides,

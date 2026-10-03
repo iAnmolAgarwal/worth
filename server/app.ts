@@ -25,12 +25,20 @@ import type {
   AppState,
   Assessment,
   FinancialProfile,
+  Product,
   Purchase,
   Transaction,
 } from '../shared/types.ts'
 import { ACTIVE, Store, publicPurchase } from './store.ts'
 import type { SessionData, StoredPurchase } from './store.ts'
-import { createPayPalGateway, PayPalError, validateOrder } from './paypal.ts'
+import {
+  approvalLink,
+  createPayPalGateway,
+  PayPalError,
+  REAPPROVAL_ISSUES,
+  toCents,
+  validateOrder,
+} from './paypal.ts'
 import type { PayPalGateway, PayPalOrder } from './paypal.ts'
 import {
   categoryCandidates,
@@ -58,6 +66,8 @@ class HttpError extends Error {
     message: string,
     readonly code = 'REQUEST_FAILED',
     readonly assessment?: Assessment,
+    /** Extra fields for the response body, such as the purchase after a decline. */
+    readonly extra?: Record<string, unknown>,
   ) {
     super(message)
   }
@@ -181,6 +191,19 @@ const resolutionSchema = z.union([
  */
 const IMPORT_BODY_LIMIT = 2 * CSV_IMPORT_LIMITS.maxBytes + 64 * 1024
 const DAY = 86400000
+const DECLINE_MESSAGES: Record<string, string> = {
+  INSTRUMENT_DECLINED: 'Your payment method was declined. Choose another way to pay in PayPal.',
+  PAYER_ACTION_REQUIRED:
+    'PayPal needs you to finish a step before this payment can go through. Return to PayPal to continue.',
+}
+const CANCELLED_IN_PAYPAL =
+  'You cancelled in PayPal. Approve the payment again when you are ready, or cancel this checkout.'
+const UNCERTAIN_CAPTURE =
+  'Payment confirmation is uncertain. Your amount stays reserved; retry to check PayPal before any further action.'
+const REJECTED_CAPTURE =
+  'PayPal did not accept this payment, and nothing was charged. Approve it again in PayPal, or cancel this checkout.'
+/** Webhook deliveries accepted per sender IP per minute; each one costs a PayPal verification call. */
+const WEBHOOK_PER_MINUTE = 60
 const SPENDING_REVIEW = 'Review your everyday spending:'
 const CLAUDE_LIMIT_REASON = {
   ip: 'You have reached this demo’s Claude limit for the hour',
@@ -227,6 +250,7 @@ export function createApp(options: AppOptions = {}) {
     amountCents: number,
   ) => recordRefund(store, sessionId, purchaseId, refundId, amountCents, now()).purchase
   const busy = new Set<string>()
+  const webhookLimiter = new WindowLimiter(WEBHOOK_PER_MINUTE, 60_000)
   const chatBusy = new Set<string>()
   const requestLimiter = new WindowLimiter(config.requestsPerMinute, 60_000)
   const sessionLimiter = new WindowLimiter(config.sessionIpHourlyLimit, 60 * 60_000)
@@ -394,8 +418,19 @@ export function createApp(options: AppOptions = {}) {
           )
         return current
       }
-      const completed = { ...current, status: 'completed' as const, captureId, completedAt }
+      const completed: StoredPurchase = {
+        ...current,
+        ...(purchase.merchantId ? { merchantId: purchase.merchantId } : {}),
+        status: 'completed',
+        captureId,
+        completedAt,
+      }
+      delete completed.needsReapproval
+      delete completed.lastError
+      delete completed.captureAttemptedAt
       store.putPurchase(id, completed)
+      // A payment for a persona purchase set aside on import never enters the user's own plan.
+      if (current.archived) return completed
       const data = store.get(id)!
       if (
         !data.transactions.some(
@@ -420,12 +455,24 @@ export function createApp(options: AppOptions = {}) {
       return completed
     })
   }
+  /** Local states a PayPal event can never reopen: only a completed capture still settles them. */
+  const TERMINAL = new Set<Purchase['status']>(['cancelled', 'failed'])
   function reconcile(id: string, purchase: StoredPurchase, order: PayPalOrder) {
+    const current = store.purchase(purchase.id, id) ?? purchase
     let merchantId: string
     try {
-      merchantId = validateOrder(order, purchase)
+      merchantId = validateOrder(order, current)
     } catch {
-      if (purchase.status !== 'completed') store.putPurchase(id, { ...purchase, status: 'unknown' })
+      if (current.status !== 'completed' && !TERMINAL.has(current.status) && !current.archived)
+        store.putPurchase(id, {
+          ...current,
+          status: 'unknown',
+          lastError: {
+            code: 'PAYMENT_MISMATCH',
+            message:
+              'PayPal returned details that do not match this purchase. Funds stay reserved.',
+          },
+        })
       throw new HttpError(
         502,
         'PayPal returned details that do not match this purchase. Funds stay reserved until reconciliation.',
@@ -433,7 +480,6 @@ export function createApp(options: AppOptions = {}) {
       )
     }
     const capture = order.purchase_units?.[0]?.payments?.captures?.[0]
-    const current = store.purchase(purchase.id, id)!
     if (capture?.status === 'COMPLETED')
       return complete(
         id,
@@ -442,6 +488,8 @@ export function createApp(options: AppOptions = {}) {
         capture.create_time ?? now().toISOString(),
       )
     if (current.status === 'completed') return current
+    // A late APPROVED or other event never revives a cancelled, failed or archived checkout.
+    if (TERMINAL.has(current.status) || current.archived) return current
     const status: Purchase['status'] =
       capture?.status === 'PENDING'
         ? 'pending'
@@ -452,9 +500,16 @@ export function createApp(options: AppOptions = {}) {
           : order.status === 'COMPLETED'
             ? 'unknown'
             : ['APPROVED', 'CREATED', 'PAYER_ACTION_REQUIRED', 'SAVED'].includes(order.status)
-              ? 'created'
+              ? current.captureAttemptedAt
+                ? current.status
+                : 'created'
               : current.status
-    const next = { ...current, merchantId, orderId: order.id, status }
+    const next: StoredPurchase = { ...current, merchantId, orderId: order.id, status }
+    if (status === 'failed')
+      next.lastError = {
+        code: 'PAYMENT_FAILED',
+        message: 'PayPal did not complete this payment. Nothing was charged; start a new checkout.',
+      }
     store.putPurchase(id, next)
     return next
   }
@@ -479,28 +534,33 @@ export function createApp(options: AppOptions = {}) {
     try {
       const order = await paypal.create(purchase)
       const merchantId = validateOrder(order, purchase)
-      const approvalUrl = order.links?.find(
-        (link) => link.rel === 'payer-action' || link.rel === 'approve',
-      )?.href
+      const approvalUrl = approvalLink(order.links)
       if (
-        approvalUrl &&
-        new URL(approvalUrl).hostname !== 'www.sandbox.paypal.com' &&
-        new URL(approvalUrl).hostname !== 'sandbox.paypal.com'
+        order.links?.some((link) => ['payer-action', 'approve'].includes(link.rel)) &&
+        !approvalUrl
       )
         throw new Error('Unexpected approval destination')
-      const updated = {
+      const updated: StoredPurchase = {
         ...purchase,
         orderId: order.id,
         merchantId,
-        approvalUrl,
-        status: 'created' as const,
+        ...(approvalUrl ? { approvalUrl } : {}),
+        status: 'created',
       }
+      delete updated.lastError
       store.putPurchase(id, updated)
       return reconcile(id, updated, order)
     } catch (error) {
       const current = store.purchase(purchase.id, id)
       if (current && current.status !== 'completed')
-        store.putPurchase(id, { ...current, status: 'unknown' })
+        store.putPurchase(id, {
+          ...current,
+          status: 'unknown',
+          lastError: {
+            code: 'PAYPAL_UNCERTAIN',
+            message: 'PayPal order creation could not be confirmed. Retry to check PayPal.',
+          },
+        })
       if (error instanceof HttpError) throw error
       throw new HttpError(
         502,
@@ -508,6 +568,49 @@ export function createApp(options: AppOptions = {}) {
         'PAYPAL_UNCERTAIN',
       )
     }
+  }
+  /**
+   * Creates the purchase reservation and, in the sandbox, its PayPal order.
+   */
+  async function startCheckout(
+    id: string,
+    product: Product,
+    options: {
+      acknowledgeShortfall: boolean
+    },
+  ) {
+    let purchase = store.atomic(() => {
+      const existing = active(id)
+      if (existing) {
+        if (existing.productId !== product.id)
+          throw new HttpError(
+            409,
+            'You already have a checkout in progress. Finish or cancel it first.',
+            'CHECKOUT_ACTIVE',
+          )
+        return existing
+      }
+      const assessment = assessmentFor(id, product.priceCents, product.name)
+      assertAssessment(assessment, options.acknowledgeShortfall)
+      const created: StoredPurchase = {
+        id: randomUUID(),
+        productId: product.id,
+        name: product.name,
+        amountCents: product.priceCents,
+        currency: 'USD',
+        mode: paypal ? 'sandbox' : 'demo',
+        status: 'created',
+        createdAt: now().toISOString(),
+        profileVersion: assessment.profileVersion,
+        assessmentDate: assessment.today,
+        acknowledgedShortfall: options.acknowledgeShortfall,
+      }
+      store.putPurchase(id, created)
+      return created
+    })
+    if (purchase.mode === 'sandbox')
+      purchase = await withPurchaseLock(purchase.id, () => ensureOrder(id, purchase))
+    return purchase
   }
   let proxyHopsLogged = !config.production
   app.use((req, res, next) => {
@@ -529,21 +632,31 @@ export function createApp(options: AppOptions = {}) {
     if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store')
     next()
   })
+  // Webhook signatures cover the exact bytes PayPal sent, so this route keeps the raw body.
+  app.use('/api/paypal/webhook', express.raw({ type: () => true, limit: '64kb' }))
   app.use('/api/import', express.json({ limit: IMPORT_BODY_LIMIT }))
   app.use(express.json({ limit: '1200kb' }))
   app.use(cookieParser())
   app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'worth' }))
+  const webhookEvent = z.object({
+    id: identifier,
+    event_type: z.string().max(100),
+    resource: z.record(z.string(), z.unknown()),
+  })
   app.post('/api/paypal/webhook', async (req, res) => {
-    if (!paypal || !(await paypal.verify(req.headers, req.body)))
+    // Limited before verification: every delivery attempt costs an outbound PayPal call.
+    if (!webhookLimiter.take(req.ip ?? 'local', now().getTime()))
+      throw new HttpError(429, 'Too many webhook deliveries.', 'RATE_LIMITED')
+    const raw = Buffer.isBuffer(req.body) ? req.body.toString('utf8') : ''
+    if (!paypal || !raw || !(await paypal.verify(req.headers, raw)))
       throw new HttpError(401, 'Webhook signature verification failed.', 'INVALID_WEBHOOK')
-    const event = z
-      .object({
-        id: identifier,
-        event_type: z.string(),
-        resource: z.record(z.string(), z.unknown()),
-      })
-      .parse(req.body)
+    const event = webhookEvent.parse(JSON.parse(raw))
     if (store.hasEvent(event.id)) return res.json({ received: true, duplicate: true })
+    if (/^PAYMENT\.CAPTURE\.(?:REFUNDED|REVERSED)$/.test(event.event_type)) {
+      const outcome = await handleRefundEvent(event.resource)
+      if (outcome.sessionId) store.recordEvent(event.id, outcome.sessionId)
+      return res.json({ received: true, ...(outcome.ignored ? { ignored: true } : {}) })
+    }
     const related = event.resource.supplementary_data as
       { related_ids?: { order_id?: string } } | undefined
     const orderId =
@@ -553,24 +666,43 @@ export function createApp(options: AppOptions = {}) {
     const match = store.byOrder(orderId)
     if (!match) return res.json({ received: true, ignored: true })
     await withPurchaseLock(match.purchase.id, async () => {
-      const current = reconcile(match.sessionId, match.purchase, await paypal.get(orderId))
-      if (
-        /REFUNDED|REVERSED|DENIED/.test(event.event_type) &&
-        current.status === 'completed' &&
-        !current.archived
-      ) {
-        const data = store.get(match.sessionId)!
-        const message =
-          'A PayPal payment changed after capture. Confirm your current balance before relying on this plan.'
-        if (!data.profile.missingFields.includes(message)) data.profile.missingFields.push(message)
-        data.profile.confirmed = false
-        data.profile.version += 1
-        store.save(match.sessionId, data)
-      }
+      reconcile(match.sessionId, match.purchase, await paypal.get(orderId))
       store.recordEvent(event.id, match.sessionId)
     })
     return res.json({ received: true })
   })
+  /**
+   * A refund (or a reversal) arrives as a refund resource whose `up` link names the capture. The
+   * refund is re-read from PayPal, then recorded for the user to review; spending room is unchanged.
+   */
+  async function handleRefundEvent(
+    resource: Record<string, unknown>,
+  ): Promise<{ sessionId?: string; ignored?: boolean }> {
+    if (typeof resource.id !== 'string' || !/^[A-Za-z0-9-]{1,64}$/.test(resource.id))
+      return { ignored: true }
+    const refund = await paypal!.getRefund(resource.id)
+    const captureId = refund.links
+      ?.find((link) => link.rel === 'up')
+      ?.href.match(/\/v2\/payments\/captures\/([A-Za-z0-9-]+)$/)?.[1]
+    const match = captureId ? store.byCapture(captureId) : undefined
+    if (!match) return { ignored: true }
+    if (refund.status !== 'COMPLETED' || refund.amount?.currency_code !== 'USD')
+      return { sessionId: match.sessionId, ignored: true }
+    let cents: number
+    try {
+      cents = toCents(refund.amount.value)
+    } catch {
+      return { sessionId: match.sessionId, ignored: true }
+    }
+    try {
+      app.locals.recordRefund(match.sessionId, match.purchase.id, refund.id, cents)
+    } catch (error) {
+      // An impossible refund (over the paid amount, or on an unpaid purchase) is not retried.
+      if (error instanceof PlanError) return { sessionId: match.sessionId, ignored: true }
+      throw error
+    }
+    return { sessionId: match.sessionId }
+  }
   app.use('/api', (req, res, next) => {
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
       const origin = req.get('origin')
@@ -607,6 +739,26 @@ export function createApp(options: AppOptions = {}) {
     next()
   })
   app.get('/api/state', (_req, res) => res.json(state(sessionId(res))))
+  /**
+   * PayPal's redirect back to Worth. It records whether the buyer approved or cancelled, then
+   * opens the app at the checkout. Nothing is captured here.
+   */
+  app.get('/api/checkout/:id/return', (req, res) => {
+    const result = req.query.paypal === 'cancelled' ? 'cancelled' : 'approved'
+    const purchaseId = String(req.params.id).slice(0, 100)
+    const purchase = store.purchase(purchaseId, sessionId(res))
+    if (purchase?.status === 'created' && !busy.has(purchase.id)) {
+      const next: StoredPurchase = { ...purchase }
+      if (result === 'cancelled')
+        next.lastError = { code: 'PAYPAL_CANCELLED', message: CANCELLED_IN_PAYPAL }
+      else {
+        delete next.lastError
+        delete next.needsReapproval
+      }
+      store.putPurchase(sessionId(res), next)
+    }
+    res.redirect(303, `/?checkout=${encodeURIComponent(purchaseId)}&paypal=${result}`)
+  })
   app.post('/api/assess', (req, res) => {
     const input = assessmentSchema.parse(req.body)
     const current = state(sessionId(res))
@@ -1030,38 +1182,9 @@ export function createApp(options: AppOptions = {}) {
       .parse(req.body)
     const product = PRODUCTS.find((p) => p.id === productId)
     if (!product) throw new HttpError(404, 'Product not found.', 'NOT_FOUND')
-    const id = sessionId(res)
-    let purchase = store.atomic(() => {
-      const existing = active(id)
-      if (existing) {
-        if (existing.productId !== productId)
-          throw new HttpError(
-            409,
-            'You already have a checkout in progress. Finish or cancel it first.',
-            'CHECKOUT_ACTIVE',
-          )
-        return existing
-      }
-      const assessment = assessmentFor(id, product.priceCents, product.name)
-      assertAssessment(assessment, acknowledgeShortfall)
-      const created: StoredPurchase = {
-        id: randomUUID(),
-        productId,
-        name: product.name,
-        amountCents: product.priceCents,
-        currency: 'USD',
-        mode: paypal ? 'sandbox' : 'demo',
-        status: 'created',
-        createdAt: now().toISOString(),
-        profileVersion: assessment.profileVersion,
-        assessmentDate: assessment.today,
-        acknowledgedShortfall: acknowledgeShortfall,
-      }
-      store.putPurchase(id, created)
-      return created
+    const purchase = await startCheckout(sessionId(res), product, {
+      acknowledgeShortfall,
     })
-    if (purchase.mode === 'sandbox')
-      purchase = await withPurchaseLock(purchase.id, () => ensureOrder(id, purchase))
     res.json({
       purchase: publicPurchase(purchase),
       orderId: purchase.orderId,
@@ -1069,8 +1192,15 @@ export function createApp(options: AppOptions = {}) {
       mode: purchase.mode,
     })
   })
+  const captureSchema = z.object({ mockDecline: z.literal(true).optional() }).strict()
   app.post('/api/checkout/:id/capture', async (req, res) => {
-    z.object({}).strict().parse(req.body)
+    const { mockDecline = false } = captureSchema.parse(req.body)
+    if (mockDecline && !config.paypalNegativeTesting)
+      throw new HttpError(
+        400,
+        'The sandbox decline demo is turned off on this server.',
+        'NEGATIVE_TESTING_DISABLED',
+      )
     const id = sessionId(res)
     let purchase = purchaseFor(req, res)
     if (purchase.status === 'completed')
@@ -1082,10 +1212,19 @@ export function createApp(options: AppOptions = {}) {
         'CHECKOUT_CLOSED',
       )
     purchase = await withPurchaseLock(purchase.id, async () => {
+      let order: PayPalOrder | undefined
       if (purchase.mode === 'sandbox') {
         purchase = await ensureOrder(id, purchase)
-        purchase = reconcile(id, purchase, await paypal!.get(purchase.orderId!))
+        // One lookup serves both reconciliation and the approval check.
+        order = await paypal!.get(purchase.orderId!)
+        purchase = reconcile(id, purchase, order)
         if (purchase.status === 'completed' || purchase.status === 'pending') return purchase
+        if (!ACTIVE.has(purchase.status))
+          throw new HttpError(
+            409,
+            'PayPal did not complete this payment. Start a new checkout.',
+            'CHECKOUT_CLOSED',
+          )
       }
       const data = dataFor(res)
       if (
@@ -1103,40 +1242,96 @@ export function createApp(options: AppOptions = {}) {
       )
       if (purchase.mode === 'demo')
         return complete(id, purchase, `demo-${purchase.id}`, now().toISOString())
-      const current = await paypal!.get(purchase.orderId!)
-      if (current.status !== 'APPROVED')
+      if (order!.status !== 'APPROVED')
         throw new HttpError(
           409,
           'Approve this order in the PayPal sandbox before confirming payment.',
           'BUYER_APPROVAL_REQUIRED',
+          undefined,
+          { purchase: publicPurchase(purchase) },
         )
-      store.putPurchase(id, {
+      // After a decline the buyer approves again; that capture needs its own request ID, because
+      // PayPal answers a repeated ID with the earlier result.
+      const retries = purchase.captureRetries ?? 0
+      const requestId = retries ? `capture-${purchase.id}-${retries}` : `capture-${purchase.id}`
+      const attempting: StoredPurchase = {
         ...purchase,
         status: 'pending',
         captureAttemptedAt: now().toISOString(),
-      })
+      }
+      delete attempting.needsReapproval
+      delete attempting.lastError
+      store.putPurchase(id, attempting)
       try {
-        return reconcile(id, purchase, await paypal!.capture(purchase.orderId!, purchase.id))
-      } catch (error) {
-        // A network failure may follow a successful capture. Keep the allocation and reconcile on retry.
-        const stored = store.purchase(purchase.id, id)!
-        if (stored.status !== 'completed') store.putPurchase(id, { ...stored, status: 'unknown' })
-        if (error instanceof PayPalError && error.issue === 'ORDER_NOT_APPROVED')
-          throw new HttpError(
-            409,
-            'Approve the order in PayPal before capture.',
-            'BUYER_APPROVAL_REQUIRED',
-          )
-        if (error instanceof HttpError) throw error
-        throw new HttpError(
-          502,
-          'Payment confirmation is uncertain. Your amount stays reserved; retry to check PayPal before any further action.',
-          'PAYPAL_UNCERTAIN',
+        return reconcile(
+          id,
+          attempting,
+          await paypal!.capture(purchase.orderId!, requestId, { mockDecline }),
         )
+      } catch (error) {
+        return captureFailed(id, attempting, error)
       }
     })
     res.json({ purchase: publicPurchase(purchase), state: state(id) })
   })
+  /**
+   * Classifies a failed capture. A decline reopens approval, a definitive rejection releases the
+   * attempt, and only transport failures and server errors leave the payment uncertain.
+   */
+  async function captureFailed(id: string, attempted: StoredPurchase, error: unknown) {
+    const stored = store.purchase(attempted.id, id)!
+    if (stored.status === 'completed') return stored
+    if (error instanceof HttpError) throw error
+    const retries = (attempted.captureRetries ?? 0) + 1
+    if (error instanceof PayPalError && REAPPROVAL_ISSUES.has(error.issue)) {
+      const declined: StoredPurchase = {
+        ...stored,
+        status: 'created',
+        captureRetries: retries,
+        needsReapproval: true,
+        approvalUrl: approvalLink(error.links) ?? stored.approvalUrl,
+        lastError: { code: error.issue, message: DECLINE_MESSAGES[error.issue]! },
+      }
+      delete declined.captureAttemptedAt
+      store.putPurchase(id, declined)
+      throw new HttpError(409, declined.lastError!.message, 'PAYMENT_DECLINED', undefined, {
+        purchase: publicPurchase(declined),
+      })
+    }
+    if (error instanceof PayPalError && error.issue === 'ORDER_ALREADY_CAPTURED')
+      return reconcile(id, stored, await paypal!.get(attempted.orderId!))
+    const definitive =
+      error instanceof PayPalError &&
+      error.status >= 400 &&
+      error.status < 500 &&
+      error.status !== 408 &&
+      error.status !== 429
+    if (definitive) {
+      // PayPal refused the request itself, so no capture exists and nothing stays locked.
+      const approval = error.issue === 'ORDER_NOT_APPROVED'
+      const released: StoredPurchase = {
+        ...stored,
+        status: 'created',
+        captureRetries: retries,
+        lastError: {
+          code: approval ? 'BUYER_APPROVAL_REQUIRED' : 'CAPTURE_REJECTED',
+          message: approval ? 'Approve the order in PayPal before capture.' : REJECTED_CAPTURE,
+        },
+      }
+      delete released.captureAttemptedAt
+      store.putPurchase(id, released)
+      throw new HttpError(409, released.lastError!.message, released.lastError!.code, undefined, {
+        purchase: publicPurchase(released),
+      })
+    }
+    // A network failure may follow a successful capture. Keep the allocation and reconcile on retry.
+    store.putPurchase(id, {
+      ...stored,
+      status: 'unknown',
+      lastError: { code: 'PAYPAL_UNCERTAIN', message: UNCERTAIN_CAPTURE },
+    })
+    throw new HttpError(502, UNCERTAIN_CAPTURE, 'PAYPAL_UNCERTAIN')
+  }
   app.post('/api/checkout/:id/cancel', async (req, res) => {
     z.object({}).strict().parse(req.body)
     const id = sessionId(res)
@@ -1148,9 +1343,23 @@ export function createApp(options: AppOptions = {}) {
           'This payment is already completed. Cancellation cannot reverse it.',
           'ALREADY_COMPLETED',
         )
-      if (purchase.mode === 'sandbox' && ACTIVE.has(purchase.status)) {
-        purchase = await ensureOrder(id, purchase)
-        const order = await paypal!.get(purchase.orderId!)
+      // Without an order no capture can exist, so the reservation is released locally.
+      if (purchase.mode === 'sandbox' && ACTIVE.has(purchase.status) && purchase.orderId) {
+        let order: PayPalOrder
+        try {
+          order = await paypal!.get(purchase.orderId)
+        } catch (error) {
+          // PayPal no longer has the order, and Worth never tried to capture it: nothing was paid.
+          if (
+            error instanceof PayPalError &&
+            (error.status === 404 || error.issue === 'RESOURCE_NOT_FOUND') &&
+            !purchase.captureAttemptedAt
+          ) {
+            store.putPurchase(id, { ...purchase, status: 'cancelled' })
+            return
+          }
+          throw error
+        }
         purchase = reconcile(id, purchase, order)
         if (purchase.status === 'completed')
           throw new HttpError(
@@ -1169,7 +1378,7 @@ export function createApp(options: AppOptions = {}) {
             'PAYMENT_PENDING',
           )
       }
-      store.putPurchase(id, { ...purchase, status: 'cancelled' })
+      if (ACTIVE.has(purchase.status)) store.putPurchase(id, { ...purchase, status: 'cancelled' })
     })
     res.json(state(id))
   })
@@ -1185,6 +1394,7 @@ export function createApp(options: AppOptions = {}) {
       return void res.status(error.status).json({ error: error.message, code: error.code })
     if (error instanceof HttpError)
       return void res.status(error.status).json({
+        ...error.extra,
         error: error.message,
         code: error.code,
         ...(error.assessment ? { assessment: error.assessment } : {}),
