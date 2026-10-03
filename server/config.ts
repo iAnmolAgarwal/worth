@@ -14,6 +14,8 @@ export interface AppConfig {
   sessionIpHourlyLimit: number
   /** Live sessions across the server; new visitors receive 503 beyond this. */
   maxSessions: number
+  /** Stored transactions per session; imports beyond this are rejected. */
+  maxTransactions: number
   paypalClientId?: string
   paypalSecret?: string
   paypalWebhookId?: string
@@ -83,6 +85,7 @@ export function loadConfig(env: Env = process.env, overrides: Partial<AppConfig>
     requestsPerMinute: 180,
     sessionIpHourlyLimit: wholeNumber(env, 'SESSION_IP_HOURLY_LIMIT', 30, 1),
     maxSessions: wholeNumber(env, 'MAX_SESSIONS', 5000, 1),
+    maxTransactions: wholeNumber(env, 'MAX_TRANSACTIONS', 20_000, 1),
     paypalClientId: setting(env, 'PAYPAL_CLIENT_ID'),
     paypalSecret: setting(env, 'PAYPAL_CLIENT_SECRET'),
     paypalWebhookId: setting(env, 'PAYPAL_WEBHOOK_ID'),

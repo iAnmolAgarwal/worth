@@ -1217,6 +1217,31 @@ describe('session storage bounds', () => {
   })
 })
 
+describe('stored transaction cap', () => {
+  it('rejects imports that would exceed the per-session transaction cap with a clear message', async () => {
+    const { agent } = setup({ config: { ...config, maxTransactions: 3 } })
+    const rows = (ids: string[]) =>
+      'Date,Name,Net,Currency,Type,Status,Transaction ID\n' +
+      ids.map((id) => `10/01/2026,Coffee ${id},-5.00,USD,Payment,Completed,${id}`).join('\n')
+    expect((await post(agent, '/api/import/commit', { csv: rows(['A', 'B']) })).status).toBe(200)
+    // Re-importing known rows does not count twice.
+    expect((await post(agent, '/api/import/commit', { csv: rows(['A', 'B', 'C']) })).status).toBe(
+      200,
+    )
+    const preview = await post(agent, '/api/import/preview', { csv: rows(['D', 'E']) })
+    expect(preview.body.errors[0]).toEqual({
+      row: 1,
+      message:
+        'This import would keep 5 transactions, but a session holds at most 3. Import a shorter date range.',
+    })
+    const rejected = await post(agent, '/api/import/commit', { csv: rows(['D', 'E']) })
+    expect(rejected.status).toBe(400)
+    expect(rejected.body.code).toBe('TOO_MANY_TRANSACTIONS')
+    expect(rejected.body.error).toContain('at most 3')
+    expect((await state(agent)).transactions).toHaveLength(3)
+  })
+})
+
 describe('production browser hardening', () => {
   it('sends HSTS and a __Host- session cookie that authenticates later requests', async () => {
     const origin = 'https://worth.example.com'

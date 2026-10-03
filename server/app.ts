@@ -6,7 +6,13 @@ import { z } from 'zod'
 import { assessPurchase, addDays } from '../shared/finance.ts'
 import { createDemoState, PRODUCTS } from '../shared/seed.ts'
 import { parsePayPalCsv } from '../shared/csv.ts'
-import type { AppState, Assessment, FinancialProfile, Purchase } from '../shared/types.ts'
+import type {
+  AppState,
+  Assessment,
+  FinancialProfile,
+  Purchase,
+  Transaction,
+} from '../shared/types.ts'
 import { ACTIVE, Store, publicPurchase } from './store.ts'
 import type { SessionData, StoredPurchase } from './store.ts'
 import { createPayPalGateway, PayPalError, validateOrder } from './paypal.ts'
@@ -554,14 +560,20 @@ export function createApp(options: AppOptions = {}) {
     store.save(sessionId(res), data)
     res.json(state(sessionId(res)))
   })
+  function mergeTransactions(existing: Transaction[], incoming: Transaction[]) {
+    return [...new Map([...existing, ...incoming].map((t) => [t.id, t])).values()]
+  }
+  function transactionLimitMessage(total: number) {
+    return `This import would keep ${total.toLocaleString('en-US')} transactions, but a session holds at most ${config.maxTransactions.toLocaleString('en-US')}. Import a shorter date range.`
+  }
   app.post('/api/import/preview', (req, res) => {
     const { csv } = csvSchema.parse(req.body)
-    res.json(
-      parsePayPalCsv(
-        csv,
-        dataFor(res).transactions.filter((t) => t.source !== 'demo'),
-      ),
-    )
+    const existing = dataFor(res).transactions.filter((t) => t.source !== 'demo')
+    const preview = parsePayPalCsv(csv, existing)
+    const total = mergeTransactions(existing, preview.transactions).length
+    if (total > config.maxTransactions)
+      preview.errors.unshift({ row: 1, message: transactionLimitMessage(total) })
+    res.json(preview)
   })
   app.post('/api/import/commit', (req, res) => {
     const { csv } = csvSchema.parse(req.body)
@@ -580,6 +592,12 @@ export function createApp(options: AppOptions = {}) {
       )
     if (!preview.transactions.length && !preview.duplicates)
       throw new HttpError(400, 'No supported transactions found.', 'EMPTY_IMPORT')
+    const merged = mergeTransactions(
+      data.transactions.filter((t) => t.source !== 'demo'),
+      preview.transactions,
+    )
+    if (merged.length > config.maxTransactions)
+      throw new HttpError(400, transactionLimitMessage(merged.length), 'TOO_MANY_TRANSACTIONS')
     if (data.profile.source === 'demo') {
       data.profile = {
         ...data.profile,
@@ -597,12 +615,7 @@ export function createApp(options: AppOptions = {}) {
         ...preview.recurring.filter((f) => !existingNames.has(f.name.toLowerCase())),
       )
     }
-    const preserved = data.transactions.filter((t) => t.source !== 'demo')
-    data.transactions = [
-      ...new Map(
-        [...preserved, ...preview.transactions].map((transaction) => [transaction.id, transaction]),
-      ).values(),
-    ].sort((a, b) => b.date.localeCompare(a.date))
+    data.transactions = merged.sort((a, b) => b.date.localeCompare(a.date))
     const dates = data.transactions
       .filter((t) => t.source === 'import')
       .map((t) => t.date)
