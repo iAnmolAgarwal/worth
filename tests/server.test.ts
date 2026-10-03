@@ -465,7 +465,7 @@ describe('HTTP sessions, profiles, and calculations', () => {
     expect((await post(agent, '/api/consent', { aiConsent: true, version: 1 })).status).toBe(400)
     const on = await post(agent, '/api/consent', { aiConsent: true })
     expect(on.status).toBe(200)
-    expect(on.body.profile).toEqual({ ...before.profile, aiConsent: true })
+    expect(on.body.profile).toEqual({ ...before.profile, aiConsent: true, aiChoiceMade: true })
     expect(await ask()).toBe('anthropic')
     const captured = await post(agent, `/api/checkout/${created.body.purchase.id}/capture`)
     expect(captured.body.purchase.status).toBe('completed')
