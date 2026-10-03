@@ -13,6 +13,7 @@ import {
 } from '../shared/finance.ts'
 import { createDemoState, DEMO_TIMEZONE, PRODUCTS, rebaseDemoState } from '../shared/seed.ts'
 import { parsePayPalCsv } from '../shared/csv.ts'
+import { CSV_IMPORT_LIMITS, CSV_SIZE_MESSAGE, utf8Bytes } from '../shared/limits.ts'
 import type {
   AppState,
   Assessment,
@@ -152,7 +153,19 @@ const chatSchema = z
       .optional(),
   })
   .strict()
-const csvSchema = z.object({ csv: z.string().min(1).max(1_000_000) }).strict()
+const csvSchema = z
+  .object({
+    csv: z
+      .string()
+      .min(1)
+      .refine((value) => utf8Bytes(value) <= CSV_IMPORT_LIMITS.maxBytes, CSV_SIZE_MESSAGE),
+  })
+  .strict()
+/**
+ * JSON escapes every quote and line break in a CSV, so a fully quoted export can double in size on
+ * the way in. The import routes accept twice the CSV limit; the CSV itself is held to the limit.
+ */
+const IMPORT_BODY_LIMIT = 2 * CSV_IMPORT_LIMITS.maxBytes + 64 * 1024
 const DAY = 86400000
 const CLAUDE_LIMIT_REASON = {
   ip: 'You have reached this demo’s Claude limit for the hour',
@@ -501,6 +514,7 @@ export function createApp(options: AppOptions = {}) {
     if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store')
     next()
   })
+  app.use('/api/import', express.json({ limit: IMPORT_BODY_LIMIT }))
   app.use(express.json({ limit: '1200kb' }))
   app.use(cookieParser())
   app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'worth' }))
@@ -1081,7 +1095,7 @@ export function createApp(options: AppOptions = {}) {
     if (error?.type === 'entity.too.large')
       return void res
         .status(413)
-        .json({ error: 'This file is too large. Use a CSV under 1 MB.', code: 'TOO_LARGE' })
+        .json({ error: `This file is too large. ${CSV_SIZE_MESSAGE}`, code: 'TOO_LARGE' })
     console.error('Worth request failed:', error instanceof Error ? error.name : 'UnknownError')
     res
       .status(500)

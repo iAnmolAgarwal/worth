@@ -22,6 +22,7 @@ import type {
   ScheduledFlow,
 } from '../shared/types'
 import { getUpcomingFlows, todayInTimezone } from '../shared/finance'
+import { CSV_IMPORT_LIMITS, CSV_SIZE_MESSAGE, utf8Bytes } from '../shared/limits'
 import { api } from './api'
 import { CLAUDE_SHARED_DATA } from './copy'
 import { money, shortDate } from './format'
@@ -998,7 +999,7 @@ export function ImportDialog({
     setError('')
     setPreview(null)
     setAcknowledged(false)
-    if (file.size > 1_000_000) {
+    if (file.size > CSV_IMPORT_LIMITS.maxBytes) {
       setError('Choose a CSV smaller than 1 MB. A recent 90-day export is a good starting point.')
       event.target.value = ''
       return
@@ -1023,8 +1024,8 @@ export function ImportDialog({
       setError('Choose a CSV or paste your PayPal activity export first.')
       return
     }
-    if (new TextEncoder().encode(csv).byteLength > 1_000_000) {
-      setError('Use a CSV smaller than 1 MB.')
+    if (utf8Bytes(csv) > CSV_IMPORT_LIMITS.maxBytes) {
+      setError(CSV_SIZE_MESSAGE)
       return
     }
     setBusy('preview')
@@ -1103,7 +1104,7 @@ export function ImportDialog({
                 className="input"
                 rows={6}
                 value={csv}
-                maxLength={1_000_000}
+                maxLength={CSV_IMPORT_LIMITS.maxBytes}
                 onChange={(event) => {
                   setFilename('')
                   changeCsv(event.target.value)

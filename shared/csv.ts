@@ -1,8 +1,8 @@
 import Papa from 'papaparse'
 import type { Cadence, ImportPreview, ScheduledFlow, Transaction } from './types.ts'
 import { occurrence, todayInTimezone } from './finance.ts'
+import { CSV_IMPORT_LIMITS, CSV_SIZE_MESSAGE, utf8Bytes } from './limits.ts'
 
-const MAX_ROWS = 10_000
 const aliases = {
   date: ['date', 'transactiondate', 'transactiondatetime'],
   time: ['time', 'transactiontime'],
@@ -252,8 +252,8 @@ export function parsePayPalCsv(
     result.errors.push({ row: 1, message: 'The file is empty.' })
     return result
   }
-  if (text.length > 5_000_000) {
-    result.errors.push({ row: 1, message: 'Use a CSV smaller than 5 MB.' })
+  if (utf8Bytes(text) > CSV_IMPORT_LIMITS.maxBytes) {
+    result.errors.push({ row: 1, message: CSV_SIZE_MESSAGE })
     return result
   }
   const parsed = Papa.parse<Record<string, string>>(text, {
@@ -278,10 +278,10 @@ export function parsePayPalCsv(
       })
   result.totalRows = parsed.data.length
   if (result.errors.some((error) => error.row === 1)) return result
-  if (parsed.data.length > MAX_ROWS) {
+  if (parsed.data.length > CSV_IMPORT_LIMITS.maxRows) {
     result.errors.push({
       row: 1,
-      message: `Use at most ${MAX_ROWS.toLocaleString('en-US')} transactions per import.`,
+      message: `Use at most ${CSV_IMPORT_LIMITS.maxRows.toLocaleString('en-US')} transactions per import.`,
     })
     return result
   }

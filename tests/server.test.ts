@@ -7,6 +7,7 @@ import type { PayPalGateway, PayPalOrder } from '../server/paypal.ts'
 import type { AppState } from '../shared/types.ts'
 import { createChatProvider, fallbackReply } from '../server/chat.ts'
 import { addDays } from '../shared/finance.ts'
+import { CSV_IMPORT_LIMITS, utf8Bytes } from '../shared/limits.ts'
 
 const stores: Store[] = []
 const config = {
@@ -1602,6 +1603,39 @@ describe('Claude request budgets', () => {
     const next = await post(agent, '/api/chat', { message: 'Hi again', history: [] })
     expect(next.body.mode).toBe('anthropic')
     expect(chat.reply).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('import size limit', () => {
+  it('accepts a fully quoted export just under 1 MB and rejects one just over it', async () => {
+    const { agent } = setup()
+    const header =
+      '"Date","Time","TimeZone","Name","Type","Status","Currency","Amount","Fees","Total","Exchange Rate","Receipt ID","Balance","Transaction ID","Item Title"'
+    // Quotes inside a field double in CSV and double again as JSON, so the request body is about
+    // twice the size of the file.
+    const title = `"${'""'.repeat(420)}"`
+    const rows = (count: number) =>
+      [
+        header,
+        ...Array.from(
+          { length: count },
+          (_, index) =>
+            `"09/30/2026","12:00:00","EDT","Coffee","Express Checkout Payment","Completed","USD","-5.00","0.00","-5.00","","","0.00","Q${index}",${title}`,
+        ),
+      ].join('\r\n')
+    const under = rows(1_000)
+    expect(utf8Bytes(under)).toBeLessThan(CSV_IMPORT_LIMITS.maxBytes)
+    expect(JSON.stringify({ csv: under }).length).toBeGreaterThan(1_200 * 1024)
+    const preview = await post(agent, '/api/import/preview', { csv: under })
+    expect(preview.status).toBe(200)
+    expect(preview.body.errors).toEqual([])
+    expect(preview.body.transactions).toHaveLength(1_000)
+    const over = rows(1_100)
+    expect(utf8Bytes(over)).toBeGreaterThan(CSV_IMPORT_LIMITS.maxBytes)
+    const rejected = await post(agent, '/api/import/commit', { csv: over })
+    expect(rejected.status).toBe(400)
+    expect(rejected.body.error).toBe('Use a CSV smaller than 1 MB.')
+    expect((await state(agent)).profile.source).toBe('demo')
   })
 })
 

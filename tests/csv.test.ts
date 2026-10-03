@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { parsePayPalCsv } from '../shared/csv.ts'
+import { CSV_IMPORT_LIMITS } from '../shared/limits.ts'
 import type { Transaction } from '../shared/types.ts'
 
 const HEADER = 'Date,Time,Name,Type,Status,Currency,Gross,Fee,Net,Transaction ID,Reference Txn ID'
@@ -333,6 +334,22 @@ describe('identity and recurring spending', () => {
     expect(parsePayPalCsv(text, [], { today: '2026-10-03' }).errors[0]!.message).toContain(
       'Future-dated',
     )
+  })
+
+  it('holds every file to the shared 1 MB and 10,000-row import limit', () => {
+    expect(CSV_IMPORT_LIMITS).toEqual({ maxBytes: 1_000_000, maxRows: 10_000 })
+    // 600,000 two-byte characters are 1.2 MB even though the string is shorter than 1,000,000.
+    const wide = `Date,Name,Currency,Amount\n2026-09-01,${'é'.repeat(600_000)},USD,-1.00`
+    expect(wide.length).toBeLessThan(CSV_IMPORT_LIMITS.maxBytes)
+    expect(parsePayPalCsv(wide).errors).toEqual([
+      { row: 1, message: 'Use a CSV smaller than 1 MB.' },
+    ])
+    const rows = (count: number) =>
+      'Date,Name,Currency,Amount\n' + Array(count).fill('2026-09-01,Shop,USD,-1.00').join('\n')
+    expect(parsePayPalCsv(rows(10_001)).errors[0]!.message).toBe(
+      'Use at most 10,000 transactions per import.',
+    )
+    expect(parsePayPalCsv(rows(10_000)).errors).toEqual([])
   })
 
   it('returns useful diagnostics for empty and malformed files', () => {
