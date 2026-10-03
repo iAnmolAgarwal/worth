@@ -136,6 +136,10 @@ export default function App() {
     const onHash = () => {
       setRoute(parseRoute())
       setMenu(false)
+      // A dialog belongs to the screen it opened on; leaving the screen closes it.
+      setCheckout(undefined)
+      setReview(undefined)
+      setImporting(false)
       window.scrollTo?.({ top: 0, behavior: 'instant' })
     }
     const refresh = () => {
@@ -143,11 +147,13 @@ export default function App() {
     }
     window.addEventListener('hashchange', onHash)
     window.addEventListener('focus', refresh)
+    window.addEventListener('online', refresh)
     document.addEventListener('visibilitychange', refresh)
     const timer = setInterval(refresh, 60_000)
     return () => {
       window.removeEventListener('hashchange', onHash)
       window.removeEventListener('focus', refresh)
+      window.removeEventListener('online', refresh)
       document.removeEventListener('visibilitychange', refresh)
       clearInterval(timer)
     }

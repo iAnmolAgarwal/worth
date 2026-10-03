@@ -2533,3 +2533,10 @@ textarea.input {
   transform: rotate(-135deg);
   margin-bottom: -4px;
 }
+@media (max-width: 767px) {
+  .verdict {
+    font-size: 1.25rem;
+    line-height: 1.75rem;
+    font-weight: var(--fw-semibold);
+  }
+}

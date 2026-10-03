@@ -32,6 +32,9 @@ export const ASK_STARTERS = [
   'What bills are coming up?',
 ]
 
+/** Money in sentences uses a true minus sign: −$458.99. */
+export const minus = (text: string) => text.replace(/-\$/g, '−$')
+
 export function itemLabel(read: Interpretation) {
   return capitalize(
     read.items
@@ -181,7 +184,7 @@ function VerdictTile({
       style={{ width: '100%', padding: 'var(--s-5)' }}
       aria-label="Purchase assessment"
     >
-      <p className="verdict">{reply.verdict ?? paragraphs(reply)[0]}</p>
+      <p className="verdict">{minus(reply.verdict ?? paragraphs(reply)[0] ?? '')}</p>
       {stale && (
         <div style={{ marginTop: 12 }}>
           <Alert tone="warn" icon={CircleAlert}>
@@ -745,7 +748,10 @@ export function Ask({
                 )}
               </div>
               <div className="chips">
-                {ASK_STARTERS.map((text) => (
+                {(entries.at(-1)?.reply?.suggestions.length
+                  ? entries.at(-1)!.reply!.suggestions
+                  : ASK_STARTERS
+                ).map((text) => (
                   <button
                     type="button"
                     key={text}
@@ -816,6 +822,10 @@ function Answer({
           : undefined
   const fix = blocked && field ? missingFix(field) : undefined
   const read = reply.interpretation
+  // One name for the item everywhere: the catalog's, when the question matches a product.
+  const readName = read
+    ? (matchProduct(state.products, itemLabel(read), read.amountCents)?.name ?? itemLabel(read))
+    : ''
   const assessment = reply.assessment
   const stale =
     Boolean(assessment) &&
@@ -825,12 +835,16 @@ function Answer({
     points: reply.points?.map((point) => point.text) ?? [],
     toolCalls: reply.toolCalls,
     mode: reply.mode,
-    readAs: read ? readAsText(read).replace(/ · [^·]+$/, ' · today') : undefined,
+    readAs: read ? `${readName} · ${money(read.amountCents)} · today` : undefined,
   }
   return (
     <>
       {read && !editing && (
-        <ReadAsChip value={readAsText(read)} onAction={onEdit} disabled={busy} />
+        <ReadAsChip
+          value={`${readName} · ${money(read!.amountCents)} · ${read!.dateLabel}`}
+          onAction={onEdit}
+          disabled={busy}
+        />
       )}
       {read && editing && (
         <AskEdit
@@ -882,7 +896,7 @@ function Answer({
           {reply.lead && <p style={{ marginTop: 8 }}>{reply.lead}</p>}
           <ul>
             {reply.points.map((point) => (
-              <li key={point.id}>{point.text}</li>
+              <li key={point.id}>{minus(point.text)}</li>
             ))}
           </ul>
         </section>
@@ -898,7 +912,8 @@ function Answer({
         {traceText(reply, state)}
       </div>
       {last && reply.suggestions.length > 0 && (
-        <div className="chips">
+        // Desktop shows these in the rail; the thread keeps them only on mobile.
+        <div className="chips show-m">
           {reply.suggestions.map((text) => (
             <button
               type="button"
