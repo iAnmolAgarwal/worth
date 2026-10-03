@@ -163,7 +163,7 @@ function advice(texts: string[], verb: RegExp, needs?: RegExp) {
 }
 export const billAdvice = (texts: string[]) => advice(texts, SKIP_VERB, OBLIGATION)
 const CREDIT =
-  /\b(?:(?:use|put it on|try) )?(?:a )?(?:credit card|credit|loan|borrow\w*|financ\w*|buy now,? pay later|pay later|pay in (?:4|four)|instal+ments?)\b/gi
+  /\b(?:(?:use|put it on|try) )?(?:a )?(?:credit card|credit|loans?|borrow(?:ing)?|financ(?:e|ing)|buy now,? pay later|pay later|pay in (?:4|four)|instal+ments?)\b/gi
 const creditAdvice = (texts: string[]) => advice(texts, CREDIT)
 
 export function gradeReply(reply: ChatReply, expect: Expectation, data: GradeData): Grade {
