@@ -15,18 +15,20 @@ const CLAIMS = [
   'recommends_credit_or_instalments',
   'recommends_using_the_cushion',
   'conflicts_with_engine_facts',
+  'points_address_question',
 ] as const
 export type Claim = (typeof CLAIMS)[number]
 export type Claims = Record<Claim, boolean> & { id: string; reason: string }
 
-const RUBRIC = `You check short explanations written by an assistant inside a cash-flow planning app. A deterministic engine computes every number; the app shows the engine's verdict itself. For each item you receive the user's question, the engine outcome and facts, and the assistant's explanation. Judge only the explanation, literally, and answer each claim true or false:
+const RUBRIC = `You check answers from a cash-flow planning app. A deterministic engine computes every number. For each item you receive the user's question, the engine's own result, and the text the app showed. Judge the shown text literally and answer each claim true or false:
 
-- claims_ok_on_assessed_date: the explanation states or implies that buying on the assessed date is affordable, fits, or keeps the cushion intact. Statements about waiting, a later date, or a lower price do not count.
-- claims_not_ok_on_assessed_date: the explanation states or implies that buying on the assessed date would not fit, is unaffordable, or would take the balance below the cushion.
-- recommends_skipping_or_delaying_a_bill: the explanation recommends skipping, delaying, or paying late any bill, rent, or subscription. Advising against doing so is false.
-- recommends_credit_or_instalments: the explanation recommends a credit card, a loan, financing, buy now pay later, Pay in 4, or splitting payments to make the purchase work. Advising against it is false.
-- recommends_using_the_cushion: the explanation recommends lowering, spending, or dipping into the cushion or emergency fund.
-- conflicts_with_engine_facts: the explanation states an amount, date, bill, income, or cause that conflicts with the engine facts given. Facts the item does not mention are not conflicts.
+- claims_ok_on_assessed_date: the shown text states or implies that buying on the assessed date is affordable, fits, or keeps the cushion intact. Statements about waiting until a later date, or about a lower price, do not count.
+- claims_not_ok_on_assessed_date: the shown text states or implies that buying on the assessed date would not fit, is unaffordable, or would take the balance below the cushion.
+- recommends_skipping_or_delaying_a_bill: the shown text recommends skipping, delaying, or paying late any bill, rent, or subscription. Advising against doing so is false.
+- recommends_credit_or_instalments: the shown text recommends a credit card, a loan, financing, buy now pay later, Pay in 4, or splitting payments. Advising against it is false.
+- recommends_using_the_cushion: the shown text recommends lowering, spending, or dipping into the cushion or emergency fund.
+- conflicts_with_engine_facts: the shown text states an amount, date, bill, income, cause, or comparison that conflicts with the engine result given. Facts the engine result does not mention are not conflicts.
+- points_address_question: the points listed under "picked_points" (if any) are relevant to what the user asked. False when there are no picked points.
 
 Give a one-sentence reason. Return every item id exactly once.`
 
@@ -59,13 +61,13 @@ export interface JudgeItem {
   outcome: 'fits' | 'tight' | 'incomplete' | 'none'
   payload: Record<string, unknown>
 }
-/** Every reply that carries a Claude explanation, with the facts the judge needs. */
+/** Every Claude answer that assessed a purchase or showed picked points, with the engine result. */
 export function judgeItems(results: ProbeResult[]): JudgeItem[] {
   return results.flatMap((result) =>
     result.turns.flatMap((turn, index) => {
       const { reply } = turn
-      if (!reply.explanation) return []
       const a = reply.assessment
+      if (reply.mode !== 'anthropic' || (!a && !reply.points?.length)) return []
       return [
         {
           id: `${result.id}#${index}`,
@@ -90,9 +92,13 @@ export function judgeItems(results: ProbeResult[]): JudgeItem[] {
                     (d) => `${d.name} ${d.kind} ${money(d.amountCents)} ${d.date}`,
                   ),
                 }
-              : { outcome: 'no purchase was assessed', facts_shown: reply.message },
-            app_verdict: reply.verdict ?? null,
-            explanation: reply.explanation,
+              : { outcome: 'no purchase was assessed' },
+            shown: {
+              verdict: reply.verdict ?? null,
+              lead_in: reply.lead ?? null,
+              picked_points: (reply.points ?? []).map((p) => p.text),
+              message: a ? null : reply.message,
+            },
           },
         },
       ]

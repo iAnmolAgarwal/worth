@@ -392,7 +392,13 @@ describe('interpretation chip', () => {
         intent: 'affordability',
         assessment,
         verdict: 'Camera at $1,199 would dip below your cushion if you buy it today.',
-        explanation: 'Rent lands before your paycheck.',
+        lead: 'Here’s what matters for this purchase:',
+        points: [
+          {
+            id: 'cause',
+            text: 'Apartment rent ($1,750) is due Thu, Oct 8, before that low point.',
+          },
+        ],
         interpretation: {
           items: [{ name: 'camera', amountCents: 119900, quantity: 1 }],
           amountCents: 119900,
@@ -409,7 +415,10 @@ describe('interpretation chip', () => {
     render(<Assistant state={state} onPlan={vi.fn()} onProduct={vi.fn()} visible={true} />)
     await sendMessage(user, 'Can I afford a $1,199 camera?')
     await screen.findByText('Camera at $1,199 would dip below your cushion if you buy it today.')
-    expect(screen.getByText('Rent lands before your paycheck.')).toBeTruthy()
+    const picked = screen.getByRole('region', { name: 'Points picked by Claude' })
+    expect(picked.textContent).toContain('Picked by Claude for your question')
+    expect(picked.textContent).toContain('Here’s what matters for this purchase:')
+    expect(within(picked).getByText(/Apartment rent \(\$1,750\) is due/)).toBeTruthy()
     expect(screen.queryByText('full text')).toBeNull()
     const chip = screen.getByLabelText('How Worth read your question')
     expect(chip.textContent).toContain('Read as: Camera · $1,199.00 · today')

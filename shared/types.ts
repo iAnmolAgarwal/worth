@@ -337,8 +337,13 @@ export interface ChatReply {
   interpretation?: Interpretation
   /** Deterministic sentence built from the engine's assessment. Never model-written. */
   verdict?: string
-  /** Claude's explanation with engine placeholders filled in by the server. */
-  explanation?: string
+  /** A lead-in Claude chose from a fixed set, shown before the points. */
+  lead?: string
+  /**
+   * Engine facts Claude chose as most relevant to the question, in its order. The server
+   * writes every sentence from engine values; Claude only picks which ones to show.
+   */
+  points?: { id: string; text: string }[]
   /** A partly understood purchase the next message may complete, e.g. a price awaiting a date. */
   pending?: PurchaseContext
   suggestions: string[]

@@ -294,7 +294,10 @@ function unaccounted(prices: { cents: number }[], read: InterpretedItem[]) {
 
 /** A local guess at the item a message names; used only for labels and new-item detection. */
 export function localItemName(message: string) {
-  const text = message.replace(/[’]/g, "'")
+  // "a pair of headphones" names the headphones.
+  const text = message
+    .replace(/[’]/g, "'")
+    .replace(/\b(?:a\s+)?(?:pair|set|couple|bunch|box|pack|bundle)\s+of\s+/gi, '')
   const take = (fragment: string | undefined) => {
     if (!fragment) return undefined
     const kept: string[] = []
@@ -713,7 +716,7 @@ export function clarificationText(
     case 'currency':
       return 'I can only plan in US dollars, and I won’t guess an exchange rate. What is the total in USD, including tax, shipping and any conversion fees?'
     case 'price_missing':
-      return 'What is the total price in US dollars, including tax and shipping? For example: “Can I buy a $900 camera today?”'
+      return 'What is the total price in US dollars, including tax and shipping?'
     case 'alternatives':
       return 'Which one should I check? Tell me the item and its price, or say if you plan to buy them together.'
     case 'amount_unclear':

@@ -373,6 +373,109 @@ export const PROBES: Probe[] = [
       },
     ],
   },
+  // ---- Added after the independent review (train split only) ---------------------------
+  {
+    id: 'R1-days-from-now',
+    split: 'train',
+    covers: 'review: span resolution',
+    kind: 'chat',
+    turns: [
+      {
+        message: 'Can I buy a $1,199 camera two days from now?',
+        expect: assessCamera(['2026-10-05']),
+      },
+    ],
+  },
+  {
+    id: 'R2-week-from-friday',
+    split: 'train',
+    covers: 'review: unknown modifier',
+    kind: 'chat',
+    turns: [
+      {
+        message: 'Can I buy a $1,199 camera a week from Friday?',
+        expect: assessCamera(['2026-10-16']),
+      },
+    ],
+  },
+  {
+    id: 'R3-past-reference',
+    split: 'train',
+    covers: 'review: past reference is not a date',
+    kind: 'chat',
+    turns: [
+      {
+        message: 'The price dropped last Friday. Can I buy the $1,199 camera?',
+        expect: assessCamera(),
+      },
+    ],
+  },
+  {
+    id: 'R4-mid-october',
+    split: 'train',
+    covers: 'review: unresolved phrase',
+    kind: 'chat',
+    turns: [
+      {
+        message: 'Can I buy a $1,199 camera mid-October?',
+        expect: assessCamera([
+          '2026-10-13',
+          '2026-10-14',
+          '2026-10-15',
+          '2026-10-16',
+          '2026-10-17',
+        ]),
+      },
+    ],
+  },
+  {
+    id: 'R5-swiss-francs',
+    split: 'train',
+    covers: 'review: unrecognised currency',
+    kind: 'chat',
+    turns: [{ message: 'Can I afford a bag that costs 500 Swiss francs?', expect: clarifyOnly }],
+  },
+  {
+    id: 'R6-euro-and-dollar',
+    split: 'train',
+    covers: 'review: mixed currencies',
+    kind: 'chat',
+    turns: [{ message: 'Can I buy a €500 bag and a $300 lens today?', expect: clarifyOnly }],
+  },
+  {
+    id: 'R7-pair',
+    split: 'train',
+    covers: 'review: quantity grounding',
+    kind: 'chat',
+    turns: [
+      {
+        message: 'Can I buy a pair of headphones for $349?',
+        expect: {
+          assess: { amounts: [34900], dates: [T], item: /headphone/i },
+          allowClarify: true,
+        },
+      },
+    ],
+  },
+  {
+    id: 'R8-lens-instead',
+    split: 'train',
+    covers: 'review: new item without a price',
+    kind: 'chat',
+    turns: [{ message: 'What about a lens instead?', context: camera, expect: clarifyOnly }],
+  },
+  {
+    id: 'R9-repeated-amount',
+    split: 'train',
+    covers: 'review: duplicate amounts',
+    kind: 'chat',
+    turns: [
+      {
+        message: 'Can I buy a $1,199 camera and a $1,199 lens?',
+        expect: { assess: { amounts: [239800], dates: [T] }, allowClarify: true },
+      },
+    ],
+  },
   {
     id: 'N15-bills',
     split: 'train',

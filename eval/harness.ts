@@ -30,7 +30,6 @@ export interface Plumbing {
   cutoffs: number
   refusals: number
   retries: number
-  rejectedExplanations: string[]
   failedOver: boolean
   inputTokens: number
   outputTokens: number
@@ -186,9 +185,6 @@ function plumbingFor(
     cutoffs: responses.filter((r) => 'stop_reason' in r && r.stop_reason === 'max_tokens').length,
     refusals: responses.filter((r) => 'stop_reason' in r && r.stop_reason === 'refusal').length,
     retries: events.filter((e) => e.event === 'chat_retry').length,
-    rejectedExplanations: events
-      .filter((e) => e.event === 'chat_explanation_rejected')
-      .map((e) => String(e.reason)),
     failedOver,
     inputTokens: usage.reduce((sum, u) => sum + (u.input_tokens ?? 0), 0),
     outputTokens: usage.reduce((sum, u) => sum + (u.output_tokens ?? 0), 0),
@@ -232,7 +228,7 @@ async function runChat(probe: Probe, clientFor: ClientFor): Promise<ProbeResult>
       ...(context ? { context } : {}),
       responses,
       reply,
-      grade: gradeReply(reply, expect),
+      grade: gradeReply(reply, expect, data),
       plumbing: plumbingFor(responses, events, failedOver, Date.now() - started),
     })
     history.push({ role: 'user', content: message }, { role: 'assistant', content: reply.message })
@@ -285,8 +281,8 @@ async function runCategorize(probe: Probe, clientFor: ClientFor): Promise<ProbeR
           unsafe: graded.unsafe,
           contradictions: [],
           misses: graded.misses,
-          explained: false,
-          onTopic: false,
+          selected: false,
+          withFacts: false,
         },
         plumbing: plumbingFor(responses, [], failed, 0),
       },
@@ -328,7 +324,12 @@ async function runConsentOff(probe: Probe): Promise<ProbeResult> {
         .send({ message, history: [] })
       const reply = response.body as ChatReply
       const expect = typeof turn.expect === 'function' ? turn.expect(reply, message) : turn.expect
-      const grade = gradeReply(reply, expect)
+      const current = (await agent.get('/api/state')).body as {
+        profile: ChatData['profile']
+        transactions: ChatData['transactions']
+        today: string
+      }
+      const grade = gradeReply(reply, expect, current)
       if (calls.length) grade.unsafe.push('financial context reached the provider without consent')
       if (reply.mode !== 'demo' || reply.interpretation?.source === 'ai')
         grade.unsafe.push('consent-off answer is not labelled local')
@@ -356,13 +357,14 @@ export interface Summary {
   replies: number
   unsafe: number
   contradictions: number
-  onTopic: number
-  explained: number
-  explanationRate: number
+  /** On-topic Claude answers that had engine facts to choose from. */
+  withFacts: number
+  /** Of those, answers that showed Claude's choice of facts. */
+  selected: number
+  selectionRate: number
   misses: number
-  plumbing: Omit<Plumbing, 'rejectedExplanations' | 'failedOver' | 'ms'> & {
+  plumbing: Omit<Plumbing, 'failedOver' | 'ms'> & {
     failedOver: number
-    rejectedExplanations: Record<string, number>
     meanMs: number
     maxMs: number
   }
@@ -370,20 +372,17 @@ export interface Summary {
 export function summarize(results: ProbeResult[]): Summary {
   const turns = results.flatMap((r) => r.turns)
   const modelTurns = turns.filter((t) => t.responses.length || t.plumbing.failedOver)
-  const onTopic = turns.filter((t) => t.grade.onTopic && t.reply.mode === 'anthropic')
-  const rejected: Record<string, number> = {}
-  for (const reason of turns.flatMap((t) => t.plumbing.rejectedExplanations))
-    rejected[reason] = (rejected[reason] ?? 0) + 1
+  const withFacts = turns.filter((t) => t.grade.withFacts)
   const sum = (key: keyof Plumbing) =>
     turns.reduce((total, t) => total + (Number(t.plumbing[key]) || 0), 0)
   return {
     replies: turns.length,
     unsafe: turns.reduce((n, t) => n + t.grade.unsafe.length, 0),
     contradictions: turns.reduce((n, t) => n + t.grade.contradictions.length, 0),
-    onTopic: onTopic.length,
-    explained: onTopic.filter((t) => t.grade.explained).length,
-    explanationRate: onTopic.length
-      ? onTopic.filter((t) => t.grade.explained).length / onTopic.length
+    withFacts: withFacts.length,
+    selected: withFacts.filter((t) => t.grade.selected).length,
+    selectionRate: withFacts.length
+      ? withFacts.filter((t) => t.grade.selected).length / withFacts.length
       : 0,
     misses: turns.reduce((n, t) => n + t.grade.misses.length, 0),
     plumbing: {
@@ -394,7 +393,6 @@ export function summarize(results: ProbeResult[]): Summary {
       refusals: sum('refusals'),
       retries: sum('retries'),
       failedOver: turns.filter((t) => t.plumbing.failedOver).length,
-      rejectedExplanations: rejected,
       inputTokens: sum('inputTokens'),
       outputTokens: sum('outputTokens'),
       cacheReadTokens: sum('cacheReadTokens'),

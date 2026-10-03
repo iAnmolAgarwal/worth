@@ -1,122 +1,133 @@
 import { describe, expect, it } from 'vitest'
-import { checkProse, contradiction, riskyAdvice } from '../server/narration.ts'
+import Anthropic from '@anthropic-ai/sdk'
+import { createChatProvider } from '../server/chat.ts'
+import {
+  chipAllowed,
+  commitmentFacts,
+  leadInText,
+  planFacts,
+  purchaseFacts,
+  spendingFacts30,
+  verdictFor,
+} from '../server/narration.ts'
+import { assessPurchase } from '../shared/finance.ts'
+import { createDemoState } from '../shared/seed.ts'
 
-const values = {
-  item: 'camera',
-  price: '$1,199',
-  low_point: '$651.52',
-  low_date: 'Thu, Oct 15',
-  cushion: '$1,000',
-  fits_on: 'Fri, Oct 16',
-  max_price: '$850.52',
-  next_bill: 'Apartment rent',
-  next_bill_date: 'Thu, Oct 8',
-}
+const TODAY = '2026-10-03'
+const seed = createDemoState(TODAY)
+const data = { profile: seed.profile, purchases: [], transactions: seed.transactions, today: TODAY }
+const assess = (amountCents: number, purchaseDate = TODAY) =>
+  assessPurchase(data.profile, [], { amountCents, itemName: 'camera', purchaseDate, today: TODAY })
 
-describe('placeholder narration', () => {
-  it('fills engine placeholders and keeps Claude’s wording', () => {
-    expect(
-      checkProse(
-        'Rent on {{next_bill_date}} lands before your paycheck, so waiting until {{fits_on}} keeps your cushion intact.',
-        values,
-        'tight',
-      ),
-    ).toEqual({
-      ok: true,
-      text: 'Rent on Thu, Oct 8 lands before your paycheck, so waiting until Fri, Oct 16 keeps your cushion intact.',
+describe('verdict template', () => {
+  it('states the engine outcome, the earliest fitting date and the most that fits', () => {
+    expect(verdictFor(assess(119900))).toBe(
+      'Camera at $1,199 would dip below your cushion if you buy it today. The earliest date that fits is Fri, Oct 16. The most you could spend today and keep your cushion is $850.52.',
+    )
+    expect(verdictFor(assess(119900, '2026-10-16'))).toBe(
+      'Camera at $1,199 fits your plan if you buy it on Fri, Oct 16.',
+    )
+  })
+})
+
+describe('fact catalogs', () => {
+  it('writes every purchase fact from engine values, with its role in the sentence', () => {
+    expect(purchaseFacts(assess(119900), data)).toEqual({
+      low_point:
+        'Your lowest balance would be $651.52 on Thu, Oct 15, $348.48 below your $1,000 cushion.',
+      cause: 'Apartment rent ($1,750) is due Thu, Oct 8, before that low point.',
+      income: 'Your next income, Monthly paycheck ($4,200), arrives Thu, Oct 15.',
+      wait: 'Waiting until Fri, Oct 16 would keep your cushion for the full $1,199.',
+      spend_less: 'Up to $850.52 would keep your cushion if you buy today.',
+      stress:
+        'With 20% higher everyday spending, your lowest balance would be $550.12, below your $1,000 cushion.',
+      bills_before:
+        'Due before your low point: Music streaming $11.99 (Oct 5), Apartment rent $1,750 (Oct 8), Video streaming $15.49 (Oct 10).',
     })
   })
 
-  it('keeps the natural explanations the old word filter discarded', () => {
-    for (const text of [
-      'Buying it today would pull your balance under your chosen cushion before your next paycheck arrives, so waiting or looking at a lower-priced camera would protect that cushion.',
-      "Rent is a confirmed obligation, so I wouldn't plan around skipping it; a better route is waiting until after your next paycheck lands.",
-      'Your biggest upcoming cost is rent, so it is worth checking that the recorded bills and subscriptions are still accurate.',
-      'The price is in euros, and your plan works only in US dollars.',
-    ])
-      expect(checkProse(text, values, 'tight').ok).toBe(true)
+  it('offers no waiting fact for a purchase that already fits', () => {
+    const facts = purchaseFacts(assess(34900), data)
+    expect(facts.wait).toBeUndefined()
+    expect(facts.low_point).toContain('above your $1,000 cushion')
   })
 
-  it.each([
-    ['Buying it would drop you to $651 on Oct 15.', 'raw figure'],
-    ['You would have nine hundred dollars left.', 'spelled-out figure'],
-    ['That leaves about fifty bucks.', 'spelled-out figure'],
-    ['Wait two weeks and check again.', 'spelled-out figure'],
-    ['Your spending will fall by twenty percent.', 'spelled-out figure'],
-    ['Rent clears on Friday.', 'raw calendar date'],
-    ['The next bill arrives in November.', 'raw calendar date'],
-    ['Your low point is {{low_points}}.', 'unavailable placeholder low_points'],
-    ['Your low point is {low_point}.', 'malformed placeholder'],
-  ])('rejects figures outside placeholders: %s', (text, reason) => {
-    expect(checkProse(text, values, 'tight')).toEqual({ ok: false, reason })
+  it('offers no facts while the plan is incomplete', () => {
+    const incomplete = { ...data, profile: { ...data.profile, confirmed: false } }
+    const a = assessPurchase(incomplete.profile, [], { amountCents: 119900, today: TODAY })
+    expect(purchaseFacts(a, incomplete)).toEqual({})
   })
 
-  it('rejects a placeholder the engine did not provide for this answer', () => {
-    const { fits_on: _fits, ...noFit } = values
-    expect(checkProse('Waiting until {{fits_on}} helps.', noFit, 'tight').ok).toBe(false)
+  it('writes plan, commitment and spending facts', () => {
+    expect(planFacts(data).room_today).toBe('Up to $850.52 today would keep your $1,000 cushion.')
+    expect(commitmentFacts(data, 'subscriptions')).toMatchObject({
+      total: '4 subscriptions are due in the next 30 days, $60.46 in all.',
+      largest: 'The largest is Design software at $29.99.',
+      other_total: 'Bills that are not subscriptions add $1,815 over the same 30 days.',
+    })
+    expect(spendingFacts30(data).total).toMatch(
+      /^You spent \$[\d,.]+ across \d+ completed purchases/,
+    )
   })
 })
 
-describe('risky advice guard', () => {
-  it.each([
-    "Don't skip rent to make room for this.",
-    'I would never delay a bill to buy something.',
-    'Rather than skipping rent, wait until payday.',
-    'Skipping rent is risky and could bring late fees.',
-    "I wouldn't use credit or a loan to make this fit.",
-    'Keep your cushion intact instead of dipping into it.',
-    'Delay buying until after rent clears.',
-  ])('allows negated or warning advice: %s', (text) => {
-    expect(riskyAdvice(text)).toBe(false)
+describe('lead-ins and chips', () => {
+  it('drops a lead-in that would not fit the result', () => {
+    expect(leadInText('not_yes', 'tight')).toBe(
+      'I can’t simply say yes. Here’s what your plan shows:',
+    )
+    expect(leadInText('not_yes', 'fits')).toBeUndefined()
+    expect(leadInText('none', 'tight')).toBeUndefined()
   })
 
   it.each([
-    'You could skip rent to buy it.',
-    'Skip rent this month and buy the camera.',
-    'Rent can wait until after your paycheck.',
-    'Pay your internet bill late this month.',
-    'Consider lowering your cushion a little.',
-    'You could dip into your emergency fund.',
-    'Using a credit card would make it fit.',
-    'Buy now, pay later could spread the cost.',
-    'A loan could close the gap.',
-    'Instead of buying now, you could delay rent.',
-  ])('rejects advice to skip bills, spend the cushion or borrow: %s', (text) => {
-    expect(riskyAdvice(text)).toBe(true)
+    ['When could I buy it?', true],
+    ['What bills are coming up?', true],
+    ['Could I skip rent this month?', false],
+    ['What if I spend $900?', false],
+    ['Can I put it on a credit card?', false],
+    ['Should I use my cushion?', false],
+    ['What about Friday?', false],
+    ['What bills are coming up', false],
+  ])('accepts only plain follow-up questions: %s', (chip, allowed) => {
+    expect(chipAllowed(chip)).toBe(allowed)
   })
 })
 
-describe('contradiction with the engine outcome', () => {
-  it('rejects a positive verdict the engine did not produce', () => {
-    expect(contradiction('You can probably cover it.', 'tight')).toBeDefined()
-    expect(contradiction('It fits, with room to spare.', 'tight')).toBeDefined()
-    expect(contradiction('You can afford it.', undefined)).toBeDefined()
-    expect(contradiction('This looks fine.', 'incomplete')).toBeDefined()
-  })
-
-  it('allows conditional statements about waiting or a lower price', () => {
-    expect(contradiction('It fits on {{fits_on}}.', 'tight')).toBeUndefined()
-    expect(
-      contradiction('Waiting until {{fits_on}} keeps your cushion intact.', 'tight'),
-    ).toBeUndefined()
-    expect(contradiction('A lower price would stay above your cushion.', 'tight')).toBeUndefined()
-  })
-
-  it('rejects a negative verdict for a fitting purchase, except the stress case', () => {
-    expect(contradiction('This would dip below your cushion.', 'fits')).toBeDefined()
-    expect(contradiction("You can't afford this.", 'fits')).toBeDefined()
-    expect(
-      contradiction(
-        'If spending runs higher, the balance could dip below your cushion.',
-        'fits',
-        true,
-      ),
-    ).toBeUndefined()
-    expect(contradiction('Your low point stays above your cushion.', 'fits')).toBeUndefined()
-  })
-
-  it('always rejects approval and guarantees', () => {
-    expect(checkProse('Go ahead and buy it.', values, 'fits').ok).toBe(false)
-    expect(checkProse('This is guaranteed to work out.', values, 'fits').ok).toBe(false)
+describe('no free-text financial claims', () => {
+  it('ignores anything in points that is not a known fact id', async () => {
+    const create = async () => ({
+      stop_reason: 'tool_use',
+      content: [
+        {
+          type: 'tool_use',
+          id: 't1',
+          name: 'interpret_purchase',
+          input: {
+            items: [{ name: 'camera', amount_cents: 119900, currency: 'USD', quantity: 1 }],
+            combine: 'single',
+            refers_to_previous_item: false,
+            date_phrase: null,
+            date: null,
+            option: 'check',
+            points: ['You can comfortably afford it.', 'wait'],
+            lead_in: 'none',
+            follow_ups: [],
+          },
+        },
+      ],
+    })
+    const provider = createChatProvider(
+      'unused',
+      'claude-sonnet-5-5',
+      { messages: { create } } as unknown as Pick<Anthropic, 'messages'>,
+      { log: () => {} },
+    )
+    const reply = await provider.reply(
+      { message: 'Can I afford a $1,199 camera?', history: [] },
+      data,
+    )
+    expect(reply.points?.map((p) => p.id)).toEqual(['wait'])
+    expect(JSON.stringify(reply)).not.toContain('comfortably afford')
   })
 })

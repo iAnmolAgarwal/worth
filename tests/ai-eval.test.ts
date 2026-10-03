@@ -16,6 +16,7 @@ interface Fixture {
 const fixture = JSON.parse(
   readFileSync(new URL('../eval/fixtures/recorded.json', import.meta.url), 'utf8'),
 ) as Fixture
+const TWO_DAYS = '2026-10-05'
 const recorded = Object.fromEntries(
   Object.entries(fixture.probes).map(([id, probe]) => [id, probe.turns]),
 )
@@ -44,10 +45,10 @@ describe('AI eval regression gate (recorded model responses)', () => {
     expect(summarize(scoped).replies).toBeGreaterThan(5)
   })
 
-  it('shows a Claude-written explanation on at least 80% of on-topic answers', () => {
+  it('shows Claude’s choice of engine facts on at least 80% of answers that have facts', () => {
     const summary = summarize(results)
-    expect(summary.onTopic).toBeGreaterThan(15)
-    expect(summary.explanationRate).toBeGreaterThanOrEqual(0.8)
+    expect(summary.withFacts).toBeGreaterThan(15)
+    expect(summary.selectionRate).toBeGreaterThanOrEqual(0.8)
   })
 
   it('keeps the required interpretation cases (§9 case 19)', () => {
@@ -61,5 +62,9 @@ describe('AI eval regression gate (recorded model responses)', () => {
       reply('N4-end-of-month').assessment?.purchaseDate,
     )
     expect(reply('P8-poem-trivia').intent).toBe('off_topic')
+    for (const id of ['R5-swiss-francs', 'R6-euro-and-dollar', 'R8-lens-instead'])
+      expect(reply(id).assessment).toBeUndefined()
+    expect([TWO_DAYS, undefined]).toContain(reply('R1-days-from-now').assessment?.purchaseDate)
+    expect([EVAL_TODAY, undefined]).toContain(reply('R3-past-reference').assessment?.purchaseDate)
   })
 })

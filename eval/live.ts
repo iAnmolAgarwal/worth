@@ -4,6 +4,8 @@
 //   npm run eval:live -- --out <dir> --env <path/to/.env> [--runs 3] [--judge]
 //                        [--record] [--split train|test] [--probes id,id] [--label name]
 //
+// The judge reviews every run once; run 1 is judged twice to measure judge stability.
+//
 // --record writes the first run's model responses to eval/fixtures/recorded.json for the
 // fixture-mode regression test. The API key is read from the env file and never printed.
 import Anthropic from '@anthropic-ai/sdk'
@@ -98,7 +100,8 @@ for (let run = 1; run <= Number(values.runs); run++) {
   }
   if (values.judge) {
     const items = judgeItems(results)
-    const [first, second] = [await judge(client, items), await judge(client, items)]
+    const first = await judge(client, items)
+    const second = run === 1 ? await judge(client, items) : first
     const byId = new Map(items.map((i) => [i.id, i]))
     report.judge = {
       first,
@@ -120,7 +123,7 @@ for (let run = 1; run <= Number(values.runs); run++) {
   console.log(
     `run ${run}: unsafe ${report.all.unsafe}, contradictions ${report.all.contradictions}` +
       `${report.judge ? ` (judge ${report.judge.contradictions.length}, flips ${report.judge.flips.length})` : ''}` +
-      `, explained ${report.all.explained}/${report.all.onTopic}, requests ${report.all.plumbing.requests}` +
+      `, facts selected ${report.all.selected}/${report.all.withFacts}, requests ${report.all.plumbing.requests}` +
       `, timeouts ${report.all.plumbing.timeouts}, api errors ${report.all.plumbing.apiErrors}`,
   )
 }
@@ -148,15 +151,15 @@ if (values.record && runs[0]) {
 
 const pct = (n: number) => `${Math.round(n * 100)}%`
 const row = (label: string, s: Summary, judged?: RunReport['judge']) =>
-  `| ${label} | ${s.replies} | ${s.unsafe} | ${s.contradictions}${judged ? ` / ${judged.contradictions.length}` : ''} | ${s.explained}/${s.onTopic} (${pct(s.explanationRate)}) | ${s.misses} | ${s.plumbing.requests} | ${s.plumbing.timeouts} | ${s.plumbing.apiErrors} | ${s.plumbing.cutoffs} | ${s.plumbing.refusals} | ${s.plumbing.retries} | ${s.plumbing.failedOver} | ${s.plumbing.meanMs}/${s.plumbing.maxMs} | $${cost(s).toFixed(3)} |`
+  `| ${label} | ${s.replies} | ${s.unsafe} | ${s.contradictions}${judged ? ` / ${judged.contradictions.length}` : ''} | ${s.selected}/${s.withFacts} (${pct(s.selectionRate)}) | ${s.misses} | ${s.plumbing.requests} | ${s.plumbing.timeouts} | ${s.plumbing.apiErrors} | ${s.plumbing.cutoffs} | ${s.plumbing.refusals} | ${s.plumbing.retries} | ${s.plumbing.failedOver} | ${s.plumbing.meanMs}/${s.plumbing.maxMs} | $${cost(s).toFixed(3)} |`
 const lines = [
   `# Worth AI eval (${values.label})`,
   '',
-  `Model under test: \`${MODEL}\`. Judge: ${values.judge ? `\`${JUDGE_MODEL}\`, two passes per run` : 'not run'}. Persona date: ${EVAL_TODAY}. Probes: ${selected.length} (${selected.filter((p) => p.split === 'train').length} train, ${selected.filter((p) => p.split === 'test').length} held-out test). Generated ${new Date().toISOString()}.`,
+  `Model under test: \`${MODEL}\`. Judge: ${values.judge ? `\`${JUDGE_MODEL}\` (run 1 judged twice for stability)` : 'not run'}. Persona date: ${EVAL_TODAY}. Probes: ${selected.length} (${selected.filter((p) => p.split === 'train').length} train, ${selected.filter((p) => p.split === 'test').length} held-out test). Generated ${new Date().toISOString()}.`,
   '',
-  'Contradictions are programmatic / judge. Explanation rate counts on-topic answers answered by Claude. Latency is mean/max ms per answer.',
+  "Contradictions are programmatic / judge. Facts selected counts on-topic Claude answers with engine facts to choose from where Claude's choice was shown. Latency is mean/max ms per answer.",
   '',
-  '| Run · split | Replies | Unsafe | Contradictions | Explained | Misses | Requests | Timeouts | API errors | Cut-offs | Refusals | Retries | Fell back | Latency | Cost |',
+  '| Run · split | Replies | Unsafe | Contradictions | Facts selected | Misses | Requests | Timeouts | API errors | Cut-offs | Refusals | Retries | Fell back | Latency | Cost |',
   '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
   ...runs.flatMap((r) => [
     row(`${r.run} · all`, r.all, r.judge),
@@ -171,7 +174,7 @@ if (values.judge)
     '',
     ...runs.map(
       (r) =>
-        `- Run ${r.run}: ${r.judge!.first.length} explanations judged twice; ${r.judge!.flips.length} claim flips${r.judge!.flips.length ? `: ${r.judge!.flips.map((f) => `${f.id} ${f.claim}`).join(', ')}` : ''}. Judged contradictions: ${r.judge!.contradictions.join(', ') || 'none'}. Judged risky advice: ${r.judge!.advice.join(', ') || 'none'}.`,
+        `- Run ${r.run}: ${r.judge!.first.length} answers judged${r.run === 1 ? ` twice; ${r.judge!.flips.length} claim flips${r.judge!.flips.length ? `: ${r.judge!.flips.map((f) => `${f.id} ${f.claim}`).join(', ')}` : ''}` : ' once'}. Judged contradictions: ${r.judge!.contradictions.join(', ') || 'none'}. Judged risky advice: ${r.judge!.advice.join(', ') || 'none'}. Picked points judged relevant: ${r.judge!.first.filter((c) => c.points_address_question).length}/${r.results.flatMap((x) => x.turns).filter((t) => t.reply.points?.length).length}.`,
     ),
     '',
   )
@@ -183,7 +186,6 @@ for (const r of runs)
         ...t.grade.unsafe.map((u) => `UNSAFE ${u}`),
         ...t.grade.contradictions.map((c) => `CONTRADICTION ${c}`),
         ...t.grade.misses.map((m) => `miss: ${m}`),
-        ...t.plumbing.rejectedExplanations.map((x) => `explanation rejected: ${x}`),
         ...(t.plumbing.failedOver ? ['fell back to local'] : []),
       ]
       if (issues.length)
@@ -205,7 +207,7 @@ for (const result of runs[0]?.results ?? [])
           ]
         : []),
       ...(t.reply.verdict ? [`- Verdict: ${t.reply.verdict}`] : []),
-      `- Explanation: ${t.reply.explanation ?? '(none)'}`,
+      `- Picked by Claude: ${t.reply.points?.length ? `${t.reply.lead ? `${t.reply.lead} ` : ''}${t.reply.points.map((p) => `[${p.id}] ${p.text}`).join(' ')}` : '(none)'}`,
       ...(t.reply.verdict ? [] : [`- Message: ${t.reply.message.replace(/\n+/g, ' ')}`]),
       `- Suggestions: ${t.reply.suggestions.join(' | ')}`,
       '',

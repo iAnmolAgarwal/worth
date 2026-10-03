@@ -237,16 +237,11 @@ export function Assistant({
                     </div>
                   )}
                   <div className="message-text">
-                    {(entry.reply?.assessment && entry.reply.verdict
-                      ? [entry.reply.verdict]
-                      : entry.content.split('\n\n')
-                    ).map((paragraph, i) => (
+                    {mainParagraphs(entry).map((paragraph, i) => (
                       <p key={i}>{paragraph}</p>
                     ))}
-                    {entry.reply?.assessment && entry.reply.explanation && (
-                      <p className="claude-explanation">{entry.reply.explanation}</p>
-                    )}
                   </div>
+                  {!!entry.reply?.points?.length && <ClaudePoints reply={entry.reply} />}
                   {entry.reply?.interpretation && (
                     <ReadAsChip
                       interpretation={entry.reply.interpretation}
@@ -494,6 +489,31 @@ export function Assistant({
         </aside>
       </div>
     </div>
+  )
+}
+
+/** The answer's own text; the points Claude picked are shown separately. */
+function mainParagraphs(entry: Entry) {
+  const reply = entry.reply
+  if (reply?.assessment && reply.verdict) return [reply.verdict]
+  const chosen =
+    reply?.points && [reply.lead, ...reply.points.map((p) => p.text)].filter(Boolean).join(' ')
+  return entry.content.split('\n\n').filter((paragraph) => paragraph !== chosen)
+}
+
+function ClaudePoints({ reply }: { reply: ChatReply }) {
+  return (
+    <section className="claude-points" aria-label="Points picked by Claude">
+      <span className="claude-points-label">
+        <Sparkles size={12} /> Picked by Claude for your question
+      </span>
+      {reply.lead && <p>{reply.lead}</p>}
+      <ul>
+        {reply.points!.map((point) => (
+          <li key={point.id}>{point.text}</li>
+        ))}
+      </ul>
+    </section>
   )
 }
 

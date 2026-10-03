@@ -7,7 +7,6 @@ import { chatLabel } from './labels.ts'
 // Every figure the user sees comes from the engine. The verdict sentence is a
 // template; Claude may add prose that names figures only through placeholders.
 
-export type Placeholders = Record<string, string>
 export type CommitmentKind = 'subscriptions' | 'bills' | 'all'
 
 const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
@@ -35,7 +34,7 @@ export function verdictFor(a: Assessment, interpretation?: Interpretation) {
 }
 
 /** The supporting engine facts behind a verdict. */
-export function assessmentFacts(a: Assessment) {
+export function assessmentSummary(a: Assessment) {
   if (a.outcome === 'incomplete')
     return `Confirm ${a.missingFields.join('; ')}. The current projection is incomplete, so it cannot support a purchase decision.`
   return `Buying ${when(a.purchaseDate, a.today)} brings your projected low point to ${money(a.lowestBalanceCents)} on ${shortLabel(a.lowestDate)}, against a ${money(a.cushionCents)} cushion. With everyday spending 20% higher, the low point is ${money(a.stressLowestCents)}. This is a conditional cash-flow estimate.`
@@ -129,240 +128,186 @@ export function overviewFacts(data: ChatData) {
 export const OFF_TOPIC_REPLY =
   'I can only help with your purchases, upcoming bills and subscriptions, spending, and how much room your plan has. Ask me about something you are thinking of buying.'
 
-function nextFlow(data: ChatData, predicate: (kind: string) => boolean) {
-  const found = getUpcomingFlows(data.profile, data.today, 30).find(({ flow }) =>
-    predicate(flow.kind),
-  )
-  return found ? { name: chatLabel(found.flow.name), date: found.date } : undefined
-}
-function planPlaceholders(data: ChatData): Placeholders {
-  const income = nextFlow(data, (kind) => kind === 'income')
-  const bill = nextFlow(data, (kind) => kind !== 'income')
-  return {
-    cushion: money(data.profile.cushionCents),
-    window_end: dateLabel(addDays(data.today, 30), data.today),
-    ...(income ? { next_income_date: dateLabel(income.date, data.today) } : {}),
-    ...(bill ? { next_bill: bill.name, next_bill_date: dateLabel(bill.date, data.today) } : {}),
-  }
-}
+// ---- Facts Claude can choose ------------------------------------------------------
+//
+// Every fact is a complete sentence built from engine values, with its role stated in the
+// sentence itself. Claude chooses which facts answer the user's question and in what
+// order; it never writes a financial claim.
 
-/** Values Claude may reference for an assessed purchase. */
-export function assessmentPlaceholders(a: Assessment, data: ChatData): Placeholders {
-  const values: Placeholders = {
-    ...planPlaceholders(data),
-    item: a.itemName,
-    price: money(a.amountCents),
-    purchase_date: dateLabel(a.purchaseDate, a.today),
-    cushion: money(a.cushionCents),
-  }
-  if (a.outcome === 'incomplete') return values
-  Object.assign(values, {
-    low_point: money(a.lowestBalanceCents),
-    low_date: dateLabel(a.lowestDate, a.today),
-    stress_low: money(a.stressLowestCents),
-  })
-  if (a.headroomCents < 0) values.shortfall = money(-a.headroomCents)
-  else values.headroom = money(a.headroomCents)
-  if (a.earliestDate && a.earliestDate > a.purchaseDate)
-    values.fits_on = dateLabel(a.earliestDate, a.today)
-  if (a.maxAffordableCents > 0) values.max_price = money(a.maxAffordableCents)
-  return values
-}
-export function overviewPlaceholders(data: ChatData): Placeholders {
-  const base = baseline(data)
-  const values = planPlaceholders(data)
-  if (base.outcome === 'incomplete') return values
-  return {
-    ...values,
-    low_point: money(base.baselineLowestCents),
-    low_date: dateLabel(base.lowestDate, data.today),
-    ...(base.maxAffordableCents > 0 ? { max_price: money(base.maxAffordableCents) } : {}),
-  }
-}
-export function commitmentPlaceholders(data: ChatData, kind: CommitmentKind): Placeholders {
-  const value = commitments(data, kind)
-  const subscriptions = commitments(data, 'subscriptions')
-  const bills = commitments(data, 'bills')
-  const first = value.events[0]
-  return {
-    ...planPlaceholders(data),
-    subscriptions_total: money(subscriptions.totalCents),
-    subscription_count: String(subscriptions.events.length),
-    bills_total: money(bills.totalCents),
-    bill_count: String(bills.events.length),
-    ...(first ? { next_bill: first.name, next_bill_date: dateLabel(first.date, data.today) } : {}),
-  }
-}
-export function spendingPlaceholders(data: ChatData): Placeholders {
-  const value = spending(data)
-  return {
-    ...planPlaceholders(data),
-    spending_total: money(value.totalCents),
-    ...(value.categories[0] ? { top_category: value.categories[0].name } : {}),
-  }
-}
+export const PURCHASE_FACTS = [
+  'low_point',
+  'cause',
+  'income',
+  'wait',
+  'spend_less',
+  'stress',
+  'bills_before',
+] as const
+export const PLAN_FACTS = ['room_today', 'low_point', 'cause', 'income'] as const
+export const COMMITMENT_FACTS = ['total', 'next', 'largest', 'other_total'] as const
+export const SPENDING_FACTS = ['total', 'top_category', 'daily_average'] as const
+export type FactId =
+  | (typeof PURCHASE_FACTS)[number]
+  | (typeof PLAN_FACTS)[number]
+  | (typeof COMMITMENT_FACTS)[number]
+  | (typeof SPENDING_FACTS)[number]
+export type FactCatalog = Partial<Record<FactId, string>>
 
-const MEANINGS: Record<string, string> = {
-  item: 'the item as the user named it',
-  price: 'the total price being checked',
-  purchase_date: 'the day being checked',
-  low_point: 'the lowest projected balance in the plan window if they buy on that day',
-  low_date: 'the day of that low point',
-  cushion: "the user's chosen minimum balance",
-  shortfall: 'how far that low point falls below the cushion',
-  headroom: 'how much room stays above the cushion at the low point, after this purchase',
-  fits_on: 'the earliest day that buying in full keeps the cushion',
-  max_price: 'the most they could spend on the day being checked and keep the cushion',
-  stress_low: 'the low point if everyday spending runs 20% higher',
-  next_income_date: 'the next confirmed paycheck date',
-  next_bill: 'the next scheduled bill or subscription',
-  next_bill_date: 'the date of that next bill',
-  window_end: 'the last day the plan covers',
-  subscriptions_total: 'the total of subscriptions due in the next 30 days',
-  subscription_count: 'how many subscriptions are due in the next 30 days',
-  bills_total: 'the total of bills (not subscriptions) due in the next 30 days',
-  bill_count: 'how many bills are due in the next 30 days',
-  spending_total: 'recorded spending over the last 30 days',
-  top_category: 'the largest spending category over the last 30 days',
+const day = (date: string, today: string) => dateLabel(date, today)
+const shift = (date: string, today: string) =>
+  date === today ? 'today' : `on ${dateLabel(date, today)}`
+
+function lowPointFact(
+  low: number,
+  date: string,
+  cushion: number,
+  today: string,
+  lead = 'Your lowest balance would be',
+) {
+  const gap = low - cushion
+  const relation =
+    gap < 0
+      ? `${money(-gap)} below your ${money(cushion)} cushion`
+      : gap > 0
+        ? `${money(gap)} above your ${money(cushion)} cushion`
+        : `exactly at your ${money(cushion)} cushion`
+  return `${lead} ${money(low)} on ${day(date, today)}, ${relation}.`
 }
-/** Placeholder names with their meaning and current value, for tool results. */
-export function describePlaceholders(values: Placeholders) {
-  return Object.fromEntries(
-    Object.entries(values).map(([name, value]) => [
-      name,
-      `${MEANINGS[name] ?? name.replaceAll('_', ' ')}: ${value}`,
-    ]),
-  )
-}
-
-// ---- Prose guard -----------------------------------------------------------------
-
-const PLACEHOLDER = /\{\{\s*([a-z_]+)\s*\}\}/g
-const NUMBER_WORD = String.raw`(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|a\s+few|a\s+couple(?:\s+of)?|several|a)`
-const CURRENCY_WORD = String.raw`(?:dollars?|bucks?|usd|cents?|euros?|eur|gbp|pounds?|yen|rupees?|inr|quid|pesos?|grand)`
-// A bare currency name ("in US dollars") is not an amount; a spelled-out one is.
-const FIGURE_WORDS = new RegExp(
-  String.raw`\b(?:hundreds?|thousands?|millions?|billions?|percent(?:age)?|dozens?)\b|\b${NUMBER_WORD}\s+(?:\w+\s+)?${CURRENCY_WORD}\b`,
-  'i',
-)
-const COUNTED_UNIT =
-  /\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|a\s+couple\s+of|a\s+few|several|couple\s+of)\s+(?:more\s+|extra\s+|short\s+)?(?:days?|weeks?|months?|years?|paychecks?|paydays?|bills?|payments?|subscriptions?)\b/i
-const CALENDAR =
-  /\b(?:January|February|March|April|June|July|August|September|October|November|December|(?:Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\.?(?=\s))|\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)s?\b/i
-
-const NEGATION =
-  /(?:\b(?:not|never|no|without|avoid|avoiding|against|rather\s+than|instead\s+of|neither|nor|refuse|wouldn't|shouldn't|don't|won't|can't|cannot|isn't)\b|n't\b)/i
-const WARNING =
-  /\b(?:(?:is|are|would\s+be|isn't|is\s+not)\s+(?:a\s+)?(?:bad|risky|unsafe|dangerous|mistake|not\s+(?:a\s+)?(?:good|safe|wise|recommended))|(?:wouldn't|would\s+not|don't|do\s+not|can't)\s+recommend|not\s+something\s+i(?:'d|\s+would)?\s+recommend|risks?|risky|late\s+fees?|penalt(?:y|ies)|hurt|damage|harm|dangerous|unsafe|costly)\b/i
-const FILL = String.raw`(?:(?:your|the|my|this|next|a|an|paying|making|on|month's|of|some|that|upcoming|scheduled|monthly|one|any)\s+){0,3}`
-const OBLIGATION = String.raw`(?:(?:rent|mortgage|utilit(?:y|ies)|internet|insurance|subscriptions?)(?:\s+(?:bills?|payments?))?|(?:phone|car|electric(?:ity)?|water|gas|loan|card|credit\s+card|student\s+loan)\s+(?:bills?|payments?)|bills?|obligations?|commitments?|payments?|repayments?|essentials?|groceries|debts?)`
-const DEFER_VERB = String.raw`(?:skip(?:ping|ped)?|miss(?:ing|ed)?|delay(?:ing|ed)?|defer(?:ring|red)?|postpon(?:e|ing|ed)|push(?:ing)?\s+back|put(?:ting)?\s+off|hold(?:ing)?\s+off\s+on|ignor(?:e|ing)|forgo(?:ing)?|forego(?:ing)?|stop\s+paying|not\s+pay(?:ing)?|underpay(?:ing)?|reschedul(?:e|ing)|mov(?:e|ing)|shift(?:ing)?|let(?:ting)?)`
-const DEFERS = new RegExp(String.raw`\b${DEFER_VERB}\s+${FILL}${OBLIGATION}\b`, 'i')
-const DEFERRED = new RegExp(
-  String.raw`\b${OBLIGATION}\s+(?:[\w']+\s+){0,3}?(?:be\s+)?(?:skipped|delayed|deferred|postponed|missed|pushed\s+back|put\s+off|paid\s+late|wait|slide|slip|rescheduled)\b`,
-  'i',
-)
-const LATE = new RegExp(
-  String.raw`\bpay(?:ing)?\s+${FILL}${OBLIGATION}\s+late\b|\blate\s+on\s+${FILL}${OBLIGATION}\b`,
-  'i',
-)
-const CUSHION = String.raw`(?:cushion|buffer|reserves?|emergency\s+(?:fund|savings)|safety\s+net)`
-const SPENDS_CUSHION = new RegExp(
-  String.raw`\b(?:lower(?:ing)?|reduc(?:e|ing)|shrink(?:ing)?|relax(?:ing)?|cut(?:ting)?|drop(?:ping)?|dip(?:ping)?\s+into|us(?:e|ing)|tap(?:ping)?(?:\s+into)?|spend(?:ing)?|eat(?:ing)?\s+into|draw(?:ing)?\s+(?:on|down)|borrow(?:ing)?\s+from|giv(?:e|ing)\s+up|sacrific(?:e|ing))\s+${FILL}${CUSHION}\b|\b${CUSHION}\s+(?:could|can|might)\s+be\s+(?:lowered|reduced|relaxed|used|dipped\s+into|tapped)\b`,
-  'i',
-)
-const CREDIT =
-  /\b(?:credit(?:\s+cards?)?|loans?|borrow(?:ing|ed)?|financ(?:e|ing)|bnpl|buy\s+now,?\s+pay\s+later|pay\s+later|pay\s+in\s+(?:four|4)|instal(?:l)?ments?|split(?:ting)?\s+(?:it|the\s+(?:cost|payment|purchase))|layaway|cash\s+advance|overdraft)\b/i
-
-function clauses(text: string) {
-  return text.split(/[.;!?]+|,|\bbut\b|\s[-–—]\s/i).map((c) => c.trim())
-}
-function affirmed(clause: string, pattern: RegExp) {
-  const match = clause.match(pattern)
-  if (!match) return false
-  const inside = /\b(?:not|never)\b|n't\b/i.test(match[0]) && !/not\s+pay/i.test(match[0])
-  return !inside && !NEGATION.test(clause.slice(0, match.index)) && !WARNING.test(clause)
-}
-
-/** Advice to skip or delay a bill, use the cushion, or take on credit, read with negation. */
-export function riskyAdvice(text: string) {
-  return clauses(text).some((clause) =>
-    [DEFERS, DEFERRED, LATE, SPENDS_CUSHION, CREDIT].some((pattern) => affirmed(clause, pattern)),
-  )
-}
-
-const APPROVAL =
-  /\b(?:guarantee[ds]?|definitely|certainly|go\s+ahead|you\s+should\s+(?:buy|get|purchase)|buy\s+it\s+(?:now|today)|treat\s+yourself|no[-\s]brainer|risk[-\s]free|nothing\s+to\s+worry)\b/i
-const POSITIVE =
-  /\b(?:(?:you\s+)?can\s+(?:easily\s+|comfortably\s+|safely\s+|probably\s+|still\s+)?(?:afford|cover)|affordable|(?:is|it's|looks|seems)\s+(?:safe|fine|ok(?:ay)?|doable|manageable|realistic)|safe\s+to\s+(?:buy|purchase|spend)|within\s+(?:your\s+)?(?:budget|means)|fits\s+(?:comfortably|easily|well|nicely|within|in|into)|(?:it|this|that|the\s+[a-z]+)\s+fits\b(?!\s+(?:on|after|from|by|once|starting|if|when|later))|(?:would|will|does|should)\s+fit\b(?!\s+(?:on|after|from|by|once|starting|if|when|later))|stays?\s+(?:above|over|within)\s+(?:your\s+)?(?:chosen\s+)?cushion|(?:keeps?|leaves?)\s+(?:your\s+)?(?:chosen\s+)?cushion\s+(?:intact|safe|untouched|whole)|(?:plenty|enough)\s+(?:of\s+)?(?:room|space|money|cushion|buffer)|you(?:'re|\s+are)\s+(?:fine|good|okay|ok|covered|set)|no\s+problem)\b/i
-const NEGATIVE =
-  /\b(?:(?:would|will|could|might)\s+(?:dip|drop|fall|go|take\s+you|push\s+you|bring\s+you|put\s+you|leave\s+you)\s+(?:\w+\s+)?below|(?:dips?|drops?|falls?|goes)\s+below|below\s+(?:your\s+)?(?:chosen\s+)?cushion|can(?:'t|not)\s+(?:afford|cover)|cannot\s+(?:afford|cover)|(?:too|very|quite)\s+tight|(?:is|looks)\s+tight|(?:falls?|comes?)\s+short|short\s+of|not\s+enough|(?:would|will)\s+(?:cross|break|dent|eat\s+into)|(?:doesn't|does\s+not|won't|wouldn't|will\s+not|would\s+not)\s+fit|not\s+affordable|unaffordable|over\s+(?:your\s+)?budget)\b/i
-const CONDITIONAL =
-  /\b(?:if|wait(?:ing|ed)?|until|after|once|later|instead|lower|cheaper|smaller|less\s+expensive|alternative|holding\s+off|hold\s+off|by\s+then|from\s+then)\b|\{\{\s*(?:fits_on|max_price)\s*\}\}/i
-const STRESS = /\b(?:if|higher|stress|more\s+than\s+(?:expected|planned|usual)|extra|unexpected)\b/i
-
-/**
- * Whether prose claims a verdict the engine did not produce. `outcome` is undefined when
- * the answer has no assessment.
- */
-export function contradiction(
-  text: string,
-  outcome: Assessment['outcome'] | undefined,
-  stressBelow = false,
-): string | undefined {
-  for (const sentence of text.split(/(?<=[.!?])\s+/)) {
-    const positive = clauses(sentence).some((clause) => asserted(clause, POSITIVE))
-    const negative = clauses(sentence).some((clause) => asserted(clause, NEGATIVE))
-    if (positive && outcome !== 'fits' && !(outcome === 'tight' && CONDITIONAL.test(sentence)))
-      return 'positive verdict the engine did not produce'
-    if (negative && outcome === 'fits' && !(stressBelow && STRESS.test(sentence)))
-      return 'negative verdict that contradicts a fitting purchase'
-    if (negative && outcome === 'incomplete') return 'verdict while the plan is incomplete'
-  }
+/** The largest bill or subscription due from today up to the low point, if any. */
+function causeFact(a: Assessment, data: ChatData) {
+  const due = a.drivers
+    .filter((d) => d.kind !== 'income' && d.date >= a.today && d.date <= a.lowestDate)
+    .sort((x, y) => y.amountCents - x.amountCents)[0]
+  if (due)
+    return `${chatLabel(due.name)} (${money(due.amountCents)}) is due ${day(due.date, a.today)}, before that low point.`
+  if (data.profile.dailySpendCents > 0)
+    return `Everyday spending of ${money(data.profile.dailySpendCents)} a day is what lowers your balance before then.`
   return undefined
 }
-function asserted(clause: string, pattern: RegExp) {
-  const match = clause.match(pattern)
-  return Boolean(match) && !NEGATION.test(clause.slice(0, match!.index))
+function incomeFact(a: Assessment) {
+  const income = a.drivers.find((d) => d.kind === 'income' && d.date >= a.today)
+  return income
+    ? `Your next income, ${chatLabel(income.name)} (${money(income.amountCents)}), arrives ${day(income.date, a.today)}.`
+    : 'No income is recorded in the plan window.'
 }
 
-export type ProseCheck = { ok: true; text: string } | { ok: false; reason: string }
+/** Facts for an assessed purchase. */
+export function purchaseFacts(a: Assessment, data: ChatData): FactCatalog {
+  if (a.outcome === 'incomplete') return {}
+  const facts: FactCatalog = {
+    low_point: lowPointFact(a.lowestBalanceCents, a.lowestDate, a.cushionCents, a.today),
+    income: incomeFact(a),
+    stress: `With 20% higher everyday spending, your lowest balance would be ${money(a.stressLowestCents)}, ${a.stressLowestCents < a.cushionCents ? 'below' : 'still at or above'} your ${money(a.cushionCents)} cushion.`,
+  }
+  const cause = causeFact(a, data)
+  if (cause) facts.cause = cause
+  if (a.outcome === 'tight')
+    facts.wait =
+      a.earliestDate && a.earliestDate > a.purchaseDate
+        ? `Waiting until ${day(a.earliestDate, a.today)} would keep your cushion for the full ${money(a.amountCents)}.`
+        : `No day in the next 30 days keeps your cushion at ${money(a.amountCents)}.`
+  facts.spend_less =
+    a.maxAffordableCents > 0
+      ? `Up to ${money(a.maxAffordableCents)} would keep your cushion if you buy ${shift(a.purchaseDate, a.today)}.`
+      : `Your plan has no room for a purchase ${shift(a.purchaseDate, a.today)} without going below your cushion.`
+  const before = a.drivers
+    .filter((d) => d.kind !== 'income' && d.date >= a.today && d.date <= a.lowestDate)
+    .slice(0, 3)
+  if (before.length)
+    facts.bills_before = `Due before your low point: ${before.map((d) => `${chatLabel(d.name)} ${money(d.amountCents)} (${shortLabel(d.date)})`).join(', ')}.`
+  return facts
+}
 
-/** Reject figures written outside known placeholders; fill the placeholders with engine values. */
-export function fillFigures(text: string, values: Placeholders, maxLength = 420): ProseCheck {
-  const trimmed = text.replace(/\s+/g, ' ').trim()
-  if (!trimmed) return { ok: false, reason: 'empty' }
-  if (trimmed.length > maxLength) return { ok: false, reason: 'too long' }
-  for (const [, name] of trimmed.matchAll(PLACEHOLDER))
-    if (!(name! in values)) return { ok: false, reason: `unavailable placeholder ${name}` }
-  const residual = trimmed.replace(PLACEHOLDER, ' ')
-  if (/[{}]/.test(residual)) return { ok: false, reason: 'malformed placeholder' }
-  if (/[\p{N}\p{Sc}%]/u.test(residual)) return { ok: false, reason: 'raw figure' }
-  if (FIGURE_WORDS.test(residual) || COUNTED_UNIT.test(residual))
-    return { ok: false, reason: 'spelled-out figure' }
-  if (CALENDAR.test(residual)) return { ok: false, reason: 'raw calendar date' }
+/** Facts about the plan before any new purchase. */
+export function planFacts(data: ChatData): FactCatalog {
+  const base = baseline(data)
+  if (base.outcome === 'incomplete') return {}
+  const facts: FactCatalog = {
+    room_today:
+      base.maxAffordableCents > 0
+        ? `Up to ${money(base.maxAffordableCents)} today would keep your ${money(base.cushionCents)} cushion.`
+        : `Your plan has no room for a new purchase today without going below your ${money(base.cushionCents)} cushion.`,
+    low_point: lowPointFact(
+      base.baselineLowestCents,
+      base.lowestDate,
+      base.cushionCents,
+      data.today,
+      'Before any new purchase, your lowest balance would be',
+    ),
+    income: incomeFact(base),
+  }
+  const cause = causeFact(base, data)
+  if (cause) facts.cause = cause
+  return facts
+}
+
+const NOUNS: Record<CommitmentKind, [string, string]> = {
+  subscriptions: ['subscription', 'subscriptions'],
+  bills: ['bill', 'bills'],
+  all: ['bill or subscription', 'bills and subscriptions'],
+}
+/** Facts about upcoming commitments of one kind. */
+export function commitmentFacts(data: ChatData, kind: CommitmentKind): FactCatalog {
+  const value = commitments(data, kind)
+  const [one, many] = NOUNS[kind]
+  if (!value.events.length) return {}
+  const next = value.events[0]!
+  const largest = [...value.events].sort((a, b) => b.amountCents - a.amountCents)[0]!
+  const facts: FactCatalog = {
+    total: `${value.events.length} ${value.events.length === 1 ? one : many} ${value.events.length === 1 ? 'is' : 'are'} due in the next 30 days, ${money(value.totalCents)} in all.`,
+    next: `The next is ${next.name}, ${money(next.amountCents)} on ${day(next.date, data.today)}.`,
+    largest: `The largest is ${largest.name} at ${money(largest.amountCents)}.`,
+  }
+  if (kind !== 'all') {
+    const other = commitments(data, kind === 'subscriptions' ? 'bills' : 'subscriptions')
+    facts.other_total = `${kind === 'subscriptions' ? 'Bills that are not subscriptions' : 'Subscriptions'} add ${money(other.totalCents)} over the same 30 days.`
+  }
+  return facts
+}
+
+/** Facts about recorded spending over the last 30 days. */
+export function spendingFacts30(data: ChatData): FactCatalog {
+  const value = spending(data)
+  if (!value.transactionCount) return {}
+  const top = value.categories[0]
   return {
-    ok: true,
-    text: capitalize(trimmed.replace(PLACEHOLDER, (_m, name: string) => values[name]!)),
+    total: `You spent ${money(value.totalCents)} across ${value.transactionCount} completed purchases from ${shortLabel(value.from)} to ${shortLabel(value.through)}.`,
+    ...(top
+      ? { top_category: `Your largest category was ${top.name} at ${money(top.amountCents)}.` }
+      : {}),
+    daily_average: `That averages ${money(Math.round(value.totalCents / 30))} a day; your plan assumes ${money(data.profile.dailySpendCents)} a day.`,
   }
 }
 
-/**
- * Accept Claude's prose only when every figure is a known placeholder and it gives no
- * risky advice or contradicting verdict; fill the placeholders with engine values.
- */
-export function checkProse(
-  text: string,
-  values: Placeholders,
-  outcome: Assessment['outcome'] | undefined,
-  options: { stressBelow?: boolean } = {},
-): ProseCheck {
-  const filled = fillFigures(text, values)
-  if (!filled.ok) return filled
-  const residual = text.replace(PLACEHOLDER, ' ')
-  if (APPROVAL.test(residual)) return { ok: false, reason: 'approval language' }
-  if (riskyAdvice(residual)) return { ok: false, reason: 'risky advice' }
-  const conflict = contradiction(text.replace(/\s+/g, ' '), outcome, options.stressBelow)
-  if (conflict) return { ok: false, reason: conflict }
-  return filled
+export const LEAD_INS = {
+  none: '',
+  matters: 'Here’s what matters for this purchase:',
+  drives: 'Here’s what drives this result:',
+  coming_up: 'Here’s what’s coming up:',
+  spending: 'Here’s where your money went:',
+  room: 'Here’s how much room your plan has:',
+  no_skipping:
+    'I wouldn’t skip or delay a bill to make a purchase fit. Here’s what matters instead:',
+  no_credit:
+    'I wouldn’t use credit, a loan or instalments to make a purchase fit. Here’s what matters instead:',
+  no_cushion: 'I wouldn’t dip into your cushion for this. Here’s what matters instead:',
+  not_yes: 'I can’t simply say yes. Here’s what your plan shows:',
+} as const
+export type LeadIn = keyof typeof LEAD_INS
+
+/** The lead-in text, or nothing when it would not fit the result. */
+export function leadInText(lead: LeadIn, outcome: Assessment['outcome'] | undefined) {
+  if (lead === 'not_yes' && outcome !== 'tight') return undefined
+  return LEAD_INS[lead] || undefined
+}
+
+// ---- Follow-up chips ---------------------------------------------------------------
+
+// Chips are questions in the user's voice. Claude writes them before it sees any result,
+// so they may not contain figures, dates, or any mention of bills, credit or the cushion.
+const CHIP_REJECT =
+  /[\p{N}\p{Sc}%{}]|\b(?:skip\w*|delay\w*|defer\w*|postpon\w*|late|credit|loans?|borrow\w*|financ\w*|bnpl|pay\s+later|pay\s+in|instal+ments?|split\w*|cushion|emergency|savings?|overdraft|hundreds?|thousands?|dollars?|bucks?|grand|percent|january|february|march|april|june|july|august|september|october|november|december|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/iu
+export function chipAllowed(text: string) {
+  const chip = text.replace(/\s+/g, ' ').trim()
+  return chip.length > 3 && chip.length <= 90 && chip.endsWith('?') && !CHIP_REJECT.test(chip)
 }
