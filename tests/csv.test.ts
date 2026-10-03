@@ -279,6 +279,43 @@ describe('identity and recurring spending', () => {
     expect(result.suggestedDailySpendCents).toBe(Math.round(9000 / 63))
   })
 
+  it('anchors month-end bills to the last day and others to their usual day', () => {
+    const rent = (...dates: string[]) =>
+      parsePayPalCsv(
+        csv(
+          ...dates.map(
+            (date, index) =>
+              `${date},12:00:00,Apartment rent,Payment Sent,Completed,USD,-1750.00,0,-1750.00,rent-${index},`,
+          ),
+        ),
+      ).recurring
+    // Jul 31, Aug 31, Sep 30 are all month ends, so the next rent is Oct 31, not Oct 30.
+    expect(rent('07/31/2026', '08/31/2026', '09/30/2026')).toMatchObject([
+      { anchorDay: 'last', nextDate: '2026-10-31', cadence: 'monthly' },
+    ])
+    expect(rent('07/30/2026', '08/30/2026', '09/30/2026')).toMatchObject([
+      { anchorDay: 30, nextDate: '2026-10-30' },
+    ])
+    // A payment made early once does not move the usual day.
+    expect(rent('07/03/2026', '08/03/2026', '09/01/2026')).toMatchObject([
+      { anchorDay: 3, nextDate: '2026-10-03' },
+    ])
+    // A tie goes to the most recent day.
+    expect(rent('07/02/2026', '08/01/2026', '09/02/2026', '10/01/2026')).toMatchObject([
+      { anchorDay: 1, nextDate: '2026-11-01' },
+    ])
+  })
+
+  it('leaves weekly and biweekly suggestions without a month anchor', () => {
+    const rows = ['08/07', '08/21', '09/04', '09/18'].map(
+      (day, index) =>
+        `${day}/2026,06:00:00,Acme payroll,Payment Received,Completed,USD,2100.00,0,2100.00,pay-${index},`,
+    )
+    const [payroll] = parsePayPalCsv(csv(...rows)).recurring
+    expect(payroll).toMatchObject({ cadence: 'biweekly', nextDate: '2026-10-16' })
+    expect(payroll).not.toHaveProperty('anchorDay')
+  })
+
   it('does not turn irregular merchant purchases into fixed obligations', () => {
     const result = parsePayPalCsv(
       'Date,Name,Currency,Amount\n2026-07-01,Music subscription,USD,-11.99\n2026-07-12,Music subscription,USD,-11.99\n2026-09-01,Music subscription,USD,-11.99',

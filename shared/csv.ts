@@ -1,6 +1,6 @@
 import Papa from 'papaparse'
 import type { Cadence, ImportPreview, ScheduledFlow, Transaction } from './types.ts'
-import { addDays, todayInTimezone } from './finance.ts'
+import { occurrence, todayInTimezone } from './finance.ts'
 
 const MAX_ROWS = 10_000
 const aliases = {
@@ -127,21 +127,27 @@ function dateDistance(first: string, last: string): number {
     (Date.parse(`${last}T12:00:00Z`) - Date.parse(`${first}T12:00:00Z`)) / 86_400_000,
   )
 }
-function nextOccurrence(date: string, cadence: Cadence, count: number): string {
-  if (cadence === 'weekly' || cadence === 'biweekly')
-    return addDays(date, count * (cadence === 'weekly' ? 7 : 14))
-  const [year, month, day] = date.split('-').map(Number)
-  const target = new Date(
-    Date.UTC(year, month - 1 + count * (cadence === 'yearly' ? 12 : 1), 1, 12),
-  )
-  const lastDay = new Date(
-    Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0, 12),
-  ).getUTCDate()
-  return new Date(
-    Date.UTC(target.getUTCFullYear(), target.getUTCMonth(), Math.min(day, lastDay), 12),
-  )
-    .toISOString()
-    .slice(0, 10)
+function daysInMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0, 12)).getUTCDate()
+}
+/**
+ * The day a monthly or yearly item recurs on: the last day of the month when every observation
+ * was, otherwise the most common day, with ties going to the most recent observation.
+ */
+function recurrenceAnchor(dates: string[]): number | 'last' {
+  const days = dates.map((date) => date.split('-').map(Number) as [number, number, number])
+  if (days.every(([year, month, day]) => day === daysInMonth(year, month))) return 'last'
+  const counts = new Map<number, number>()
+  for (const [, , day] of days) counts.set(day, (counts.get(day) ?? 0) + 1)
+  const most = Math.max(...counts.values())
+  return days.findLast(([, , day]) => counts.get(day) === most)![2]
+}
+/** The anchored day in the month of `date`, clamped to that month's length. */
+function anchoredInMonth(date: string, anchor: number | 'last'): string {
+  const [year, month] = date.split('-').map(Number)
+  const lastDay = daysInMonth(year, month)
+  const day = anchor === 'last' ? lastDay : Math.min(anchor, lastDay)
+  return `${date.slice(0, 8)}${String(day).padStart(2, '0')}`
 }
 
 function recurringSuggestions(
@@ -199,22 +205,29 @@ function recurringSuggestions(
       ['Entertainment', 'Software'].includes(latest.category) ||
       /gym|fitness|membership/.test(latest.name.toLowerCase())
     if (latest.kind !== 'income' && !bill && !knownSubscription) continue
-    let nextDate = nextOccurrence(latest.date, cadence, 1)
-    for (let count = 2; nextDate < today && count < 1000; count++)
-      nextDate = nextOccurrence(latest.date, cadence, count)
-    sorted.forEach((item) => ids.add(item.id))
-    flows.push({
+    const anchorDay =
+      cadence === 'monthly' || cadence === 'yearly'
+        ? recurrenceAnchor(sorted.map((item) => item.date))
+        : undefined
+    const flow: ScheduledFlow = {
       id: `suggested:${hash(groupKey)}`,
       name: latest.name,
       amountCents: amount,
-      nextDate,
+      // The latest period on the anchor; the suggestion is the first later one from today on.
+      nextDate: anchorDay === undefined ? latest.date : anchoredInMonth(latest.date, anchorDay),
+      ...(anchorDay === undefined ? {} : { anchorDay }),
       cadence,
       kind: latest.kind === 'income' ? 'income' : bill ? 'bill' : 'subscription',
       category: latest.category,
       confirmed: false,
       active: true,
       color: latest.color,
-    })
+    }
+    let nextDate = occurrence(flow, 1)
+    for (let count = 2; nextDate < today && count < 1000; count++)
+      nextDate = occurrence(flow, count)
+    sorted.forEach((item) => ids.add(item.id))
+    flows.push({ ...flow, nextDate })
   }
   return { flows: flows.sort((a, b) => a.nextDate.localeCompare(b.nextDate)), ids }
 }
