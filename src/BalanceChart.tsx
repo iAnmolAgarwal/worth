@@ -10,6 +10,7 @@ import {
   YAxis,
 } from 'recharts'
 import type { ForecastPoint, InstalmentDetail } from '../shared/types'
+import { useRef, useState, type KeyboardEvent } from 'react'
 import { dayLabel, shortDate, signed } from './format'
 
 const TEXT_2 = '#545D68'
@@ -256,28 +257,93 @@ export function BalanceChart({
           </ComposedChart>
         </ResponsiveContainer>
       </div>
-      {marks.length > 0 && (
-        <ol className="strip" aria-label="Paydays and big bills">
-          {marks.map((mark) => (
-            <li
-              key={`${mark.kind}-${mark.date}`}
-              className={`mark ${mark.kind}${mark.labelled ? ' labelled' : ''}${
-                mark.at > 0.7 ? ' edge-end' : mark.at < 0.25 ? ' edge-start' : ''
-              }`}
-              style={{ left: `calc(48px + (100% - 60px) * ${mark.at.toFixed(4)})` }}
-              tabIndex={0}
-              data-tip={`${mark.name} · ${dayLabel(mark.date)} · ${mark.amount}`}
-              aria-label={`${mark.name}, ${dayLabel(mark.date)}, ${mark.amount}`}
-            >
-              {mark.labelled && (
-                <span className="mark-label" aria-hidden="true">
-                  {mark.name} · {dayLabel(mark.date)}
-                </span>
-              )}
-            </li>
-          ))}
-        </ol>
-      )}
+      {marks.length > 0 && <TimingStrip marks={marks} />}
     </>
+  )
+}
+
+type Mark = {
+  date: string
+  kind: 'bill' | 'payday'
+  name: string
+  amount: string
+  labelled: boolean
+  at: number
+}
+/** Events this many days apart or closer share one marker, so none overlap on a phone. */
+const MERGE_DAYS = 3
+const dayIndex = (date: string) => Math.round(Date.parse(`${date}T12:00:00Z`) / 86_400_000)
+
+/**
+ * Paydays and big bills under the chart. Neighbouring events merge into one marker whose tooltip
+ * lists them all; the bill and payday behind the answer carry a label tied to their marker. The
+ * strip is one tab stop: arrow keys move between markers.
+ */
+function TimingStrip({ marks }: { marks: Mark[] }) {
+  const sorted = [...marks].sort((a, b) => a.date.localeCompare(b.date))
+  const groups: Mark[][] = []
+  for (const mark of sorted) {
+    const group = groups.at(-1)
+    if (group && dayIndex(mark.date) - dayIndex(group[0]!.date) <= MERGE_DAYS) group.push(mark)
+    else groups.push([mark])
+  }
+  const [active, setActive] = useState(0)
+  const items = useRef<(HTMLLIElement | null)[]>([])
+  const move = (event: KeyboardEvent<HTMLLIElement>, index: number) => {
+    const next =
+      event.key === 'ArrowRight' || event.key === 'ArrowDown'
+        ? Math.min(groups.length - 1, index + 1)
+        : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
+          ? Math.max(0, index - 1)
+          : event.key === 'Home'
+            ? 0
+            : event.key === 'End'
+              ? groups.length - 1
+              : index
+    if (next === index) return
+    event.preventDefault()
+    setActive(next)
+    items.current[next]?.focus()
+  }
+  const describe = (mark: Mark) => `${mark.name} · ${dayLabel(mark.date)} · ${mark.amount}`
+  return (
+    <ol
+      className="strip"
+      aria-label="Paydays and big bills. Use the arrow keys to move between them."
+    >
+      {groups.map((group, index) => {
+        const label = group.find((mark) => mark.labelled)
+        // The bill behind the low point keeps its label on phones; the payday label is extra.
+        const primary = label?.kind === 'bill'
+        const at = group[0]!.at
+        return (
+          <li
+            key={group[0]!.date}
+            ref={(element) => {
+              items.current[index] = element
+            }}
+            className={`mark${label ? ' labelled' : ''}${primary ? ' primary' : ''}${
+              at > 0.7 ? ' edge-end' : at < 0.25 ? ' edge-start' : ''
+            }`}
+            style={{ left: `calc(48px + (100% - 60px) * ${at.toFixed(4)})` }}
+            tabIndex={index === active ? 0 : -1}
+            onFocus={() => setActive(index)}
+            onKeyDown={(event) => move(event, index)}
+            data-tip={group.map(describe).join('  ·  ')}
+            aria-label={group.map(describe).join('; ')}
+          >
+            <span className="shapes" aria-hidden="true">
+              {group.some((mark) => mark.kind === 'payday') && <i className="shape payday" />}
+              {group.some((mark) => mark.kind === 'bill') && <i className="shape bill" />}
+            </span>
+            {label && (
+              <span className="mark-label" aria-hidden="true">
+                {label.name} · {dayLabel(label.date)}
+              </span>
+            )}
+          </li>
+        )
+      })}
+    </ol>
   )
 }

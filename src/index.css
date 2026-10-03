@@ -2670,49 +2670,56 @@ textarea.input {
 }
 
 /* Timing strip: paydays (green triangles) and big bills (navy squares) under the plot.
-   Shapes carry the meaning; the two events behind the answer are labelled inline. */
+   Shapes carry the meaning; neighbouring days share one marker; labels hang from a tick. */
 .strip {
   position: relative;
   list-style: none;
   margin: 2px 0 0;
   padding: 0;
-  height: 60px;
+  height: 52px;
   border-top: 1px solid var(--c-divider);
 }
 .strip .mark {
   position: absolute;
   top: 6px;
-  width: 12px;
-  height: 12px;
-  margin-left: -6px;
+  transform: translateX(-50%);
   cursor: default;
-  border-radius: 2px;
+  border-radius: var(--r-xs);
+  padding: 2px;
 }
 .strip .mark::before {
   content: '';
   position: absolute;
-  inset: -8px;
+  inset: -8px -4px;
 }
-.strip .mark.bill {
+.strip .shapes {
+  display: flex;
+  gap: 2px;
+  align-items: flex-end;
+}
+.strip .shape {
+  display: block;
+}
+.strip .shape.bill {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
   background: var(--c-navy);
 }
-.strip .mark.payday {
-  background: transparent;
+.strip .shape.payday {
   width: 0;
   height: 0;
-  margin-left: -7px;
-  border-left: 7px solid transparent;
-  border-right: 7px solid transparent;
-  border-bottom: 12px solid var(--c-success);
-  border-radius: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-bottom: 11px solid var(--c-success);
 }
 .strip .mark:focus-visible {
   outline: 3px solid var(--c-focus);
-  outline-offset: 4px;
+  outline-offset: 2px;
 }
 .strip .mark-label {
   position: absolute;
-  top: 16px;
+  top: 26px;
   left: 50%;
   transform: translateX(-50%);
   white-space: nowrap;
@@ -2721,20 +2728,36 @@ textarea.input {
   font-weight: var(--fw-bold);
   color: var(--c-text-strong);
 }
-.strip .mark.payday .mark-label {
-  top: 34px;
+.strip .mark-label::before {
+  /* the tick from label to marker */
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -9px;
+  height: 7px;
+  border-left: 1px solid var(--c-border-strong);
 }
 .strip .mark.edge-end .mark-label {
   left: auto;
-  right: -6px;
+  right: 0;
   transform: none;
 }
-.strip .mark.payday.edge-end .mark-label {
-  right: -7px;
+.strip .mark.edge-end .mark-label::before {
+  left: auto;
+  right: 8px;
 }
 .strip .mark.edge-start .mark-label {
-  left: -6px;
+  left: 0;
   transform: none;
+}
+.strip .mark.edge-start .mark-label::before {
+  left: 8px;
+}
+@media (max-width: 767px) {
+  /* On phones only the event that sets the low point keeps its label. */
+  .strip .mark.labelled:not(.primary) .mark-label {
+    display: none;
+  }
 }
 .strip .mark:hover::after,
 .strip .mark:focus-visible::after {
@@ -2752,6 +2775,17 @@ textarea.input {
   padding: 4px 8px;
   border-radius: var(--r-xs);
   z-index: 5;
+}
+.strip .mark.edge-end:hover::after,
+.strip .mark.edge-end:focus-visible::after {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+.strip .mark.edge-start:hover::after,
+.strip .mark.edge-start:focus-visible::after {
+  left: 0;
+  transform: none;
 }
 
 .plain-summary > summary {
