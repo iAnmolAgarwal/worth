@@ -11,7 +11,14 @@ import {
   ShieldCheck,
   Sparkles,
 } from 'lucide-react'
-import type { AppState, Assessment, ChatMessage, ChatReply, Product } from '../shared/types'
+import type {
+  AppState,
+  Assessment,
+  ChatMessage,
+  ChatReply,
+  Product,
+  PurchaseContext,
+} from '../shared/types'
 import { addDays } from '../shared/finance'
 import { api, ApiError } from './api'
 import { CLAUDE_SHARED_DATA } from './copy'
@@ -47,11 +54,7 @@ export function Assistant({
   const [item, setItem] = useState('My next good thing')
   const [amount, setAmount] = useState('')
   const [date, setDate] = useState(state.today)
-  const [context, setContext] = useState<{
-    amountCents: number
-    itemName: string
-    purchaseDate: string
-  }>()
+  const [context, setContext] = useState<PurchaseContext>()
   const lastPrompt = useRef<number>(0)
   const inFlight = useRef(false)
   const bottom = useRef<HTMLDivElement>(null)
@@ -221,14 +224,15 @@ export function Assistant({
                     </div>
                   )}
                   <div className="message-text">
-                    {(entry.reply?.assessment && entry.reply.intro
-                      ? entry.reply.intro
-                      : entry.content
-                    )
-                      .split('\n\n')
-                      .map((paragraph, i) => (
-                        <p key={i}>{paragraph}</p>
-                      ))}
+                    {(entry.reply?.assessment && entry.reply.verdict
+                      ? [entry.reply.verdict]
+                      : entry.content.split('\n\n')
+                    ).map((paragraph, i) => (
+                      <p key={i}>{paragraph}</p>
+                    ))}
+                    {entry.reply?.assessment && entry.reply.explanation && (
+                      <p className="claude-explanation">{entry.reply.explanation}</p>
+                    )}
                   </div>
                   {entry.reply?.assessment && (
                     <AssessmentCard
@@ -254,13 +258,13 @@ export function Assistant({
                         {Array.from(new Set(entry.reply.toolCalls))
                           .map(
                             (t) =>
-                              ({
-                                assess_purchase: 'purchase forecast',
-                                upcoming_commitments: 'upcoming bills',
-                                spending_summary: 'spending patterns',
-                              })[
-                                t as 'assess_purchase' | 'upcoming_commitments' | 'spending_summary'
-                              ] ?? 'your plan',
+                              (
+                                ({
+                                  interpret_purchase: 'purchase forecast',
+                                  list_commitments: 'upcoming bills',
+                                  spending_summary: 'spending patterns',
+                                }) as Record<string, string>
+                              )[t] ?? 'your plan',
                           )
                           .join(' · ')}
                       </span>

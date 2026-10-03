@@ -326,14 +326,23 @@ export interface PurchaseContext {
   itemName?: string
   purchaseDate?: string
 }
+export type ChatIntent =
+  'affordability' | 'subscriptions' | 'spending' | 'overview' | 'clarify' | 'off_topic'
 export interface ChatReply {
+  /** Full plain-text answer: verdict or facts, plus any explanation. */
   message: string
-  /** Short visible lead-in when the assessment card already presents the numerical facts. */
-  intro?: string
   mode: 'anthropic' | 'demo'
+  intent: ChatIntent
   assessment?: Assessment
-  intent: 'affordability' | 'subscriptions' | 'spending' | 'overview' | 'clarify'
+  interpretation?: Interpretation
+  /** Deterministic sentence built from the engine's assessment. Never model-written. */
+  verdict?: string
+  /** Claude's explanation with engine placeholders filled in by the server. */
+  explanation?: string
+  /** A partly understood purchase the next message may complete, e.g. a price awaiting a date. */
+  pending?: PurchaseContext
   suggestions: string[]
+  /** Tools that ran successfully for this answer. */
   toolCalls: string[]
 }
 /**
