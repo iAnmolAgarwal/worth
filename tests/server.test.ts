@@ -1164,3 +1164,46 @@ describe('hosted abuse limits', () => {
     ).toBe(429)
   })
 })
+
+describe('production browser hardening', () => {
+  it('sends HSTS and a __Host- session cookie that authenticates later requests', async () => {
+    const origin = 'https://worth.example.com'
+    const { app } = setup({ config: { ...config, production: true, origin } })
+    const first = await request(app).get('/api/state')
+    expect(first.status).toBe(200)
+    expect(first.headers['strict-transport-security']).toBe('max-age=31536000; includeSubDomains')
+    expect(first.headers['x-content-type-options']).toBe('nosniff')
+    expect(first.headers['referrer-policy']).toBe('same-origin')
+    expect(first.headers['content-security-policy']).toBe("frame-ancestors 'none'")
+    const cookie = first.headers['set-cookie'][0] as string
+    expect(cookie).toMatch(/^__Host-worth_session=[A-Za-z0-9_-]{43};/)
+    expect(cookie).toContain('Path=/')
+    expect(cookie).toContain('Secure')
+    expect(cookie).toContain('HttpOnly')
+    expect(cookie).toContain('SameSite=Lax')
+    expect(cookie).not.toMatch(/Domain=/i)
+    const pair = cookie.split(';')[0]!
+    const write = await request(app)
+      .post('/api/wishlist')
+      .set('Cookie', pair)
+      .set('X-Worth-Client', 'web')
+      .set('Origin', origin)
+      .send({ productId: 'chair' })
+    expect(write.status).toBe(200)
+    expect(write.body.sessionKey).toBe(first.body.sessionKey)
+    expect(write.headers['set-cookie']).toBeUndefined()
+    // The development cookie name is not accepted in production.
+    const legacy = await request(app)
+      .get('/api/state')
+      .set('Cookie', pair.replace('__Host-worth_session', 'worth_session'))
+    expect(legacy.body.sessionKey).not.toBe(first.body.sessionKey)
+  })
+  it('keeps local development on plain HTTP without HSTS', async () => {
+    const { app } = setup()
+    const response = await request(app).get('/api/state')
+    expect(response.headers['strict-transport-security']).toBeUndefined()
+    expect(response.headers['content-security-policy']).toBe("frame-ancestors 'none'")
+    expect(response.headers['set-cookie'][0]).toMatch(/^worth_session=/)
+    expect(response.headers['set-cookie'][0]).not.toContain('Secure')
+  })
+})

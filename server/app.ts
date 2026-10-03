@@ -160,6 +160,8 @@ export function createApp(options: AppOptions = {}) {
   const busy = new Set<string>()
   const chatBusy = new Set<string>()
   const requestLimiter = new WindowLimiter(config.requestsPerMinute, 60_000)
+  // The __Host- prefix makes browsers require Secure, Path=/ and no Domain for the session cookie.
+  const cookieName = config.production ? '__Host-worth_session' : 'worth_session'
   function today(timezone = 'UTC') {
     const parts = new Intl.DateTimeFormat('en-CA', {
       timeZone: timezone,
@@ -206,7 +208,7 @@ export function createApp(options: AppOptions = {}) {
       { profile: seed.profile, transactions: seed.transactions, wishlist: seed.wishlist },
       now().getTime(),
     )
-    res.cookie('worth_session', id, {
+    res.cookie(cookieName, id, {
       httpOnly: true,
       sameSite: 'lax',
       secure: config.production,
@@ -393,6 +395,10 @@ export function createApp(options: AppOptions = {}) {
     res.setHeader('X-Content-Type-Options', 'nosniff')
     res.setHeader('Referrer-Policy', 'same-origin')
     res.setHeader('X-Frame-Options', 'DENY')
+    // Framing only. Script and connection rules wait until the PayPal SDK is tested live.
+    res.setHeader('Content-Security-Policy', "frame-ancestors 'none'")
+    if (config.production)
+      res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
     if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store')
     next()
   })
@@ -457,7 +463,7 @@ export function createApp(options: AppOptions = {}) {
         new HttpError(429, 'Please wait a moment before making more requests.', 'RATE_LIMITED'),
       )
     store.cleanup(time)
-    const cookie = req.cookies.worth_session as unknown
+    const cookie = req.cookies[cookieName] as unknown
     if (typeof cookie === 'string' && /^[A-Za-z0-9_-]{43}$/.test(cookie) && store.get(cookie))
       res.locals.sessionId = cookie
     else startSession(res)
