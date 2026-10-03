@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { addDays } from '../shared/finance'
 import type {
+  Assessment,
   ChatMessage,
   Interpretation,
   OptionResult,
@@ -21,7 +22,7 @@ import type { AgentCheckout, AppState, ChatReply, Comparison } from './contract'
 import { claudeUses } from './copy'
 import { breachLine, optionStatus, type DecisionRequest, type Explanation } from './Decision'
 import { claudeOn, envLabel, fits, missingFix, useComparison } from './engine'
-import { capitalize, cx, fromMoney, money } from './format'
+import { capitalize, cx, dayLabel, fromMoney, money } from './format'
 import { Alert, Button, Field, Pill, ReadAsChip, Toggle } from './ui'
 
 type Entry = ChatMessage & { reply?: ChatReply; id: number }
@@ -31,6 +32,20 @@ export const ASK_STARTERS = [
   'How much can I spend today?',
   'What bills are coming up?',
 ]
+
+/** Follow-ups that stay on the item under discussion: none that name a different price. */
+export function matchingSuggestions(reply: ChatReply | undefined) {
+  if (!reply) return []
+  const amount = reply.interpretation?.amountCents ?? reply.assessment?.amountCents
+  return reply.suggestions.filter((text) => {
+    const prices = text.match(/\$[\d,]+(?:\.\d{2})?/g)
+    return (
+      !amount ||
+      !prices ||
+      prices.every((price) => Math.round(Number(price.replace(/[$,]/g, '')) * 100) === amount)
+    )
+  })
+}
 
 /** Money in sentences uses a true minus sign: −$458.99. */
 export const minus = (text: string) => text.replace(/-\$/g, '−$')
@@ -89,27 +104,34 @@ const status = (option: OptionResult) => {
   return [tone, text] as const
 }
 
-function OptionRows({ c }: { c: Comparison }) {
+function OptionRows({ c, at }: { c: Comparison; at?: Assessment }) {
+  // A question about a later day is answered for that day; waiting and spending less still
+  // count from today.
+  const later = at && at.purchaseDate !== c.today ? at : undefined
+  const buy: OptionResult = later ? { ...later, lowPointCause: null } : c.buyToday
+  const day = later ? dayLabel(later.purchaseDate) : 'today'
+  const maxCents = later ? later.maxAffordableCents : c.spendLess.maxPriceCents
+  const recommendation = later ? (fits(buy) ? 'buyToday' : c.recommendation) : c.recommendation
   const rows = [
     {
       key: 'buyToday',
-      title: 'Buy today',
-      sub: fits(c.buyToday)
-        ? `${money(c.buyToday.headroomCents)} above cushion at lowest`
-        : (breachLine(c.buyToday, c.cushionCents, true) ?? 'Below your cushion'),
-      pill: status(c.buyToday),
+      title: later ? `Buy ${day}` : 'Buy today',
+      sub: fits(buy)
+        ? `${money(buy.headroomCents)} above cushion at lowest`
+        : (breachLine(buy, c.cushionCents, true) ?? 'Below your cushion'),
+      pill: status(buy),
     },
-    fits(c.buyToday)
+    fits(buy)
       ? {
           key: 'wait',
           title: 'Wait',
-          sub: 'Not needed: it fits today',
+          sub: `Not needed: it fits ${day}`,
           pill: ['info', 'Not needed'] as const,
         }
       : c.wait.date
         ? {
             key: 'wait',
-            title: `Wait until ${new Date(`${c.wait.date}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
+            title: `Wait until ${dayLabel(c.wait.date)}`,
             sub: `${money(c.wait.headroomCents)} above cushion at lowest${c.wait.stressLowestCents < c.cushionCents ? ' · tight' : ''}`,
             pill: status(c.wait),
           }
@@ -123,11 +145,15 @@ function OptionRows({ c }: { c: Comparison }) {
       key: 'spendLess',
       title: 'Spend less',
       sub:
-        c.spendLess.maxPriceCents > 0
-          ? `Up to ${money(c.spendLess.maxPriceCents)} today`
-          : 'Nothing fits today',
+        maxCents > 0
+          ? `Up to ${money(maxCents)} ${later ? `on ${day}` : 'today'}`
+          : `Nothing fits ${day}`,
       pill:
-        c.spendLess.maxPriceCents > 0 ? status(c.spendLess) : (['info', 'Nothing fits'] as const),
+        maxCents > 0
+          ? later
+            ? (['ok', 'Above cushion'] as const)
+            : status(c.spendLess)
+          : (['info', 'Nothing fits'] as const),
     },
   ]
   return (
@@ -137,7 +163,7 @@ function OptionRows({ c }: { c: Comparison }) {
           <div className="body">
             <div className="t">
               {row.title}
-              {c.recommendation === row.key && row.pill[0] !== 'info' && (
+              {recommendation === row.key && row.pill[0] !== 'info' && (
                 <span className="tag-rec">Recommended</span>
               )}
             </div>
@@ -196,7 +222,7 @@ function VerdictTile({
         </div>
       )}
       {comparison ? (
-        <OptionRows c={comparison} />
+        <OptionRows c={comparison} at={assessment} />
       ) : assessment.outcome !== 'incomplete' ? (
         <div className="stack tight" style={{ marginTop: 16 }} aria-hidden="true">
           <span className="sk" style={{ width: '70%' }} />
@@ -748,8 +774,8 @@ export function Ask({
                 )}
               </div>
               <div className="chips">
-                {(entries.at(-1)?.reply?.suggestions.length
-                  ? entries.at(-1)!.reply!.suggestions
+                {(matchingSuggestions(entries.at(-1)?.reply).length
+                  ? matchingSuggestions(entries.at(-1)?.reply)
                   : ASK_STARTERS
                 ).map((text) => (
                   <button
@@ -911,10 +937,10 @@ function Answer({
         <ListChecks className="ico" aria-hidden="true" />
         {traceText(reply, state)}
       </div>
-      {last && reply.suggestions.length > 0 && (
+      {last && matchingSuggestions(reply).length > 0 && (
         // Desktop shows these in the rail; the thread keeps them only on mobile.
         <div className="chips show-m">
-          {reply.suggestions.map((text) => (
+          {matchingSuggestions(reply).map((text) => (
             <button
               type="button"
               key={text}

@@ -66,7 +66,7 @@ export function breachLine(option: OptionResult, cushion: number, short = false)
     breach.date === option.points[0]?.date
       ? 'today'
       : short
-        ? shortDate(breach.date)
+        ? dayLabel(breach.date)
         : dayLabel(breach.date)
   const first = `Below cushion from ${day}${bill ? ` (${lower(bill)})` : ''}`
   if (short) return first
@@ -385,7 +385,7 @@ function PayIn4Panel({
           <b>{p4.label}.</b>
           <br />
           Lowest <span className="num">{signed(p4.lowestBalanceCents)}</span> on{' '}
-          {shortDate(p4.lowestDate)}
+          {dayLabel(p4.lowestDate)}
           {paydayOn(p4.points, p4.lowestDate) ? ', before payday' : ''}.
         </Alert>
         <div className="sched" role="list" aria-label="Illustrative Pay in 4 schedule">
@@ -407,7 +407,7 @@ function PayIn4Panel({
               </div>
               <div className="near">{nearText(item.nearestBill)}</div>
               <div className="after num">
-                Lowest after: {signed(item.balanceCents)} on {shortDate(item.lowestDate)}
+                Lowest after: {signed(item.balanceCents)} on {dayLabel(item.lowestDate)}
               </div>
             </div>
           ))}
@@ -419,7 +419,7 @@ function PayIn4Panel({
               <div className="t">Already running: {plan.name}</div>
               <div className="meta">
                 {plan.items
-                  .map((item) => `${money(item.amountCents)} on ${shortDate(item.date)}`)
+                  .map((item) => `${money(item.amountCents)} on ${dayLabel(item.date)}`)
                   .join(', ')}
                 . Included above.
               </div>
@@ -750,7 +750,7 @@ export function Decision({
                   {money(state.profile.balanceCents)} ·{' '}
                   {state.profile.snapshotDate === state.today
                     ? 'today'
-                    : shortDate(state.profile.snapshotDate)}
+                    : dayLabel(state.profile.snapshotDate)}
                 </dd>
               </div>
               <div>

@@ -166,7 +166,7 @@ export const optionTitle = (key: 'buyToday' | 'wait' | 'spendLess', c: Compariso
     : key === 'spendLess'
       ? 'Spend less'
       : c.wait.date
-        ? `Wait until ${dayLabel(c.wait.date).replace(/^\w+, /, '')}`
+        ? `Wait until ${dayLabel(c.wait.date)}`
         : 'Wait'
 
 /**
