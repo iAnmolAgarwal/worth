@@ -10,7 +10,7 @@ import {
   Sparkles,
   TriangleAlert,
 } from 'lucide-react'
-import { dateInTimezone } from '../shared/finance'
+import { confirmedSchedule, dateInTimezone } from '../shared/finance'
 import type { OptionResult, Product } from '../shared/types'
 import { BalanceChart } from './BalanceChart'
 import type { AppState, Comparison, PayIn4 } from './contract'
@@ -602,6 +602,7 @@ export function Decision({
       )}
     </>
   )
+  const boughtSchedule = bought ? confirmedSchedule(bought) : undefined
   const boughtPlan = bought
     ? purchasePlans(state).find((plan) => plan.planId === `purchase:${bought.id}`)
     : undefined
@@ -622,7 +623,7 @@ export function Decision({
             <h1 className="title" style={{ margin: '0 0 8px' }}>
               {product!.name}, {money(bought.amountCents)}
             </h1>
-            <section className="tile co" style={{ maxWidth: 560 }} aria-label="Bought">
+            <section className="tile co" aria-label="Bought">
               <div className="co-head">
                 <span className="co-icon ok" aria-hidden="true">
                   <CircleCheck className="ico" />
@@ -640,10 +641,26 @@ export function Decision({
                   </p>
                 </div>
               </div>
-              {boughtPlan ? (
-                <p className="meta strong">
-                  Pay in 4 · next {money(boughtPlan.amountCents)} {dayLabel(boughtPlan.next)}
-                </p>
+              {boughtSchedule ? (
+                <div className="sched" role="list" aria-label="Your Pay in 4 payments">
+                  {boughtSchedule.map((item, index) => {
+                    const paid =
+                      item.date < state.today ||
+                      (index === 0 && item.date === bought.assessmentDate)
+                    return (
+                      <div className="inst" role="listitem" key={item.date}>
+                        <div className="top">
+                          <Ring part={index + 1} of={boughtSchedule.length} />
+                          <div>
+                            <div className="amt num">{money(item.amountCents)}</div>
+                            <div className="when">{dayLabel(item.date)}</div>
+                          </div>
+                        </div>
+                        <div className="after">{paid ? 'Paid' : 'Due'}</div>
+                      </div>
+                    )
+                  })}
+                </div>
               ) : (
                 state.reviews.some(
                   (review) => review.kind === 'confirmPlan' && review.purchaseId === bought.id,
