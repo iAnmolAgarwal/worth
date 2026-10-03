@@ -2,10 +2,18 @@ import 'dotenv/config'
 import { resolve } from 'node:path'
 import express from 'express'
 import { createApp } from './app.ts'
+import { loadConfig } from './config.ts'
+import type { AppConfig } from './config.ts'
 
-const app = createApp()
-const port = Number(process.env.PORT ?? 5173)
-if (process.env.NODE_ENV === 'production') {
+let config: AppConfig
+try {
+  config = loadConfig()
+} catch (error) {
+  console.error(error instanceof Error ? error.message : error)
+  process.exit(1)
+}
+const app = createApp({ config })
+if (config.production) {
   const directory = resolve('dist')
   app.use(express.static(directory, { index: false }))
   app.get('/{*path}', (_req, res) => res.sendFile(resolve(directory, 'index.html')))
@@ -14,8 +22,8 @@ if (process.env.NODE_ENV === 'production') {
   const vite = await createServer({ server: { middlewareMode: true }, appType: 'spa' })
   app.use(vite.middlewares)
 }
-const server = app.listen(port, process.env.HOST ?? '127.0.0.1', () =>
-  console.log(`Worth is ready at http://localhost:${port}`),
+const server = app.listen(config.port, config.host, () =>
+  console.log(`Worth is ready at ${config.origin} (listening on ${config.host}:${config.port})`),
 )
 const cleanup = setInterval(() => app.locals.cleanup(), 60 * 1000)
 cleanup.unref()

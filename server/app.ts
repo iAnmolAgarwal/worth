@@ -18,16 +18,10 @@ import {
   fallbackReply,
 } from './chat.ts'
 import type { ChatProvider } from './chat.ts'
+import { allowedOrigins, loadConfig } from './config.ts'
+import type { AppConfig } from './config.ts'
 
-export interface AppConfig {
-  origin: string
-  production: boolean
-  paypalClientId?: string
-  paypalSecret?: string
-  paypalWebhookId?: string
-  anthropicKey?: string
-  anthropicModel: string
-}
+export type { AppConfig } from './config.ts'
 export interface AppOptions {
   store?: Store
   config?: Partial<AppConfig>
@@ -137,17 +131,8 @@ function mayUseExternalAi(profile: FinancialProfile) {
 }
 
 export function createApp(options: AppOptions = {}) {
-  const config: AppConfig = {
-    origin: process.env.APP_ORIGIN ?? 'http://localhost:5173',
-    production: process.env.NODE_ENV === 'production',
-    paypalClientId: process.env.PAYPAL_CLIENT_ID,
-    paypalSecret: process.env.PAYPAL_CLIENT_SECRET,
-    paypalWebhookId: process.env.PAYPAL_WEBHOOK_ID,
-    anthropicKey: process.env.ANTHROPIC_API_KEY,
-    anthropicModel: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5',
-    ...options.config,
-  }
-  config.origin = new URL(config.origin).origin
+  const config: AppConfig = loadConfig(process.env, options.config)
+  const origins = allowedOrigins(config)
   const store = options.store ?? new Store(process.env.DATABASE_PATH ?? '.data/worth.sqlite')
   const now = options.now ?? (() => new Date())
   const paypal =
@@ -448,10 +433,9 @@ export function createApp(options: AppOptions = {}) {
   app.use('/api', (req, res, next) => {
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
       const origin = req.get('origin')
-      const expected = config.origin
       if (
         req.get('X-Worth-Client') !== 'web' ||
-        (origin && origin !== expected) ||
+        (origin && !origins.has(origin)) ||
         req.get('sec-fetch-site') === 'cross-site'
       )
         return next(
