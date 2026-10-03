@@ -303,14 +303,51 @@ export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
 }
+export interface InterpretedItem {
+  name: string
+  /** Unit price in USD cents, as the user stated or confirmed it. */
+  amountCents: number
+  quantity: number
+}
+/** How a purchase question was read. Every value is the user's stated or confirmed input. */
+export interface Interpretation {
+  items: InterpretedItem[]
+  amountCents: number
+  currency: 'USD'
+  date: string
+  /** Echo of the date, e.g. "today" or "Fri, Oct 16". */
+  dateLabel: string
+  dateSource: 'stated' | 'context' | 'default'
+  option: 'check' | 'earliest_date' | 'max_price'
+  source: 'ai' | 'local'
+}
+export interface PurchaseContext {
+  amountCents: number
+  itemName?: string
+  purchaseDate?: string
+}
+export type ChatIntent =
+  'affordability' | 'subscriptions' | 'spending' | 'overview' | 'clarify' | 'off_topic'
 export interface ChatReply {
+  /** Full plain-text answer: verdict or facts, plus any explanation. */
   message: string
-  /** Short visible lead-in when the assessment card already presents the numerical facts. */
-  intro?: string
   mode: 'anthropic' | 'demo'
+  intent: ChatIntent
   assessment?: Assessment
-  intent: 'affordability' | 'subscriptions' | 'spending' | 'overview' | 'clarify'
+  interpretation?: Interpretation
+  /** Deterministic sentence built from the engine's assessment. Never model-written. */
+  verdict?: string
+  /** A lead-in Claude chose from a fixed set, shown before the points. */
+  lead?: string
+  /**
+   * Engine facts Claude chose as most relevant to the question, in its order. The server
+   * writes every sentence from engine values; Claude only picks which ones to show.
+   */
+  points?: { id: string; text: string }[]
+  /** A partly understood purchase the next message may complete, e.g. a price awaiting a date. */
+  pending?: PurchaseContext
   suggestions: string[]
+  /** Tools that ran successfully for this answer. */
   toolCalls: string[]
 }
 /**

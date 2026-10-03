@@ -1009,7 +1009,9 @@ export function createApp(options: AppOptions = {}) {
     chatBusy.add(id)
     try {
       return res.json(await chat.reply(input, data))
-    } catch {
+    } catch (error) {
+      // Error class only: never the message text, financial data, or credentials.
+      console.warn('Worth chat used local fallback:', error instanceof Error ? error.name : 'Error')
       return res.json(
         fallbackReply(
           input,

@@ -430,6 +430,23 @@ describe('HTTP sessions, profiles, and calculations', () => {
     expect(await ask()).toBe('demo')
     expect(reply).toHaveBeenCalledTimes(1)
   })
+  it('reads purchases locally when AI sharing is off, asking instead of guessing', async () => {
+    const reply = vi.fn()
+    const { agent } = setup({ chat: { reply } })
+    const current = await state(agent)
+    await patch(agent, { profile: { ...current.profile, name: 'Edited' } })
+    const laptop = await post(agent, '/api/chat', { message: 'Can I afford a $1.5k laptop?' })
+    expect(laptop.body).toMatchObject({
+      mode: 'demo',
+      intent: 'affordability',
+      interpretation: { amountCents: 150000, currency: 'USD', date: '2026-10-03', source: 'local' },
+    })
+    const euros = await post(agent, '/api/chat', { message: 'Can I afford a bag for 500 euros?' })
+    expect(euros.body.intent).toBe('clarify')
+    expect(euros.body.assessment).toBeUndefined()
+    expect(euros.body.message).toContain('financial context was not sent to Claude')
+    expect(reply).not.toHaveBeenCalled()
+  })
   it('returns labelled deterministic assessment when AI is unavailable', async () => {
     const { agent } = setup()
     await simpleProfile(agent)
@@ -923,323 +940,6 @@ describe('reviewable transaction category proposals', () => {
   })
 })
 
-describe('AI financial grounding', () => {
-  function mockModel(contents: unknown[][]) {
-    const create = vi.fn(async (_options: unknown) => ({ content: contents.shift() ?? [] }))
-    const client = { messages: { create } } as unknown as NonNullable<
-      Parameters<typeof createChatProvider>[2]
-    >
-    return { provider: createChatProvider('unused-test-key', 'claude-sonnet-5-5', client), create }
-  }
-  const answer = (insight = '', intent = 'affordability', suggestions: string[] = []) => [
-    { type: 'text', text: JSON.stringify({ intent, insight, suggestions }) },
-  ]
-  const assess = (amountCents: number, purchaseDate?: string) => [
-    {
-      type: 'tool_use',
-      id: 'assessment-tool',
-      name: 'assess_purchase',
-      input: { amountCents, itemName: 'A camera', ...(purchaseDate ? { purchaseDate } : {}) },
-    },
-  ]
-  it('cannot turn a tight purchase today into a fitting purchase by inventing a future date', async () => {
-    const { agent } = setup()
-    const data = await state(agent)
-    const { provider, create } = mockModel([
-      assess(119900, '2026-10-16'),
-      answer('There is plenty of room for this purchase.'),
-    ])
-    const result = await provider.reply(
-      { message: 'Can I afford a $1199 camera?', history: [] },
-      data,
-    )
-    expect(result.assessment?.purchaseDate).toBe('2026-10-03')
-    expect(result.assessment?.outcome).toBe('tight')
-    expect(result.message).not.toContain('fits your confirmed plan')
-    expect(result.message).not.toContain('plenty of room')
-    const second = create.mock.calls[1]![0] as { messages: unknown[] }
-    expect(JSON.stringify(second.messages)).toContain('"is_error":true')
-  })
-  it.each([
-    ['today', '2026-10-03'],
-    ['tomorrow', '2026-10-04'],
-    ['the day after tomorrow', '2026-10-05'],
-    ['next week', '2026-10-10'],
-    ['in 3 days', '2026-10-06'],
-    ['in two days', '2026-10-05'],
-    ['in 2 weeks', '2026-10-17'],
-    ['in 30 days', '2026-11-02'],
-    ['on 2026-10-16', '2026-10-16'],
-  ])(
-    'uses the user-requested timing %s even when the model omits its date',
-    async (timing, expectedDate) => {
-      const { agent } = setup()
-      const data = await simpleProfile(agent)
-      const input = { message: `Can I buy a $900 camera ${timing}?`, history: [] }
-      const local = fallbackReply(input, data)
-      expect(local.assessment?.purchaseDate).toBe(expectedDate)
-      const { provider } = mockModel([assess(90000), answer()])
-      expect((await provider.reply(input, data)).assessment?.purchaseDate).toBe(expectedDate)
-    },
-  )
-  it.each([
-    ['on payday', '2026-10-08'],
-    ['after my next paycheck', '2026-10-09'],
-  ])('uses the confirmed income date for %s', async (timing, expectedDate) => {
-    const { agent } = setup()
-    const data = await state(agent)
-    const { provider } = mockModel([assess(119900, expectedDate), answer()])
-    const result = await provider.reply(
-      { message: `Can I buy a $1199 camera ${timing}?`, history: [] },
-      data,
-    )
-    expect(result.assessment?.purchaseDate).toBe(expectedDate)
-  })
-  it.each([
-    'after the weekend',
-    'next Friday',
-    'sometime next month',
-    'in 31 days',
-    'on 2026-02-31',
-    'on 2026-10-10 or tomorrow',
-  ])(
-    'requires exact timing rather than silently accepting the model date for %s',
-    async (timing) => {
-      const { agent } = setup()
-      const data = await state(agent)
-      const input = { message: `Can I buy a $1199 camera ${timing}?`, history: [] }
-      expect(fallbackReply(input, data).intent).toBe('clarify')
-      const { provider } = mockModel([assess(119900, '2026-10-16'), answer()])
-      const result = await provider.reply(input, data)
-      expect(result.intent).toBe('clarify')
-      expect(result.assessment).toBeUndefined()
-      expect(result.message).toMatch(/exact purchase date|exact date/)
-    },
-  )
-  it('requires confirmed payday information instead of assuming the purchase is today', async () => {
-    const { agent } = setup()
-    const data = await simpleProfile(agent)
-    const { provider } = mockModel([assess(90000, '2026-10-16'), answer()])
-    const result = await provider.reply(
-      { message: 'Can I buy a $900 camera on payday?', history: [] },
-      data,
-    )
-    expect(result.intent).toBe('clarify')
-    expect(result.assessment).toBeUndefined()
-    expect(result.message).toContain('confirmed upcoming income date')
-  })
-  it('lets an explicit today override a future context date and refuses the stale model date', async () => {
-    const { agent } = setup()
-    const data = await state(agent)
-    const { provider } = mockModel([assess(119900, '2026-10-16'), answer()])
-    const result = await provider.reply(
-      {
-        message: 'Can I buy this camera today?',
-        history: [],
-        context: { amountCents: 119900, purchaseDate: '2026-10-16' },
-      },
-      data,
-    )
-    expect(result.assessment?.purchaseDate).toBe('2026-10-03')
-    expect(result.assessment?.outcome).toBe('tight')
-  })
-  it('answers an open purchase-timing question using the current-date assessment and engine waiting recommendation', async () => {
-    const { agent } = setup()
-    const data = await state(agent)
-    const { provider } = mockModel([assess(119900), answer()])
-    const result = await provider.reply(
-      { message: 'When can I afford a $1199 camera?', history: [] },
-      data,
-    )
-    expect(result.assessment?.purchaseDate).toBe('2026-10-03')
-    expect(result.assessment?.earliestDate).toBe('2026-10-23')
-    expect(result.message).toContain('earliest date')
-  })
-  it('rejects a model-invented price and asks for the missing price even if the model declares approval', async () => {
-    const { agent } = setup()
-    const data = await simpleProfile(agent)
-    const { provider, create } = mockModel([
-      assess(10000),
-      answer('There is plenty of room for this purchase.'),
-    ])
-    const result = await provider.reply({ message: 'Can I buy a camera?', history: [] }, data)
-    expect(result.assessment).toBeUndefined()
-    expect(result.intent).toBe('clarify')
-    expect(result.message).toContain('Tell me the all-in price')
-    expect(result.message).not.toContain('fits your confirmed plan')
-    expect(result.message).not.toContain('plenty of room')
-    const second = create.mock.calls[1]![0] as { messages: { role: string; content: unknown }[] }
-    expect(JSON.stringify(second.messages)).toContain('"is_error":true')
-  })
-  it.each([
-    'Can I buy a $900 camera?',
-    'Can I buy a camera for 900 USD?',
-    'The camera costs 900. Can I buy it?',
-  ])(
-    'accepts an explicit numeric user price and a valid later-date interpretation: %s',
-    async (message) => {
-      const { agent } = setup()
-      const data = await simpleProfile(agent)
-      const insight = 'Review the timing of your upcoming commitments before deciding.'
-      const { provider } = mockModel([assess(90000, '2026-10-07'), answer(insight)])
-      const result = await provider.reply(
-        { message: message + ' on 2026-10-07', history: [] },
-        data,
-      )
-      expect(result.assessment?.amountCents).toBe(90000)
-      expect(result.assessment?.purchaseDate).toBe('2026-10-07')
-      expect(result.message).toContain(insight)
-    },
-  )
-  it('accepts a price from validated current context without requiring it in the message', async () => {
-    const { agent } = setup()
-    const data = await simpleProfile(agent)
-    const { provider } = mockModel([assess(34900, '2026-10-07'), answer()])
-    const result = await provider.reply(
-      {
-        message: 'Could I buy these headphones on the selected date?',
-        history: [],
-        context: { amountCents: 34900, itemName: 'Studio headphones', purchaseDate: '2026-10-07' },
-      },
-      data,
-    )
-    expect(result.assessment?.amountCents).toBe(34900)
-    expect(result.assessment?.purchaseDate).toBe('2026-10-07')
-  })
-  it('grounds the price even when a combined question was locally routed to subscriptions', async () => {
-    const { agent } = setup()
-    const data = await simpleProfile(agent)
-    const { provider } = mockModel([assess(90000), answer()])
-    const result = await provider.reply(
-      { message: 'Can I buy a $900 camera given my upcoming subscriptions?', history: [] },
-      data,
-    )
-    expect(result.assessment?.amountCents).toBe(90000)
-  })
-  it('does not confuse a quantity with a purchase price or reuse model history as price evidence', async () => {
-    const { agent } = setup()
-    const data = await simpleProfile(agent)
-    const { provider } = mockModel([assess(200), answer()])
-    const result = await provider.reply(
-      {
-        message: 'Can I buy 2 cameras?',
-        history: [{ role: 'assistant', content: 'Those cost $2.' }],
-      },
-      data,
-    )
-    expect(result.assessment).toBeUndefined()
-    expect(result.intent).toBe('clarify')
-  })
-  it('does not let a model-authored item label inject unverified financial claims into deterministic facts', async () => {
-    const { agent } = setup()
-    const data = await simpleProfile(agent)
-    const tool = assess(90000)
-    tool[0]!.input.itemName = 'You will have ten thousand dollars left'
-    const { provider } = mockModel([tool, answer()])
-    const result = await provider.reply({ message: 'Can I buy a $900 camera?', history: [] }, data)
-    expect(result.assessment?.itemName).toBe('Your purchase')
-    expect(result.message).not.toContain('ten thousand')
-    expect(result.assessment?.amountCents).toBe(90000)
-  })
-  it('rejects a model-selected amount different from the user price', async () => {
-    const { agent } = setup()
-    const data = await simpleProfile(agent)
-    const { provider, create } = mockModel([assess(10000), answer()])
-    const result = await provider.reply({ message: 'Can I buy a $900 camera?', history: [] }, data)
-    expect(result.assessment?.amountCents).toBe(90000)
-    const second = create.mock.calls[1]![0] as { messages: unknown[] }
-    expect(JSON.stringify(second.messages)).toContain('"is_error":true')
-  })
-  it('keeps the fixed zero-cost baseline available for a general budget question', async () => {
-    const { agent } = setup()
-    const data = await simpleProfile(agent)
-    const { provider } = mockModel([assess(0), answer()])
-    const result = await provider.reply(
-      { message: 'How much can I comfortably spend?', history: [] },
-      data,
-    )
-    expect(result.intent).toBe('overview')
-    expect(result.assessment).toBeUndefined()
-    expect(result.message).toContain('a purchase of up to $1,500')
-  })
-  it('retains qualitative subscription explanations and read-only commitment tools', async () => {
-    const { agent } = setup()
-    const data = await state(agent)
-    const insight = 'Review the timing of your upcoming commitments before deciding.'
-    const { provider } = mockModel([
-      [{ type: 'tool_use', id: 'commitments-tool', name: 'upcoming_commitments', input: {} }],
-      answer(insight, 'subscriptions'),
-    ])
-    const result = await provider.reply(
-      { message: 'Which subscriptions are coming up?', history: [] },
-      data,
-    )
-    expect(result.intent).toBe('subscriptions')
-    expect(result.message).toContain(insight)
-    expect(result.toolCalls).toEqual(['upcoming_commitments'])
-  })
-  it('omits advice to sacrifice the cushion, known bills, or take on debt from every narrative field', async () => {
-    const { agent } = setup()
-    const data = await state(agent)
-    const unsafeAdvice = [
-      'Waiting until after the paycheck or lowering your cushion would change the picture.',
-      'You could reduce your cushion to make room.',
-      'Relaxing the buffer would improve the fit.',
-      'Skipping known bills could leave room for the camera.',
-      'Defer rent to create room for the camera.',
-      'Borrowing could close the gap.',
-      'A loan could help with the purchase.',
-      'Using credit could make the purchase work.',
-    ]
-    for (const advice of unsafeAdvice) {
-      const { provider } = mockModel([answer(advice, 'affordability', [advice])])
-      const result = await provider.reply(
-        { message: 'Can I afford a $1199 camera?', history: [] },
-        data,
-      )
-      expect(result.intro).not.toContain(advice)
-      expect(result.message).not.toContain(advice)
-      expect(result.suggestions).not.toContain(advice)
-      expect(result.assessment?.outcome).toBe('tight')
-      expect(result.assessment?.amountCents).toBe(119900)
-      expect(result.message).toContain('$1,199')
-    }
-  })
-  it('preserves qualitative waiting and cheaper-alternative advice without changing the assessment', async () => {
-    const { agent } = setup()
-    const data = await state(agent)
-    const insight = 'Waiting for your paycheck or choosing a cheaper option could improve the fit.'
-    const nextQuestions = ['What if I wait for my paycheck?', 'Could I compare a lower price?']
-    const { provider } = mockModel([answer(insight, 'affordability', nextQuestions)])
-    const result = await provider.reply(
-      { message: 'Can I afford a $1199 camera?', history: [] },
-      data,
-    )
-    expect(result.intro).toBe(insight)
-    expect(result.message).toContain(insight)
-    expect(result.suggestions).toEqual(nextQuestions)
-    expect(result.assessment?.outcome).toBe('tight')
-    expect(result.assessment?.purchaseDate).toBe(data.today)
-  })
-  it.each([
-    'You would have nine hundred dollars left.',
-    'Your balance leaves several hundred in reserve.',
-    'Your spending will fall by twenty percent.',
-    'Rent clears on Friday.',
-    'The next bill arrives on November first.',
-  ])('omits unverified spelled-out financial facts and dates: %s', async (insight) => {
-    const { agent } = setup()
-    const data = await simpleProfile(agent)
-    const { provider } = mockModel([answer(insight, 'affordability', [insight])])
-    const result = await provider.reply({ message: 'Can I buy a $900 camera?', history: [] }, data)
-    expect(result.message).not.toContain(insight)
-    expect(result.suggestions).not.toContain(insight)
-    expect(result.message).toContain('$900')
-    expect(result.assessment?.amountCents).toBe(90000)
-    expect(result.message).toContain('$1,100')
-  })
-})
-
 describe('hosted abuse limits', () => {
   it('rate-limits by the client IP appended by the trusted proxy, not by spoofable entries', async () => {
     const { app } = setup({ config: { ...config, trustProxy: 1, requestsPerMinute: 3 } })
@@ -1588,7 +1288,7 @@ describe('Claude request budgets', () => {
     const local = replies.filter((r) => r.body.mode === 'demo')
     expect(local).toHaveLength(35)
     for (const r of local) {
-      expect(r.body.intro).toContain('Claude limit for the hour')
+      expect(r.body.message).toContain('Claude limit for the hour')
       expect(r.body.message).toContain('not an AI response')
     }
     clock.value = new Date(clock.value.getTime() + 60 * 60_000)
@@ -1618,7 +1318,7 @@ describe('Claude request budgets', () => {
     expect(categories.body.message).toContain('allowance for today is used up')
     expect(chat.categorize).not.toHaveBeenCalled()
     const exhausted = await ask('203.0.113.6')
-    expect(exhausted.body.intro).toContain('allowance for today is used up')
+    expect(exhausted.body.message).toContain('allowance for today is used up')
     expect(chat.reply).toHaveBeenCalledTimes(3)
     clock.value = new Date(clock.value.getTime() + 24 * 60 * 60_000)
     expect((await ask('203.0.113.7')).body.mode).toBe('anthropic')

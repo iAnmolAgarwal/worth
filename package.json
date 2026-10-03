@@ -10,10 +10,11 @@
     "typecheck": "tsc -b",
     "test": "vitest run --maxWorkers=1",
     "test:watch": "vitest --maxWorkers=1",
-    "lint": "oxlint src server shared tests",
+    "lint": "oxlint src server shared tests eval",
     "check": "npm run lint && npm run typecheck && npm test && npm run build",
-    "format": "prettier --write src server shared tests *.ts *.json index.html",
-    "format:check": "prettier --check src server shared tests *.ts *.json index.html"
+    "format": "prettier --write src server shared tests eval *.ts *.json index.html",
+    "format:check": "prettier --check src server shared tests eval *.ts *.json index.html",
+    "eval:live": "tsx eval/live.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",

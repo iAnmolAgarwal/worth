@@ -11,7 +11,15 @@ import {
   ShieldCheck,
   Sparkles,
 } from 'lucide-react'
-import type { AppState, Assessment, ChatMessage, ChatReply, Product } from '../shared/types'
+import type {
+  AppState,
+  Assessment,
+  ChatMessage,
+  ChatReply,
+  Interpretation,
+  Product,
+  PurchaseContext,
+} from '../shared/types'
 import { addDays } from '../shared/finance'
 import { api, ApiError } from './api'
 import { CLAUDE_SHARED_DATA } from './copy'
@@ -47,11 +55,7 @@ export function Assistant({
   const [item, setItem] = useState('My next good thing')
   const [amount, setAmount] = useState('')
   const [date, setDate] = useState(state.today)
-  const [context, setContext] = useState<{
-    amountCents: number
-    itemName: string
-    purchaseDate: string
-  }>()
+  const [context, setContext] = useState<PurchaseContext>()
   const lastPrompt = useRef<number>(0)
   const inFlight = useRef(false)
   const bottom = useRef<HTMLDivElement>(null)
@@ -97,7 +101,19 @@ export function Assistant({
           ...prev,
           { role: 'assistant', content: reply.message, reply, id: Date.now() },
         ])
-        if (reply.assessment)
+        // The server decides whether a later message is about the same purchase.
+        if (reply.interpretation)
+          setContext({
+            amountCents: reply.interpretation.amountCents,
+            itemName: reply.assessment?.itemName ?? itemLabel(reply.interpretation),
+            purchaseDate: reply.interpretation.date,
+          })
+        else if (reply.pending)
+          setContext({
+            amountCents: reply.pending.amountCents,
+            itemName: reply.pending.itemName ?? 'Your purchase',
+          })
+        else if (reply.assessment)
           setContext({
             amountCents: reply.assessment.amountCents,
             itemName: reply.assessment.itemName,
@@ -221,15 +237,24 @@ export function Assistant({
                     </div>
                   )}
                   <div className="message-text">
-                    {(entry.reply?.assessment && entry.reply.intro
-                      ? entry.reply.intro
-                      : entry.content
-                    )
-                      .split('\n\n')
-                      .map((paragraph, i) => (
-                        <p key={i}>{paragraph}</p>
-                      ))}
+                    {mainParagraphs(entry).map((paragraph, i) => (
+                      <p key={i}>{paragraph}</p>
+                    ))}
                   </div>
+                  {!!entry.reply?.points?.length && <ClaudePoints reply={entry.reply} />}
+                  {entry.reply?.interpretation && (
+                    <ReadAsChip
+                      interpretation={entry.reply.interpretation}
+                      disabled={busy}
+                      onEdit={() => {
+                        const read = entry.reply!.interpretation!
+                        setItem(itemLabel(read))
+                        setAmount((read.amountCents / 100).toFixed(2))
+                        setDate(read.date)
+                        setCustom(true)
+                      }}
+                    />
+                  )}
                   {entry.reply?.assessment && (
                     <AssessmentCard
                       assessment={entry.reply.assessment}
@@ -254,13 +279,13 @@ export function Assistant({
                         {Array.from(new Set(entry.reply.toolCalls))
                           .map(
                             (t) =>
-                              ({
-                                assess_purchase: 'purchase forecast',
-                                upcoming_commitments: 'upcoming bills',
-                                spending_summary: 'spending patterns',
-                              })[
-                                t as 'assess_purchase' | 'upcoming_commitments' | 'spending_summary'
-                              ] ?? 'your plan',
+                              (
+                                ({
+                                  interpret_purchase: 'purchase forecast',
+                                  list_commitments: 'upcoming bills',
+                                  spending_summary: 'spending patterns',
+                                }) as Record<string, string>
+                              )[t] ?? 'your plan',
                           )
                           .join(' · ')}
                       </span>
@@ -463,6 +488,60 @@ export function Assistant({
           </button>
         </aside>
       </div>
+    </div>
+  )
+}
+
+/** The answer's own text; the points Claude picked are shown separately. */
+function mainParagraphs(entry: Entry) {
+  const reply = entry.reply
+  if (reply?.assessment && reply.verdict) return [reply.verdict]
+  const chosen =
+    reply?.points && [reply.lead, ...reply.points.map((p) => p.text)].filter(Boolean).join(' ')
+  return entry.content.split('\n\n').filter((paragraph) => paragraph !== chosen)
+}
+
+function ClaudePoints({ reply }: { reply: ChatReply }) {
+  return (
+    <section className="claude-points" aria-label="Points picked by Claude">
+      <span className="claude-points-label">
+        <Sparkles size={12} /> Picked by Claude for your question
+      </span>
+      {reply.lead && <p>{reply.lead}</p>}
+      <ul>
+        {reply.points!.map((point) => (
+          <li key={point.id}>{point.text}</li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+function itemLabel(read: Interpretation) {
+  const label = read.items
+    .map((item) => (item.quantity > 1 ? `${item.quantity} × ${item.name}` : item.name))
+    .join(' + ')
+  return label.charAt(0).toUpperCase() + label.slice(1)
+}
+
+function ReadAsChip({
+  interpretation: read,
+  onEdit,
+  disabled,
+}: {
+  interpretation: Interpretation
+  onEdit: () => void
+  disabled: boolean
+}) {
+  return (
+    <div className="read-as" aria-label="How Worth read your question">
+      <span>
+        Read as: {itemLabel(read)} · {money(read.amountCents, true)} · {read.dateLabel}
+        {read.source === 'local' ? ' · local reading' : ''}
+      </span>
+      <button className="inline-link" onClick={onEdit} disabled={disabled}>
+        Edit
+      </button>
     </div>
   )
 }

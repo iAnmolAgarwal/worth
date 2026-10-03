@@ -16,5 +16,5 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": ["src", "shared", "server", "tests", "vite.config.ts", "vitest.config.ts"]
+  "include": ["src", "shared", "server", "tests", "eval", "vite.config.ts", "vitest.config.ts"]
 }
