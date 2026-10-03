@@ -9,3 +9,7 @@ export const CLAUDE_USES: [string, string][] = [
   ['Your messages', 'Yes'],
   ['PayPal login or card numbers', 'Never'],
 ]
+
+/** The rows as they stand: with Claude off, nothing is sent. */
+export const claudeUses = (on: boolean): [string, string][] =>
+  CLAUDE_USES.map(([label, value]) => [label, on || value === 'Never' ? value : 'Not sent'])

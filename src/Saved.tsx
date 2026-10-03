@@ -11,8 +11,8 @@ import {
 import type { Product } from '../shared/types'
 import { api } from './api'
 import { ClaudeSwitch, JudgeBadge } from './Ask'
-import { CLAUDE_SHARED_DATA, CLAUDE_USES } from './copy'
-import { boughtProductIds } from './engine'
+import { CLAUDE_SHARED_DATA, claudeUses } from './copy'
+import { boughtProductIds, claudeOn } from './engine'
 import type { AppState } from './contract'
 import { isActive } from './contract'
 import { shortDate, money } from './format'
@@ -229,16 +229,17 @@ export function Settings({
               What’s shared with Claude
             </h3>
             <dl className="kvlist">
-              {CLAUDE_USES.map(([label, value]) => (
+              {claudeUses(claudeOn(state)).map(([label, value]) => (
                 <div key={label}>
                   <dt>{label}</dt>
                   <dd>{value}</dd>
                 </div>
               ))}
             </dl>
-            <p className="caption" style={{ marginTop: 8 }}>
-              When Claude answers, it receives {CLAUDE_SHARED_DATA}.
-            </p>
+            <details className="quiet-details">
+              <summary>Everything Claude receives</summary>
+              <p className="caption">When Claude answers, it receives {CLAUDE_SHARED_DATA}.</p>
+            </details>
           </section>
           <section className="tile" aria-labelledby="set-data">
             <div className="sec-head">

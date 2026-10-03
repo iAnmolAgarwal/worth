@@ -2503,3 +2503,33 @@ textarea.input {
     padding-top: 60px;
   }
 }
+
+/* A quiet disclosure row with the system chevron, in place of the native triangle. */
+.quiet-details > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+  color: var(--c-brand);
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-meta);
+}
+.quiet-details > summary::-webkit-details-marker {
+  display: none;
+}
+.quiet-details > summary::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+  margin: 0 6px 4px 0;
+  transition: transform var(--d-action) var(--ease-move);
+}
+.quiet-details[open] > summary::after {
+  transform: rotate(-135deg);
+  margin-bottom: -4px;
+}

@@ -18,7 +18,7 @@ import type {
 } from '../shared/types'
 import { api, ApiError } from './api'
 import type { AgentCheckout, AppState, ChatReply, Comparison } from './contract'
-import { CLAUDE_USES } from './copy'
+import { claudeUses } from './copy'
 import { breachLine, optionStatus, type DecisionRequest, type Explanation } from './Decision'
 import { claudeOn, envLabel, fits, missingFix, useComparison } from './engine'
 import { capitalize, cx, fromMoney, money } from './format'
@@ -686,7 +686,9 @@ export function Ask({
               </form>
               <div className="dock-line">
                 <span className="caption hide-m" style={{ color: 'var(--c-text-2)' }}>
-                  Claude sees your plan totals, not your login.{' '}
+                  {claudeOn(state)
+                    ? 'Claude sees your plan totals, never your login. '
+                    : 'Claude is off. Answers use Worth’s own calculation. '}
                   <a href="#settings" style={{ fontSize: 'inherit' }}>
                     What’s shared
                   </a>
@@ -708,7 +710,7 @@ export function Ask({
                 </h2>
               </div>
               <dl className="kvlist">
-                {CLAUDE_USES.map(([label, value]) => (
+                {claudeUses(claudeOn(state)).map(([label, value]) => (
                   <div key={label}>
                     <dt>{label}</dt>
                     <dd>{value}</dd>

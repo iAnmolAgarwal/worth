@@ -7,7 +7,6 @@ import { api } from './api'
 import { BalanceChart } from './BalanceChart'
 import type { AppState } from './contract'
 import { isActive } from './contract'
-import { CLAUDE_SHARED_DATA } from './copy'
 import { allPlans, cadenceLabel, flowIcon, kindLabel, runningPlans } from './engine'
 import { cx, dayLabel, money, shortDate, signed } from './format'
 import { Alert, Button, Disc, Field, Pill, Ring, Toggle } from './ui'
@@ -577,8 +576,8 @@ export function PlanWizard({
                   />
                 </div>
                 <p className="caption" id="claude-setting-note">
-                  Claude receives {CLAUDE_SHARED_DATA}. Answers still work with this off.{' '}
-                  <a href="#settings">What’s shared</a>
+                  Claude gets your plan totals and bill names, never your login. Answers still work
+                  with this off. <a href="#settings">What’s shared</a>
                 </p>
               </section>
               <label className="check">
