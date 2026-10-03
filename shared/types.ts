@@ -322,8 +322,11 @@ export interface ImportPreview {
   warnings: string[]
   /** Balance corrections from this file, such as "General Account Correction". Never counted. */
   adjustments: Transaction[]
-  /** Rows not imported because they never moved money: memo rows and authorization holds. */
-  leftOut: { memo: number; holds: number }
+  /**
+   * Rows not imported: memo rows and authorization holds never moved money, and rows in other
+   * currencies are counted only through a matched USD conversion.
+   */
+  leftOut: { memo: number; holds: number; otherCurrency: number }
   /** The order used for slash dates; null when the file has none that could read differently. */
   dateOrder: DateOrder | null
   /**

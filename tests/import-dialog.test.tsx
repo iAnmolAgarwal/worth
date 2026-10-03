@@ -48,7 +48,7 @@ function preview(overrides: Partial<ImportPreview> = {}): ImportPreview {
     recurring: [],
     warnings: [],
     adjustments: [],
-    leftOut: { memo: 0, holds: 0 },
+    leftOut: { memo: 0, holds: 0, otherCurrency: 0 },
     dateOrder: null,
     needsDateOrder: false,
     ...overrides,

@@ -1636,6 +1636,29 @@ describe('real PayPal exports', () => {
   })
 })
 
+describe('foreign-currency imports', () => {
+  it('imports a business export with a matched conversion, memo rows and holds', async () => {
+    const { agent } = setup()
+    const imported = await post(agent, '/api/import/commit', {
+      csv: fixture('paypal-business-fx-memo.csv'),
+    })
+    expect(imported.status).toBe(200)
+    const transactions = imported.body.transactions as AppState['transactions']
+    expect(transactions.filter((t) => t.name === 'Ceramics studio Berlin')).toMatchObject([
+      { amountCents: -5012, currency: 'USD', kind: 'expense' },
+    ])
+    // Holds, memo rows and both conversion legs are not separate records.
+    const ids = transactions.map((t) => t.id)
+    for (const left of ['9UH00001AA', '9UR00001AA', 'AOB00001AA', 'CNF00001AA', '7CV00001AA'])
+      expect(ids).not.toContain(`paypal:${left}`)
+    expect(ids).not.toContain('paypal:7CV00002AA')
+    expect(imported.body.profile).toMatchObject({
+      coverageDays: 61,
+      dailySpendCents: Math.round(11352 / 61),
+    })
+  })
+})
+
 describe('import date order', () => {
   it('refuses to import an ambiguous file until the user chooses the date order', async () => {
     const { agent } = setup()

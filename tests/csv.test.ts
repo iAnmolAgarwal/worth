@@ -124,7 +124,7 @@ describe('PayPal CSV normalization', () => {
     )
     expect(result.errors).toEqual([])
     expect(result.totalRows).toBe(6)
-    expect(result.leftOut).toEqual({ memo: 2, holds: 2 })
+    expect(result.leftOut).toEqual({ memo: 2, holds: 2, otherCurrency: 0 })
     expect(result.transactions.map((item) => [item.id, item.status])).toEqual([
       ['paypal:P1', 'pending'],
       ['paypal:U1', 'completed'],
@@ -603,5 +603,194 @@ describe('date order', () => {
       },
     ])
     expect(mixed.transactions).toEqual([])
+  })
+})
+
+const PERSONAL_HEADER =
+  '"Date","Time","TimeZone","Name","Type","Status","Currency","Amount","Fees","Total","Exchange Rate","Receipt ID","Balance","Transaction ID","Item Title"'
+function personal(...rows: string[][]): string {
+  return [PERSONAL_HEADER, ...rows.map((row) => row.map((cell) => `"${cell}"`).join(','))].join(
+    '\n',
+  )
+}
+function personalRow(
+  date: string,
+  time: string,
+  name: string,
+  type: string,
+  currency: string,
+  amount: string,
+  id: string,
+): string[] {
+  return [
+    date,
+    time,
+    'EDT',
+    name,
+    type,
+    'Completed',
+    currency,
+    amount,
+    '0.00',
+    amount,
+    '',
+    '',
+    '',
+    id,
+    '',
+  ]
+}
+
+describe('foreign currencies', () => {
+  it('counts a business-export conversion once, in USD, and leaves memo and hold rows out', () => {
+    const result = parsePayPalCsv(fixture('paypal-business-fx-memo.csv'))
+    expect(result.errors).toEqual([])
+    expect(result.dateOrder).toBe('MM/DD')
+    // The EUR payment is recorded through its USD leg; only its EUR conversion leg is left out.
+    expect(result.leftOut).toEqual({ memo: 2, holds: 2, otherCurrency: 1 })
+    expect(result.transactions.find((item) => item.id === 'paypal:7ET00001AA')).toEqual({
+      id: 'paypal:7ET00001AA',
+      date: '2026-08-20',
+      name: 'Ceramics studio Berlin',
+      amountCents: -5012,
+      currency: 'USD',
+      kind: 'expense',
+      category: 'Shopping',
+      color: '#e7cbb1',
+      status: 'completed',
+      source: 'import',
+    })
+    // Neither conversion leg is a second record of the same spending.
+    expect(result.transactions.map((item) => item.id)).not.toContain('paypal:7CV00002AA')
+    expect(result.transactions.map((item) => item.id)).not.toContain('paypal:7CV00001AA')
+    expect(result.transactions.every((item) => item.currency === 'USD')).toBe(true)
+    // Ordinary spending: the mug's USD leg, the ride and the dinner. The TV was refunded in full.
+    expect(result.coverageDays).toBe(61)
+    expect(result.suggestedDailySpendCents).toBe(Math.round((5012 + 2340 + 4000) / 61))
+    expect(result.recurring.map((item) => [item.name, item.kind, item.nextDate])).toEqual([
+      ['ACME CORP PAYROLL', 'income', '2026-10-09'],
+      ['Home internet', 'bill', '2026-10-15'],
+      ['Music streaming subscription', 'subscription', '2026-11-01'],
+    ])
+    expect(result.warnings.join(' ')).toContain('1 row in other currencies was left out')
+  })
+
+  it('pairs personal-export conversion legs by identical date and time', () => {
+    const result = parsePayPalCsv(
+      personal(
+        personalRow(
+          '09/12/2026',
+          '10:01:05',
+          'Tokyo stationery',
+          'Express Checkout Payment',
+          'JPY',
+          '-4,500.00',
+          'P1',
+        ),
+        personalRow(
+          '09/12/2026',
+          '10:01:05',
+          '',
+          'General Currency Conversion',
+          'JPY',
+          '4,500.00',
+          'P2',
+        ),
+        personalRow(
+          '09/12/2026',
+          '10:01:05',
+          '',
+          'General Currency Conversion',
+          'USD',
+          '-31.02',
+          'P3',
+        ),
+        personalRow(
+          '09/20/2026',
+          '08:30:00',
+          'Lisbon bakery',
+          'Express Checkout Payment',
+          'EUR',
+          '-12.00',
+          'P4',
+        ),
+        personalRow(
+          '09/20/2026',
+          '08:30:00',
+          '',
+          'General Currency Conversion',
+          'USD',
+          '-13.37',
+          'P5',
+        ),
+        personalRow(
+          '09/20/2026',
+          '08:30:00',
+          '',
+          'General Currency Conversion',
+          'EUR',
+          '12.00',
+          'P6',
+        ),
+      ),
+    )
+    expect(result.errors).toEqual([])
+    expect(result.transactions.map((item) => [item.id, item.name, item.amountCents])).toEqual([
+      ['paypal:P4', 'Lisbon bakery', -1337],
+      ['paypal:P1', 'Tokyo stationery', -3102],
+    ])
+    expect(result.leftOut.otherCurrency).toBe(2)
+  })
+
+  it('counts a USD conversion whose foreign payment is missing as spending', () => {
+    const result = parsePayPalCsv(
+      personal(
+        personalRow(
+          '09/12/2026',
+          '10:01:05',
+          '',
+          'General Currency Conversion',
+          'USD',
+          '-50.12',
+          'L1',
+        ),
+        personalRow(
+          '09/14/2026',
+          '10:00:00',
+          '',
+          'General Currency Conversion',
+          'USD',
+          '20.00',
+          'L2',
+        ),
+      ),
+    )
+    expect(result.errors).toEqual([])
+    expect(result.transactions.map((item) => [item.id, item.kind, item.category])).toEqual([
+      ['paypal:L2', 'transfer', 'Transfers'],
+      ['paypal:L1', 'expense', 'Currency conversion'],
+    ])
+    expect(result.suggestedDailySpendCents).toBe(Math.round(5012 / 3))
+    expect(result.warnings.join(' ')).toContain('Row 2: this USD currency conversion')
+  })
+
+  it('treats converting received USD as a transfer and leaves the other-currency legs out', () => {
+    const result = parsePayPalCsv(
+      [
+        'Date,Time,TimeZone,Name,Type,Status,Currency,Gross,Fee,Net,Transaction ID,Reference Txn ID,Balance Impact',
+        '15/09/2026,21:05:00,IST,Client LLC,Express Checkout Payment,Completed,USD,500.00,-22.45,477.55,INC1,,Credit',
+        '15/09/2026,21:05:00,IST,,General Currency Conversion,Completed,USD,-477.55,0.00,-477.55,INC2,INC1,Debit',
+        '15/09/2026,21:05:00,IST,,General Currency Conversion,Completed,INR,"39,812.17",0.00,"39,812.17",INC3,INC1,Credit',
+        '15/09/2026,21:05:00,IST,,General Withdrawal,Completed,INR,"-39,812.17",0.00,"-39,812.17",INC4,,Debit',
+      ].join('\n'),
+    )
+    expect(result.errors).toEqual([])
+    expect(result.dateOrder).toBe('DD/MM')
+    expect(result.transactions.map((item) => [item.id, item.kind])).toEqual([
+      ['paypal:INC1', 'unknown'],
+      ['paypal:INC2', 'transfer'],
+    ])
+    expect(result.leftOut.otherCurrency).toBe(2)
+    expect(result.suggestedDailySpendCents).toBe(0)
   })
 })

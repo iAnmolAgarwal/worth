@@ -117,11 +117,7 @@ const HOLD_TYPE = /\b(?:holds?|authori[sz]ations?)\b/i
 /** A plain bank transfer type with no other detail. */
 const BANK_TRANSFER_TYPE = /^(?:bank )?transfer$/
 
-function classify(
-  name: string,
-  type: string,
-  amount: number,
-): Pick<Transaction, 'category' | 'kind' | 'color'> {
+function classify(name: string, type: string, amount: number): Classification {
   const content = `${name} ${type}`.toLowerCase()
   const kind = type.toLowerCase().trim()
   // PayPal's own balance corrections (for example a sandbox top-up) are neither income nor spending.
@@ -294,6 +290,94 @@ function recurringSuggestions(
   return { flows: flows.sort((a, b) => a.nextDate.localeCompare(b.nextDate)), ids }
 }
 
+type Classification = Pick<Transaction, 'category' | 'kind' | 'color'>
+
+/** One validated CSV row, before it becomes a transaction. */
+interface Row {
+  rowNumber: number
+  date: string
+  time: string
+  name: string
+  type: string
+  amount: number
+  currency: string
+  nativeId: string
+  reference: string
+  statusText: string
+  status: Transaction['status']
+}
+
+function readStatus(statusText: string): Transaction['status'] {
+  return /pending|held|hold|processing|unclaimed|in.?progress/.test(statusText)
+    ? 'pending'
+    : /denied|cancel|failed|void|expired|removed|reversed/.test(statusText)
+      ? 'excluded'
+      : statusText === '' ||
+          /^(completed|complete|cleared|paid|processed|refunded|partially refunded|success|successful)$/.test(
+            statusText,
+          )
+        ? 'completed'
+        : 'excluded'
+}
+
+function isConversion(row: Row): boolean {
+  return /\bconversion\b/i.test(row.type)
+}
+
+/** A completed payment out in another currency, the kind a USD conversion pays for. */
+function isForeignSpend(row: Row): boolean {
+  return (
+    row.currency !== 'USD' &&
+    !isConversion(row) &&
+    row.amount < 0 &&
+    row.status === 'completed' &&
+    classify(row.name, row.type, row.amount).kind === 'expense'
+  )
+}
+
+/**
+ * Matches USD currency-conversion legs to the foreign-currency payments they paid for. Business
+ * exports link the legs to the payment through Reference Txn ID. Personal exports have no
+ * reference, so a leg pairs with the one foreign payment that has exactly the same date and time.
+ * A leg that converted money the user received or already held is a transfer; a USD debit with no
+ * payment to pair with is `unmatched`.
+ */
+function pairConversions(rows: Row[]): {
+  paid: Map<Row, Row[]>
+  legs: Map<Row, 'paid' | 'transfer' | 'unmatched'>
+} {
+  const paid = new Map<Row, Row[]>()
+  const legs = new Map<Row, 'paid' | 'transfer' | 'unmatched'>()
+  const link = (leg: Row, payment: Row) => {
+    paid.set(payment, [...(paid.get(payment) ?? []), leg])
+    legs.set(leg, 'paid')
+  }
+  const byId = new Map(rows.filter((row) => row.nativeId).map((row) => [row.nativeId, row]))
+  const usdLegs = new Set(rows.filter((row) => row.currency === 'USD' && isConversion(row)))
+  for (const leg of usdLegs) {
+    const target = leg.reference ? byId.get(leg.reference) : undefined
+    if (!target || target === leg) continue
+    if (leg.amount < 0 && isForeignSpend(target)) link(leg, target)
+    else legs.set(leg, 'transfer')
+  }
+  const moments = new Map<string, { legs: Row[]; payments: Row[] }>()
+  for (const row of rows) {
+    const leg = usdLegs.has(row) && !legs.has(row) && row.amount < 0
+    const payment = isForeignSpend(row) && !paid.has(row)
+    if (!row.time || (!leg && !payment)) continue
+    const key = `${row.date}|${row.time}`
+    const moment = moments.get(key) ?? { legs: [], payments: [] }
+    ;(leg ? moment.legs : moment.payments).push(row)
+    moments.set(key, moment)
+  }
+  for (const moment of moments.values())
+    if (moment.legs.length === 1 && moment.payments.length === 1)
+      link(moment.legs[0]!, moment.payments[0]!)
+  for (const leg of usdLegs)
+    if (!legs.has(leg)) legs.set(leg, leg.amount < 0 ? 'unmatched' : 'transfer')
+  return { paid, legs }
+}
+
 export interface ParseOptions {
   /** Today in the profile's time zone. Without it, today in New York is used. */
   today?: string
@@ -317,7 +401,7 @@ export function parsePayPalCsv(
     recurring: [],
     warnings: [],
     adjustments: [],
-    leftOut: { memo: 0, holds: 0 },
+    leftOut: { memo: 0, holds: 0, otherCurrency: 0 },
     dateOrder: null,
     needsDateOrder: false,
   }
@@ -389,18 +473,17 @@ export function parsePayPalCsv(
   let noIds = 0
   // The caller passes today in the user's time zone; New York is only the standalone default.
   const today = options.today ?? todayInTimezone('America/New_York')
+
+  // 1. Validate every row. Memo rows and holds go first: they never moved money.
+  const rows: Row[] = []
   for (let index = 0; index < parsed.data.length; index++) {
-    const row = parsed.data[index]!
+    const raw = parsed.data[index]!
     const rowNumber = index + 2
-    const date = parseDate(get(row, 'date'), dateOrder)
-    const amount = parseCents(get(row, 'amount'))
-    const currency = get(row, 'currency').toUpperCase()
-    const type = get(row, 'type')
+    const type = get(raw, 'type')
     // Funding legs and corrections often have no counterparty; fall back to the item, then the type.
     const name =
-      (get(row, 'name') || get(row, 'title') || type).slice(0, 180) || 'PayPal transaction'
-    // Memo rows and authorization holds (and their releases) never moved money.
-    if (get(row, 'impact').toLowerCase() === 'memo') {
+      (get(raw, 'name') || get(raw, 'title') || type).slice(0, 180) || 'PayPal transaction'
+    if (get(raw, 'impact').toLowerCase() === 'memo') {
       result.leftOut.memo++
       continue
     }
@@ -408,6 +491,9 @@ export function parsePayPalCsv(
       result.leftOut.holds++
       continue
     }
+    const date = parseDate(get(raw, 'date'), dateOrder)
+    const amount = parseCents(get(raw, 'amount'))
+    const currency = get(raw, 'currency').toUpperCase()
     if (!date) {
       result.errors.push({
         row: rowNumber,
@@ -425,16 +511,14 @@ export function parsePayPalCsv(
     if (amount === null) {
       result.errors.push({
         row: rowNumber,
-        message: 'Invalid amount. Use signed USD amounts with at most two decimal places.',
+        message: 'Invalid amount. Use signed amounts with at most two decimal places.',
       })
       continue
     }
-    if (currency !== 'USD') {
+    if (!currency) {
       result.errors.push({
         row: rowNumber,
-        message: currency
-          ? `Unsupported currency ${currency}. Only USD can be forecast; no conversion is applied.`
-          : 'Currency is missing. Confirm this row is USD before importing.',
+        message: 'Currency is missing. Confirm this row is USD before importing.',
       })
       continue
     }
@@ -449,23 +533,36 @@ export function parsePayPalCsv(
       })
       continue
     }
-    const nativeId = get(row, 'id')
-    const fingerprint = hash([date, get(row, 'time'), name, type, amount, currency].join('|'))
+    const statusText = get(raw, 'status').toLowerCase()
+    rows.push({
+      rowNumber,
+      date,
+      time: get(raw, 'time'),
+      name,
+      type,
+      amount,
+      currency,
+      nativeId: get(raw, 'id'),
+      reference: get(raw, 'reference'),
+      statusText,
+      status: readStatus(statusText),
+    })
+  }
+
+  // 2. Record a row once, under the identity it was exported with.
+  const record = (
+    row: Row,
+    override: { amount?: number; classification?: Classification } = {},
+  ) => {
+    const { rowNumber, date, nativeId, status, statusText } = row
+    const amount = override.amount ?? row.amount
+    const currency = override.amount === undefined ? row.currency : 'USD'
+    const fingerprint = hash(
+      [date, row.time, row.name, row.type, row.amount, row.currency].join('|'),
+    )
     const ordinal = (occurrences.get(fingerprint) ?? 0) + 1
     occurrences.set(fingerprint, ordinal)
     const id = nativeId ? `paypal:${nativeId}` : `import:${fingerprint}:${ordinal}`
-    const statusText = get(row, 'status').toLowerCase()
-    const status: Transaction['status'] =
-      /pending|held|hold|processing|unclaimed|in.?progress/.test(statusText)
-        ? 'pending'
-        : /denied|cancel|failed|void|expired|removed|reversed/.test(statusText)
-          ? 'excluded'
-          : statusText === '' ||
-              /^(completed|complete|cleared|paid|processed|refunded|partially refunded|success|successful)$/.test(
-                statusText,
-              )
-            ? 'completed'
-            : 'excluded'
     if (
       statusText &&
       status === 'excluded' &&
@@ -474,18 +571,17 @@ export function parsePayPalCsv(
       result.warnings.push(
         `Row ${rowNumber}: unrecognized status “${statusText}” is excluded from estimates.`,
       )
-    const classification = classify(name, type, amount)
-    const reference = get(row, 'reference')
+    const classification = override.classification ?? classify(row.name, row.type, amount)
     const transaction: Transaction = {
       id,
       date,
-      name,
+      name: row.name,
       amountCents: amount,
       currency,
       ...classification,
       status,
       source: 'import',
-      ...(reference ? { referenceId: `paypal:${reference}` } : {}),
+      ...(row.reference ? { referenceId: `paypal:${row.reference}` } : {}),
     }
     const capturedPurchase = nativeId ? capturedPurchases.get(nativeId) : undefined
     if (capturedPurchase) {
@@ -501,7 +597,7 @@ export function parsePayPalCsv(
           row: rowNumber,
           message: `Capture ${nativeId} matches a Worth purchase but its amount, currency, date, or payment type conflicts. Resolve this row before importing.`,
         })
-        continue
+        return
       }
       // The capture reference is the identity. A merchant name or amount alone never establishes a match.
       // App captures use UTC dates; an export's local date can legitimately differ by one day.
@@ -510,7 +606,7 @@ export function parsePayPalCsv(
           `Row ${rowNumber}: capture ${nativeId} is already recorded in Worth. Its one-day date difference is treated as a time-zone difference.`,
         )
       result.duplicates++
-      continue
+      return
     }
     const previous = knownById.get(id)
     if (previous) {
@@ -523,11 +619,11 @@ export function parsePayPalCsv(
           row: rowNumber,
           message: `Transaction ${nativeId || id} appears with conflicting amounts or dates. Resolve the conflict before importing.`,
         })
-        continue
+        return
       }
       if (previous.status === status || (status === 'pending' && previous.status !== 'pending')) {
         result.duplicates++
-        continue
+        return
       }
       // A later settled/failed row replaces its pending representation; never add a second payment.
       const previousIndex = result.transactions.findIndex((item) => item.id === id)
@@ -540,6 +636,39 @@ export function parsePayPalCsv(
       if (!nativeId) noIds++
     }
     knownById.set(id, transaction)
+  }
+
+  // 3. Foreign-currency payments count once, through the USD conversion that paid for them.
+  const conversions = pairConversions(rows)
+  for (const row of rows) {
+    if (row.currency !== 'USD') {
+      const legs = conversions.paid.get(row)
+      if (legs) {
+        record(row, { amount: legs.reduce((sum, leg) => sum + leg.amount, 0) })
+        continue
+      }
+      result.leftOut.otherCurrency++
+      if (isForeignSpend(row))
+        result.errors.push({
+          row: row.rowNumber,
+          message: `Unsupported currency ${row.currency}: this payment has no matching USD conversion in the file. Only USD can be forecast.`,
+        })
+      continue
+    }
+    const leg = conversions.legs.get(row)
+    if (leg === 'paid') continue
+    if (leg === 'unmatched') {
+      // The foreign payment it paid for is missing from the file. Counting it is the safe side.
+      result.warnings.push(
+        `Row ${row.rowNumber}: this USD currency conversion has no matching foreign-currency payment in the file, so it counts as spending.`,
+      )
+      record(row, {
+        amount: row.amount,
+        classification: { kind: 'expense', category: 'Currency conversion', color: '#e7cbb1' },
+      })
+      continue
+    }
+    record(row)
   }
   // Return only inserted/updated rows, but analyze the complete retained personal history.
   const combined = [...knownById.values()].filter((transaction) => transaction.source === 'import')
@@ -619,7 +748,11 @@ export function parsePayPalCsv(
     result.warnings.push(
       `${pending} pending payments are excluded from spending history. Add any outstanding commitments to your financial picture.`,
     )
-  const { memo, holds } = result.leftOut
+  const { memo, holds, otherCurrency } = result.leftOut
+  if (otherCurrency)
+    result.warnings.push(
+      `${otherCurrency} ${otherCurrency === 1 ? 'row' : 'rows'} in other currencies ${otherCurrency === 1 ? 'was' : 'were'} left out. Worth plans in USD: a foreign-currency payment counts once, through the USD conversion that paid for it.`,
+    )
   if (memo)
     result.warnings.push(
       `${memo} memo ${memo === 1 ? 'row was' : 'rows were'} left out. Memo rows never change your balance.`,
