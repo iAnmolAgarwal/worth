@@ -222,6 +222,12 @@ function commitmentKind(text: string): CommitmentKind {
   const bills = /\bbills?\b|\brent\b/i.test(text)
   return subscriptions && !bills ? 'subscriptions' : bills && !subscriptions ? 'bills' : 'all'
 }
+const PAYDAY_PHRASE = /\b(?:pay\s*days?|pay\s*checks?|get(?:ting)?\s+paid|salary)\b/i
+/** A follow-up about the item under discussion, timed by a payday the plan already knows. */
+function paydayFollowUp(input: ChatInput, data: ChatData) {
+  if (!validContext(input) || !PAYDAY_PHRASE.test(input.message)) return false
+  return Boolean(localAnswer(input, data).assessment)
+}
 /** The deterministic route for a message when Claude is not involved. */
 function localIntent(input: ChatInput, data: ChatData): ChatIntent {
   const text = input.message.toLowerCase()
@@ -812,7 +818,17 @@ function answerFor(turn: Turn, final: Final | undefined): Answer {
       assessment: turn.assessment,
       interpretation: turn.interpretation,
     }
-  else if (turn.clarify) answer = { ...base, intent: 'clarify', clarify: turn.clarify }
+  else if (paydayFollowUp(input, data)) {
+    // "Wait until my next paycheck" names a date the plan already knows. The server resolves it
+    // for the item under discussion instead of letting the model ask which date.
+    const local = localAnswer(input, data)
+    answer = {
+      ...base,
+      intent: 'affordability',
+      assessment: local.assessment,
+      interpretation: local.interpretation,
+    }
+  } else if (turn.clarify) answer = { ...base, intent: 'clarify', clarify: turn.clarify }
   else {
     const local = localAnswer(input, data)
     const intent: ChatIntent =
