@@ -1,0 +1,443 @@
+import { useState } from 'react'
+import type { ChangeEvent, FormEvent } from 'react'
+import { CircleAlert, FileUp, Info } from 'lucide-react'
+import type { DateOrder, ImportPreview } from '../shared/types'
+import { CSV_IMPORT_LIMITS, CSV_SIZE_MESSAGE, utf8Bytes } from '../shared/limits'
+import { api } from './api'
+import type { AppState } from './contract'
+import { isActive } from './contract'
+import { currencyAmount, money, shortDate } from './format'
+import { Alert, Button, Dialog, Field } from './ui'
+
+type DialogProps = { state: AppState; onClose: () => void; onUpdate: (state: AppState) => void }
+const errorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : 'Something went wrong. Please try again.'
+
+export function ImportDialog({
+  state,
+  onClose,
+  onUpdate,
+  onReview,
+}: DialogProps & { onReview: () => void }) {
+  const [csv, setCsv] = useState('')
+  const [filename, setFilename] = useState('')
+  const [preview, setPreview] = useState<ImportPreview | null>(null)
+  const [previewedCsv, setPreviewedCsv] = useState('')
+  const [acknowledged, setAcknowledged] = useState(false)
+  // Asked only when every date in the file could be read either way.
+  const [dateOrder, setDateOrder] = useState<DateOrder>()
+  const [busy, setBusy] = useState<'read' | 'preview' | 'commit' | null>(null)
+  const [error, setError] = useState('')
+  const activeCheckout = state.purchases.some(isActive)
+  const changeCsv = (value: string) => {
+    setCsv(value)
+    setPreview(null)
+    setPreviewedCsv('')
+    setAcknowledged(false)
+    setDateOrder(undefined)
+    setError('')
+  }
+
+  const chooseFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    setError('')
+    setPreview(null)
+    setAcknowledged(false)
+    if (file.size > CSV_IMPORT_LIMITS.maxBytes) {
+      setError('Choose a CSV smaller than 1 MB. A recent 90-day export is a good starting point.')
+      event.target.value = ''
+      return
+    }
+    setBusy('read')
+    try {
+      const text = await file.text()
+      changeCsv(text)
+      setFilename(file.name)
+    } catch {
+      setError('This file could not be read. Try choosing it again or paste its contents below.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const getPreview = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    void runPreview(dateOrder)
+  }
+
+  const chooseDateOrder = (order: DateOrder) => {
+    setDateOrder(order)
+    void runPreview(order)
+  }
+
+  const runPreview = async (order: DateOrder | undefined) => {
+    setError('')
+    setAcknowledged(false)
+    if (!csv.trim()) {
+      setError('Choose a CSV or paste your PayPal activity export first.')
+      return
+    }
+    if (utf8Bytes(csv) > CSV_IMPORT_LIMITS.maxBytes) {
+      setError(CSV_SIZE_MESSAGE)
+      return
+    }
+    setBusy('preview')
+    try {
+      const result = await api<ImportPreview>('/import/preview', {
+        csv,
+        ...(order ? { dateOrder: order } : {}),
+      })
+      setPreview(result)
+      setPreviewedCsv(csv)
+    } catch (failure) {
+      setError(errorMessage(failure))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const commit = async () => {
+    if (
+      !preview ||
+      preview.errors.length ||
+      preview.needsDateOrder ||
+      csv !== previewedCsv ||
+      !acknowledged
+    )
+      return
+    setError('')
+    setBusy('commit')
+    try {
+      const updated = (await api<AppState>('/import/commit', {
+        csv,
+        ...(dateOrder ? { dateOrder } : {}),
+      })) as AppState
+      onUpdate(updated)
+      onClose()
+      onReview()
+    } catch (failure) {
+      setError(errorMessage(failure))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <Dialog
+      title="Import PayPal activity"
+      onClose={onClose}
+      dismissible={!busy}
+      wide
+      footer={
+        <>
+          {error && (
+            <p className="co-error" role="alert">
+              <CircleAlert size={16} aria-hidden="true" style={{ flex: 'none', marginTop: 2 }} />
+              {error}
+            </p>
+          )}
+          <Button
+            block
+            onClick={() => void commit()}
+            loading={busy === 'commit'}
+            disabled={
+              !preview ||
+              preview.errors.length > 0 ||
+              preview.needsDateOrder ||
+              !acknowledged ||
+              csv !== previewedCsv ||
+              Boolean(busy) ||
+              activeCheckout ||
+              (!preview.transactions.length && !preview.duplicates && !preview.unresolved.length)
+            }
+          >
+            Import and review my plan
+          </Button>
+          <Button variant="text" onClick={onClose} disabled={Boolean(busy)}>
+            Cancel
+          </Button>
+        </>
+      }
+    >
+      <p className="meta">
+        Bring your PayPal activity export. Worth turns the patterns into a plan you confirm.
+      </p>
+      <form onSubmit={getPreview} aria-busy={Boolean(busy)}>
+        {activeCheckout && (
+          <Alert tone="warn" icon={CircleAlert}>
+            Finish or cancel your active checkout before importing new history.
+          </Alert>
+        )}
+        <section className="stack tight">
+          <Alert tone="info" icon={Info}>
+            <b>A PayPal activity export, in USD.</b> Use an English-language CSV with Date,
+            Currency, and Net, Amount or Gross. Up to 1 MB; about 90 days of history works well.
+          </Alert>
+          <Field
+            label="Choose your CSV"
+            hint={
+              filename
+                ? `Selected: ${filename}`
+                : 'Download an activity report from your PayPal account.'
+            }
+          >
+            <input
+              className="input"
+              type="file"
+              accept=".csv,text/csv"
+              onChange={(event) => void chooseFile(event)}
+              disabled={Boolean(busy)}
+            />
+          </Field>
+          <details>
+            <summary>Or paste the CSV contents</summary>
+            <Field label="PayPal CSV contents">
+              <textarea
+                className="input"
+                rows={6}
+                value={csv}
+                maxLength={CSV_IMPORT_LIMITS.maxBytes}
+                onChange={(event) => {
+                  setFilename('')
+                  changeCsv(event.target.value)
+                }}
+                spellCheck={false}
+                placeholder={'Date,Name,Currency,Amount\n2026-01-01,Coffee shop,USD,-6.50'}
+                disabled={Boolean(busy)}
+              />
+            </Field>
+          </details>
+          <p className="caption">
+            {state.profile.source === 'demo'
+              ? 'Your own history replaces the sample transactions. Next, you’ll confirm your money, income and bills.'
+              : 'New transactions are merged with your history. Matching transaction IDs keep repeated imports from counting twice.'}
+          </p>
+          <Button
+            type="submit"
+            variant="secondary"
+            icon={FileUp}
+            loading={busy === 'preview'}
+            disabled={!csv.trim() || Boolean(busy) || activeCheckout}
+          >
+            Preview my history
+          </Button>
+        </section>
+      </form>
+
+      {preview && (
+        <section
+          className="stack tight"
+          aria-labelledby="import-preview-heading"
+          aria-live="polite"
+        >
+          <h3 className="h-section" id="import-preview-heading">
+            Here’s what Worth found
+          </h3>
+          {(preview.needsDateOrder || dateOrder) && (
+            <fieldset className="import-date-order" disabled={Boolean(busy)}>
+              <legend>How does this file write dates?</legend>
+              <p className="meta">
+                Every date here could be read two ways. Choose the order your PayPal account uses.
+              </p>
+              {(
+                [
+                  ['MM/DD', 'Month first, as in the US', '03/04/2026 is March 4'],
+                  ['DD/MM', 'Day first, as in the UK', '03/04/2026 is 3 April'],
+                ] as const
+              ).map(([order, label, example]) => (
+                <label className="check" key={order}>
+                  <input
+                    type="radio"
+                    name="import-date-order"
+                    value={order}
+                    checked={dateOrder === order}
+                    onChange={() => chooseDateOrder(order)}
+                  />
+                  <span>
+                    <strong>{label}</strong>
+                    <small>{example}</small>
+                  </span>
+                </label>
+              ))}
+            </fieldset>
+          )}
+          <dl className="kvlist">
+            <div>
+              <dt>Rows in your file</dt>
+              <dd className="num">{preview.totalRows}</dd>
+            </div>
+            <div>
+              <dt>Days of history</dt>
+              <dd className="num">{preview.coverageDays}</dd>
+            </div>
+            <div>
+              <dt>New or updated transactions</dt>
+              <dd className="num">{preview.transactions.length}</dd>
+            </div>
+            <div>
+              <dt>Duplicate rows skipped</dt>
+              <dd className="num">{preview.duplicates}</dd>
+            </div>
+          </dl>
+          <p className="meta">
+            {preview.excluded} rows are excluded from everyday spending estimates. Suggested
+            everyday spending: <strong>{money(preview.suggestedDailySpendCents)} / day</strong>.{' '}
+            {preview.recurring.length} possible recurring{' '}
+            {preview.recurring.length === 1 ? 'item needs' : 'items need'} your review.
+          </p>
+          {preview.unresolved.length > 0 && (
+            <div className="alert warn">
+              <div className="alert-body">
+                <strong>
+                  {preview.unresolved.length} foreign-currency{' '}
+                  {preview.unresolved.length === 1 ? 'payment has' : 'payments have'} no USD
+                  conversion
+                </strong>
+                <ul>
+                  {preview.unresolved.slice(0, 8).map((payment) => (
+                    <li key={payment.id}>
+                      {payment.name} · {shortDate(payment.date)} ·{' '}
+                      {currencyAmount(Math.abs(payment.originalCents), payment.currency)}
+                    </li>
+                  ))}
+                </ul>
+                <p>
+                  After importing, give each one its USD cost under Activity or mark it as a
+                  one-off. Until then, Worth won’t show a positive result.
+                </p>
+              </div>
+            </div>
+          )}
+          {preview.instalmentPlans.length > 0 && (
+            <div className="alert info">
+              <div className="alert-body">
+                <strong>Possible Pay in 4 or Pay Later plans</strong>
+                <ul>
+                  {preview.instalmentPlans.map((plan) => (
+                    <li key={plan.id}>
+                      {plan.name}
+                      {plan.purchaseCents !== null && ` · ${money(plan.purchaseCents)} purchase`} ·
+                      payments of about {money(plan.paymentCents)}
+                    </li>
+                  ))}
+                </ul>
+                <p>
+                  These are not counted as everyday spending. Next, add any payments still due to
+                  your plan, or confirm the plan is paid off.
+                </p>
+              </div>
+            </div>
+          )}
+          {preview.adjustments.length > 0 && (
+            <div className="alert info">
+              <div className="alert-body">
+                <strong>PayPal balance corrections, not counted</strong>
+                <ul>
+                  {preview.adjustments.slice(0, 5).map((transaction) => (
+                    <li key={transaction.id}>
+                      {transaction.name} · {shortDate(transaction.date)} ·{' '}
+                      {money(transaction.amountCents)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+          {preview.errors.length > 0 && (
+            <div className="alert bad" role="alert">
+              <div className="alert-body">
+                <strong>
+                  Correct {preview.errors.length}{' '}
+                  {preview.errors.length === 1 ? 'row issue' : 'row issues'} before importing.
+                </strong>
+                <ul>
+                  {preview.errors.slice(0, 20).map((issue, index) => (
+                    <li key={`${issue.row}-${index}`}>
+                      Row {issue.row}: {issue.message}
+                    </li>
+                  ))}
+                </ul>
+                {preview.errors.length > 20 && (
+                  <p>
+                    And {preview.errors.length - 20} more issues. Correct these rows and preview the
+                    file again.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+          {preview.warnings.length > 0 && (
+            <div className="alert warn">
+              <div className="alert-body">
+                <strong>A few things to review</strong>
+                <ul>
+                  {preview.warnings.slice(0, 12).map((warning, index) => (
+                    <li key={index}>{warning}</li>
+                  ))}
+                </ul>
+                {preview.warnings.length > 12 && (
+                  <p>
+                    {preview.warnings.length - 12} more row warnings. Review your export before
+                    continuing.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+          {preview.transactions.length > 0 && (
+            <div className="preview-list">
+              <table>
+                <caption>
+                  Preview of your {Math.min(preview.transactions.length, 8)} most recent new or
+                  updated transactions
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Date</th>
+                    <th scope="col">Transaction</th>
+                    <th scope="col">Amount</th>
+                    <th scope="col">Type</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.transactions.slice(0, 8).map((transaction) => (
+                    <tr key={transaction.id}>
+                      <td>{shortDate(transaction.date)}</td>
+                      <td>
+                        {transaction.name}
+                        {transaction.status !== 'completed' && (
+                          <small> · {transaction.status}</small>
+                        )}
+                      </td>
+                      <td>{money(transaction.amountCents)}</td>
+                      <td>{transaction.kind === 'unknown' ? 'Needs review' : transaction.kind}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {preview.errors.length === 0 && !preview.needsDateOrder && (
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={acknowledged}
+                onChange={(event) => setAcknowledged(event.target.checked)}
+                disabled={Boolean(busy)}
+              />
+              <span>
+                I reviewed this preview. I’ll confirm my available funds and upcoming commitments
+                next.
+              </span>
+            </label>
+          )}
+        </section>
+      )}
+      <p className="caption">
+        Raw CSV files aren’t saved. Imported history stays in this session and isn’t sent to Claude
+        without your permission. Past activity doesn’t set your money available.
+      </p>
+    </Dialog>
+  )
+}

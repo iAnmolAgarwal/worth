@@ -1,397 +1,540 @@
 import { useMemo, useState } from 'react'
 import {
-  ArrowUpRight,
-  Check,
-  ChevronLeft,
-  ChevronRight,
-  Pencil,
+  ArrowDownLeft,
+  Banknote,
+  CalendarCheck,
+  Clock,
+  Download,
+  ReceiptText,
+  RefreshCw,
   Search,
-  Sparkles,
-  Upload,
-  X,
+  SlidersHorizontal,
+  Store,
+  type LucideIcon,
 } from 'lucide-react'
-import type { AppState, Transaction } from '../shared/types'
 import { addDays } from '../shared/finance'
+import type { Transaction } from '../shared/types'
 import { api } from './api'
-import { money, shortDate } from './format'
-import { Button, EmptyState, Field, Footnote, IconButton, Modal, Tag } from './ui'
+import type { AppState, Purchase } from './contract'
+import { isActive } from './contract'
 import { ForeignPayments } from './ForeignPayments'
+import { monthLabel, money, shortDate, signed } from './format'
+import { Button, Dialog, Disc, EmptyState, Field, Pill } from './ui'
+
+type Filter = 'all' | 'expense' | 'income' | 'refund' | 'transfer'
+const FILTERS: [Filter, string][] = [
+  ['all', 'All activity'],
+  ['expense', 'Spending'],
+  ['income', 'Income'],
+  ['refund', 'Refunds'],
+  ['transfer', 'Transfers'],
+]
+const KIND_TEXT: Record<Transaction['kind'], string> = {
+  expense: 'Payment',
+  income: 'Income',
+  transfer: 'Transfer',
+  refund: 'Refund',
+  adjustment: 'Balance correction, not counted',
+  installment: 'Pay in 4 or Pay Later',
+  unknown: 'Needs review',
+}
+const iconFor = (t: Transaction): LucideIcon =>
+  t.kind === 'income'
+    ? Banknote
+    : t.kind === 'refund'
+      ? RefreshCw
+      : t.kind === 'transfer'
+        ? ArrowDownLeft
+        : t.kind === 'installment'
+          ? CalendarCheck
+          : Store
+const PAGE = 25
 
 interface CategoryResult {
   mode: 'anthropic' | 'demo'
   suggestions: { transactionId: string; category: string }[]
   message: string
 }
+
 export function Activity({
   state,
   onUpdate,
-  onImport,
-  onPlan,
+  onAsk,
+  onOpenCheckout,
+  onConfirmPlan,
+  onReviewRefund,
 }: {
   state: AppState
-  onUpdate: (s: AppState) => void
-  onImport: () => void
-  onPlan: () => void
+  onUpdate: (state: AppState) => void
+  onAsk: () => void
+  onOpenCheckout: (purchase: Purchase) => void
+  onConfirmPlan: (purchaseId: string) => void
+  onReviewRefund: (purchaseId: string, refundId: string) => void
 }) {
-  const [search, setSearch] = useState(''),
-    [filter, setFilter] = useState('all'),
-    [page, setPage] = useState(0)
-  const [edit, setEdit] = useState<Transaction | null>(null),
-    [category, setCategory] = useState('')
-  const [busy, setBusy] = useState(false),
-    [error, setError] = useState(''),
-    [proposals, setProposals] = useState<CategoryResult>()
+  const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState<Filter>('all')
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [shown, setShown] = useState(PAGE)
+  const [detail, setDetail] = useState<Transaction>()
+  const [proposals, setProposals] = useState<CategoryResult>()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const q = query.trim().toLowerCase()
+  const matches = (text: string) => !q || text.toLowerCase().includes(q)
   const rows = useMemo(
     () =>
       state.transactions.filter(
-        (t) =>
-          (filter === 'all' || t.kind === filter) &&
-          `${t.name} ${t.category}`.toLowerCase().includes(search.toLowerCase()),
+        (t) => (filter === 'all' || t.kind === filter) && matches(`${t.name} ${t.category}`),
       ),
-    [state.transactions, search, filter],
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+    [state.transactions, filter, q],
   )
-  const recent = state.transactions.filter(
-    (t) =>
-      t.date >= addDays(state.today, -29) &&
-      t.date <= state.today &&
-      t.status === 'completed' &&
-      t.currency === 'USD',
+  const active = state.purchases.filter(isActive).filter((p) => matches(p.name))
+  const refunds = state.reviews.filter(
+    (review): review is Extract<AppState['reviews'][number], { kind: 'refund' }> =>
+      review.kind === 'refund' && matches(review.name),
   )
-  const spend = recent
-    .filter((t) => t.kind === 'expense')
-    .reduce((s, t) => s + Math.abs(t.amountCents), 0)
-  const incomes = recent.filter((t) => t.kind === 'income').reduce((s, t) => s + t.amountCents, 0)
-  const totalPages = Math.max(1, Math.ceil(rows.length / 12)),
-    shownPage = Math.min(page, totalPages - 1)
+  const unconfirmed = new Set(
+    state.reviews.filter((review) => review.kind === 'confirmPlan').map((r) => r.purchaseId),
+  )
+  const pending = rows.filter((t) => t.status === 'pending')
+  const completed = rows.filter((t) => t.status !== 'pending')
+  const weekStart = addDays(state.today, -6)
+  const groups: { label: string; items: Transaction[] }[] = []
+  for (const t of completed.slice(0, shown)) {
+    const label = t.date >= weekStart ? 'This week' : monthLabel(t.date)
+    const group = groups.at(-1)
+    if (group?.label === label) group.items.push(t)
+    else groups.push({ label, items: [t] })
+  }
+
+  function download() {
+    const escape = (value: string) => `"${value.replace(/"/g, '""')}"`
+    const csv = [
+      'Date,Name,Category,Type,Status,Amount USD',
+      ...rows.map((t) =>
+        [
+          t.date,
+          escape(t.name),
+          escape(t.category),
+          t.kind,
+          t.status,
+          (t.amountCents / 100).toFixed(2),
+        ].join(','),
+      ),
+    ].join('\n')
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+    link.download = `worth-activity-${state.today}.csv`
+    link.click()
+    URL.revokeObjectURL(link.href)
+  }
   async function suggest() {
     setBusy(true)
     setError('')
     try {
       setProposals(await api<CategoryResult>('/transactions/categories', {}))
-    } catch (e) {
-      setError((e as Error).message)
+    } catch (failure) {
+      setError((failure as Error).message)
     } finally {
       setBusy(false)
     }
   }
-  async function update(id: string, value: string) {
+  async function setCategory(id: string, category: string) {
     setBusy(true)
     setError('')
     try {
       onUpdate(
-        await api<AppState>(
+        (await api<AppState>(
           `/transactions/${encodeURIComponent(id)}`,
-          { category: value },
+          { category },
           'PATCH',
-        ),
+        )) as AppState,
       )
-      setEdit(null)
+      setDetail(undefined)
       setProposals((prev) =>
         prev
-          ? {
-              ...prev,
-              suggestions: prev.suggestions.filter((s) => s.transactionId !== id),
-            }
+          ? { ...prev, suggestions: prev.suggestions.filter((s) => s.transactionId !== id) }
           : prev,
       )
-    } catch (e) {
-      setError((e as Error).message)
+    } catch (failure) {
+      setError((failure as Error).message)
     } finally {
       setBusy(false)
     }
   }
+
+  const row = (t: Transaction) => {
+    const purchaseId = t.source === 'purchase' ? t.id.replace(/^purchase-/, '') : undefined
+    const needsPlan = purchaseId && unconfirmed.has(purchaseId)
+    return (
+      <button
+        type="button"
+        className="row"
+        key={t.id}
+        onClick={() => (needsPlan ? onConfirmPlan(purchaseId!) : setDetail(t))}
+      >
+        <Disc icon={iconFor(t)} kind={t.kind === 'income' ? 'income' : undefined} />
+        <div className="body">
+          <div className="t">{t.name}</div>
+          <div className="s">
+            {shortDate(t.date)} ·{' '}
+            {t.source === 'purchase'
+              ? `${state.purchases.find((p) => p.id === purchaseId)?.paymentPlan?.product === 'payIn4' ? 'Pay in 4' : 'Payment'} · Worth checkout`
+              : KIND_TEXT[t.kind]}
+            {t.status === 'excluded' ? ' · not counted' : ''}
+          </div>
+          {needsPlan && (
+            <div className="pills">
+              <Pill tone="warn">Confirm your plan</Pill>
+            </div>
+          )}
+        </div>
+        <div className={`amt num${t.amountCents > 0 ? ' pos' : ''}`}>
+          {signed(t.amountCents, t.amountCents > 0)}
+        </div>
+      </button>
+    )
+  }
+  const nothing = !pending.length && !completed.length && !active.length && !refunds.length
+
   return (
-    <div className="page-enter">
-      <div className="page-heading">
-        <div>
-          <h1>Your activity.</h1>
-        </div>
-        <Button variant="secondary" onClick={onImport}>
-          <Upload size={16} /> Import activity
-        </Button>
-      </div>
-      <div className="activity-stats">
-        <div>
-          <span>Recorded expenses · 30 days</span>
-          <strong>{money(spend, true)}</strong>
-          <small>Completed spending, before refunds</small>
-        </div>
-        <div>
-          <span>Recorded income · 30 days</span>
-          <strong>{money(incomes, true)}</strong>
-          <small>Transfers are kept separate</small>
-        </div>
-        <div>
-          <span>History in your picture</span>
-          <strong>
-            {state.profile.coverageDays}
-            <em> days</em>
-          </strong>
-          <small>
-            {state.profile.source === 'demo'
-              ? 'Synthetic sample history'
-              : 'From your imported records'}
-          </small>
-        </div>
-      </div>
-      <ForeignPayments state={state} onUpdate={onUpdate} />
-      <section className="panel activity-panel">
-        <div className="activity-toolbar">
-          <div className="search-field">
-            <Search size={17} />
+    <div className="page plain">
+      <div className="wrap">
+        <h1 className="sr">Activity</h1>
+        <div className="search-row">
+          <div className="composer">
+            <Search className="ico search" aria-hidden="true" />
+            <label className="sr" htmlFor="activity-q">
+              Search activity
+            </label>
             <input
-              placeholder="Find a merchant or category"
-              aria-label="Search transactions"
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value)
-                setPage(0)
+              id="activity-q"
+              type="search"
+              placeholder="Search by name or category"
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value)
+                setShown(PAGE)
               }}
             />
           </div>
-          <select
+          <button
+            type="button"
+            className="round-btn"
             aria-label="Filter activity"
-            value={filter}
-            onChange={(e) => {
-              setFilter(e.target.value)
-              setPage(0)
-            }}
+            aria-pressed={filtersOpen}
+            aria-controls="activity-filters"
+            onClick={() => setFiltersOpen(!filtersOpen)}
           >
-            <option value="all">All activity</option>
-            <option value="expense">Spending</option>
-            <option value="income">Income</option>
-            <option value="transfer">Transfers</option>
-            <option value="refund">Refunds</option>
-          </select>
-          <Button variant="secondary" loading={busy} onClick={suggest}>
-            <Sparkles size={15} /> Review categories
-          </Button>
+            <SlidersHorizontal className="ico" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="round-btn"
+            aria-label="Download activity as CSV"
+            onClick={download}
+          >
+            <Download className="ico" aria-hidden="true" />
+          </button>
         </div>
-        {proposals && (
-          <div className="category-proposals">
-            <div className="category-proposals-heading">
-              <div>
-                <Tag tone={proposals.mode === 'anthropic' ? 'purple' : 'neutral'}>
-                  {proposals.mode === 'anthropic' ? 'AI suggestions' : 'Local categories'}
-                </Tag>
-                <p>{proposals.message}</p>
-              </div>
-              <IconButton
-                label="Close category suggestions"
-                onClick={() => setProposals(undefined)}
-              >
-                <X size={16} />
-              </IconButton>
-            </div>
-            {proposals.suggestions.length ? (
-              <div className="proposal-list">
-                {proposals.suggestions.slice(0, 10).map((s) => {
-                  const t = state.transactions.find((t) => t.id === s.transactionId)
-                  return (
-                    <div className="proposal-row" key={s.transactionId}>
-                      <span>
-                        <strong>{t?.name}</strong>
-                        <small>
-                          {t && shortDate(t.date)} · {t && money(Math.abs(t.amountCents), true)} ·{' '}
-                          {t?.category}
-                        </small>
-                      </span>
-                      <span>{s.category}</span>
-                      <Button
-                        variant="ghost"
-                        disabled={busy || t?.category === s.category}
-                        onClick={() => update(s.transactionId, s.category)}
-                      >
-                        {t?.category === s.category ? 'Already set' : 'Apply'}
-                        <Check size={14} />
-                      </Button>
-                    </div>
-                  )
-                })}
-              </div>
+        <div style={{ marginTop: 'var(--s-6)' }}>
+          <p
+            className="strong"
+            style={{ marginBottom: 'var(--s-3)', fontSize: 'var(--fs-section)' }}
+          >
+            Filter by
+          </p>
+          <div className="chips" id="activity-filters">
+            {filtersOpen ? (
+              FILTERS.map(([value, label]) => (
+                <button
+                  type="button"
+                  key={value}
+                  className={value === filter ? 'chip-filter' : 'chip-suggest'}
+                  aria-pressed={value === filter}
+                  onClick={() => {
+                    setFilter(value)
+                    setShown(PAGE)
+                    setFiltersOpen(false)
+                  }}
+                >
+                  {label}
+                </button>
+              ))
             ) : (
-              <p className="muted">No category suggestions to review.</p>
+              <button type="button" className="chip-filter" onClick={() => setFiltersOpen(true)}>
+                Type: {FILTERS.find(([value]) => value === filter)![1]}
+              </button>
             )}
-            {state.profile.source === 'import' && !state.profile.aiConsent && (
-              <Button variant="ghost" onClick={onPlan}>
-                Manage AI sharing <ArrowUpRight size={14} />
-              </Button>
-            )}
+            <button
+              type="button"
+              className="chip-suggest"
+              onClick={() => void suggest()}
+              disabled={busy}
+            >
+              Suggest categories
+            </button>
           </div>
+        </div>
+        <div style={{ marginTop: 'var(--s-6)' }}>
+          <ForeignPayments state={state} onUpdate={onUpdate} />
+        </div>
+        {error && !detail && (
+          <p className="co-error" role="alert" style={{ marginTop: 16 }}>
+            {error}
+          </p>
         )}
-        {rows.length ? (
-          <>
-            <div className="transaction-table-wrap">
-              <table className="transaction-table">
-                <thead>
-                  <tr>
-                    <th>Transaction</th>
-                    <th>Category</th>
-                    <th>Date</th>
-                    <th>Status</th>
-                    <th className="text-right">Amount</th>
-                    <th>
-                      <span className="sr-only">Edit</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.slice(shownPage * 12, shownPage * 12 + 12).map((t) => (
-                    <tr key={t.id}>
-                      <td>
-                        <span className="transaction-name">
-                          <span
-                            className="merchant-mark"
-                            style={{ background: t.color ?? '#e8ecdf' }}
-                          >
-                            {t.name.slice(0, 1)}
-                          </span>
-                          <span>
-                            <strong>{t.name}</strong>
-                            <small>
-                              {t.kind === 'transfer'
-                                ? 'Account transfer'
-                                : t.kind === 'adjustment'
-                                  ? 'PayPal balance correction'
-                                  : t.kind === 'installment'
-                                    ? 'Pay in 4 or Pay Later'
-                                    : t.source === 'purchase'
-                                      ? 'App purchase'
-                                      : t.kind === 'refund'
-                                        ? 'Refund'
-                                        : t.source === 'demo'
-                                          ? 'Demo history'
-                                          : 'PayPal import'}
-                            </small>
-                          </span>
-                        </span>
-                      </td>
-                      <td>
-                        <span className="category-pill">{t.category}</span>
-                      </td>
-                      <td>{shortDate(t.date, { year: 'numeric' })}</td>
-                      <td>
-                        <span className={`transaction-status status-${t.status}`}>{t.status}</span>
-                      </td>
-                      <td className={`transaction-amount ${t.amountCents > 0 ? 'positive' : ''}`}>
-                        {t.amountCents < 0 ? '−' : '+'}
-                        {money(Math.abs(t.amountCents), true)}
-                      </td>
-                      <td>
-                        <IconButton
-                          label={`Edit category for ${t.name} on ${t.date}`}
-                          onClick={() => {
-                            setEdit(t)
-                            setCategory(t.category)
-                            setError('')
-                          }}
-                        >
-                          <Pencil size={14} />
-                        </IconButton>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="table-pagination">
-              <span>
-                {shownPage * 12 + 1}–{Math.min((shownPage + 1) * 12, rows.length)} of {rows.length}{' '}
-                transactions
-              </span>
-              <div>
-                <IconButton
-                  label="Previous page"
-                  disabled={shownPage === 0}
-                  onClick={() => setPage(shownPage - 1)}
-                >
-                  <ChevronLeft size={17} />
-                </IconButton>
-                <span>
-                  {shownPage + 1} / {totalPages}
-                </span>
-                <IconButton
-                  label="Next page"
-                  disabled={shownPage >= totalPages - 1}
-                  onClick={() => setPage(shownPage + 1)}
-                >
-                  <ChevronRight size={17} />
-                </IconButton>
-              </div>
-            </div>
-          </>
-        ) : (
-          <EmptyState title="A clean slate.">
-            No transactions match this view. Try another search or import your activity.
+        {nothing && q && (
+          <EmptyState
+            icon={Search}
+            title={`No matches for “${query.trim()}”`}
+            action={
+              <Button variant="quiet" onClick={() => setQuery('')}>
+                Clear search
+              </Button>
+            }
+          >
+            Try a merchant name or a category.
           </EmptyState>
         )}
-      </section>
-      {error && !edit && (
-        <p className="error-text" role="alert">
-          {error}
-        </p>
-      )}
-      <Footnote>
-        History helps you estimate patterns. Your current funds are a separate confirmed snapshot;
-        these past transactions are not subtracted again.
-      </Footnote>
-      {edit && (
-        <Modal
-          open
-          onClose={() => setEdit(null)}
-          title="Give it the right place."
-          description={`${edit.name} · ${shortDate(edit.date)} · ${money(Math.abs(edit.amountCents), true)}`}
-        >
-          <form
-            onSubmit={(e) => {
-              e.preventDefault()
-              void update(edit.id, category)
-            }}
-          >
-            <Field
-              label="Spending category"
-              hint="Your daily spending estimate stays as you confirmed it. Review your plan if that estimate needs changing."
+        {nothing && !q && (
+          <div style={{ marginTop: 'var(--s-8)' }}>
+            <EmptyState
+              icon={ReceiptText}
+              title="No purchases yet"
+              action={
+                <Button variant="quiet" onClick={onAsk}>
+                  Ask about a purchase
+                </Button>
+              }
             >
-              <input
-                required
-                maxLength={80}
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                list="category-options"
-              />
-              <datalist id="category-options">
-                {[
-                  'Groceries',
-                  'Food & drink',
-                  'Transport',
-                  'Home',
-                  'Entertainment',
-                  'Software',
-                  'Health',
-                  'Shopping',
-                  'Travel',
-                  'Education',
-                  'Gifts',
-                  'Other',
-                ].map((c) => (
-                  <option key={c} value={c} />
-                ))}
-              </datalist>
-            </Field>
-            {error && (
-              <p className="error-text" role="alert">
-                {error}
-              </p>
-            )}
-            <div className="form-actions">
-              <Button variant="ghost" onClick={() => setEdit(null)} type="button">
-                Cancel
-              </Button>
-              <Button loading={busy}>Save category</Button>
+              Purchases you make through Worth show up here once.
+            </EmptyState>
+          </div>
+        )}
+        {(active.length > 0 || refunds.length > 0 || pending.length > 0) && (
+          <section aria-labelledby="pending-title">
+            <h2 className="list-head" id="pending-title">
+              Pending
+            </h2>
+            <div className="rows">
+              {active.map((purchase) => (
+                <button
+                  type="button"
+                  className="row"
+                  key={purchase.id}
+                  onClick={() => onOpenCheckout(purchase)}
+                >
+                  <Disc icon={Store} badge={Clock} />
+                  <div className="body">
+                    <div className="t">{purchase.name}</div>
+                    <div className="s">
+                      {shortDate(purchase.createdAt.slice(0, 10))} ·{' '}
+                      {purchase.status === 'created'
+                        ? 'Waiting for PayPal'
+                        : 'PayPal is confirming'}
+                    </div>
+                  </div>
+                  <div className="amt num">{signed(-purchase.amountCents)}</div>
+                </button>
+              ))}
+              {refunds.map((review) => (
+                <button
+                  type="button"
+                  className="row"
+                  key={review.refundId}
+                  onClick={() => onReviewRefund(review.purchaseId, review.refundId)}
+                >
+                  <Disc icon={RefreshCw} kind="plan" />
+                  <div className="body">
+                    <div className="t">{review.name}</div>
+                    <div className="s">
+                      <span className="soft">
+                        The store refunded {money(review.refundedCents)}. Confirm what came back to
+                        you.
+                      </span>
+                    </div>
+                    <div className="pills">
+                      <Pill tone="warn">Refund to review</Pill>
+                    </div>
+                  </div>
+                  <div className="amt num pos">{signed(review.refundedCents, true)}</div>
+                </button>
+              ))}
+              {pending.map(row)}
             </div>
-          </form>
-        </Modal>
+          </section>
+        )}
+        {groups.length > 0 && (
+          <section aria-labelledby="completed-title">
+            <h2 className="list-head" id="completed-title">
+              Completed
+            </h2>
+            {groups.map((group) => (
+              <div key={group.label} style={{ marginBottom: 'var(--s-4)' }}>
+                <h3 className="group-label">{group.label}</h3>
+                <div className="rows">{group.items.map(row)}</div>
+              </div>
+            ))}
+            {completed.length > shown && (
+              <Button variant="secondary" onClick={() => setShown(shown + PAGE)}>
+                Show more
+              </Button>
+            )}
+          </section>
+        )}
+        <p className="caption" style={{ marginTop: 'var(--s-6)' }}>
+          Past activity helps estimate your everyday spending. Your money available is the amount
+          you confirmed, so these payments are not subtracted again.
+        </p>
+      </div>
+      {detail && (
+        <TransactionDialog
+          transaction={detail}
+          busy={busy}
+          error={error}
+          onClose={() => {
+            setDetail(undefined)
+            setError('')
+          }}
+          onSave={(category) => void setCategory(detail.id, category)}
+        />
+      )}
+      {proposals && (
+        <Dialog title="Suggested categories" onClose={() => setProposals(undefined)} wide>
+          <p className="meta">{proposals.message}</p>
+          {proposals.suggestions.length ? (
+            <div className="rows">
+              {proposals.suggestions.slice(0, 10).map((s) => {
+                const t = state.transactions.find((item) => item.id === s.transactionId)
+                return (
+                  <div className="row plain" key={s.transactionId}>
+                    <div className="body">
+                      <div className="t" style={{ fontSize: 'var(--fs-body)' }}>
+                        {t?.name}
+                      </div>
+                      <div className="s">
+                        <span className="soft">
+                          {t?.category} → {s.category}
+                        </span>
+                      </div>
+                    </div>
+                    <Button
+                      variant="secondary"
+                      disabled={busy || t?.category === s.category}
+                      onClick={() => void setCategory(s.transactionId, s.category)}
+                    >
+                      {t?.category === s.category ? 'Applied' : 'Apply'}
+                    </Button>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <p className="meta">No category changes to review.</p>
+          )}
+        </Dialog>
       )}
     </div>
+  )
+}
+
+const CATEGORIES = [
+  'Groceries',
+  'Food & drink',
+  'Transport',
+  'Home',
+  'Entertainment',
+  'Software',
+  'Health',
+  'Shopping',
+  'Travel',
+  'Education',
+  'Gifts',
+  'Other',
+]
+function TransactionDialog({
+  transaction: t,
+  busy,
+  error,
+  onClose,
+  onSave,
+}: {
+  transaction: Transaction
+  busy: boolean
+  error: string
+  onClose: () => void
+  onSave: (category: string) => void
+}) {
+  const [category, setCategory] = useState(t.category)
+  return (
+    <Dialog
+      title={t.name}
+      onClose={onClose}
+      dismissible={!busy}
+      footer={
+        <>
+          {error && (
+            <p className="co-error" role="alert">
+              {error}
+            </p>
+          )}
+          <Button
+            block
+            loading={busy}
+            onClick={() => onSave(category.trim())}
+            disabled={!category.trim()}
+          >
+            Save category
+          </Button>
+          <Button variant="text" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+        </>
+      }
+    >
+      <dl className="kvlist">
+        <div>
+          <dt>Amount</dt>
+          <dd className="num">{signed(t.amountCents, t.amountCents > 0)}</dd>
+        </div>
+        <div>
+          <dt>Date</dt>
+          <dd>{shortDate(t.date, { weekday: 'short', year: 'numeric' })}</dd>
+        </div>
+        <div>
+          <dt>Type</dt>
+          <dd>{KIND_TEXT[t.kind]}</dd>
+        </div>
+        <div>
+          <dt>Status</dt>
+          <dd>
+            {t.status === 'excluded'
+              ? 'Not counted'
+              : t.status === 'pending'
+                ? 'Pending'
+                : 'Completed'}
+          </dd>
+        </div>
+      </dl>
+      <Field
+        label="Category"
+        hint="Changing a category doesn’t change your everyday spending estimate."
+      >
+        <input
+          className="input"
+          value={category}
+          maxLength={80}
+          list="category-options"
+          onChange={(event) => setCategory(event.target.value)}
+        />
+        <datalist id="category-options">
+          {CATEGORIES.map((c) => (
+            <option key={c} value={c} />
+          ))}
+        </datalist>
+      </Field>
+    </Dialog>
   )
 }

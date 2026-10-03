@@ -1,89 +1,139 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ArrowDownLeft,
-  ArrowRight,
-  ArrowUpRight,
-  CalendarDays,
-  Check,
-  ChevronRight,
-  Heart,
-  LayoutGrid,
-  Leaf,
-  Menu,
-  Plus,
-  Repeat2,
-  Settings2,
-  ShieldCheck,
+  ArrowLeft,
+  Bookmark,
+  CircleAlert,
+  FileUp,
+  House,
+  ReceiptText,
+  Settings as SettingsIcon,
+  SlidersHorizontal,
   Sparkles,
-  Wallet,
   X,
+  type LucideIcon,
 } from 'lucide-react'
-import type { AppState, Product, ScheduledFlow } from '../shared/types'
-import { assessPurchase, getUpcomingFlows } from '../shared/finance'
-import { api } from './api'
-import { cx, fullDate, money, shortDate } from './format'
-import { ArrowLink, Button, Footnote, IconButton, Logo, SectionTitle, Tag } from './ui'
-import { ForecastChart } from './ForecastChart'
-import { Assistant } from './Assistant'
-import { PlanDialog, ImportDialog } from './PlanDialogs'
-import { PurchaseDialog } from './PurchaseDialog'
+import type { Product } from '../shared/types'
 import { Activity } from './Activity'
+import { api } from './api'
+import { Ask } from './Ask'
+import { Checkout } from './Checkout'
+import type { AppState, Purchase } from './contract'
+import { Decision, type DecisionRequest, type Explanation } from './Decision'
+import { dayLabel } from './format'
+import { Home, HomeSkeleton } from './Home'
+import { ImportDialog } from './Import'
+import { PlanPage, PlanWizard } from './Plan'
+import { ConfirmPlanDialog, RefundDialog } from './Reviews'
+import { readPlanned, Saved, Settings, writePlanned } from './Saved'
+import { usePayPalSdk } from './paypal'
+import { Alert, Button, IconButton, Wordmark } from './ui'
 
-type Page = 'overview' | 'assistant' | 'activity' | 'recurring' | 'wishlist'
-const navigation = [
-  { id: 'overview', label: 'Overview', icon: LayoutGrid },
-  { id: 'assistant', label: 'Ask Worth', icon: Sparkles },
-  { id: 'activity', label: 'Activity', icon: ArrowDownLeft },
-  { id: 'recurring', label: 'Recurring', icon: Repeat2 },
-  { id: 'wishlist', label: 'Wishlist', icon: Heart },
-] as const
-function getPage(): Page {
-  const hash = window.location.hash.slice(1)
-  return navigation.some((n) => n.id === hash) ? (hash as Page) : 'overview'
+type Screen = 'home' | 'ask' | 'activity' | 'plan' | 'plan-edit' | 'saved' | 'settings' | 'decision'
+const LEGACY: Record<string, Screen> = {
+  overview: 'home',
+  assistant: 'ask',
+  recurring: 'plan',
+  wishlist: 'saved',
 }
+const NAV: { screen: Screen; label: string; icon: LucideIcon; tab: boolean }[] = [
+  { screen: 'home', label: 'Home', icon: House, tab: true },
+  { screen: 'ask', label: 'Ask', icon: Sparkles, tab: true },
+  { screen: 'activity', label: 'Activity', icon: ReceiptText, tab: true },
+  { screen: 'plan', label: 'Plan', icon: SlidersHorizontal, tab: true },
+  { screen: 'saved', label: 'Saved', icon: Bookmark, tab: false },
+]
+const DETAIL: Screen[] = ['decision', 'plan-edit', 'settings']
+
+function parseRoute(): { screen: Screen; params: URLSearchParams } {
+  const [path = '', query = ''] = window.location.hash.slice(1).split('?')
+  const screen: Screen =
+    path === 'plan/edit'
+      ? 'plan-edit'
+      : (LEGACY[path] ??
+        ((
+          ['home', 'ask', 'activity', 'plan', 'saved', 'settings', 'decision'] as string[]
+        ).includes(path)
+          ? (path as Screen)
+          : 'home'))
+  return { screen, params: new URLSearchParams(query) }
+}
+
+type CheckoutState = {
+  productId: string
+  purchaseId?: string
+  approved?: boolean
+  cancelled?: boolean
+  acknowledge?: boolean
+}
+type ReviewState =
+  { kind: 'plan'; purchaseId: string } | { kind: 'refund'; purchaseId: string; refundId: string }
 
 export default function App() {
   const [state, setState] = useState<AppState>()
-  const sessionKey = useRef<string | undefined>(undefined)
-  const stateRevision = useRef(0)
   const [error, setError] = useState('')
-  const [page, setPage] = useState<Page>(getPage)
+  const [route, setRoute] = useState(parseRoute)
   const [menu, setMenu] = useState(false)
-  const sidebar = useRef<HTMLElement>(null)
-  const [dialog, setDialog] = useState<'plan' | 'import' | null>(null)
-  const [product, setProduct] = useState<Product | null>(null)
-  const [checkoutId, setCheckoutId] = useState<string | null>(
-    new URLSearchParams(location.search).get('checkout'),
-  )
-  const [prompt, setPrompt] = useState<{ text: string; id: number }>()
-  const [conversationEpoch, setConversationEpoch] = useState(0)
   const [toast, setToast] = useState('')
-  function replaceState(next: AppState) {
-    stateRevision.current += 1
-    if (sessionKey.current && next.sessionKey && next.sessionKey !== sessionKey.current)
-      clearConversation()
-    sessionKey.current = next.sessionKey
-    setState(next)
-  }
-  async function load() {
-    const revision = stateRevision.current
+  const [checkout, setCheckout] = useState<CheckoutState>()
+  const [review, setReview] = useState<ReviewState>()
+  const [importing, setImporting] = useState(false)
+  const [prompt, setPrompt] = useState<{ text: string; id: number }>()
+  const [epoch, setEpoch] = useState(0)
+  const [explanations, setExplanations] = useState<Record<string, Explanation>>({})
+  const [returned] = useState(() => {
+    const params = new URLSearchParams(window.location.search)
+    const id = params.get('checkout')
+    return id
+      ? {
+          id,
+          approved: params.get('paypal') === 'approved',
+          cancelled: params.get('paypal') === 'cancelled',
+        }
+      : undefined
+  })
+  const sessionKey = useRef<string | undefined>(undefined)
+  const revision = useRef(0)
+  const avatar = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const sdk = usePayPalSdk(
+    state?.config.paypal === 'sandbox' ? state.config.paypalClientId : undefined,
+  )
+
+  const clearConversation = useCallback(() => {
+    setEpoch((value) => value + 1)
+    setPrompt(undefined)
+    setExplanations({})
+  }, [])
+  const replaceState = useCallback(
+    (next: AppState) => {
+      revision.current += 1
+      if (sessionKey.current && next.sessionKey && next.sessionKey !== sessionKey.current)
+        clearConversation()
+      sessionKey.current = next.sessionKey
+      setState(next)
+    },
+    [clearConversation],
+  )
+  const load = useCallback(async () => {
+    const started = revision.current
     try {
-      const next = await api<AppState>('/state')
+      const next = (await api<AppState>('/state')) as AppState
       // A slower refresh must not overwrite a completed edit or checkout.
-      if (revision !== stateRevision.current) return
+      if (started !== revision.current) return
       replaceState(next)
       setError('')
-    } catch (e) {
-      setError((e as Error).message)
+    } catch (failure) {
+      setError((failure as Error).message)
     }
-  }
+  }, [replaceState])
+
   useEffect(() => {
-    // Synchronize the initial state with the server; subsequent updates are async.
     // oxlint-disable-next-line react/set-state-in-effect
     void load()
     const onHash = () => {
-      const next = window.location.hash.slice(1)
-      if (navigation.some((item) => item.id === next)) setPage(next as Page)
+      setRoute(parseRoute())
+      setMenu(false)
+      window.scrollTo?.({ top: 0, behavior: 'instant' })
     }
     const refresh = () => {
       if (!document.hidden) void load()
@@ -91,769 +141,471 @@ export default function App() {
     window.addEventListener('hashchange', onHash)
     window.addEventListener('focus', refresh)
     document.addEventListener('visibilitychange', refresh)
-    const timer = setInterval(refresh, 60000)
+    const timer = setInterval(refresh, 60_000)
     return () => {
       window.removeEventListener('hashchange', onHash)
       window.removeEventListener('focus', refresh)
       document.removeEventListener('visibilitychange', refresh)
       clearInterval(timer)
     }
-  }, [])
+  }, [load])
+  // Back from PayPal: reopen that checkout and strip ?checkout=…&paypal=… from the URL.
+  useEffect(() => {
+    if (!returned || !state) return
+    history.replaceState(null, '', window.location.pathname + window.location.hash)
+    const purchase = state.purchases.find((p) => p.id === returned.id)
+    // oxlint-disable-next-line react/set-state-in-effect
+    if (purchase)
+      setCheckout({
+        productId: purchase.productId,
+        purchaseId: purchase.id,
+        approved: returned.approved,
+        cancelled: returned.cancelled,
+      })
+    else
+      setToast('That checkout isn’t available in this session, so its status can’t be shown here.')
+    // Runs once, when the first state arrives.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [Boolean(state)])
   useEffect(() => {
     if (!toast) return
-    const timer = setTimeout(() => setToast(''), 5000)
+    const timer = setTimeout(() => setToast(''), 6000)
     return () => clearTimeout(timer)
   }, [toast])
   useEffect(() => {
     if (!menu) return
-    const previous = document.activeElement as HTMLElement | null
-    const controls = () =>
-      Array.from(
-        sidebar.current?.querySelectorAll<HTMLElement>('a[href],button:not(:disabled)') ?? [],
-      )
-    controls()[0]?.focus()
-    const keys = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setMenu(false)
-      if (event.key === 'Tab') {
-        const items = controls(),
-          first = items[0],
-          last = items.at(-1)
-        if (event.shiftKey && document.activeElement === first) {
-          event.preventDefault()
-          last?.focus()
-        } else if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault()
-          first?.focus()
-        }
-      }
+    menuRef.current?.querySelector<HTMLElement>('a,button')?.focus()
+    const close = (event: Event) => {
+      if (event instanceof KeyboardEvent && event.key !== 'Escape') return
+      if (event instanceof MouseEvent && menuRef.current?.contains(event.target as Node)) return
+      if (event instanceof MouseEvent && avatar.current?.contains(event.target as Node)) return
+      setMenu(false)
+      avatar.current?.focus()
     }
-    document.addEventListener('keydown', keys)
+    document.addEventListener('keydown', close)
+    document.addEventListener('mousedown', close)
     return () => {
-      document.removeEventListener('keydown', keys)
-      previous?.focus()
+      document.removeEventListener('keydown', close)
+      document.removeEventListener('mousedown', close)
     }
   }, [menu])
-  const baseline = useMemo(
-    () =>
-      state
-        ? assessPurchase(state.profile, state.purchases, {
-            amountCents: 0,
-            today: state.today,
-            findEarliest: false,
-          })
-        : null,
-    [state],
-  )
-  function navigate(next: Page) {
-    setPage(next)
-    location.hash = next
+
+  const navigate = useCallback((hash: string) => {
+    if (window.location.hash === `#${hash}`) setRoute(parseRoute())
+    else window.location.hash = hash
     setMenu(false)
-    window.scrollTo({ top: 0, behavior: 'instant' })
-  }
-  function ask(text: string) {
-    setPrompt({ text, id: Date.now() })
-    navigate('assistant')
-  }
-  function clearConversation() {
-    setConversationEpoch((value) => value + 1)
-    setPrompt(undefined)
-  }
-  async function save(id: string) {
+  }, [])
+  const ask = useCallback(
+    (text?: string) => {
+      if (text) setPrompt({ text, id: Date.now() })
+      navigate('ask')
+    },
+    [navigate],
+  )
+  const openDecision = useCallback(
+    (request: DecisionRequest, explanation?: Explanation, from = 'ask') => {
+      const params = new URLSearchParams()
+      if (request.productId) params.set('product', request.productId)
+      else {
+        params.set('amount', String(request.amountCents))
+        params.set('item', request.itemName ?? 'Your purchase')
+      }
+      params.set('from', from)
+      if (explanation)
+        setExplanations((all) => ({ ...all, [JSON.stringify(request)]: explanation }))
+      navigate(`decision?${params}`)
+    },
+    [navigate],
+  )
+  const openProduct = (product: Product, from: string) =>
+    openDecision({ productId: product.id }, undefined, from)
+  const openCheckout = (purchase: Purchase) =>
+    setCheckout({ productId: purchase.productId, purchaseId: purchase.id })
+  async function saveForLater(product: Product, date?: string) {
+    if (!state) return
     try {
-      replaceState(await api<AppState>('/wishlist', { productId: id }))
-    } catch (e) {
-      setToast((e as Error).message)
+      if (!state.wishlist.includes(product.id))
+        replaceState((await api<AppState>('/wishlist', { productId: product.id })) as AppState)
+      writePlanned(product.id, date)
+      setToast(
+        date
+          ? `Saved for ${dayLabel(date)}. Check it again from Saved.`
+          : `${product.name} is in Saved.`,
+      )
+    } catch (failure) {
+      setToast((failure as Error).message)
     }
   }
-  function closePurchase() {
-    setProduct(null)
-    setCheckoutId(null)
-    if (location.search) history.replaceState(null, '', location.pathname + location.hash)
-  }
-  const active = state?.purchases.find((p) => ['created', 'pending', 'unknown'].includes(p.status))
-  const returned = state?.purchases.find((p) => p.id === checkoutId)
+
+  const { screen, params } = route
+  const decisionRequest = useMemo<DecisionRequest | undefined>(() => {
+    if (screen !== 'decision') return undefined
+    const product = params.get('product')
+    if (product) return { productId: product }
+    const amount = Number(params.get('amount'))
+    return Number.isSafeInteger(amount) && amount > 0
+      ? { amountCents: amount, itemName: (params.get('item') ?? 'Your purchase').slice(0, 150) }
+      : undefined
+  }, [screen, params])
 
   if (!state)
     return (
-      <div className="boot-screen">
-        <Logo />
-        <div className="boot-orbit">
-          <Leaf size={28} />
-        </div>
-        <h1>{error ? 'Let’s reconnect.' : 'Making room for what matters.'}</h1>
-        <p>{error || 'Getting your financial picture ready…'}</p>
-        {error && <Button onClick={load}>Try again</Button>}
-      </div>
-    )
-  const upcoming = getUpcomingFlows(state.profile, state.today, 30)
-  const expenses = upcoming.filter((e) => e.flow.kind !== 'income')
-  const incoming = upcoming.filter((e) => e.flow.kind === 'income')
-  const totalBills = expenses.reduce((s, e) => s + e.flow.amountCents, 0)
-  const subscriptions = expenses.filter((e) => e.flow.kind === 'subscription')
-  const navLabel = navigation.find((n) => n.id === page)!.label
-  return (
-    <div className="app-shell">
-      <a className="skip-link" href="#main">
-        Skip to content
-      </a>
-      {menu && (
-        <button
-          className="nav-scrim"
-          aria-label="Close navigation"
-          onClick={() => setMenu(false)}
-        />
-      )}
-      <aside ref={sidebar} className={cx('sidebar', menu && 'open')} aria-label="Main sidebar">
-        <a
-          className="brand-link"
-          href="#overview"
-          aria-label="Worth overview"
-          onClick={() => navigate('overview')}
-        >
-          <Logo />
-        </a>
-        <nav aria-label="Main navigation">
-          {navigation.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              onClick={() => navigate(id)}
-              className={cx('nav-item', page === id && 'active')}
-              aria-current={page === id ? 'page' : undefined}
-            >
-              <Icon size={19} strokeWidth={1.7} />
-              <span>{label}</span>
-              {id === 'assistant' && <span className="nav-new">AI</span>}
-              {id === 'wishlist' && <span className="nav-count">{state.wishlist.length}</span>}
-            </button>
-          ))}
-        </nav>
-        <div className="sidebar-bottom">
-          <button
-            className="nav-item"
-            aria-label="Import PayPal activity"
-            onClick={() => setDialog('import')}
-          >
-            <ArrowDownLeft size={18} />
-            <span>Import activity</span>
-          </button>
-          <button className="nav-item" onClick={() => setDialog('plan')}>
-            <Settings2 size={18} />
-            <span>Your plan</span>
-          </button>
-          <div className="account">
-            <span className="avatar">{state.profile.name.slice(0, 1).toUpperCase()}</span>
-            <div>
-              <strong>{state.profile.name}</strong>
-              <small>
-                {state.profile.source === 'demo' ? 'Demo profile' : 'Your personal plan'}
-              </small>
-            </div>
-            <ShieldCheck size={16} />
-          </div>
-        </div>
-      </aside>
-      <div className="main-shell" inert={menu || undefined}>
+      <div>
         <header className="topbar">
-          <div className="topbar-left">
-            <IconButton
-              label="Open navigation"
-              className="mobile-menu"
-              onClick={() => setMenu(true)}
-            >
-              <Menu size={21} />
-            </IconButton>
-            <span className="breadcrumb">
-              Worth <ChevronRight size={13} />
-              <strong>{navLabel}</strong>
-            </span>
-          </div>
-          <div className="topbar-right">
-            <span className="today-label">
-              {shortDate(state.today, { weekday: 'short', year: 'numeric' })}
-            </span>
-            <Tag dot tone={state.profile.source === 'demo' ? 'amber' : 'green'}>
-              {state.profile.source === 'demo' ? 'Demo data' : 'Imported history'}
-            </Tag>
-            <button
-              className="profile-button"
-              onClick={() => setDialog('plan')}
-              aria-label="Edit your financial plan"
-            >
-              {state.profile.name.slice(0, 1).toUpperCase()}
-            </button>
+          <div className="in">
+            <Wordmark />
           </div>
         </header>
-        <main id="main" className="main-content" tabIndex={-1}>
-          {error && (
-            <div className="notice notice-warning review-banner" role="alert">
-              <div>
-                <strong>Your plan couldn’t refresh.</strong>
-                <span>{error} Showing your last loaded picture.</span>
-              </div>
-              <Button variant="secondary" onClick={load}>
-                Try again
-              </Button>
-            </div>
-          )}
-          {checkoutId && !returned && (
-            <div className="notice notice-warning review-banner">
-              <div>
-                <strong>This checkout isn’t available in this session.</strong>
-                <span>
-                  It may have expired or belong to another session. Its payment status cannot be
-                  confirmed here.
-                </span>
-              </div>
-              <Button variant="secondary" onClick={closePurchase}>
-                Back to your plan
-              </Button>
-            </div>
-          )}
-          {!state.profile.confirmed && (
-            <div className="notice notice-warning review-banner">
-              <div>
-                <strong>Your picture needs a few details.</strong>
-                <span>
-                  Confirm your available funds, income and bills before making a decision.
-                </span>
-              </div>
-              <Button variant="secondary" onClick={() => setDialog('plan')}>
-                Review your plan <ArrowRight size={15} />
-              </Button>
-            </div>
-          )}
-          {active && !product && !checkoutId && (
-            <div className="notice review-banner">
-              <div>
-                <strong>There’s a checkout to finish.</strong>
-                <span>
-                  {active.name} · {money(active.amountCents, true)} remains allocated until it’s
-                  resolved.
-                </span>
-              </div>
-              <Button variant="secondary" onClick={() => setCheckoutId(active.id)}>
-                Review checkout
-              </Button>
-            </div>
-          )}
-          {page === 'overview' && baseline && (
-            <div className="page-enter">
-              <div className="page-heading">
-                <div>
-                  <h1>
-                    Make room for <span className="serif-accent">what matters.</span>
-                  </h1>
-                </div>
-                <Button
-                  variant="secondary"
-                  className="heading-action"
-                  onClick={() => setDialog('plan')}
-                >
-                  <Settings2 size={16} /> Your plan
-                </Button>
-              </div>
-              <div className="hero-grid">
-                <section className="ask-hero">
-                  <div className="hero-grain" />
-                  <span className="hero-label">
-                    <span className="ai-spark">
-                      <Sparkles size={16} />
-                    </span>{' '}
-                    ASK WORTH
+        <main id="main">
+          {error ? (
+            <div className="page plain">
+              <div className="wrap narrow">
+                <div className="tile empty" role="alert">
+                  <span className="co-icon bad" aria-hidden="true">
+                    <CircleAlert className="ico" />
                   </span>
-                  <h2>Can I afford it?</h2>
-                  <p>Your bills, spending and cushion. Already considered.</p>
-                  <QuestionBox onAsk={ask} placeholder="Can I afford a $1,199 camera?" light />
-                  <div className="hero-prompt-links">
-                    <button onClick={() => ask('How much can I afford to spend today?')}>
-                      What can I spend? <ArrowUpRight size={12} />
-                    </button>
-                    <button onClick={() => ask('What subscriptions are coming up?')}>
-                      What’s coming up? <ArrowUpRight size={12} />
-                    </button>
-                  </div>
-                  <span className="hero-loop" aria-hidden="true" />
-                </section>
-                <section className="possibility-card">
-                  <div
-                    className="possibility-photo"
-                    style={{
-                      backgroundImage: `url(${state.products[0]?.image})`,
-                    }}
-                  />
-                  <div className="possibility-content">
-                    <Tag>ON YOUR RADAR</Tag>
-                    <h3>
-                      A little less noise.
-                      <br />A little more you.
-                    </h3>
-                    <button
-                      className="round-link"
-                      onClick={() => setProduct(state.products[0]!)}
-                      aria-label="Check if studio headphones fit your plan"
-                    >
-                      <ArrowUpRight size={22} />
-                    </button>
-                    <span>
-                      Studio headphones <b>{money(state.products[0]?.priceCents ?? 0)}</b>
-                    </span>
-                  </div>
-                </section>
-              </div>
-              <div className="stat-grid">
-                <Stat
-                  label="Available funds"
-                  value={money(state.profile.balanceCents)}
-                  icon={<Wallet size={18} />}
-                  note={
-                    state.profile.confirmed
-                      ? `Confirmed snapshot · ${shortDate(state.profile.snapshotDate)}`
-                      : 'Confirm your current balance'
-                  }
-                  onClick={() => setDialog('plan')}
-                />
-                <Stat
-                  label="Upcoming commitments"
-                  value={money(totalBills, true)}
-                  icon={<CalendarDays size={18} />}
-                  note={`${expenses.length} bills & subscriptions · next 30 days`}
-                  onClick={() => navigate('recurring')}
-                />
-                <Stat
-                  label="Room for a purchase"
-                  value={
-                    baseline.outcome === 'incomplete'
-                      ? 'Needs review'
-                      : money(baseline.maxAffordableCents, true)
-                  }
-                  icon={<Leaf size={18} />}
-                  note={
-                    baseline.outcome === 'incomplete'
-                      ? 'Complete your picture first'
-                      : baseline.outcome === 'tight'
-                        ? 'Your baseline already crosses the cushion'
-                        : `Preserving your ${money(baseline.cushionCents)} cushion`
-                  }
-                  green={baseline.outcome === 'fits'}
-                  onClick={() => ask('How much can I afford to spend today?')}
-                />
-              </div>
-              <div className="insights-grid">
-                <section className="panel cashflow-panel">
-                  <SectionTitle title="Your next 30 days">
-                    <Tag tone={baseline.outcome === 'fits' ? 'green' : 'amber'} dot>
-                      {baseline.outcome === 'fits'
-                        ? 'Cushion protected'
-                        : baseline.outcome === 'incomplete'
-                          ? 'Review needed'
-                          : 'Cushion under pressure'}
-                    </Tag>
-                  </SectionTitle>
-                  <div className="chart-summary">
-                    <strong>{money(baseline.baselineLowestCents, true)}</strong>
-                    <span>
-                      projected low point <b>on {shortDate(baseline.lowestDate)}</b>
-                    </span>
-                    <span className="chart-key">
-                      <i /> Your plan
-                    </span>
-                  </div>
-                  <ForecastChart assessment={baseline} showPurchase={false} />
-                  <div className="chart-footer">
-                    <span>
-                      <ShieldCheck size={14} />
-                      {money(state.profile.cushionCents)} protected cushion
-                    </span>
-                    <ArrowLink onClick={() => setDialog('plan')}>Check assumptions</ArrowLink>
-                  </div>
-                </section>
-                <section className="panel upcoming-panel">
-                  <SectionTitle title="Coming up">
-                    <ArrowLink onClick={() => navigate('recurring')}>View all</ArrowLink>
-                  </SectionTitle>
-                  <div className="flow-list">
-                    {expenses.slice(0, 4).map(({ flow, date }) => (
-                      <FlowRow key={`${flow.id}-${date}`} flow={flow} date={date} />
-                    ))}
-                  </div>
-                  {!expenses.length && (
-                    <p className="muted">
-                      No bills recorded. Add anything paid outside PayPal too.
-                    </p>
-                  )}
-                  <div className="payday-note">
-                    <span className="payday-icon">
-                      <ArrowDownLeft size={19} />
-                    </span>
-                    <div>
-                      <strong>{incoming[0] ? 'Next income' : 'Add expected income'}</strong>
-                      <p>
-                        {incoming[0]
-                          ? `${money(incoming[0].flow.amountCents)} expected ${shortDate(incoming[0].date)}`
-                          : 'Add your next expected income.'}
-                      </p>
-                    </div>
-                  </div>
-                </section>
-              </div>
-              <section className="recent-section">
-                <SectionTitle title="Recent activity">
-                  <ArrowLink onClick={() => navigate('activity')}>All activity</ArrowLink>
-                </SectionTitle>
-                <div className="recent-grid">
-                  {state.transactions.slice(0, 3).map((t) => (
-                    <div className="recent-card" key={t.id}>
-                      <MerchantMark name={t.name} color={t.color} />
-                      <div>
-                        <strong>{t.name}</strong>
-                        <small>
-                          {t.category} · {shortDate(t.date)}
-                        </small>
-                      </div>
-                      <b>
-                        {t.amountCents < 0 ? '−' : '+'}
-                        {money(Math.abs(t.amountCents), true)}
-                      </b>
-                    </div>
-                  ))}
+                  <h1 className="h-section">Worth couldn’t load your plan</h1>
+                  <p className="meta">{error}</p>
+                  <Button onClick={() => void load()}>Try again</Button>
                 </div>
-              </section>
+              </div>
             </div>
+          ) : (
+            <HomeSkeleton />
           )}
-          <div hidden={page !== 'assistant'}>
-            <Assistant
-              key={conversationEpoch}
-              state={state}
-              initialPrompt={prompt}
-              onPlan={() => setDialog('plan')}
-              onProduct={setProduct}
-              onSessionChange={() => void load()}
-              onUpdate={replaceState}
-              visible={page === 'assistant'}
-            />
-          </div>
-          {page === 'activity' && (
-            <Activity
-              state={state}
-              onUpdate={replaceState}
-              onImport={() => setDialog('import')}
-              onPlan={() => setDialog('plan')}
-            />
-          )}
-          {page === 'recurring' && (
-            <div className="page-enter">
-              <PageHeading
-                title="What’s coming up."
-                text="Income, bills and renewals. All in view."
-                action={
-                  <Button onClick={() => setDialog('plan')}>
-                    <Plus size={16} /> Manage your plan
-                  </Button>
-                }
-              />
-              <div className="recurring-summary">
-                <div>
-                  <span className="eyebrow">NEXT 30 DAYS</span>
-                  <strong>{money(totalBills, true)}</strong>
-                  <p>Bills & subscriptions</p>
-                </div>
-                <div>
-                  <span className="eyebrow">YOUR SUBSCRIPTIONS</span>
-                  <strong>
-                    {money(
-                      subscriptions.reduce((s, e) => s + e.flow.amountCents, 0),
-                      true,
-                    )}
-                  </strong>
-                  <p>{subscriptions.length} upcoming renewals</p>
-                </div>
-                <span className="recurring-art" aria-hidden="true">
-                  <Repeat2 size={65} strokeWidth={1} />
-                </span>
-              </div>
-              <div className="recurring-grid">
-                {upcoming.map(({ flow, date }) => (
-                  <button
-                    className="panel recurring-card"
-                    key={`${flow.id}-${date}`}
-                    onClick={() => setDialog('plan')}
-                  >
-                    <div className="recurring-card-top">
-                      <MerchantMark name={flow.name} color={flow.color} />
-                      <Tag
-                        tone={
-                          flow.kind === 'income' ? 'green' : flow.confirmed ? 'neutral' : 'amber'
-                        }
-                      >
-                        {flow.kind === 'income'
-                          ? 'Income'
-                          : flow.confirmed
-                            ? flow.cadence
-                            : 'Needs review'}
-                      </Tag>
-                    </div>
-                    <h3>{flow.name}</h3>
-                    <strong className={flow.kind === 'income' ? 'positive' : ''}>
-                      {flow.kind === 'income' ? '+' : ''}
-                      {money(flow.amountCents, true)}
-                    </strong>
-                    <div className="recurring-card-bottom">
-                      <span>{fullDate(date)}</span>
-                      <ArrowUpRight size={16} />
-                    </div>
-                  </button>
-                ))}
-              </div>
-              <Footnote>
-                Changes here update your forecast. Manage actual subscriptions with the provider.
-              </Footnote>
-            </div>
-          )}
-          {page === 'wishlist' && (
-            <div className="page-enter">
-              <PageHeading
-                title="Worth planning for."
-                text="Find the right moment for something you love."
-                action={
-                  <Button
-                    variant="secondary"
-                    onClick={() => ask('I want to check a custom purchase.')}
-                  >
-                    <Plus size={16} /> Check something else
-                  </Button>
-                }
-              />
-              <div className="wishlist-note">
-                <Heart size={17} />
-                <span>{state.wishlist.length} saved · Demo store · Total prices in USD</span>
-              </div>
-              <div className="product-grid">
-                {state.products.map((p) => (
-                  <ProductCard
-                    key={p.id}
-                    product={p}
-                    saved={state.wishlist.includes(p.id)}
-                    onSave={() => save(p.id)}
-                    onOpen={() => setProduct(p)}
-                  />
-                ))}
-              </div>
-              <Footnote>Sandbox checkout only. No goods are sold or shipped.</Footnote>
-            </div>
-          )}
-          <footer className="app-footer">
-            <span>
-              {state.profile.source === 'demo' ? 'Synthetic history' : 'Imported history'} ·{' '}
-              {state.config.paypal === 'sandbox' ? 'PayPal sandbox' : 'Simulated checkout'}
-              <i />
-              Conditional estimates, based on your plan.
-            </span>
-          </footer>
         </main>
       </div>
-      {dialog === 'plan' && (
-        <PlanDialog
+    )
+
+  const detail = DETAIL.includes(screen)
+  const current: Screen =
+    screen === 'decision'
+      ? ((params.get('from') as Screen) ?? 'ask')
+      : screen === 'plan-edit'
+        ? 'plan'
+        : screen
+  const sample = state.profile.source === 'demo' ? 'Sample data' : 'Your data'
+  const env = `${sample} · Claude ${state.config.ai === 'anthropic' ? 'live' : 'off'} · PayPal ${state.config.paypal === 'sandbox' ? 'sandbox' : 'simulated'}`
+  const decisionProduct = decisionRequest?.productId
+    ? state.products.find((p) => p.id === decisionRequest.productId)
+    : undefined
+  const from = (params.get('from') ?? 'ask') as Screen
+  const backTo: Screen =
+    screen === 'decision'
+      ? ['home', 'saved', 'ask'].includes(from)
+        ? from
+        : 'ask'
+      : screen === 'plan-edit'
+        ? 'plan'
+        : 'home'
+  const backLabel = `Back to ${NAV.find((n) => n.screen === backTo)?.label ?? 'Home'}`
+  const mobileTitle =
+    screen === 'decision'
+      ? (decisionProduct?.name ?? decisionRequest?.itemName ?? 'Your options')
+      : screen === 'plan-edit'
+        ? 'Edit your plan'
+        : 'Settings and privacy'
+  const checkoutProduct = checkout && state.products.find((p) => p.id === checkout.productId)
+
+  return (
+    <div className={detail ? 'detail' : undefined}>
+      <a
+        className="skip"
+        href="#main"
+        onClick={(event) => {
+          event.preventDefault()
+          document.getElementById('main')?.focus()
+        }}
+      >
+        Skip to content
+      </a>
+      <header className="topbar">
+        <div className="in">
+          <IconButton
+            className="back"
+            label={backLabel}
+            icon={ArrowLeft}
+            onClick={() => navigate(backTo)}
+          />
+          <p className="mtitle">{mobileTitle}</p>
+          <Wordmark />
+          <nav className="nav" aria-label="Main">
+            {NAV.map((item) => (
+              <a
+                key={item.screen}
+                href={`#${item.screen}`}
+                aria-current={current === item.screen ? 'page' : undefined}
+              >
+                {item.label}
+              </a>
+            ))}
+          </nav>
+          <div className="right">
+            <span className="env d">{env}</span>
+            <span className="env show-m">{sample}</span>
+            <a className="icon-btn hide-m" href="#settings" aria-label="Settings and privacy">
+              <SettingsIcon className="ico" strokeWidth={1.75} aria-hidden="true" />
+            </a>
+            <button
+              ref={avatar}
+              type="button"
+              className="avatar-btn"
+              aria-label={`${state.profile.name} account menu`}
+              aria-expanded={menu}
+              aria-haspopup="true"
+              onClick={() => setMenu(!menu)}
+            >
+              <span className="avatar" aria-hidden="true">
+                {state.profile.name.slice(0, 1).toUpperCase()}
+              </span>
+            </button>
+            {menu && (
+              <div className="menu" ref={menuRef} role="menu" aria-label="Account">
+                <div className="menu-head">
+                  <div className="strong" style={{ fontWeight: 700 }}>
+                    {state.profile.name}
+                  </div>
+                  <div className="caption">{env}</div>
+                </div>
+                {NAV.filter((item) => !item.tab || true).map((item) => (
+                  <a
+                    key={item.screen}
+                    role="menuitem"
+                    className={item.tab ? 'show-t' : undefined}
+                    href={`#${item.screen}`}
+                  >
+                    <item.icon className="ico" aria-hidden="true" />
+                    {item.label}
+                  </a>
+                ))}
+                <a role="menuitem" href="#plan/edit">
+                  <SlidersHorizontal className="ico" aria-hidden="true" />
+                  Edit your plan
+                </a>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenu(false)
+                    setImporting(true)
+                  }}
+                >
+                  <FileUp className="ico" aria-hidden="true" />
+                  Import PayPal activity
+                </button>
+                <a role="menuitem" href="#settings">
+                  <SettingsIcon className="ico" aria-hidden="true" />
+                  Settings and privacy
+                </a>
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+      <main id="main" tabIndex={-1}>
+        {error && (
+          <div className="wrap" style={{ paddingBottom: 0 }}>
+            <Alert tone="warn" icon={CircleAlert}>
+              <b>Your plan couldn’t refresh.</b> {error} Showing what was last loaded.{' '}
+              <button type="button" className="link" onClick={() => void load()}>
+                Try again
+              </button>
+            </Alert>
+          </div>
+        )}
+        {screen === 'home' && (
+          <Home
+            state={state}
+            onAsk={ask}
+            onNavigate={navigate}
+            onOpenProduct={(product) => openProduct(product, 'home')}
+            onEditPlan={() => navigate('plan/edit')}
+            onOpenCheckout={openCheckout}
+            onConfirmPlan={(purchaseId) => setReview({ kind: 'plan', purchaseId })}
+            onReviewRefund={(purchaseId, refundId) =>
+              setReview({ kind: 'refund', purchaseId, refundId })
+            }
+          />
+        )}
+        <div hidden={screen !== 'ask'}>
+          <Ask
+            key={epoch}
+            state={state}
+            initialPrompt={prompt}
+            visible={screen === 'ask'}
+            onUpdate={replaceState}
+            onSessionChange={() => void load()}
+            onOpenDecision={(request, explanation) => openDecision(request, explanation, 'ask')}
+            onOpenCheckout={(purchaseId) => {
+              const purchase = state.purchases.find((p) => p.id === purchaseId)
+              if (purchase) openCheckout(purchase)
+              else void load()
+            }}
+            onNavigate={navigate}
+          />
+        </div>
+        {screen === 'decision' &&
+          (decisionRequest ? (
+            <Decision
+              key={JSON.stringify(decisionRequest)}
+              state={state}
+              request={decisionRequest}
+              explanation={explanations[JSON.stringify(decisionRequest)]}
+              instance={sdk.instance}
+              backLabel={backLabel}
+              onBack={() => navigate(backTo)}
+              onBuy={(product, acknowledge) => {
+                const active = state.purchases.find(
+                  (p) =>
+                    p.productId === product.id &&
+                    ['created', 'pending', 'unknown'].includes(p.status),
+                )
+                setCheckout({ productId: product.id, purchaseId: active?.id, acknowledge })
+              }}
+              onSave={(product, date) => void saveForLater(product, date)}
+              onEditPlan={() => navigate('plan/edit')}
+            />
+          ) : (
+            <div className="page plain">
+              <div className="wrap narrow">
+                <Alert tone="warn" icon={CircleAlert}>
+                  This comparison link is incomplete. <a href="#ask">Ask about a purchase</a>
+                </Alert>
+              </div>
+            </div>
+          ))}
+        {screen === 'activity' && (
+          <Activity
+            state={state}
+            onUpdate={replaceState}
+            onAsk={() => ask()}
+            onOpenCheckout={openCheckout}
+            onConfirmPlan={(purchaseId) => setReview({ kind: 'plan', purchaseId })}
+            onReviewRefund={(purchaseId, refundId) =>
+              setReview({ kind: 'refund', purchaseId, refundId })
+            }
+          />
+        )}
+        {screen === 'plan' && (
+          <PlanPage
+            state={state}
+            onEdit={(step) => navigate(`plan/edit?step=${step}`)}
+            onImport={() => setImporting(true)}
+          />
+        )}
+        {screen === 'plan-edit' && (
+          <PlanWizard
+            key={state.sessionKey}
+            state={state}
+            initialStep={Number(params.get('step') ?? 0)}
+            onClose={() => navigate('plan')}
+            onSaved={(next) => {
+              replaceState(next)
+              setToast('Your plan is up to date.')
+              navigate('plan')
+            }}
+          />
+        )}
+        {screen === 'saved' && (
+          <Saved
+            state={state}
+            onOpen={(product) => openProduct(product, 'saved')}
+            onUpdate={replaceState}
+            onToast={setToast}
+            key={JSON.stringify(readPlanned())}
+          />
+        )}
+        {screen === 'settings' && (
+          <Settings
+            state={state}
+            onUpdate={replaceState}
+            onReset={(next) => {
+              clearConversation()
+              replaceState(next)
+              setToast('Your data was deleted. Worth is showing the sample profile again.')
+              navigate('home')
+            }}
+            onEditPlan={(step) => navigate(`plan/edit?step=${step}`)}
+            onImport={() => setImporting(true)}
+          />
+        )}
+      </main>
+      <nav className="tabbar" aria-label="Main">
+        {NAV.filter((item) => item.tab).map((item) => (
+          <a
+            key={item.screen}
+            href={`#${item.screen}`}
+            aria-current={current === item.screen ? 'page' : undefined}
+          >
+            <item.icon className="ico" strokeWidth={2} aria-hidden="true" />
+            {item.label}
+          </a>
+        ))}
+      </nav>
+      {checkout && checkoutProduct && (
+        <Checkout
+          key={`${checkout.productId}-${checkout.purchaseId ?? 'new'}`}
           state={state}
-          onClose={() => setDialog(null)}
-          onReset={clearConversation}
-          onUpdate={(s) => {
-            replaceState(s)
+          product={checkoutProduct}
+          purchaseId={checkout.purchaseId}
+          returnedApproved={checkout.approved}
+          returnedCancelled={checkout.cancelled}
+          acknowledge={checkout.acknowledge}
+          instance={sdk.instance}
+          sdkStatus={sdk.status}
+          onClose={() => setCheckout(undefined)}
+          onUpdate={replaceState}
+          onViewActivity={() => {
+            setCheckout(undefined)
+            navigate('activity')
+          }}
+          onConfirmPlan={(purchaseId) => {
+            setCheckout(undefined)
+            setReview({ kind: 'plan', purchaseId })
+          }}
+          onEditPlan={() => {
+            setCheckout(undefined)
+            navigate('plan/edit')
+          }}
+        />
+      )}
+      {review?.kind === 'plan' && (
+        <ConfirmPlanDialog
+          state={state}
+          purchaseId={review.purchaseId}
+          onClose={() => setReview(undefined)}
+          onUpdate={(next) => {
+            replaceState(next)
             setToast('Your plan is up to date.')
           }}
         />
       )}
-      {dialog === 'import' && (
-        <ImportDialog
+      {review?.kind === 'refund' && (
+        <RefundDialog
           state={state}
-          onClose={() => setDialog(null)}
-          onUpdate={(s) => {
-            clearConversation()
-            replaceState(s)
-          }}
-          onReview={() => setDialog('plan')}
+          purchaseId={review.purchaseId}
+          refundId={review.refundId}
+          onClose={() => setReview(undefined)}
+          onUpdate={replaceState}
         />
       )}
-      {(product || returned) && (
-        <PurchaseDialog
+      {importing && (
+        <ImportDialog
           state={state}
-          product={product ?? state.products.find((p) => p.id === returned?.productId)!}
-          existingPurchase={returned}
-          onClose={closePurchase}
-          onUpdate={replaceState}
-          onPlan={() => {
-            closePurchase()
-            setDialog('plan')
+          onClose={() => setImporting(false)}
+          onUpdate={(next) => {
+            clearConversation()
+            replaceState(next)
           }}
+          onReview={() => navigate('plan/edit')}
         />
       )}
       {toast && (
         <div className="toast" role="status">
-          <Check size={17} />
           {toast}
-          <IconButton label="Dismiss notification" onClick={() => setToast('')}>
-            <X size={15} />
-          </IconButton>
+          <IconButton label="Dismiss" icon={X} onClick={() => setToast('')} />
         </div>
       )}
     </div>
-  )
-}
-
-export function PageHeading({
-  eyebrow,
-  title,
-  text,
-  action,
-}: {
-  eyebrow?: string
-  title: string
-  text: string
-  action?: React.ReactNode
-}) {
-  return (
-    <div className="page-heading">
-      <div>
-        {eyebrow && <span className="eyebrow">{eyebrow}</span>}
-        <h1>{title}</h1>
-        <p>{text}</p>
-      </div>
-      {action}
-    </div>
-  )
-}
-export function QuestionBox({
-  onAsk,
-  placeholder,
-  light = false,
-}: {
-  onAsk: (text: string) => void
-  placeholder: string
-  light?: boolean
-}) {
-  const [value, setValue] = useState('')
-  return (
-    <form
-      className={cx('question-box', light && 'light')}
-      onSubmit={(e) => {
-        e.preventDefault()
-        onAsk(value.trim() || placeholder)
-        setValue('')
-      }}
-    >
-      <Sparkles size={18} />
-      <input
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        placeholder={placeholder}
-        aria-label="Ask Worth a purchase question"
-        maxLength={2000}
-      />
-      <button aria-label="Ask Worth" type="submit">
-        <ArrowUpRight size={20} />
-      </button>
-    </form>
-  )
-}
-function Stat({
-  label,
-  value,
-  note,
-  icon,
-  green,
-  onClick,
-}: {
-  label: string
-  value: string
-  note: string
-  icon: React.ReactNode
-  green?: boolean
-  onClick: () => void
-}) {
-  return (
-    <button className={cx('stat-card', green && 'stat-green')} onClick={onClick}>
-      <div>
-        <span>{label}</span>
-        <span className="stat-icon">{icon}</span>
-      </div>
-      <strong>{value}</strong>
-      <small>
-        {green && <span className="status-dot" />}
-        {note}
-      </small>
-    </button>
-  )
-}
-export function MerchantMark({ name, color }: { name: string; color?: string }) {
-  return (
-    <span className="merchant-mark" style={{ background: color ?? '#e7ebdf' }}>
-      {name.slice(0, 1).toUpperCase()}
-    </span>
-  )
-}
-export function FlowRow({ flow, date }: { flow: ScheduledFlow; date: string }) {
-  return (
-    <div className="flow-row">
-      <MerchantMark name={flow.name} color={flow.color} />
-      <div>
-        <strong>{flow.name}</strong>
-        <small>
-          {shortDate(date)} ·{' '}
-          {flow.kind === 'subscription'
-            ? 'Subscription'
-            : flow.kind === 'income'
-              ? 'Expected income'
-              : flow.kind === 'installment'
-                ? 'Instalment'
-                : 'Bill'}
-        </small>
-      </div>
-      <b>
-        {flow.kind === 'income' ? '+' : ''}
-        {money(flow.amountCents, true)}
-      </b>
-    </div>
-  )
-}
-function ProductCard({
-  product: p,
-  saved,
-  onSave,
-  onOpen,
-}: {
-  product: Product
-  saved: boolean
-  onSave: () => void
-  onOpen: () => void
-}) {
-  return (
-    <article className="product-card">
-      <div className="product-photo" style={{ background: p.color }}>
-        <button className="product-open" onClick={onOpen} aria-label={`Assess ${p.name}`}>
-          <img
-            src={p.image}
-            alt={p.name}
-            style={{ objectPosition: p.id === 'chair' ? '50% 70%' : undefined }}
-          />
-        </button>
-        <IconButton
-          label={saved ? `Remove ${p.name} from wishlist` : `Save ${p.name}`}
-          className={cx('save-button', saved && 'saved')}
-          onClick={onSave}
-        >
-          <Heart size={18} fill={saved ? 'currentColor' : 'none'} />
-        </IconButton>
-        <span className="product-category">{p.category}</span>
-      </div>
-      <div className="product-info">
-        <div>
-          <h3>{p.name}</h3>
-          <strong>{money(p.priceCents)}</strong>
-        </div>
-        <p>{p.description}</p>
-        <Button variant="secondary" onClick={onOpen}>
-          Does it fit my plan? <ArrowUpRight size={16} />
-        </Button>
-      </div>
-    </article>
   )
 }
