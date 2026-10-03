@@ -41,7 +41,7 @@ function allowedAmounts(data: GradeData, a: Assessment | undefined, reply: ChatR
   const allowed = new Set<number>([data.profile.cushionCents, data.profile.dailySpendCents])
   const flows = getUpcomingFlows(data.profile, data.today, 60)
   for (const { flow } of flows) allowed.add(flow.amountCents)
-  for (const kinds of [['subscription'], ['bill'], ['subscription', 'bill']]) {
+  for (const kinds of [['subscription'], ['bill'], ['subscription', 'bill', 'installment']]) {
     const within = getUpcomingFlows(data.profile, data.today, 30).filter(({ flow }) =>
       kinds.includes(flow.kind),
     )
@@ -162,8 +162,10 @@ function advice(texts: string[], verb: RegExp, needs?: RegExp) {
   return [...new Set(found)]
 }
 export const billAdvice = (texts: string[]) => advice(texts, SKIP_VERB, OBLIGATION)
+// Recommending credit needs a verb ("use a credit card", "take out a loan"); a bill named
+// "Student loan" in a list of commitments is not advice.
 const CREDIT =
-  /\b(?:(?:use|put it on|try) )?(?:a )?(?:credit card|credit|loans?|borrow(?:ing)?|financ(?:e|ing)|buy now,? pay later|pay later|pay in (?:4|four)|instal+ments?)\b/gi
+  /\b(?:use|using|put(?:ting)? (?:it |this )?on|take out|taking out|get|getting|apply(?:ing)? for|try|trying|consider|considering|open|opening|go with|pay (?:it |this )?with|split(?:ting)? (?:it|this|the cost|the payment)(?: into)?)\s+(?:a |an |your |some )?(?:credit cards?|credit|loans?|financing|buy now,? pay later|pay later|pay in (?:4|four)|instal+ments?|(?:four|4) payments)\b|\bborrow(?:ing)?\b/gi
 const creditAdvice = (texts: string[]) => advice(texts, CREDIT)
 
 export function gradeReply(reply: ChatReply, expect: Expectation, data: GradeData): Grade {
