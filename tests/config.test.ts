@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import request from 'supertest'
 import { createApp } from '../server/app.ts'
 import { allowedOrigins, ConfigError, loadConfig } from '../server/config.ts'
@@ -81,6 +81,53 @@ describe('deployment configuration', () => {
     expect((await write('http://localhost:5173')).status).toBe(200)
     expect((await write('http://127.0.0.1:5174')).status).toBe(403)
     expect((await write('https://attacker.example')).status).toBe(403)
+    store.close()
+  })
+})
+
+describe('hosted PayPal return', () => {
+  afterEach(() => vi.unstubAllGlobals())
+  it('sends buyers back to the Render origin when only RENDER_EXTERNAL_URL is set', async () => {
+    const origin = 'https://worth.onrender.com'
+    const bodies: { return_url?: string; cancel_url?: string }[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith('/v1/oauth2/token'))
+          return Response.json({ access_token: 'stub', expires_in: 3600 })
+        if (!url.endsWith('/v2/checkout/orders')) throw new Error(`Unexpected call to ${url}`)
+        const body = JSON.parse(String(init!.body))
+        bodies.push(body.payment_source.paypal.experience_context)
+        return Response.json({
+          id: 'ORDER1',
+          status: 'PAYER_ACTION_REQUIRED',
+          purchase_units: [{ ...body.purchase_units[0], payee: { merchant_id: 'M1' } }],
+          links: [{ rel: 'payer-action', href: 'https://www.sandbox.paypal.com/checkoutnow?t=1' }],
+        })
+      }),
+    )
+    const store = new Store(':memory:')
+    const config = loadConfig({
+      NODE_ENV: 'production',
+      RENDER_EXTERNAL_URL: origin,
+      PAYPAL_CLIENT_ID: 'sandbox-id',
+      PAYPAL_CLIENT_SECRET: 'sandbox-secret',
+    })
+    const app = createApp({ store, config })
+    const created = await request(app)
+      .post('/api/checkout/create')
+      .set('X-Worth-Client', 'web')
+      .set('Origin', origin)
+      .send({ productId: 'headphones' })
+    expect(created.status).toBe(200)
+    expect(created.body.mode).toBe('sandbox')
+    const id = encodeURIComponent(created.body.purchase.id)
+    expect(bodies).toEqual([
+      expect.objectContaining({
+        return_url: `${origin}/?checkout=${id}&paypal=approved`,
+        cancel_url: `${origin}/?checkout=${id}&paypal=cancelled`,
+      }),
+    ])
     store.close()
   })
 })
