@@ -336,7 +336,7 @@ describe('queued assistant prompts', () => {
 
 describe('AI sharing consent in chat', () => {
   const shared =
-    'your messages, recent chat history (including figures), a forecast summary, income and bill names with amounts and dates, and minimized merchant labels'
+    'your messages, recent chat history (including figures), the item, price and date you ask about, a forecast summary, 30-day spending totals by category, income and bill names with amounts and dates, and minimized merchant labels'
   it('discloses what the untouched synthetic persona sends without asking for consent', () => {
     render(<Assistant state={makeState()} onPlan={vi.fn()} onProduct={vi.fn()} visible />)
     expect(
