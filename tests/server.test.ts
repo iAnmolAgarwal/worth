@@ -1762,6 +1762,27 @@ describe('unresolved foreign-currency payments', () => {
   })
 })
 
+describe('Pay in 4 rows in an import', () => {
+  it('proposes the plan for review instead of counting it as spending', async () => {
+    const { agent } = setup()
+    const csv = [
+      '"Date","Time","TimeZone","Name","Type","Status","Currency","Amount","Fees","Total","Exchange Rate","Receipt ID","Balance","Transaction ID","Item Title"',
+      '"09/28/2026","14:02:11","EDT","Test Store","Pay in 4","Completed","USD","-1,199.00","0.00","-1,199.00","","","","S1",""',
+      '"09/28/2026","14:02:11","EDT","Pay in 4","Authorization","Pending","USD","-299.75","0.00","-299.75","","","","S2",""',
+    ].join('\n')
+    const preview = await post(agent, '/api/import/preview', { csv })
+    expect(preview.body.instalmentPlans).toMatchObject([
+      { name: 'Test Store', purchaseCents: 119900, paymentCents: 29975 },
+    ])
+    const imported = await post(agent, '/api/import/commit', { csv })
+    expect(imported.status).toBe(200)
+    expect(imported.body.profile.dailySpendCents).toBe(0)
+    expect(imported.body.profile.missingFields).toContain(
+      'Your import shows a Pay in 4 or Pay Later plan (Test Store). Add any payments still due to your upcoming bills, or confirm it is paid off.',
+    )
+  })
+})
+
 describe('import date order', () => {
   it('refuses to import an ambiguous file until the user chooses the date order', async () => {
     const { agent } = setup()

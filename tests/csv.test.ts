@@ -877,3 +877,151 @@ describe('unresolved foreign-currency spending', () => {
     expect(withForeignPaymentGate(one, [])).toEqual(['Confirm your funds.'])
   })
 })
+
+describe('Pay in 4 and Pay Later rows', () => {
+  it('proposes a plan from a Pay in 4 purchase and its pending first payment', () => {
+    const result = parsePayPalCsv(
+      personal(
+        personalRow('09/28/2026', '14:02:11', 'Test Store', 'Pay in 4', 'USD', '-1,199.00', 'S1'),
+        [
+          ...personalRow(
+            '09/28/2026',
+            '14:02:11',
+            'Pay in 4',
+            'Authorization',
+            'USD',
+            '-299.75',
+            'S2',
+          ),
+        ].map((cell) => (cell === 'Completed' ? 'Pending' : cell)),
+        personalRow(
+          '09/29/2026',
+          '09:00:00',
+          'Corner grocery',
+          'Express Checkout Payment',
+          'USD',
+          '-20.00',
+          'S3',
+        ),
+      ),
+    )
+    expect(result.errors).toEqual([])
+    // The authorization is kept as evidence of the plan, not left out as an ordinary hold.
+    expect(result.leftOut.holds).toBe(0)
+    expect(result.instalmentPlans).toEqual([
+      {
+        id: 'pay-later:paypal:S1',
+        name: 'Test Store',
+        startDate: '2026-09-28',
+        purchaseCents: 119900,
+        paymentCents: 29975,
+        payments: [{ date: '2026-09-28', amountCents: 29975, status: 'pending' }],
+        transactionIds: ['paypal:S1', 'paypal:S2'],
+      },
+    ])
+    expect(
+      result.transactions.filter((item) => item.kind === 'installment').map((item) => item.id),
+    ).toEqual(['paypal:S1', 'paypal:S2'])
+    // Only the groceries are everyday spending: 20.00 over Sep 28 to 29.
+    expect(result.suggestedDailySpendCents).toBe(1000)
+    expect(result.warnings.join(' ')).toContain('Found a possible Pay in 4 or Pay Later plan')
+  })
+
+  it('treats a Pay Later credit and the purchase it paid for as one plan', () => {
+    const result = parsePayPalCsv(
+      personal(
+        personalRow(
+          '09/20/2026',
+          '18:30:00',
+          'PayPal Pay Later',
+          'Pay Later Funding',
+          'USD',
+          '450.00',
+          'C1',
+        ),
+        personalRow(
+          '09/20/2026',
+          '18:30:00',
+          'Outdoor gear shop',
+          'Express Checkout Payment',
+          'USD',
+          '-450.00',
+          'C2',
+        ),
+        personalRow(
+          '09/20/2026',
+          '18:30:00',
+          'Coffee kiosk',
+          'Express Checkout Payment',
+          'USD',
+          '-4.50',
+          'C3',
+        ),
+      ),
+    )
+    expect(result.instalmentPlans).toMatchObject([
+      {
+        name: 'Outdoor gear shop',
+        purchaseCents: 45000,
+        paymentCents: 11250,
+        transactionIds: ['paypal:C2', 'paypal:C1'],
+      },
+    ])
+    expect(result.transactions.map((item) => [item.id, item.kind])).toEqual([
+      ['paypal:C1', 'installment'],
+      ['paypal:C2', 'installment'],
+      ['paypal:C3', 'expense'],
+    ])
+    expect(result.suggestedDailySpendCents).toBe(450)
+  })
+
+  it('groups payments of an earlier plan by amount when its purchase is not in the file', () => {
+    const result = parsePayPalCsv(
+      personal(
+        personalRow('09/02/2026', '08:00:00', 'PayPal Pay in 4', 'Payment', 'USD', '-62.50', 'R1'),
+        personalRow('09/16/2026', '08:00:00', 'PayPal Pay in 4', 'Payment', 'USD', '-62.50', 'R2'),
+        personalRow('09/16/2026', '08:05:00', 'PayPal Pay in 4', 'Payment', 'USD', '-25.00', 'R3'),
+      ),
+    )
+    expect(
+      result.instalmentPlans.map(({ name, purchaseCents, paymentCents, payments }) => ({
+        name,
+        purchaseCents,
+        paymentCents,
+        dates: payments.map((payment) => payment.date),
+      })),
+    ).toEqual([
+      {
+        name: 'PayPal Pay in 4',
+        purchaseCents: null,
+        paymentCents: 6250,
+        dates: ['2026-09-02', '2026-09-16'],
+      },
+      { name: 'PayPal Pay in 4', purchaseCents: null, paymentCents: 2500, dates: ['2026-09-16'] },
+    ])
+    // Fixed payments of a plan are not proposed as a subscription.
+    expect(result.recurring).toEqual([])
+    expect(result.suggestedDailySpendCents).toBe(0)
+  })
+
+  it('does not mistake similar names for Pay in 4 or Pay Later', () => {
+    const names = ['Pay 4 Less Market', 'Payday advance', 'Pay in full discount', 'Paylater Gifts']
+    const result = parsePayPalCsv(
+      personal(
+        ...names.map((name, index) =>
+          personalRow(
+            '09/20/2026',
+            '10:00:00',
+            name,
+            'Express Checkout Payment',
+            'USD',
+            '-10.00',
+            `N${index}`,
+          ),
+        ),
+      ),
+    )
+    expect(result.instalmentPlans).toEqual([])
+    expect(result.transactions.every((item) => item.kind === 'expense')).toBe(true)
+  })
+})

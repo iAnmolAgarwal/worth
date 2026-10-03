@@ -236,6 +236,7 @@ describe('conversation isolation across financial sessions', () => {
       dateOrder: null,
       needsDateOrder: false,
       unresolved: [],
+      instalmentPlans: [],
     }
     routeApi((path, data) => {
       if (path === '/state') return demo

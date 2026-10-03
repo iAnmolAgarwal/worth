@@ -58,8 +58,11 @@ export interface Transaction {
   amountCents: number
   currency: string
   category: string
-  /** `adjustment` is a PayPal balance correction: listed, but neither income nor spending. */
-  kind: 'expense' | 'income' | 'transfer' | 'refund' | 'unknown' | 'adjustment'
+  /**
+   * `adjustment` is a PayPal balance correction: listed, but neither income nor spending.
+   * `installment` is a Pay in 4 or Pay Later row, proposed as a plan rather than counted.
+   */
+  kind: 'expense' | 'income' | 'transfer' | 'refund' | 'unknown' | 'adjustment' | 'installment'
   status: 'completed' | 'pending' | 'excluded'
   source: 'demo' | 'import' | 'purchase'
   color?: string
@@ -326,6 +329,21 @@ export interface ForeignPayment {
   /** The user's answer: what it cost in USD, or a one-off left out of the history. */
   resolution?: { kind: 'usd'; amountCents: number } | { kind: 'oneOff' }
 }
+/** A Pay in 4 or Pay Later plan found in an import, proposed to the user for confirmation. */
+export interface InstalmentPlanProposal {
+  id: string
+  /** The merchant, or the row's own label when the purchase is not in the file. */
+  name: string
+  /** The purchase date, or the first payment seen. */
+  startDate: string
+  /** The full price, when the purchase row is in the file. */
+  purchaseCents: number | null
+  /** One payment: PayPal's usual split of the price (remainder on the first), or as seen. */
+  paymentCents: number
+  /** Payment rows found in the file, pending or completed. PayPal sets the real schedule. */
+  payments: { date: string; amountCents: number; status: Transaction['status'] }[]
+  transactionIds: string[]
+}
 /** The order of day and month in a CSV's slash dates. */
 export type DateOrder = 'MM/DD' | 'DD/MM'
 export interface ImportPreview {
@@ -354,4 +372,6 @@ export interface ImportPreview {
   needsDateOrder: boolean
   /** Foreign-currency spending without a matching USD conversion, to be resolved after import. */
   unresolved: ForeignPayment[]
+  /** Possible existing Pay in 4 or Pay Later plans. Their rows are never ordinary spending. */
+  instalmentPlans: InstalmentPlanProposal[]
 }

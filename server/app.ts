@@ -16,6 +16,7 @@ import { createDemoState, DEMO_TIMEZONE, PRODUCTS, rebaseDemoState } from '../sh
 import {
   analyzeHistory,
   foreignPaymentTransaction,
+  instalmentPlanReview,
   parsePayPalCsv,
   withForeignPaymentGate,
 } from '../shared/csv.ts'
@@ -821,9 +822,11 @@ export function createApp(options: AppOptions = {}) {
       ...known,
       ...preview.unresolved.filter((payment) => !known.some((item) => item.id === payment.id)),
     ]
+    const plans = instalmentPlanReview(preview.instalmentPlans)
     data.profile.missingFields = withForeignPaymentGate(
       [
         'Confirm current available funds, income, upcoming bills, and everyday spending after import.',
+        ...(plans ? [plans] : []),
       ],
       data.foreignPayments,
     )

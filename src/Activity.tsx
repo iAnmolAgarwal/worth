@@ -251,13 +251,15 @@ export function Activity({
                                 ? 'Account transfer'
                                 : t.kind === 'adjustment'
                                   ? 'PayPal balance correction'
-                                  : t.source === 'purchase'
-                                    ? 'App purchase'
-                                    : t.kind === 'refund'
-                                      ? 'Refund'
-                                      : t.source === 'demo'
-                                        ? 'Demo history'
-                                        : 'PayPal import'}
+                                  : t.kind === 'installment'
+                                    ? 'Pay in 4 or Pay Later'
+                                    : t.source === 'purchase'
+                                      ? 'App purchase'
+                                      : t.kind === 'refund'
+                                        ? 'Refund'
+                                        : t.source === 'demo'
+                                          ? 'Demo history'
+                                          : 'PayPal import'}
                             </small>
                           </span>
                         </span>

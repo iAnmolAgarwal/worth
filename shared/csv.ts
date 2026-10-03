@@ -4,6 +4,7 @@ import type {
   DateOrder,
   ForeignPayment,
   ImportPreview,
+  InstalmentPlanProposal,
   ScheduledFlow,
   Transaction,
 } from './types.ts'
@@ -121,6 +122,9 @@ const WITHDRAWAL_TYPE =
   /\b(?:withdrawal|withdraw|transfer to (?:bank|checking|savings|(?:debit )?card)|instant transfer|standard transfer)\b/
 /** Authorization holds, their releases and voids; the completed payment is a separate row. */
 const HOLD_TYPE = /\b(?:holds?|authori[sz]ations?)\b/i
+/** PayPal's instalment products, named in a row's Type or Name. Deliberately narrow. */
+const PAY_LATER = /\bpay\s+in\s+(?:4|four)\b|\bpay\s+later\b/i
+const INSTALLMENT: Classification = { kind: 'installment', category: 'Pay in 4', color: '#c4bee0' }
 /** A plain bank transfer type with no other detail. */
 const BANK_TRANSFER_TYPE = /^(?:bank )?transfer$/
 
@@ -365,6 +369,13 @@ export function withForeignPaymentGate(
   ]
 }
 
+/** What the user must review after importing possible Pay in 4 or Pay Later plans. */
+export function instalmentPlanReview(plans: InstalmentPlanProposal[]): string | undefined {
+  if (!plans.length) return undefined
+  const names = [...new Set(plans.map((plan) => plan.name))].join(', ').slice(0, 120)
+  return `Your import shows ${plans.length === 1 ? 'a Pay in 4 or Pay Later plan' : `${plans.length} Pay in 4 or Pay Later plans`} (${names}). Add any payments still due to your upcoming bills, or confirm ${plans.length === 1 ? 'it is' : 'they are'} paid off.`
+}
+
 /** The USD record of a foreign-currency payment once the user says what it cost. */
 export function foreignPaymentTransaction(
   payment: ForeignPayment,
@@ -395,6 +406,8 @@ interface Row {
   reference: string
   statusText: string
   status: Transaction['status']
+  /** Type or Name mentions Pay in 4 or Pay Later. */
+  payLater: boolean
 }
 
 function readStatus(statusText: string): Transaction['status'] {
@@ -468,6 +481,97 @@ function pairConversions(rows: Row[]): {
   return { paid, legs }
 }
 
+/** A recorded Pay in 4 or Pay Later row, and the credit that financed it when there is one. */
+interface PayLaterRecord {
+  row: Row
+  transaction: Transaction
+  fundedBy?: Row
+}
+
+/**
+ * Purchases paid for by a Pay Later credit: a debit of exactly the credit's amount that the credit
+ * references (or that references it), or the only such debit at the credit's date and time.
+ */
+function financedPurchases(rows: Row[]): Map<Row, Row> {
+  const financed = new Map<Row, Row>()
+  for (const credit of rows.filter((row) => row.payLater && row.amount > 0)) {
+    const candidates = rows.filter(
+      (row) =>
+        !row.payLater &&
+        !isConversion(row) &&
+        row.currency === credit.currency &&
+        row.amount === -credit.amount &&
+        ((credit.reference && row.nativeId === credit.reference) ||
+          (row.reference && row.reference === credit.nativeId) ||
+          (credit.time && row.date === credit.date && row.time === credit.time)),
+    )
+    if (candidates.length === 1 && !financed.has(candidates[0]!))
+      financed.set(candidates[0]!, credit)
+  }
+  return financed
+}
+
+/** PayPal's Pay in 4 split: equal whole-cent payments, with any remainder on the first. */
+function quarterSplit(totalCents: number): number[] {
+  const base = Math.floor(totalCents / 4)
+  return [base, base + (totalCents % 4)]
+}
+
+/**
+ * Groups Pay in 4 and Pay Later rows into proposed plans for the user to confirm. Each purchase is
+ * one plan. A payment row named after the product joins the only plan whose price it splits into,
+ * within eight weeks of the purchase; otherwise payments of the same amount form their own plan.
+ */
+function proposeInstalmentPlans(records: PayLaterRecord[]): InstalmentPlanProposal[] {
+  const plans: InstalmentPlanProposal[] = []
+  const purchases = records.filter(
+    ({ row, fundedBy }) => row.amount < 0 && (fundedBy || !PAY_LATER.test(row.name)),
+  )
+  for (const { row, transaction, fundedBy } of purchases) {
+    const credit = fundedBy && records.find((item) => item.row === fundedBy)
+    plans.push({
+      id: `pay-later:${transaction.id}`,
+      name: row.name,
+      startDate: row.date,
+      purchaseCents: -row.amount,
+      paymentCents: quarterSplit(-row.amount)[0]!,
+      payments: [],
+      transactionIds: [transaction.id, ...(credit ? [credit.transaction.id] : [])],
+    })
+  }
+  const unlinked = new Map<number, InstalmentPlanProposal>()
+  const payments = records
+    .filter(({ row, fundedBy }) => row.amount < 0 && !fundedBy && PAY_LATER.test(row.name))
+    .sort((a, b) => a.row.date.localeCompare(b.row.date))
+  for (const { row, transaction } of payments) {
+    const cents = -row.amount
+    const matches = plans.filter(
+      (plan) =>
+        plan.purchaseCents !== null &&
+        quarterSplit(plan.purchaseCents).includes(cents) &&
+        row.date >= plan.startDate &&
+        dateDistance(plan.startDate, row.date) <= 56,
+    )
+    let plan = matches.length === 1 ? matches[0]! : unlinked.get(cents)
+    if (!plan) {
+      plan = {
+        id: `pay-later:${transaction.id}`,
+        name: row.name,
+        startDate: row.date,
+        purchaseCents: null,
+        paymentCents: cents,
+        payments: [],
+        transactionIds: [],
+      }
+      unlinked.set(cents, plan)
+      plans.push(plan)
+    }
+    plan.payments.push({ date: row.date, amountCents: cents, status: row.status })
+    plan.transactionIds.push(transaction.id)
+  }
+  return plans.sort((a, b) => a.startDate.localeCompare(b.startDate))
+}
+
 export interface ParseOptions {
   /** Today in the profile's time zone. Without it, today in New York is used. */
   today?: string
@@ -495,6 +599,7 @@ export function parsePayPalCsv(
     adjustments: [],
     leftOut: { memo: 0, holds: 0, otherCurrency: 0 },
     unresolved: [],
+    instalmentPlans: [],
     dateOrder: null,
     needsDateOrder: false,
   }
@@ -576,11 +681,13 @@ export function parsePayPalCsv(
     // Funding legs and corrections often have no counterparty; fall back to the item, then the type.
     const name =
       (get(raw, 'name') || get(raw, 'title') || type).slice(0, 180) || 'PayPal transaction'
-    if (get(raw, 'impact').toLowerCase() === 'memo') {
+    // A Pay in 4 authorization is kept: it is evidence of a plan, though never counted.
+    const payLater = PAY_LATER.test(type) || PAY_LATER.test(name)
+    if (!payLater && get(raw, 'impact').toLowerCase() === 'memo') {
       result.leftOut.memo++
       continue
     }
-    if (HOLD_TYPE.test(type)) {
+    if (!payLater && HOLD_TYPE.test(type)) {
       result.leftOut.holds++
       continue
     }
@@ -639,6 +746,7 @@ export function parsePayPalCsv(
       reference: get(raw, 'reference'),
       statusText,
       status: readStatus(statusText),
+      payLater,
     })
   }
 
@@ -654,7 +762,7 @@ export function parsePayPalCsv(
   const record = (
     row: Row,
     override: { amount?: number; classification?: Classification } = {},
-  ) => {
+  ): Transaction | undefined => {
     const { rowNumber, date, nativeId, status, statusText } = row
     const amount = override.amount ?? row.amount
     const currency = override.amount === undefined ? row.currency : 'USD'
@@ -687,7 +795,7 @@ export function parsePayPalCsv(
         capturedPurchase.currency !== currency ||
         !Number.isFinite(dayDifference) ||
         dayDifference > 1 ||
-        classification.kind !== 'expense'
+        !['expense', 'installment'].includes(classification.kind)
       ) {
         result.errors.push({
           row: rowNumber,
@@ -732,11 +840,14 @@ export function parsePayPalCsv(
       if (!nativeId) noIds++
     }
     knownById.set(id, transaction)
+    return transaction
   }
 
   // 3. Foreign-currency payments count once, through the USD conversion that paid for them.
   const knownForeign = new Map((options.foreignPayments ?? []).map((item) => [item.id, item]))
   const conversions = pairConversions(rows)
+  const financed = financedPurchases(rows)
+  const payLater: PayLaterRecord[] = []
   for (const row of rows) {
     if (row.currency !== 'USD') {
       const legs = conversions.paid.get(row)
@@ -783,8 +894,15 @@ export function parsePayPalCsv(
       })
       continue
     }
+    // Pay in 4 rows, and a purchase a Pay Later credit paid for, are a plan to confirm.
+    if (row.payLater || financed.has(row)) {
+      const transaction = record(row, { classification: INSTALLMENT })
+      if (transaction) payLater.push({ row, transaction, fundedBy: financed.get(row) })
+      continue
+    }
     record(row)
   }
+  result.instalmentPlans = proposeInstalmentPlans(payLater)
   // Return only inserted/updated rows, but analyze the complete retained personal history.
   const combined = [...knownById.values()].filter((transaction) => transaction.source === 'import')
   const analysis = analyzeHistory(combined, today)
@@ -798,7 +916,7 @@ export function parsePayPalCsv(
   result.excluded = result.transactions.filter(
     (transaction) =>
       transaction.status !== 'completed' ||
-      ['transfer', 'refund', 'unknown', 'adjustment'].includes(transaction.kind) ||
+      ['transfer', 'refund', 'unknown', 'adjustment', 'installment'].includes(transaction.kind) ||
       transaction.amountCents === 0,
   ).length
   const unknownIncoming = combined.filter(
@@ -835,6 +953,11 @@ export function parsePayPalCsv(
   if (pending)
     result.warnings.push(
       `${pending} pending payments are excluded from spending history. Add any outstanding commitments to your financial picture.`,
+    )
+  const plans = result.instalmentPlans.length
+  if (plans)
+    result.warnings.push(
+      `Found ${plans === 1 ? 'a possible Pay in 4 or Pay Later plan' : `${plans} possible Pay in 4 or Pay Later plans`}. ${plans === 1 ? 'It is' : 'They are'} not counted as everyday spending; add any payments still due to your plan.`,
     )
   const unresolved = result.unresolved.length
   if (unresolved)
