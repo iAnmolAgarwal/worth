@@ -1,16 +1,33 @@
 import type {
+  ActivePlanPayment,
   Assessment,
+  Comparison,
   FinancialProfile,
   ForecastPoint,
+  InstalmentDetail,
+  LowPointCause,
+  NearbyBill,
+  OptionResult,
+  PayIn4Comparison,
   PlanInstalment,
   Purchase,
   ScheduledFlow,
+  StackingWarning,
 } from './types.ts'
 
 /** Every option is judged from today through this many days ahead, fixed before any search. */
 export const COMPARISON_WINDOW_DAYS = 60
 /** Wait candidates run from today through this many days ahead. */
 export const WAIT_SEARCH_DAYS = 30
+/** PayPal's US Pay in 4 range. Eligibility also needs PayPal's own check; it is never approval. */
+export const PAY_IN_4_MIN_CENTS = 1_000
+export const PAY_IN_4_MAX_CENTS = 200_000
+/** Illustrative payment days. PayPal's real schedule can differ (the sandbox used 16-day gaps). */
+export const PAY_IN_4_OFFSETS = [0, 14, 28, 42] as const
+/** An instalment is paired with the nearest bill no more than this many days away. */
+export const NEARBY_BILL_DAYS = 3
+export const PAY_IN_4_NOTICE = 'Illustrative. PayPal sets the exact terms at checkout.'
+export const PAY_IN_4_UNAVAILABLE = 'Not available for this amount'
 
 const DAY_MS = 86_400_000
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -59,6 +76,15 @@ export function money(cents: number): string {
     currency: 'USD',
     maximumFractionDigits: cents % 100 === 0 ? 0 : 2,
   }).format(cents / 100)
+}
+
+/** A short, time-zone-free label such as "Oct 18". */
+export function shortDay(date: string): string {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  }).format(new Date(`${date}T12:00:00Z`))
 }
 
 export function daysBetween(from: string, to: string): number {
@@ -257,20 +283,47 @@ function purchaseOutflows(
   return result
 }
 
+/** A proposed payment in a scenario: the whole purchase, or one illustrative instalment. */
+export interface ScenarioOutflow {
+  id: string
+  name: string
+  date: string
+  amountCents: number
+}
+
 export function forecast(
   profile: FinancialProfile,
   purchases: Purchase[],
-  options: { today?: string; purchaseDate?: string; amountCents?: number; days?: number } = {},
+  options: {
+    today?: string
+    purchaseDate?: string
+    amountCents?: number
+    /** Replaces `purchaseDate` and `amountCents` with several dated payments. */
+    outflows?: ScenarioOutflow[]
+    days?: number
+  } = {},
 ): ForecastPoint[] {
   const today = options.today ?? todayInTimezone(profile.timezone)
   const purchaseDate = options.purchaseDate ?? today
   const amount = options.amountCents ?? 0
   const days = options.days ?? 30
+  const proposals: ScenarioOutflow[] = options.outflows ?? [
+    {
+      id: `proposed:${purchaseDate}`,
+      name: 'Proposed purchase',
+      date: purchaseDate,
+      amountCents: amount,
+    },
+  ]
   if (
-    !validDate(purchaseDate) ||
-    purchaseDate < today ||
-    !Number.isSafeInteger(amount) ||
-    amount < 0
+    !validDate(today) ||
+    proposals.some(
+      (item) =>
+        !validDate(item.date) ||
+        item.date < today ||
+        !Number.isSafeInteger(item.amountCents) ||
+        item.amountCents < 0,
+    )
   )
     throw new Error('Enter a valid future purchase date and a non-negative price in cents.')
   const upcoming = getUpcomingFlows(profile, today, days)
@@ -325,12 +378,12 @@ export function forecast(
         amountCents: -dailySpend,
         kind: 'spending',
       })
-    if (date === purchaseDate && amount > 0) {
-      outflow(amount, false)
+    for (const item of proposals.filter((item) => item.date === date && item.amountCents > 0)) {
+      outflow(item.amountCents, false)
       events.push({
-        id: `proposed:${date}`,
-        name: 'Proposed purchase',
-        amountCents: -amount,
+        id: item.id,
+        name: item.name,
+        amountCents: -item.amountCents,
         kind: 'purchase',
       })
     }
@@ -540,4 +593,343 @@ function assumptions(profile: FinancialProfile, windowEnd: string): string[] {
     'The stress scenario assumes 20% higher everyday spending; it is not a statistical confidence interval.',
     'Estimates depend on the income, bills, and outside-PayPal commitments you confirmed.',
   ]
+}
+
+/**
+ * The largest outflow since the last income before the low point, so a payday-morning low names
+ * the rent paid days earlier rather than that morning's everyday spending.
+ */
+function lowPointCause(points: ForecastPoint[], lowest: ForecastPoint): LowPointCause | null {
+  const end = points.indexOf(lowest)
+  let start = 0
+  for (let index = end - 1; index >= 0; index--)
+    if (points[index]!.events.some((event) => event.kind === 'income')) {
+      start = index + 1
+      break
+    }
+  let cause: LowPointCause | null = null
+  let everyday: LowPointCause | null = null
+  for (const point of points.slice(start, end + 1))
+    for (const event of point.events) {
+      if (event.amountCents >= 0) continue
+      const candidate = {
+        name: event.name,
+        amountCents: -event.amountCents,
+        date: point.date,
+        kind: event.kind,
+      }
+      if (event.kind === 'spending') everyday ??= candidate
+      // On a tie the later outflow, nearer the low point, is named.
+      else if (!cause || candidate.amountCents >= cause.amountCents) cause = candidate
+    }
+  return cause ?? everyday
+}
+
+function evaluate(
+  profile: FinancialProfile,
+  purchases: Purchase[],
+  today: string,
+  missing: boolean,
+  outflows: ScenarioOutflow[],
+  purchaseDate: string,
+): OptionResult {
+  const points = forecast(profile, purchases, {
+    today,
+    outflows,
+    days: COMPARISON_WINDOW_DAYS,
+  })
+  const cushion = cushionOf(profile)
+  const lowest = lowestPoint(points)
+  return {
+    outcome: missing ? 'incomplete' : lowest.minimumCents >= cushion ? 'fits' : 'tight',
+    amountCents: outflows.reduce((total, item) => total + item.amountCents, 0),
+    purchaseDate,
+    lowestBalanceCents: lowest.minimumCents,
+    lowestDate: lowest.date,
+    lowPointCause: lowPointCause(points, lowest),
+    stressLowestCents: Math.min(...points.map((point) => point.stressMinimumCents)),
+    headroomCents: lowest.minimumCents - cushion,
+    points,
+  }
+}
+
+function fullPurchase(date: string, amountCents: number, itemName: string): ScenarioOutflow[] {
+  return [{ id: `proposed:${date}`, name: itemName, date, amountCents }]
+}
+
+/**
+ * The illustrative Pay in 4 schedule: four whole-cent payments on days 0, 14, 28 and 42, with any
+ * remainder on the first. $1,199.00 is 4 × $299.75; $10.03 is $2.53 then 3 × $2.50.
+ */
+export function payIn4Schedule(totalCents: number, today: string): PlanInstalment[] {
+  if (!Number.isSafeInteger(totalCents) || totalCents < 0)
+    throw new Error('Enter a non-negative total purchase price in cents.')
+  const base = Math.floor(totalCents / PAY_IN_4_OFFSETS.length)
+  return PAY_IN_4_OFFSETS.map((offset, index) => ({
+    date: addDays(today, offset),
+    amountCents: index === 0 ? totalCents - base * (PAY_IN_4_OFFSETS.length - 1) : base,
+  }))
+}
+
+export function payIn4InRange(amountCents: number): boolean {
+  return (
+    Number.isSafeInteger(amountCents) &&
+    amountCents >= PAY_IN_4_MIN_CENTS &&
+    amountCents <= PAY_IN_4_MAX_CENTS
+  )
+}
+
+/** Obligations an instalment can land next to: bills, subscriptions and other plans' payments. */
+function obligations(
+  profile: FinancialProfile,
+  purchases: Purchase[],
+  today: string,
+): Omit<NearbyBill, 'daysFromInstalment'>[] {
+  return [
+    ...getUpcomingFlows(profile, today, COMPARISON_WINDOW_DAYS)
+      .filter(({ flow }) => flow.kind !== 'income')
+      .map(({ flow, date }) => ({
+        name: flow.name,
+        date,
+        amountCents: flow.amountCents,
+        kind: flow.kind,
+      })),
+    ...purchaseOutflows(profile, purchases, today)
+      .filter((item) => item.planned)
+      .map((item) => ({
+        name: item.name,
+        date: item.date,
+        amountCents: item.amountCents,
+        kind: 'purchase' as const,
+      })),
+  ]
+}
+
+/**
+ * The bill an instalment lands next to, at most NEARBY_BILL_DAYS away. Bills and other plans'
+ * payments come before subscriptions, so a small renewal on the same day never hides rent two days
+ * later; then the nearer one wins, then the larger.
+ */
+function nearestBill(
+  date: string,
+  candidates: Omit<NearbyBill, 'daysFromInstalment'>[],
+): NearbyBill | null {
+  return (
+    candidates
+      .map((bill) => ({ ...bill, daysFromInstalment: daysBetween(date, bill.date) }))
+      .filter((bill) => Math.abs(bill.daysFromInstalment) <= NEARBY_BILL_DAYS)
+      .sort(
+        (x, y) =>
+          Number(x.kind === 'subscription') - Number(y.kind === 'subscription') ||
+          Math.abs(x.daysFromInstalment) - Math.abs(y.daysFromInstalment) ||
+          y.amountCents - x.amountCents,
+      )[0] ?? null
+  )
+}
+
+/** Instalment plans already running: profile instalments grouped by plan, and confirmed purchase plans. */
+function activePlanPayments(
+  profile: FinancialProfile,
+  purchases: Purchase[],
+  today: string,
+): ActivePlanPayment[] {
+  return [
+    ...getUpcomingFlows(profile, today, COMPARISON_WINDOW_DAYS)
+      .filter(({ flow }) => flow.kind === 'installment')
+      .map(({ flow, date }) => ({
+        planId: flow.planId ?? flow.id,
+        name: flow.name,
+        date,
+        amountCents: flow.amountCents,
+        proposed: false,
+      })),
+    ...purchaseOutflows(profile, purchases, today)
+      .filter((item) => item.planned)
+      .map((item) => ({
+        planId: `purchase:${item.purchaseId}`,
+        name: item.name,
+        date: item.date,
+        amountCents: item.amountCents,
+        proposed: false,
+      })),
+  ]
+}
+
+function stackingWarning(
+  existing: ActivePlanPayment[],
+  proposed: ActivePlanPayment[],
+): StackingWarning | null {
+  const plans = new Set(existing.map((payment) => payment.planId)).size
+  if (!plans) return null
+  const totalCents = existing.reduce((total, payment) => total + payment.amountCents, 0)
+  return {
+    activePlans: plans,
+    totalCents,
+    calendar: [...existing, ...proposed].sort(
+      (a, b) => a.date.localeCompare(b.date) || Number(a.proposed) - Number(b.proposed),
+    ),
+    message: `You already have ${plans === 1 ? '1 instalment plan' : `${plans} instalment plans`} with ${money(totalCents)} due in this window. A new plan would add ${PAY_IN_4_OFFSETS.length} more payments on top.`,
+  }
+}
+
+function payIn4Comparison(
+  profile: FinancialProfile,
+  purchases: Purchase[],
+  today: string,
+  missing: boolean,
+  amountCents: number,
+  itemName: string,
+  eligible: boolean,
+): PayIn4Comparison {
+  if (!eligible || !payIn4InRange(amountCents))
+    return { available: false, reason: PAY_IN_4_UNAVAILABLE }
+  const schedule = payIn4Schedule(amountCents, today)
+  const option = evaluate(
+    profile,
+    purchases,
+    today,
+    missing,
+    schedule.map((item, index) => ({
+      id: `payin4:${index + 1}:${item.date}`,
+      name: `${itemName} · Pay in 4 payment ${index + 1} of ${schedule.length}`,
+      ...item,
+    })),
+    today,
+  )
+  const cushion = cushionOf(profile)
+  const nearby = obligations(profile, purchases, today)
+  const instalments: InstalmentDetail[] = schedule.map((item, index) => {
+    // Each payment is judged until the next one, so a dip a few days after rent still shows on it.
+    const until = schedule[index + 1]?.date ?? option.points.at(-1)!.date
+    const stretch = option.points.filter(
+      (point) =>
+        point.date >= item.date &&
+        (point.date < until || (!schedule[index + 1] && point.date === until)),
+    )
+    const low = lowestPoint(stretch)
+    return {
+      number: index + 1,
+      date: item.date,
+      amountCents: item.amountCents,
+      nearestBill: nearestBill(item.date, nearby),
+      balanceCents: low.minimumCents,
+      lowestDate: low.date,
+      belowCushion: low.minimumCents < cushion,
+    }
+  })
+  const firstDip = option.points.find((point) => point.minimumCents < cushion)
+  return {
+    ...option,
+    available: true,
+    illustrative: true,
+    notice: PAY_IN_4_NOTICE,
+    label:
+      option.outcome === 'incomplete'
+        ? 'Review the missing information before using this estimate.'
+        : firstDip
+          ? `An instalment would dip below your cushion on ${shortDay(firstDip.date)}`
+          : 'Instalment scenario stays above your cushion',
+    instalments,
+    stacking: stackingWarning(
+      activePlanPayments(profile, purchases, today),
+      schedule.map((item, index) => ({
+        planId: 'proposed',
+        name: `${itemName} · Pay in 4 payment ${index + 1} of ${schedule.length}`,
+        ...item,
+        proposed: true,
+      })),
+    ),
+  }
+}
+
+/**
+ * Compares buying today, waiting and spending less over one window fixed before any search. Pay in
+ * 4 is an extra comparison for the user to open; it is never recommended or ranked.
+ */
+export function compareOptions(
+  profile: FinancialProfile,
+  purchases: Purchase[],
+  options: { amountCents: number; itemName?: string; today?: string; payIn4Eligible?: boolean },
+): Comparison {
+  const today = options.today ?? todayInTimezone(profile.timezone)
+  if (!validDate(today)) throw new Error('Use a valid calendar date.')
+  const { amountCents } = options
+  if (!Number.isSafeInteger(amountCents) || amountCents < 0)
+    throw new Error('Enter a non-negative total purchase price in cents.')
+  const itemName = options.itemName?.trim() || 'Your purchase'
+  const window = {
+    start: today,
+    end: addDays(today, COMPARISON_WINDOW_DAYS),
+    days: COMPARISON_WINDOW_DAYS,
+  }
+  const missingFields = missingInputs(profile, purchases, today)
+  const missing = missingFields.length > 0
+  const buyToday = evaluate(
+    profile,
+    purchases,
+    today,
+    missing,
+    fullPurchase(today, amountCents, itemName),
+    today,
+  )
+  const waitDate = missing ? null : earliestFittingDate(profile, purchases, today, amountCents)
+  const baseline = forecast(profile, purchases, { today, days: COMPARISON_WINDOW_DAYS })
+  const cushion = cushionOf(profile)
+  const maxPriceCents = missing
+    ? 0
+    : Math.max(0, Math.min(...baseline.map((point) => point.baselineMinimumCents)) - cushion)
+  return {
+    itemName,
+    amountCents,
+    today,
+    window,
+    profileVersion: profile.version,
+    cushionCents: cushion,
+    missingFields,
+    buyToday,
+    wait: waitDate
+      ? {
+          date: waitDate,
+          ...evaluate(
+            profile,
+            purchases,
+            today,
+            missing,
+            fullPurchase(waitDate, amountCents, itemName),
+            waitDate,
+          ),
+        }
+      : { date: null },
+    spendLess: {
+      maxPriceCents,
+      ...evaluate(
+        profile,
+        purchases,
+        today,
+        missing,
+        fullPurchase(today, maxPriceCents, itemName),
+        today,
+      ),
+    },
+    payIn4: payIn4Comparison(
+      profile,
+      purchases,
+      today,
+      missing,
+      amountCents,
+      itemName,
+      options.payIn4Eligible === true,
+    ),
+    recommendation: missing
+      ? null
+      : buyToday.outcome === 'fits'
+        ? 'buyToday'
+        : waitDate
+          ? 'wait'
+          : 'spendLess',
+    assumptions: [
+      ...assumptions(profile, window.end),
+      'Pay in 4 is shown for comparison only. Its schedule is illustrative, and PayPal sets the exact terms at checkout.',
+    ],
+  }
 }

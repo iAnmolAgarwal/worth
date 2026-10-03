@@ -157,6 +157,100 @@ export interface Assessment {
   explanation: string
   assumptions: string[]
 }
+/** The fixed range every option is judged over, set before any search. */
+export interface ComparisonWindow {
+  start: string
+  end: string
+  days: number
+}
+/** The largest outflow between the last income and the low point. */
+export interface LowPointCause {
+  name: string
+  amountCents: number
+  date: string
+  kind: ForecastEvent['kind']
+}
+export interface OptionResult {
+  outcome: Outcome
+  /** Total price of the option, in cents. */
+  amountCents: number
+  /** The day the purchase is made; for Pay in 4, the first payment. */
+  purchaseDate: string
+  lowestBalanceCents: number
+  lowestDate: string
+  lowPointCause: LowPointCause | null
+  stressLowestCents: number
+  headroomCents: number
+  points: ForecastPoint[]
+}
+export type WaitOption = { date: null } | ({ date: string } & OptionResult)
+export interface SpendLessOption extends OptionResult {
+  /** The highest all-in price that keeps the cushion when bought today. */
+  maxPriceCents: number
+}
+export interface NearbyBill {
+  name: string
+  date: string
+  amountCents: number
+  kind: FlowKind | 'purchase'
+  /** Positive when the bill falls after the instalment. */
+  daysFromInstalment: number
+}
+export interface InstalmentDetail {
+  number: number
+  date: string
+  amountCents: number
+  /** Within 3 days; bills and other plans' payments are named before subscriptions. */
+  nearestBill: NearbyBill | null
+  /** Lowest projected balance from this payment until the next one (the last runs to the window end). */
+  balanceCents: number
+  lowestDate: string
+  belowCushion: boolean
+}
+export interface ActivePlanPayment {
+  planId: string
+  name: string
+  date: string
+  amountCents: number
+  /** True for the illustrative payments of the plan being compared. */
+  proposed: boolean
+}
+export interface StackingWarning {
+  /** Instalment plans already running with payments inside the window. */
+  activePlans: number
+  /** What those plans still take inside the window. */
+  totalCents: number
+  /** Existing and proposed payments in date order. */
+  calendar: ActivePlanPayment[]
+  message: string
+}
+export interface PayIn4Scenario extends OptionResult {
+  available: true
+  illustrative: true
+  notice: string
+  label: string
+  instalments: InstalmentDetail[]
+  stacking: StackingWarning | null
+}
+export type PayIn4Comparison = PayIn4Scenario | { available: false; reason: string }
+export type Recommendation = 'buyToday' | 'wait' | 'spendLess'
+export interface Comparison {
+  itemName: string
+  amountCents: number
+  today: string
+  window: ComparisonWindow
+  profileVersion: number
+  cushionCents: number
+  missingFields: string[]
+  buyToday: OptionResult
+  wait: WaitOption
+  spendLess: SpendLessOption
+  /** A comparison the user opens deliberately. It is never recommended or ranked. */
+  payIn4: PayIn4Comparison
+  /** Null while information is missing. Pay in 4 is never a recommendation. */
+  recommendation: Recommendation | null
+  assumptions: string[]
+}
 export interface AppState {
   /** Public session fingerprint for clearing browser-only context; never an authentication token. */
   sessionKey?: string
