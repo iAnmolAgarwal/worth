@@ -76,6 +76,8 @@ export interface Purchase {
   captureId?: string
   profileVersion: number
   assessmentDate: string
+  /** Made as the synthetic persona and set aside when the user switched to imported data. */
+  archived?: boolean
 }
 export interface ForecastEvent {
   id: string

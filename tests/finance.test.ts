@@ -69,6 +69,13 @@ const assess = (
 ) => assessPurchase(p, purchases, { amountCents, today: TODAY, ...extra })
 
 describe('deterministic purchase assessment', () => {
+  it('never reserves or validates an archived purchase', () => {
+    const archived = purchase({ status: 'completed', archived: true, currency: 'EUR' as 'USD' })
+    const result = assess(profile(), 0, {}, [archived])
+    expect(result.outcome).toBe('fits')
+    expect(result.points[0]!.events).toEqual([])
+    expect(result.missingFields).toEqual([])
+  })
   it('uses the minimum path and fits at the exact cushion boundary', () => {
     const tight = assess(profile(), 90000)
     expect(tight.outcome).toBe('tight')

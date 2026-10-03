@@ -1238,6 +1238,76 @@ describe('hosted abuse limits', () => {
   })
 })
 
+describe('demo purchases stay out of imported finances', () => {
+  it('archives persona purchases on import so they leave the forecast, activity, and AI context', async () => {
+    const reply = vi.fn(async (_input: unknown, _data: { purchases: unknown[] }) => ({
+      message: 'external',
+      mode: 'anthropic' as const,
+      intent: 'overview' as const,
+      suggestions: [],
+      toolCalls: [],
+    }))
+    const { gateway } = fakePayPal()
+    const { app, agent } = setup({ chat: { reply }, paypal: gateway })
+    await state(agent)
+    const created = await post(agent, '/api/checkout/create', { productId: 'headphones' })
+    const captured = await post(agent, `/api/checkout/${created.body.purchase.id}/capture`)
+    expect(captured.body.purchase.status).toBe('completed')
+    expect(
+      captured.body.state.transactions.some((t: { source: string }) => t.source === 'purchase'),
+    ).toBe(true)
+    const csv =
+      'Date,Name,Net,Currency,Type,Status,Transaction ID\n09/20/2026,Coffee,-5.00,USD,Payment,Completed,C1\n10/01/2026,Coffee,-5.00,USD,Payment,Completed,C2'
+    expect((await post(agent, '/api/import/preview', { csv })).body.duplicates).toBe(0)
+    const imported = await post(agent, '/api/import/commit', { csv })
+    expect(imported.status).toBe(200)
+    expect(imported.body.purchases).toEqual([])
+    expect(imported.body.transactions.map((t: { source: string }) => t.source)).toEqual([
+      'import',
+      'import',
+    ])
+    // The user enters their real funds; the persona's purchase was never paid from them.
+    const real = {
+      ...imported.body.profile,
+      balanceCents: 200000,
+      cushionCents: 50000,
+      confirmed: true,
+      missingFields: [],
+    }
+    const forged = await patch(agent, {
+      profile: { ...real, reflectedPurchaseIds: [created.body.purchase.id] },
+    })
+    expect(forged.status).toBe(400)
+    expect(forged.body.code).toBe('INVALID_SNAPSHOT')
+    const saved = await patch(agent, { profile: real })
+    expect(saved.status).toBe(200)
+    const daily = saved.body.profile.dailySpendCents as number
+    const assessed = await post(agent, '/api/assess', { amountCents: 0 })
+    expect(assessed.body.outcome).toBe('fits')
+    expect(assessed.body.points[0].events.map((e: { name: string }) => e.name)).toEqual([
+      'Everyday spending',
+    ])
+    expect(assessed.body.points[0].baselineCents).toBe(200000 - daily)
+    await post(agent, '/api/consent', { aiConsent: true })
+    await post(agent, '/api/chat', { message: 'What is coming up?', history: [] })
+    expect(reply.mock.calls[0]![1].purchases).toEqual([])
+    // A late refund for the archived sandbox payment does not unsettle the user's plan.
+    await request(app)
+      .post('/api/paypal/webhook')
+      .send({
+        id: 'REFUND-ARCHIVED',
+        event_type: 'PAYMENT.CAPTURE.REFUNDED',
+        resource: { supplementary_data: { related_ids: { order_id: created.body.orderId } } },
+      })
+    expect((await state(agent)).profile.confirmed).toBe(true)
+    // Purchases made with the user's own plan still count.
+    const own = await post(agent, '/api/checkout/create', { productId: 'chair' })
+    expect(own.status).toBe(200)
+    const after = await post(agent, '/api/assess', { amountCents: 0 })
+    expect(after.body.points[0].events[0]).toMatchObject({ amountCents: -44900, kind: 'purchase' })
+  })
+})
+
 describe('demo dates follow the viewer', () => {
   const localDate = (timeZone: string, at: Date) =>
     new Intl.DateTimeFormat('en-CA', { timeZone }).format(at)

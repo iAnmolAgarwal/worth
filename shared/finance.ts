@@ -136,7 +136,8 @@ function reservedPurchases(profile: FinancialProfile, purchases: Purchase[]): Pu
   return [...purchases]
     .sort((a, b) => Number(b.status === 'completed') - Number(a.status === 'completed'))
     .filter((purchase) => {
-      if (purchase.status === 'failed' || purchase.status === 'cancelled') return false
+      if (purchase.archived || purchase.status === 'failed' || purchase.status === 'cancelled')
+        return false
       const identities = [
         `id:${purchase.id}`,
         ...(purchase.orderId ? [`order:${purchase.orderId}`] : []),
@@ -280,7 +281,7 @@ function missingInputs(profile: FinancialProfile, purchases: Purchase[], today: 
       missing.push(`Confirm whether ${flow.name} has already happened.`)
   }
   for (const purchase of purchases.filter(
-    (item) => !['failed', 'cancelled'].includes(item.status),
+    (item) => !item.archived && !['failed', 'cancelled'].includes(item.status),
   )) {
     if (
       !Number.isSafeInteger(purchase.amountCents) ||

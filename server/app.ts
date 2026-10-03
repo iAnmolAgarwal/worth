@@ -217,7 +217,7 @@ export function createApp(options: AppOptions = {}) {
     return {
       ...data,
       sessionKey: createHash('sha256').update(id).digest('hex').slice(0, 20),
-      purchases: store.purchases(id).map(publicPurchase),
+      purchases: livePurchases(id).map(publicPurchase),
       products: PRODUCTS,
       today: today(data.profile.timezone),
       config: {
@@ -259,6 +259,16 @@ export function createApp(options: AppOptions = {}) {
     res.locals.sessionId = id
     return id
   }
+  /** Purchases that belong to the current plan; archived persona purchases are kept only for PayPal. */
+  function livePurchases(id: string) {
+    return store.purchases(id).filter((p) => !p.archived)
+  }
+  /** History kept on import. Purchases made as the synthetic persona never carry into a user's plan. */
+  function retainedHistory(data: SessionData) {
+    return data.transactions.filter(
+      (t) => t.source === 'import' || (t.source === 'purchase' && data.profile.source === 'import'),
+    )
+  }
   function active(id: string) {
     return store.purchases(id).find((p) => ACTIVE.has(p.status))
   }
@@ -279,7 +289,7 @@ export function createApp(options: AppOptions = {}) {
     const profile = store.get(id)!.profile
     return assessPurchase(
       profile,
-      store.purchases(id).filter((p) => p.id !== excludeId),
+      livePurchases(id).filter((p) => p.id !== excludeId),
       {
         amountCents,
         itemName,
@@ -467,7 +477,11 @@ export function createApp(options: AppOptions = {}) {
     if (!match) return res.json({ received: true, ignored: true })
     await withPurchaseLock(match.purchase.id, async () => {
       const current = reconcile(match.sessionId, match.purchase, await paypal.get(orderId))
-      if (/REFUNDED|REVERSED|DENIED/.test(event.event_type) && current.status === 'completed') {
+      if (
+        /REFUNDED|REVERSED|DENIED/.test(event.event_type) &&
+        current.status === 'completed' &&
+        !current.archived
+      ) {
         const data = store.get(match.sessionId)!
         const message =
           'A PayPal payment changed after capture. Confirm your current balance before relying on this plan.'
@@ -544,7 +558,7 @@ export function createApp(options: AppOptions = {}) {
       )
     if (new Set(input.flows.map((f) => f.id)).size !== input.flows.length)
       throw new HttpError(400, 'Each scheduled item needs a unique identity.', 'DUPLICATE_FLOW')
-    const completed = store.purchases(id).filter((p) => p.status === 'completed')
+    const completed = livePurchases(id).filter((p) => p.status === 'completed')
     if (input.reflectedPurchaseIds.some((ref) => !completed.some((p) => p.id === ref)))
       throw new HttpError(
         400,
@@ -600,7 +614,7 @@ export function createApp(options: AppOptions = {}) {
   app.post('/api/import/preview', (req, res) => {
     const { csv } = csvSchema.parse(req.body)
     const data = dataFor(res)
-    const existing = data.transactions.filter((t) => t.source !== 'demo')
+    const existing = retainedHistory(data)
     const preview = parsePayPalCsv(csv, existing, { today: today(data.profile.timezone) })
     const total = mergeTransactions(existing, preview.transactions).length
     if (total > config.maxTransactions)
@@ -612,11 +626,8 @@ export function createApp(options: AppOptions = {}) {
     const id = sessionId(res)
     noActive(id)
     const data = dataFor(res)
-    const preview = parsePayPalCsv(
-      csv,
-      data.transactions.filter((t) => t.source !== 'demo'),
-      { today: today(data.profile.timezone) },
-    )
+    const retained = retainedHistory(data)
+    const preview = parsePayPalCsv(csv, retained, { today: today(data.profile.timezone) })
     if (preview.errors.length)
       throw new HttpError(
         400,
@@ -625,13 +636,11 @@ export function createApp(options: AppOptions = {}) {
       )
     if (!preview.transactions.length && !preview.duplicates)
       throw new HttpError(400, 'No supported transactions found.', 'EMPTY_IMPORT')
-    const merged = mergeTransactions(
-      data.transactions.filter((t) => t.source !== 'demo'),
-      preview.transactions,
-    )
+    const merged = mergeTransactions(retained, preview.transactions)
     if (merged.length > config.maxTransactions)
       throw new HttpError(400, transactionLimitMessage(merged.length), 'TOO_MANY_TRANSACTIONS')
-    if (data.profile.source === 'demo') {
+    const switching = data.profile.source === 'demo'
+    if (switching) {
       data.profile = {
         ...data.profile,
         name: 'Your plan',
@@ -663,7 +672,13 @@ export function createApp(options: AppOptions = {}) {
     data.profile.missingFields = [
       'Confirm current available funds, income, upcoming bills, and everyday spending after import.',
     ]
-    store.save(id, data)
+    store.atomic(() => {
+      // Purchases made as the persona never reduce the user's own plan or appear in their activity.
+      if (switching)
+        for (const purchase of store.purchases(id))
+          if (!purchase.archived) store.putPurchase(id, { ...purchase, archived: true })
+      store.save(id, data)
+    })
     res.json(state(id))
   })
   app.post('/api/transactions/categories', async (req, res) => {
