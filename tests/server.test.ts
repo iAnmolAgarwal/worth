@@ -1472,6 +1472,28 @@ describe('demo dates follow the viewer', () => {
     expect(later.body.profile.timezone).toBe('Europe/London')
     expect(later.body.today).toBe('2026-10-03')
   })
+  it('dates recurring suggestions from the plan’s own today', async () => {
+    const { app } = setup()
+    // 01:30 on Oct 4 in India; still Oct 3 in New York.
+    clock.value = new Date('2026-10-03T20:00:00Z')
+    const csv = [
+      'Date,Name,Type,Status,Currency,Net,Transaction ID',
+      '2026-08-03,Music streaming subscription,Subscription Payment,Completed,USD,-10.99,M1',
+      '2026-09-03,Music streaming subscription,Subscription Payment,Completed,USD,-10.99,M2',
+    ].join('\n')
+    const nextDate = async (zone: string) => {
+      const agent = request.agent(app)
+      const imported = await post(agent, '/api/import/commit', { csv }).set(
+        'X-Worth-Timezone',
+        zone,
+      )
+      expect(imported.status).toBe(200)
+      return imported.body.profile.flows[0].nextDate as string
+    }
+    // Oct 3 is still to come in New York but has passed in India.
+    expect(await nextDate('America/New_York')).toBe('2026-10-03')
+    expect(await nextDate('Asia/Kolkata')).toBe('2026-11-03')
+  })
 })
 
 describe('session storage bounds', () => {
