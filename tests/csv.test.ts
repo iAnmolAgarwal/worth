@@ -53,6 +53,56 @@ describe('PayPal CSV normalization', () => {
     expect(result.excluded).toBe(3)
   })
 
+  it('treats only funding and withdrawal types as transfers', () => {
+    const kinds = (...rows: [string, string][]) =>
+      parsePayPalCsv(
+        'Date,Name,Type,Currency,Amount,Transaction ID\n' +
+          rows
+            .map(([type, amount], index) => `2026-09-01,,${type},USD,${amount},t${index}`)
+            .join('\n'),
+      )
+        .transactions.sort((a, b) => a.id.localeCompare(b.id, 'en', { numeric: true }))
+        .map((item) => item.kind)
+    expect(
+      kinds(
+        ['Bank Deposit to PP Account', '50.00'],
+        ['General Card Deposit', '20.00'],
+        ['General Credit Card Deposit', '20.00'],
+        ['Add Funds from a Bank Account', '20.00'],
+        ['General Withdrawal', '-50.00'],
+        ['User Initiated Withdrawal', '-50.00'],
+        ['Instant Transfer', '-50.00'],
+        ['Transfer', '-50.00'],
+      ),
+    ).toEqual(Array(8).fill('transfer'))
+    expect(
+      kinds(
+        ['Direct Deposit', '2100.00'],
+        ['Mobile Check Deposit', '300.00'],
+        ['Express Checkout Payment', '-12.00'],
+      ),
+    ).toEqual(['income', 'unknown', 'expense'])
+  })
+
+  it('suggests a paycheck typed as Direct Deposit as recurring income', () => {
+    const rows = ['08/07', '08/21', '09/04', '09/18'].map(
+      (day, index) =>
+        `${day}/2026,06:00:00,ACME CORP PAYROLL,Direct Deposit,Completed,USD,"2,100.00",0,"2,100.00",dd-${index},`,
+    )
+    const result = parsePayPalCsv(csv(...rows))
+    expect(result.errors).toEqual([])
+    expect(result.transactions.every((item) => item.kind === 'income')).toBe(true)
+    expect(result.recurring).toMatchObject([
+      {
+        name: 'ACME CORP PAYROLL',
+        kind: 'income',
+        cadence: 'biweekly',
+        amountCents: 210000,
+        nextDate: '2026-10-16',
+      },
+    ])
+  })
+
   it('handles quoted commas, BOM headers, and parentheses without float rounding', () => {
     const result = parsePayPalCsv(
       '\uFEFFDate,Name,Currency,Amount,Transaction ID\r\n2026-09-01,"Shop, Inc.",USD,"(1,234.56)",a\r\n2026-09-02,Coffee,USD,-0.29,b',

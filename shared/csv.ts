@@ -74,17 +74,31 @@ function parseCents(value: string): number | null {
   return negative ? -cents : cents
 }
 
+/** Money moved in from the user's own bank or card. "Direct Deposit" (pay) is not funding. */
+const FUNDING_TYPE =
+  /\b(?:bank deposit to pp account|deposit to pp account|(?:general )?(?:credit |debit )?card deposit|add(?:ed)? funds?|funds? added|top.?up|funding|transfer from (?:bank|checking|savings))\b/
+/** Money moved out to the user's own bank or card. */
+const WITHDRAWAL_TYPE =
+  /\b(?:withdrawal|withdraw|transfer to (?:bank|checking|savings|(?:debit )?card)|instant transfer|standard transfer)\b/
+/** A plain bank transfer type with no other detail. */
+const BANK_TRANSFER_TYPE = /^(?:bank )?transfer$/
+
 function classify(
   name: string,
   type: string,
   amount: number,
 ): Pick<Transaction, 'category' | 'kind' | 'color'> {
   const content = `${name} ${type}`.toLowerCase()
+  const kind = type.toLowerCase().trim()
   // PayPal's own balance corrections (for example a sandbox top-up) are neither income nor spending.
-  if (/\b(account correction|correction|adjustment)\b/.test(type.toLowerCase()))
+  if (/\b(account correction|correction|adjustment)\b/.test(kind))
     return { kind: 'adjustment', category: 'Account adjustment', color: '#c4c6bb' }
+  // Only funding and withdrawal move the user's own money; everything else is income or spending.
   if (
-    /\b(transfer|deposit|withdrawal|conversion|top.?up|funding)\b/.test(type.toLowerCase()) ||
+    FUNDING_TYPE.test(kind) ||
+    WITHDRAWAL_TYPE.test(kind) ||
+    BANK_TRANSFER_TYPE.test(kind) ||
+    /\bconversion\b/.test(kind) ||
     /\btransfer (from|to)\b/.test(name.toLowerCase())
   )
     return { kind: 'transfer', category: 'Transfers', color: '#c4c6bb' }
@@ -94,7 +108,11 @@ function classify(
       category: /reimbursement/.test(content) ? 'Reimbursements' : 'Refunds',
       color: '#c4c6bb',
     }
-  if (amount > 0 && /\b(salary|payroll|paycheck|wages)\b/.test(content))
+  if (
+    amount > 0 &&
+    (/\b(direct deposit|payroll)\b/.test(kind) ||
+      /\b(salary|payroll|paycheck|wages)\b/.test(content))
+  )
     return { kind: 'income', category: 'Income', color: '#b6d58d' }
   if (amount >= 0) return { kind: 'unknown', category: 'Review incoming payment', color: '#c4c6bb' }
   if (
