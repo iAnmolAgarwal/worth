@@ -225,7 +225,7 @@ describe('HTTP sessions, profiles, and calculations', () => {
     expect(
       (
         await post(agent, '/api/import/commit', {
-          csv: csv + '\n10/02/2026,Bad,-3.00,EUR,Payment,Completed,ABC124',
+          csv: csv + '\n10/02/2026,Bad,-3.0x,USD,Payment,Completed,ABC124',
           dateOrder: 'MM/DD',
         })
       ).status,
@@ -1656,6 +1656,109 @@ describe('foreign-currency imports', () => {
       coverageDays: 61,
       dailySpendCents: Math.round(11352 / 61),
     })
+  })
+})
+
+describe('unresolved foreign-currency payments', () => {
+  const csv = [
+    'Date,Time,Name,Type,Status,Currency,Net,Transaction ID',
+    '2026-09-10,09:00:00,Lisbon bakery,Express Checkout Payment,Completed,EUR,-12.00,F1',
+    '2026-09-11,09:00:00,London theatre,Express Checkout Payment,Completed,GBP,-40.00,F2',
+    '2026-09-14,09:00:00,Coffee,Express Checkout Payment,Completed,USD,-4.00,U1',
+  ].join('\n')
+  const resolve = (agent: ReturnType<typeof request.agent>, id: string, body: object) =>
+    post(agent, `/api/import/unresolved/${encodeURIComponent(id)}`, body)
+  const assess = async (agent: ReturnType<typeof request.agent>) =>
+    (await post(agent, '/api/assess', { amountCents: 100 })).body as {
+      outcome: string
+      missingFields: string[]
+    }
+
+  it('withholds every positive result until each payment is resolved', async () => {
+    const { agent } = setup()
+    const preview = await post(agent, '/api/import/preview', { csv })
+    expect(preview.body.unresolved.map((p: { id: string }) => p.id)).toEqual([
+      'paypal:F1',
+      'paypal:F2',
+    ])
+    const imported = await post(agent, '/api/import/commit', { csv })
+    expect(imported.status).toBe(200)
+    expect(imported.body.foreignPayments).toHaveLength(2)
+    expect(imported.body.transactions.map((t: { id: string }) => t.id)).toEqual(['paypal:U1'])
+    // Confirming the plan does not clear the foreign-currency entry.
+    const saved = await simpleProfile(agent, { confirmed: true, missingFields: [] })
+    expect(saved.profile.missingFields).toEqual([
+      'Resolve 2 foreign-currency payments from your import in Activity: enter what each one cost in USD, or mark each one as a one-off.',
+    ])
+    expect(await assess(agent)).toMatchObject({ outcome: 'incomplete' })
+    const checkout = await post(agent, '/api/checkout/create', { productId: 'headphones' })
+    expect(checkout.body.code).toBe('PLAN_INCOMPLETE')
+
+    const converted = await resolve(agent, 'paypal:F1', { amountCents: 1337 })
+    expect(converted.status).toBe(200)
+    expect(converted.body.profile.version).toBe(saved.profile.version + 1)
+    // History now runs from the bakery on Sep 10 to the coffee on Sep 14.
+    expect(converted.body.profile.coverageDays).toBe(5)
+    expect(converted.body.transactions.find((t: { id: string }) => t.id === 'paypal:F1')).toEqual(
+      expect.objectContaining({ amountCents: -1337, currency: 'USD', kind: 'expense' }),
+    )
+    expect(converted.body.profile.missingFields).toEqual([
+      'Review your everyday spending: with Lisbon bakery included, your imported history suggests $3.47 a day, more than your $0 estimate.',
+      'Resolve 1 foreign-currency payment from your import in Activity: enter what it cost in USD, or mark it as a one-off.',
+    ])
+    expect((await resolve(agent, 'paypal:F1', { oneOff: true })).body.code).toBe('ALREADY_RESOLVED')
+    const oneOff = await resolve(agent, 'paypal:F2', { oneOff: true })
+    expect(oneOff.status).toBe(200)
+    expect(oneOff.body.foreignPayments.map((p: { resolution: unknown }) => p.resolution)).toEqual([
+      { kind: 'usd', amountCents: 1337 },
+      { kind: 'oneOff' },
+    ])
+    expect(oneOff.body.transactions.some((t: { id: string }) => t.id === 'paypal:F2')).toBe(false)
+    // The spending review is the last thing standing; saving the plan clears it.
+    expect((await assess(agent)).missingFields).toEqual([
+      expect.stringContaining('Review your everyday spending'),
+    ])
+    await simpleProfile(agent, { confirmed: true, missingFields: [], dailySpendCents: 347 })
+    expect(await assess(agent)).toMatchObject({ outcome: 'fits', missingFields: [] })
+
+    // Importing the same file again raises nothing that was already answered.
+    const again = await post(agent, '/api/import/preview', { csv })
+    expect(again.body).toMatchObject({ unresolved: [], duplicates: 3 })
+  })
+
+  it('validates resolutions and refuses unknown payments', async () => {
+    const { agent } = setup()
+    await post(agent, '/api/import/commit', { csv })
+    for (const body of [{}, { amountCents: 0 }, { amountCents: 12.5 }, { oneOff: false }])
+      expect((await resolve(agent, 'paypal:F1', body)).status).toBe(400)
+    expect((await resolve(agent, 'paypal:F1', { amountCents: 100, oneOff: true })).status).toBe(400)
+    expect((await resolve(agent, 'paypal:NOPE', { oneOff: true })).status).toBe(404)
+    expect((await state(agent)).profile.missingFields).toContain(
+      'Resolve 2 foreign-currency payments from your import in Activity: enter what each one cost in USD, or mark each one as a one-off.',
+    )
+  })
+
+  it('keeps answered payments when a later import adds new ones', async () => {
+    const { agent } = setup()
+    await post(agent, '/api/import/commit', { csv })
+    await resolve(agent, 'paypal:F1', { oneOff: true })
+    const more = await post(agent, '/api/import/commit', {
+      csv: `${csv}\n2026-09-20,09:00:00,Tokyo stationery,Express Checkout Payment,Completed,JPY,"-4,500.00",F3`,
+    })
+    expect(more.status).toBe(200)
+    expect(
+      more.body.foreignPayments.map((p: { id: string; resolution?: unknown }) => [
+        p.id,
+        p.resolution ?? null,
+      ]),
+    ).toEqual([
+      ['paypal:F1', { kind: 'oneOff' }],
+      ['paypal:F2', null],
+      ['paypal:F3', null],
+    ])
+    expect(more.body.profile.missingFields).toContain(
+      'Resolve 2 foreign-currency payments from your import in Activity: enter what each one cost in USD, or mark each one as a one-off.',
+    )
   })
 })
 

@@ -1,5 +1,12 @@
 import Papa from 'papaparse'
-import type { Cadence, DateOrder, ImportPreview, ScheduledFlow, Transaction } from './types.ts'
+import type {
+  Cadence,
+  DateOrder,
+  ForeignPayment,
+  ImportPreview,
+  ScheduledFlow,
+  Transaction,
+} from './types.ts'
 import { occurrence, todayInTimezone } from './finance.ts'
 import { CSV_IMPORT_LIMITS, CSV_SIZE_MESSAGE, utf8Bytes } from './limits.ts'
 
@@ -292,6 +299,89 @@ function recurringSuggestions(
 
 type Classification = Pick<Transaction, 'category' | 'kind' | 'color'>
 
+/**
+ * What imported history suggests: how many days it covers, everyday spending per day (recurring
+ * suggestions and refunded amounts excluded) and recurring items to confirm. Only imported
+ * transactions are analyzed.
+ */
+export function analyzeHistory(
+  transactions: Transaction[],
+  today: string,
+): { coverageDays: number; suggestedDailySpendCents: number; recurring: ScheduledFlow[] } {
+  const imported = transactions
+    .filter((transaction) => transaction.source === 'import')
+    .sort((a, b) => a.date.localeCompare(b.date))
+  const coverageDays = imported.length
+    ? dateDistance(imported[0]!.date, imported[imported.length - 1]!.date) + 1
+    : 0
+  const suggestions = recurringSuggestions(imported, today)
+  const refunded = new Map<string, number>()
+  for (const transaction of imported)
+    if (
+      transaction.kind === 'refund' &&
+      transaction.status === 'completed' &&
+      transaction.amountCents > 0 &&
+      transaction.referenceId
+    )
+      refunded.set(
+        transaction.referenceId,
+        (refunded.get(transaction.referenceId) ?? 0) + transaction.amountCents,
+      )
+  const ordinaryTotal = imported
+    .filter(
+      (transaction) =>
+        transaction.kind === 'expense' &&
+        transaction.status === 'completed' &&
+        !suggestions.ids.has(transaction.id),
+    )
+    .reduce(
+      (sum, transaction) =>
+        sum + Math.max(0, Math.abs(transaction.amountCents) - (refunded.get(transaction.id) ?? 0)),
+      0,
+    )
+  return {
+    coverageDays,
+    suggestedDailySpendCents: coverageDays ? Math.round(ordinaryTotal / coverageDays) : 0,
+    recurring: suggestions.flows,
+  }
+}
+
+const FOREIGN_PAYMENT_GATE = /^Resolve \d+ foreign-currency payments? /
+
+/**
+ * The profile's missing information with one entry for unresolved foreign-currency payments, kept
+ * while any remain. While it is there, no assessment can be positive.
+ */
+export function withForeignPaymentGate(
+  missingFields: string[],
+  payments: ForeignPayment[] = [],
+): string[] {
+  const open = payments.filter((payment) => !payment.resolution).length
+  const others = missingFields.filter((field) => !FOREIGN_PAYMENT_GATE.test(field))
+  if (!open) return others
+  return [
+    ...others,
+    `Resolve ${open} foreign-currency ${open === 1 ? 'payment' : 'payments'} from your import in Activity: enter what ${open === 1 ? 'it' : 'each one'} cost in USD, or mark ${open === 1 ? 'it' : 'each one'} as a one-off.`,
+  ]
+}
+
+/** The USD record of a foreign-currency payment once the user says what it cost. */
+export function foreignPaymentTransaction(
+  payment: ForeignPayment,
+  amountCents: number,
+): Transaction {
+  return {
+    id: payment.id,
+    date: payment.date,
+    name: payment.name,
+    amountCents: -amountCents,
+    currency: 'USD',
+    ...classify(payment.name, payment.type, -amountCents),
+    status: 'completed',
+    source: 'import',
+  }
+}
+
 /** One validated CSV row, before it becomes a transaction. */
 interface Row {
   rowNumber: number
@@ -383,6 +473,8 @@ export interface ParseOptions {
   today?: string
   /** The user's answer when every slash date in the file could be read either way. */
   dateOrder?: DateOrder
+  /** Foreign-currency payments from earlier imports; resolved ones are not raised again. */
+  foreignPayments?: ForeignPayment[]
 }
 
 export function parsePayPalCsv(
@@ -402,6 +494,7 @@ export function parsePayPalCsv(
     warnings: [],
     adjustments: [],
     leftOut: { memo: 0, holds: 0, otherCurrency: 0 },
+    unresolved: [],
     dateOrder: null,
     needsDateOrder: false,
   }
@@ -550,6 +643,14 @@ export function parsePayPalCsv(
   }
 
   // 2. Record a row once, under the identity it was exported with.
+  const identify = (row: Row) => {
+    const fingerprint = hash(
+      [row.date, row.time, row.name, row.type, row.amount, row.currency].join('|'),
+    )
+    const ordinal = (occurrences.get(fingerprint) ?? 0) + 1
+    occurrences.set(fingerprint, ordinal)
+    return row.nativeId ? `paypal:${row.nativeId}` : `import:${fingerprint}:${ordinal}`
+  }
   const record = (
     row: Row,
     override: { amount?: number; classification?: Classification } = {},
@@ -557,12 +658,7 @@ export function parsePayPalCsv(
     const { rowNumber, date, nativeId, status, statusText } = row
     const amount = override.amount ?? row.amount
     const currency = override.amount === undefined ? row.currency : 'USD'
-    const fingerprint = hash(
-      [date, row.time, row.name, row.type, row.amount, row.currency].join('|'),
-    )
-    const ordinal = (occurrences.get(fingerprint) ?? 0) + 1
-    occurrences.set(fingerprint, ordinal)
-    const id = nativeId ? `paypal:${nativeId}` : `import:${fingerprint}:${ordinal}`
+    const id = identify(row)
     if (
       statusText &&
       status === 'excluded' &&
@@ -639,6 +735,7 @@ export function parsePayPalCsv(
   }
 
   // 3. Foreign-currency payments count once, through the USD conversion that paid for them.
+  const knownForeign = new Map((options.foreignPayments ?? []).map((item) => [item.id, item]))
   const conversions = pairConversions(rows)
   for (const row of rows) {
     if (row.currency !== 'USD') {
@@ -648,10 +745,28 @@ export function parsePayPalCsv(
         continue
       }
       result.leftOut.otherCurrency++
-      if (isForeignSpend(row))
+      if (!isForeignSpend(row)) continue
+      // Spending in another currency without its USD cost is unresolved, never silently dropped.
+      const id = identify(row)
+      if (row.nativeId && capturedPurchases.has(row.nativeId)) {
         result.errors.push({
           row: row.rowNumber,
-          message: `Unsupported currency ${row.currency}: this payment has no matching USD conversion in the file. Only USD can be forecast.`,
+          message: `Capture ${row.nativeId} matches a Worth purchase but its currency conflicts. Resolve this row before importing.`,
+        })
+        continue
+      }
+      if (knownById.has(id) || knownForeign.get(id)?.resolution) {
+        result.duplicates++
+        continue
+      }
+      if (!result.unresolved.some((payment) => payment.id === id))
+        result.unresolved.push({
+          id,
+          date: row.date,
+          name: row.name,
+          type: row.type,
+          currency: row.currency,
+          originalCents: row.amount,
         })
       continue
     }
@@ -672,38 +787,14 @@ export function parsePayPalCsv(
   }
   // Return only inserted/updated rows, but analyze the complete retained personal history.
   const combined = [...knownById.values()].filter((transaction) => transaction.source === 'import')
-  const chronological = combined.sort((a, b) => a.date.localeCompare(b.date))
-  result.coverageDays = chronological.length
-    ? dateDistance(chronological[0]!.date, chronological[chronological.length - 1]!.date) + 1
-    : 0
-  const suggestions = recurringSuggestions(combined, today)
-  result.recurring = suggestions.flows
-  const refunded = new Map<string, number>()
-  for (const transaction of combined)
-    if (
-      transaction.kind === 'refund' &&
-      transaction.status === 'completed' &&
-      transaction.amountCents > 0 &&
-      transaction.referenceId
-    )
-      refunded.set(
-        transaction.referenceId,
-        (refunded.get(transaction.referenceId) ?? 0) + transaction.amountCents,
-      )
-  const ordinarySpend = combined.filter(
-    (transaction) =>
-      transaction.kind === 'expense' &&
-      transaction.status === 'completed' &&
-      !suggestions.ids.has(transaction.id),
+  const analysis = analyzeHistory(combined, today)
+  result.coverageDays = analysis.coverageDays
+  result.recurring = analysis.recurring
+  result.suggestedDailySpendCents = analysis.suggestedDailySpendCents
+  const latest = combined.reduce<string | undefined>(
+    (max, transaction) => (!max || transaction.date > max ? transaction.date : max),
+    undefined,
   )
-  const ordinaryTotal = ordinarySpend.reduce(
-    (sum, transaction) =>
-      sum + Math.max(0, Math.abs(transaction.amountCents) - (refunded.get(transaction.id) ?? 0)),
-    0,
-  )
-  result.suggestedDailySpendCents = result.coverageDays
-    ? Math.round(ordinaryTotal / result.coverageDays)
-    : 0
   result.excluded = result.transactions.filter(
     (transaction) =>
       transaction.status !== 'completed' ||
@@ -729,10 +820,7 @@ export function parsePayPalCsv(
     result.warnings.push(
       'This history covers fewer than 60 days. Confirm an everyday spending estimate that includes spending outside PayPal.',
     )
-  if (
-    chronological.length &&
-    dateDistance(chronological[chronological.length - 1]!.date, today) > 7
-  )
+  if (latest && dateDistance(latest, today) > 7)
     result.warnings.push(
       'The latest transaction is more than a week old. Review changes in your current bills and spending.',
     )
@@ -747,6 +835,11 @@ export function parsePayPalCsv(
   if (pending)
     result.warnings.push(
       `${pending} pending payments are excluded from spending history. Add any outstanding commitments to your financial picture.`,
+    )
+  const unresolved = result.unresolved.length
+  if (unresolved)
+    result.warnings.push(
+      `${unresolved} foreign-currency ${unresolved === 1 ? 'payment has' : 'payments have'} no matching USD conversion. Worth will not show a positive result until you enter what each one cost in USD or mark it as a one-off.`,
     )
   const { memo, holds, otherCurrency } = result.leftOut
   if (otherCurrency)

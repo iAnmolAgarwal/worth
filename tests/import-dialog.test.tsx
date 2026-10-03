@@ -51,6 +51,7 @@ function preview(overrides: Partial<ImportPreview> = {}): ImportPreview {
     leftOut: { memo: 0, holds: 0, otherCurrency: 0 },
     dateOrder: null,
     needsDateOrder: false,
+    unresolved: [],
     ...overrides,
   }
 }

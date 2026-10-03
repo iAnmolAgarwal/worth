@@ -2,12 +2,14 @@ import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { randomBytes } from 'node:crypto'
-import type { FinancialProfile, Purchase, Transaction } from '../shared/types.ts'
+import type { FinancialProfile, ForeignPayment, Purchase, Transaction } from '../shared/types.ts'
 
 export interface SessionData {
   profile: FinancialProfile
   transactions: Transaction[]
   wishlist: string[]
+  /** Imported foreign-currency payments without a USD conversion, and how each was resolved. */
+  foreignPayments?: ForeignPayment[]
 }
 export interface StoredPurchase extends Purchase {
   approvalUrl?: string

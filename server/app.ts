@@ -7,12 +7,18 @@ import {
   assessPurchase,
   addDays,
   compareOptions,
+  money,
   normalizeTimezone,
   payIn4InRange,
   purchaseReviews,
 } from '../shared/finance.ts'
 import { createDemoState, DEMO_TIMEZONE, PRODUCTS, rebaseDemoState } from '../shared/seed.ts'
-import { parsePayPalCsv } from '../shared/csv.ts'
+import {
+  analyzeHistory,
+  foreignPaymentTransaction,
+  parsePayPalCsv,
+  withForeignPaymentGate,
+} from '../shared/csv.ts'
 import { CSV_IMPORT_LIMITS, CSV_SIZE_MESSAGE, utf8Bytes } from '../shared/limits.ts'
 import type {
   AppState,
@@ -163,6 +169,11 @@ const csvSchema = z
     dateOrder: z.enum(['MM/DD', 'DD/MM']).optional(),
   })
   .strict()
+/** A foreign-currency payment is resolved by what it cost in USD, or as a one-off to leave out. */
+const resolutionSchema = z.union([
+  z.object({ amountCents: cents.min(1) }).strict(),
+  z.object({ oneOff: z.literal(true) }).strict(),
+])
 /**
  * JSON escapes every quote and line break in a CSV, so a fully quoted export can double in size on
  * the way in. The import routes accept twice the CSV limit; the CSV itself is held to the limit.
@@ -694,6 +705,8 @@ export function createApp(options: AppOptions = {}) {
       coverageDays: data.profile.coverageDays,
       confirmedAt: input.confirmed ? now().toISOString() : '',
       userEdited: true,
+      // Saving the plan never clears unresolved foreign-currency payments; resolving them does.
+      missingFields: withForeignPaymentGate(input.missingFields, data.foreignPayments),
     }
     store.save(id, data)
     res.json(state(id))
@@ -738,6 +751,7 @@ export function createApp(options: AppOptions = {}) {
     const preview = parsePayPalCsv(csv, existing, {
       today: today(data.profile.timezone),
       dateOrder,
+      foreignPayments: data.foreignPayments,
     })
     const total = mergeTransactions(existing, preview.transactions).length
     if (total > config.maxTransactions)
@@ -753,6 +767,7 @@ export function createApp(options: AppOptions = {}) {
     const preview = parsePayPalCsv(csv, retained, {
       today: today(data.profile.timezone),
       dateOrder,
+      foreignPayments: data.foreignPayments,
     })
     if (preview.needsDateOrder)
       throw new HttpError(
@@ -766,7 +781,7 @@ export function createApp(options: AppOptions = {}) {
         'Correct the flagged rows before importing. No history was changed.',
         'IMPORT_ERRORS',
       )
-    if (!preview.transactions.length && !preview.duplicates)
+    if (!preview.transactions.length && !preview.duplicates && !preview.unresolved.length)
       throw new HttpError(400, 'No supported transactions found.', 'EMPTY_IMPORT')
     const merged = mergeTransactions(retained, preview.transactions)
     if (merged.length > config.maxTransactions)
@@ -801,9 +816,17 @@ export function createApp(options: AppOptions = {}) {
     data.profile.confirmedAt = ''
     data.profile.version += 1
     data.profile.userEdited = true
-    data.profile.missingFields = [
-      'Confirm current available funds, income, upcoming bills, and everyday spending after import.',
+    const known = switching ? [] : (data.foreignPayments ?? [])
+    data.foreignPayments = [
+      ...known,
+      ...preview.unresolved.filter((payment) => !known.some((item) => item.id === payment.id)),
     ]
+    data.profile.missingFields = withForeignPaymentGate(
+      [
+        'Confirm current available funds, income, upcoming bills, and everyday spending after import.',
+      ],
+      data.foreignPayments,
+    )
     store.atomic(() => {
       // Purchases made as the persona never reduce the user's own plan or appear in their activity.
       if (switching)
@@ -811,6 +834,52 @@ export function createApp(options: AppOptions = {}) {
           if (!purchase.archived) store.putPurchase(id, { ...purchase, archived: true })
       store.save(id, data)
     })
+    res.json(state(id))
+  })
+  app.post('/api/import/unresolved/:paymentId', (req, res) => {
+    const input = resolutionSchema.parse(req.body)
+    const id = sessionId(res)
+    noActive(id)
+    const data = dataFor(res)
+    const payment = data.foreignPayments?.find((item) => item.id === String(req.params.paymentId))
+    if (!payment) throw new HttpError(404, 'Foreign-currency payment not found.', 'NOT_FOUND')
+    if (payment.resolution)
+      throw new HttpError(409, 'This payment is already resolved.', 'ALREADY_RESOLVED')
+    if ('oneOff' in input) payment.resolution = { kind: 'oneOff' }
+    else {
+      if (data.transactions.length >= config.maxTransactions)
+        throw new HttpError(
+          400,
+          transactionLimitMessage(data.transactions.length + 1),
+          'TOO_MANY_TRANSACTIONS',
+        )
+      payment.resolution = { kind: 'usd', amountCents: input.amountCents }
+      // Its USD cost joins the history, so the history-based suggestions can be checked again.
+      data.transactions = [
+        ...data.transactions,
+        foreignPaymentTransaction(payment, input.amountCents),
+      ].sort((a, b) => b.date.localeCompare(a.date))
+      const analysis = analyzeHistory(data.transactions, today(data.profile.timezone))
+      data.profile.coverageDays = analysis.coverageDays
+      const names = new Set(data.profile.flows.map((flow) => flow.name.toLowerCase()))
+      data.profile.flows.push(
+        ...analysis.recurring.filter(
+          (flow) =>
+            flow.name.toLowerCase() === payment.name.toLowerCase() &&
+            !names.has(flow.name.toLowerCase()),
+        ),
+      )
+      if (analysis.suggestedDailySpendCents > data.profile.dailySpendCents)
+        data.profile.missingFields.push(
+          `Review your everyday spending: with ${payment.name.slice(0, 60)} included, your imported history suggests ${money(analysis.suggestedDailySpendCents)} a day, more than your ${money(data.profile.dailySpendCents)} estimate.`,
+        )
+    }
+    data.profile.missingFields = withForeignPaymentGate(
+      data.profile.missingFields,
+      data.foreignPayments,
+    )
+    data.profile.version += 1
+    store.save(id, data)
     res.json(state(id))
   })
   app.post('/api/transactions/categories', async (req, res) => {

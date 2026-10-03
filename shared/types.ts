@@ -287,6 +287,8 @@ export interface AppState {
   wishlist: string[]
   products: Product[]
   today: string
+  /** Imported foreign-currency payments; unresolved ones withhold any positive result. */
+  foreignPayments?: ForeignPayment[]
   config: {
     ai: 'anthropic' | 'demo'
     paypal: 'sandbox' | 'demo'
@@ -307,6 +309,22 @@ export interface ChatReply {
   intent: 'affordability' | 'subscriptions' | 'spending' | 'overview' | 'clarify'
   suggestions: string[]
   toolCalls: string[]
+}
+/**
+ * A completed payment in another currency with no matching USD conversion in the export. Until it
+ * is resolved, no assessment can be positive.
+ */
+export interface ForeignPayment {
+  /** The identity it would have as a transaction, such as `paypal:<Transaction ID>`. */
+  id: string
+  date: string
+  name: string
+  type: string
+  currency: string
+  /** Hundredths of the payment's own currency, as exported; negative for money out. */
+  originalCents: number
+  /** The user's answer: what it cost in USD, or a one-off left out of the history. */
+  resolution?: { kind: 'usd'; amountCents: number } | { kind: 'oneOff' }
 }
 /** The order of day and month in a CSV's slash dates. */
 export type DateOrder = 'MM/DD' | 'DD/MM'
@@ -334,4 +352,6 @@ export interface ImportPreview {
    * explicit `dateOrder`. The commit refuses such a file without one.
    */
   needsDateOrder: boolean
+  /** Foreign-currency spending without a matching USD conversion, to be resolved after import. */
+  unresolved: ForeignPayment[]
 }

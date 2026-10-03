@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { parsePayPalCsv } from '../shared/csv.ts'
+import { foreignPaymentTransaction, parsePayPalCsv, withForeignPaymentGate } from '../shared/csv.ts'
 import { CSV_IMPORT_LIMITS } from '../shared/limits.ts'
 import type { Transaction } from '../shared/types.ts'
 
@@ -157,8 +157,10 @@ describe('PayPal CSV normalization', () => {
     const result = parsePayPalCsv(
       'Date,Name,Currency,Amount\n2026-09-01,Euro Store,EUR,-50.00\n2026-02-30,Invalid date,USD,-10.00\n2026-09-01,Comma decimal,USD,"12,50"\n2026-09-02,Fraction,USD,-12.999\n2027-01-01,Future,USD,-10.00\n2026-09-02,Valid,USD,-25.00',
     )
-    expect(result.errors).toHaveLength(5)
+    expect(result.errors.map((error) => error.row)).toEqual([3, 4, 5, 6])
     expect(result.transactions).toHaveLength(1)
+    // The euro payment is no longer an error: it waits, unresolved, for its USD cost.
+    expect(result.unresolved.map((payment) => payment.name)).toEqual(['Euro Store'])
     expect(result.warnings.join(' ')).toContain('Some rows could not be imported')
   })
 
@@ -792,5 +794,86 @@ describe('foreign currencies', () => {
     ])
     expect(result.leftOut.otherCurrency).toBe(2)
     expect(result.suggestedDailySpendCents).toBe(0)
+  })
+})
+
+describe('unresolved foreign-currency spending', () => {
+  const header = 'Date,Time,Name,Type,Status,Currency,Net,Transaction ID'
+  const text = [
+    header,
+    '2026-09-10,09:00:00,Lisbon bakery,Express Checkout Payment,Completed,EUR,-12.00,F1',
+    '2026-09-11,09:00:00,London theatre,Express Checkout Payment,Completed,GBP,-40.00,F2',
+    '2026-09-12,09:00:00,Lisbon bakery,Express Checkout Payment,Pending,EUR,-8.00,F3',
+    '2026-09-13,09:00:00,Paris client,Payment Received,Completed,EUR,300.00,F4',
+    '2026-09-14,09:00:00,Coffee,Express Checkout Payment,Completed,USD,-4.00,U1',
+  ].join('\n')
+
+  it('lists completed foreign spending without a USD conversion instead of dropping it', () => {
+    const result = parsePayPalCsv(text)
+    expect(result.errors).toEqual([])
+    expect(result.unresolved).toEqual([
+      {
+        id: 'paypal:F1',
+        date: '2026-09-10',
+        name: 'Lisbon bakery',
+        type: 'Express Checkout Payment',
+        currency: 'EUR',
+        originalCents: -1200,
+      },
+      {
+        id: 'paypal:F2',
+        date: '2026-09-11',
+        name: 'London theatre',
+        type: 'Express Checkout Payment',
+        currency: 'GBP',
+        originalCents: -4000,
+      },
+    ])
+    // Pending and incoming foreign rows are left out without needing an answer.
+    expect(result.leftOut.otherCurrency).toBe(4)
+    expect(result.transactions.map((item) => item.id)).toEqual(['paypal:U1'])
+    expect(result.warnings.join(' ')).toContain(
+      '2 foreign-currency payments have no matching USD conversion',
+    )
+  })
+
+  it('does not raise a payment again once it is resolved', () => {
+    const converted = foreignPaymentTransaction(parsePayPalCsv(text).unresolved[0]!, 1337)
+    expect(converted).toEqual({
+      id: 'paypal:F1',
+      date: '2026-09-10',
+      name: 'Lisbon bakery',
+      amountCents: -1337,
+      currency: 'USD',
+      kind: 'expense',
+      category: 'Shopping',
+      color: '#e7cbb1',
+      status: 'completed',
+      source: 'import',
+    })
+    const again = parsePayPalCsv(text, [converted], {
+      foreignPayments: [{ ...parsePayPalCsv(text).unresolved[1]!, resolution: { kind: 'oneOff' } }],
+    })
+    expect(again.unresolved).toEqual([])
+    expect(again.duplicates).toBe(2)
+  })
+
+  it('keeps a missing-information entry exactly while payments are unresolved', () => {
+    const payments = parsePayPalCsv(text).unresolved
+    const gated = withForeignPaymentGate(['Confirm your funds.'], payments)
+    expect(gated).toEqual([
+      'Confirm your funds.',
+      'Resolve 2 foreign-currency payments from your import in Activity: enter what each one cost in USD, or mark each one as a one-off.',
+    ])
+    // Applying it again replaces the entry rather than repeating it.
+    const one = withForeignPaymentGate(gated, [
+      { ...payments[0]!, resolution: { kind: 'usd', amountCents: 1337 } },
+      payments[1]!,
+    ])
+    expect(one).toEqual([
+      'Confirm your funds.',
+      'Resolve 1 foreign-currency payment from your import in Activity: enter what it cost in USD, or mark it as a one-off.',
+    ])
+    expect(withForeignPaymentGate(one, [])).toEqual(['Confirm your funds.'])
   })
 })
