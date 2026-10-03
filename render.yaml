@@ -22,10 +22,10 @@ services:
         value: 0.0.0.0
       - key: DATABASE_PATH
         value: /var/data/worth.sqlite
-      # Reverse proxies in front of the app. Confirm it after the first deploy from the logged
-      # line "X-Forwarded-For carries N address(es)" and adjust if Render adds more hops.
+      # Render forwards through two proxies: the first deploy logged
+      # "X-Forwarded-For carries 2 address(es)" for direct visits, so trust both hops.
       - key: TRUST_PROXY
-        value: '1'
+        value: '2'
       # APP_ORIGIN falls back to RENDER_EXTERNAL_URL; set it when a custom domain is added.
       - key: APP_ORIGIN
         sync: false
