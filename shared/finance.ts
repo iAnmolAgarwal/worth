@@ -826,7 +826,11 @@ function payIn4Comparison(
       belowCushion: low.minimumCents < cushion,
     }
   })
-  const firstDip = option.points.find((point) => point.minimumCents < cushion)
+  // A dip counts against the instalments only where the plan stays above the cushion without them.
+  const firstDip = option.points.find(
+    (point) => point.minimumCents < cushion && point.baselineMinimumCents >= cushion,
+  )
+  const baselineDip = option.points.find((point) => point.baselineMinimumCents < cushion)
   return {
     ...option,
     available: true,
@@ -837,7 +841,9 @@ function payIn4Comparison(
         ? 'Review the missing information before using this estimate.'
         : firstDip
           ? `An instalment would dip below your cushion on ${shortDay(firstDip.date)}`
-          : 'Instalment scenario stays above your cushion',
+          : baselineDip
+            ? `Your plan dips below your cushion on ${shortDay(baselineDip.date)} even without this purchase`
+            : 'Instalment scenario stays above your cushion',
     instalments,
     stacking: stackingWarning(
       activePlanPayments(profile, purchases, today),
@@ -959,7 +965,7 @@ export function purchaseReviews(purchases: Purchase[]): PurchaseReview[] {
         name: purchase.name,
         amountCents: purchase.amountCents,
         title: 'Confirm your plan',
-        message: `PayPal doesn’t tell Worth whether you paid in full or chose Pay in 4. Until you confirm, Worth counts the full ${money(purchase.amountCents)} as paid on the day you bought it.`,
+        message: `PayPal doesn’t tell Worth whether you paid in full or chose Pay in 4. Until you confirm, Worth counts the full ${money(purchase.amountCents)} as one payment today, unless your available funds already include it.`,
       })
     for (const refund of purchase.refunds ?? [])
       if (refund.status === 'review')

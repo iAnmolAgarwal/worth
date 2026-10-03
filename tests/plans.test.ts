@@ -300,6 +300,9 @@ describe('review prompts', () => {
       purchase({ id: 'open', status: 'pending' }),
       purchase({ id: 'old', archived: true }),
     ])
+    expect(reviews[0]!.message).toContain(
+      'Worth counts the full $1,199 as one payment today, unless your available funds already include it.',
+    )
     expect(reviews.map((item) => [item.kind, item.purchaseId, item.title])).toEqual([
       ['confirmPlan', 'sandbox', 'Confirm your plan'],
       ['confirmPlan', 'later', 'Confirm your plan'],

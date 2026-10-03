@@ -257,6 +257,22 @@ describe('Pay in 4 comparison (acceptance 16)', () => {
     expect(third!.nearestBill).toMatchObject({ name: 'Video', daysFromInstalment: 1 })
   })
 
+  it('does not blame the instalments for a dip the plan already has without the purchase', () => {
+    const short = payIn4(compare(profile({ balanceCents: 40000 }), 1000))
+    expect(short.outcome).toBe('tight')
+    expect(short.label).toBe(
+      'Your plan dips below your cushion on Oct 3 even without this purchase',
+    )
+    // A later dip that only the instalments cause is still attributed to them.
+    const later = profile({
+      balanceCents: 80000,
+      flows: [flow({ id: 'pay', kind: 'income', amountCents: 5000, nextDate: addDays(TODAY, 1) })],
+    })
+    expect(payIn4(compare(later, 119900)).label).toBe(
+      'An instalment would dip below your cushion on Oct 17',
+    )
+  })
+
   it('labels a scenario that stays above the cushion and one that dips, with the dip date', () => {
     const above = payIn4(compare(profile({ balanceCents: 500000 }), 119900))
     expect(above.outcome).toBe('fits')
