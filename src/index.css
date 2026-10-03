@@ -2540,3 +2540,66 @@ textarea.input {
     font-weight: var(--fw-semibold);
   }
 }
+
+/* Header: nav pills never wrap; the environment is one quiet chip with details on request. */
+.nav a {
+  white-space: nowrap;
+}
+.env-wrap {
+  position: relative;
+}
+.env-btn {
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--fs-caption);
+  min-height: 32px;
+  position: relative;
+}
+.env-btn::after {
+  content: '';
+  position: absolute;
+  inset: -8px -4px;
+}
+.env-btn:hover {
+  background: var(--c-nav-active);
+}
+.env-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  z-index: 40;
+  background: var(--c-surface);
+  color: var(--c-text-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--e-3);
+  padding: var(--s-3) var(--s-4);
+  min-width: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+}
+.env-pop a {
+  margin-top: var(--s-1);
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+}
+@media (max-width: 1279px) {
+  .nav {
+    margin-left: 0;
+    gap: 0;
+  }
+  .topbar .in {
+    gap: var(--s-4);
+  }
+}
+@media (max-width: 1023px) {
+  .env-wrap.d {
+    display: none;
+  }
+}

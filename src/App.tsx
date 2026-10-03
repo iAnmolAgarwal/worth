@@ -75,6 +75,8 @@ export default function App() {
   const [error, setError] = useState('')
   const [route, setRoute] = useState(parseRoute)
   const [menu, setMenu] = useState(false)
+  /** The "Sandbox demo" chip's details: data source, assistant state and PayPal mode. */
+  const [envOpen, setEnvOpen] = useState(false)
   const [toast, setToast] = useState('')
   const [checkout, setCheckout] = useState<CheckoutState>()
   const [review, setReview] = useState<ReviewState>()
@@ -351,7 +353,31 @@ export default function App() {
             ))}
           </nav>
           <div className="right">
-            <span className="env d">{env}</span>
+            <span className="env-wrap d">
+              <button
+                type="button"
+                className="env env-btn"
+                aria-expanded={envOpen}
+                aria-controls="env-details"
+                onClick={() => setEnvOpen(!envOpen)}
+                onBlur={(event) => {
+                  if (!event.currentTarget.parentElement?.contains(event.relatedTarget as Node))
+                    setEnvOpen(false)
+                }}
+              >
+                Sandbox demo
+              </button>
+              {envOpen && (
+                <span className="env-pop" id="env-details" role="status">
+                  {env.split(' · ').map((part) => (
+                    <span key={part}>{part}</span>
+                  ))}
+                  <a href="#settings" onClick={() => setEnvOpen(false)}>
+                    About this demo
+                  </a>
+                </span>
+              )}
+            </span>
             <span className="env show-m">{sample}</span>
             <a className="icon-btn hide-m" href="#settings" aria-label="Settings and privacy">
               <SettingsIcon className="ico" strokeWidth={1.75} aria-hidden="true" />
