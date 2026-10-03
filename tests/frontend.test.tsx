@@ -9,6 +9,8 @@ import { Ask } from '../src/Ask'
 import { Checkout, checkoutView } from '../src/Checkout'
 import { Decision } from '../src/Decision'
 import { ConfirmPlanDialog, RefundDialog } from '../src/Reviews'
+import { Settings } from '../src/Saved'
+import { Home } from '../src/Home'
 import { api, ApiError } from '../src/api'
 import {
   loadPayPalSdk,
@@ -345,15 +347,42 @@ describe('queued prompts', () => {
 describe('Claude consent in chat', () => {
   const shared =
     'your messages, recent chat history (including figures), the item, price and date you ask about, a forecast summary, 30-day spending totals by category, income and bill names with amounts and dates, minimized merchant labels, whether PayPal offers Pay in 4 for the price, and whether Worth prepared a checkout for a catalog item and how it went'
-  it('shows Claude on for the untouched sample profile and lists everything it receives', () => {
-    render(<Ask {...askProps} state={makeState()} />)
+  it('lets the untouched sample profile turn Claude off, keeping focus on the switch while it saves', async () => {
+    const user = userEvent.setup()
+    const state = makeState()
+    const saved = deferred<AppState>()
+    routeApi(() => saved.promise)
+    const onUpdate = vi.fn()
+    render(<Ask {...askProps} state={state} onUpdate={onUpdate} />)
     const toggle = screen.getAllByRole('switch', { name: 'Use Claude for explanations' })[0]!
     expect(toggle.getAttribute('aria-checked')).toBe('true')
-    expect((toggle as HTMLButtonElement).disabled).toBe(true)
+    expect((toggle as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.getAllByText(/^On: Claude explains answers/).length).toBeGreaterThan(0)
+    await user.click(toggle)
+    expect(document.activeElement).toBe(toggle)
+    expect(toggle.getAttribute('aria-disabled')).toBe('true')
+    expect(apiMock).toHaveBeenCalledWith('/consent', { aiConsent: false })
+    const off = { ...state, profile: { ...state.profile, aiChoiceMade: true } }
+    await act(async () => {
+      saved.resolve(off)
+      await saved.promise
+    })
+    expect(onUpdate).toHaveBeenCalledWith(off)
+    expect(document.activeElement).toBe(toggle)
+  })
+  it('lists everything Claude receives in Settings, with the same rows as Ask', () => {
+    render(
+      <Settings
+        state={makeState()}
+        onUpdate={vi.fn()}
+        onReset={vi.fn()}
+        onEditPlan={vi.fn()}
+        onImport={vi.fn()}
+      />,
+    )
     expect(screen.getByText(`When Claude answers, it receives ${shared}.`)).toBeTruthy()
-    expect(
-      screen.getByText('Claude: live · PayPal checkout: simulated', { exact: false }),
-    ).toBeTruthy()
+    expect(screen.getByText('Shortened labels')).toBeTruthy()
+    expect(screen.getByText('Sample data · Claude on · PayPal simulated')).toBeTruthy()
   })
   it('toggles consent alone for personal data and reports the new state', async () => {
     const user = userEvent.setup()
@@ -531,6 +560,7 @@ describe('decision view', () => {
     onBuy: vi.fn(),
     onSave: vi.fn(),
     onEditPlan: vi.fn(),
+    onViewActivity: vi.fn(),
   }
   it('selects the engine’s recommendation, leads with the margin and draws one chart', async () => {
     const user = userEvent.setup()
@@ -545,7 +575,7 @@ describe('decision view', () => {
     fireEvent.keyDown(radios[1]!, { key: 'ArrowRight' })
     expect(radios[2]!.getAttribute('aria-checked')).toBe('true')
     expect(screen.getByRole('heading', { name: /If you spend/ })).toBeTruthy()
-    await user.click(screen.getAllByRole('button', { name: /Plan to buy on/ })[0]!)
+    await user.click(screen.getAllByRole('button', { name: /^Save for / })[0]!)
     expect(props.onSave).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'camera' }),
       expect.stringMatching(/^2026-/),
@@ -621,7 +651,7 @@ function Harness({ initial }: { initial: AppState }) {
 describe('checkout status', () => {
   it.each([
     [undefined, false, 'review'],
-    [{ status: 'created' }, false, 'waiting'],
+    [{ status: 'created' }, false, 'approve'],
     [{ status: 'created' }, true, 'approved'],
     [{ status: 'created', mode: 'demo' }, false, 'approved'],
     [{ status: 'created', needsReapproval: true }, true, 'declined'],
@@ -633,8 +663,41 @@ describe('checkout status', () => {
   ] as const)('maps %o (approved: %s) to %s', (patch, approved, view) => {
     const state = makeState()
     expect(
-      checkoutView(patch ? purchase(state, patch as Partial<Purchase>) : undefined, approved),
+      checkoutView(
+        patch ? purchase(state, patch as Partial<Purchase>) : undefined,
+        approved,
+        false,
+      ),
     ).toBe(view)
+  })
+  it('shows Waiting for PayPal only once PayPal was opened from this screen', () => {
+    expect(checkoutView(purchase(makeState()), false, true)).toBe('waiting')
+  })
+  it('leads an order prepared elsewhere with the official PayPal button, not a waiting state', async () => {
+    const state = makeState()
+    state.config = { ...state.config, paypal: 'sandbox', paypalClientId: 'public-test-client' }
+    const prepared = purchase(state, { preparedBy: 'agent', orderId: 'ORDER' })
+    const current = { ...state, purchases: [prepared] }
+    routeApi((path, data) =>
+      path === '/compare'
+        ? compare(current, data)
+        : assessPurchase(state.profile, [], { amountCents: 34900, today: TODAY }),
+    )
+    const instance: PayPalSdkInstance = {
+      findEligibleMethods: async () => ({ isEligible: () => true }),
+      createPayPalOneTimePaymentSession: vi.fn(),
+    }
+    const { container } = render(
+      <Checkout
+        {...checkoutProps(current)}
+        purchaseId="reservation"
+        instance={instance}
+        sdkStatus="ready"
+      />,
+    )
+    expect(screen.getByRole('heading', { name: 'Approve in PayPal' })).toBeTruthy()
+    expect(screen.queryByRole('heading', { name: 'Waiting for PayPal' })).toBeNull()
+    await waitFor(() => expect(container.ownerDocument.querySelector('paypal-button')).toBeTruthy())
   })
 
   it('recovers a reservation after an uncertain create and keeps the error in view', async () => {
@@ -731,7 +794,7 @@ describe('checkout status', () => {
       expect(findEligibleMethods).toHaveBeenCalledWith({ currencyCode: 'USD', amount: '349.00' })
       await user.click(container.ownerDocument.querySelector('paypal-button')!)
       await screen.findByRole('heading', {
-        name: outcome === 'approve' ? 'Approved in PayPal' : 'Waiting for PayPal',
+        name: outcome === 'approve' ? 'Approved in PayPal' : 'Approve in PayPal',
       })
       expect(createSession).toHaveBeenCalledWith(expect.objectContaining({ commit: false }))
       expect(start).toHaveBeenCalledOnce()
@@ -742,7 +805,7 @@ describe('checkout status', () => {
         expect(apiMock.mock.calls.filter(([path]) => path.endsWith('/capture'))).toHaveLength(1)
       } else {
         expect(screen.getByText(/You closed PayPal before approving/)).toBeTruthy()
-        expect(screen.getByRole('button', { name: 'Reopen PayPal' })).toBeTruthy()
+        expect(container.ownerDocument.querySelector('paypal-button')).toBeTruthy()
       }
     },
   )
@@ -1009,5 +1072,117 @@ describe('app shell', () => {
       ),
     )
     expect(hero.textContent).toContain('Keeps your $300.00 cushion through Wed, Dec 2')
+  })
+})
+
+describe('blocking fixes', () => {
+  const decisionProps = {
+    backLabel: 'Back to Ask',
+    onBack: vi.fn(),
+    onBuy: vi.fn(),
+    onSave: vi.fn(),
+    onEditPlan: vi.fn(),
+    onViewActivity: vi.fn(),
+  }
+  it('shows a Bought state for an item already bought, with View in Activity', async () => {
+    const user = userEvent.setup()
+    const state = makeState()
+    const paid = purchase(state, {
+      status: 'completed',
+      completedAt: '2026-10-04T02:00:00Z',
+      assessmentDate: TODAY,
+    })
+    const current = { ...state, purchases: [paid] }
+    const onViewActivity = vi.fn()
+    routeApi((_path, data) => compare(current, data))
+    render(
+      <Decision
+        {...decisionProps}
+        onViewActivity={onViewActivity}
+        state={current}
+        request={{ productId: paid.productId }}
+      />,
+    )
+    const bought = await screen.findByRole('region', { name: 'Bought' })
+    // 2 am UTC on Oct 4 is still Oct 3 in New York, the profile's time zone.
+    expect(bought.textContent).toContain('Sat, Oct 3')
+    expect(screen.queryByText(/Wait until/)).toBeNull()
+    await user.click(within(bought).getByRole('button', { name: 'View in Activity' }))
+    expect(onViewActivity).toHaveBeenCalledOnce()
+  })
+
+  it('marks Wait as not needed when buying today fits', async () => {
+    const state = makeState()
+    routeApi((_path, data) => compare(state, data))
+    render(<Decision {...decisionProps} state={state} request={{ productId: 'backpack' }} />)
+    const group = await screen.findByRole('radiogroup', { name: 'Your options' })
+    expect(within(group).getByText('Not needed')).toBeTruthy()
+    expect(screen.queryByText(/Wait until/)).toBeNull()
+    expect(screen.getAllByRole('button', { name: 'Buy now' }).length).toBeGreaterThan(0)
+  })
+
+  it('returns focus to the trigger when “Buy today anyway?” closes with Escape', async () => {
+    const user = userEvent.setup()
+    const state = makeState()
+    routeApi((_path, data) => compare(state, data))
+    render(<Decision {...decisionProps} state={state} request={{ productId: 'camera' }} />)
+    const trigger = (await screen.findAllByRole('button', { name: 'Buy today anyway' }))[0]!
+    trigger.focus()
+    await user.click(trigger)
+    await screen.findByRole('dialog', { name: 'Buy today anyway?' })
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(trigger))
+  })
+
+  it('prefills the Pay in 4 schedule from the purchase’s local day, not the UTC timestamp', async () => {
+    const user = userEvent.setup()
+    const state = makeState()
+    const paid = purchase(state, {
+      status: 'completed',
+      completedAt: '2026-10-04T02:00:00Z',
+      assessmentDate: TODAY,
+    })
+    state.purchases = [paid]
+    render(
+      <ConfirmPlanDialog state={state} purchaseId={paid.id} onClose={vi.fn()} onUpdate={vi.fn()} />,
+    )
+    await user.click(screen.getByRole('radio', { name: 'Pay in 4' }))
+    expect((screen.getByLabelText('Payment 1 date') as HTMLInputElement).value).toBe(TODAY)
+  })
+
+  it('shows confirmed Pay in 4 payments in Coming up and counts the plan on Home', async () => {
+    const state = makeState()
+    const paid = purchase(state, {
+      status: 'completed',
+      completedAt: `${TODAY}T15:00:00Z`,
+      paymentPlan: {
+        product: 'payIn4',
+        status: 'confirmed',
+        confirmedAt: `${TODAY}T15:05:00Z`,
+        instalments: [
+          { date: TODAY, amountCents: 8725 },
+          { date: '2026-10-17', amountCents: 8725 },
+          { date: '2026-10-31', amountCents: 8725 },
+          { date: '2026-11-14', amountCents: 8725 },
+        ],
+      },
+    })
+    const current = { ...state, purchases: [paid] }
+    routeApi((_path, data) => compare(current, data))
+    render(
+      <Home
+        state={current}
+        onAsk={vi.fn()}
+        onNavigate={vi.fn()}
+        onOpenProduct={vi.fn()}
+        onEditPlan={vi.fn()}
+        onOpenCheckout={vi.fn()}
+        onConfirmPlan={vi.fn()}
+        onReviewRefund={vi.fn()}
+      />,
+    )
+    expect(screen.getAllByText('Studio headphones · Pay in 4').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByText('2 running')).toBeTruthy()
   })
 })
