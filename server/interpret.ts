@@ -9,15 +9,18 @@ import type {
   PurchaseContext,
   Transaction,
 } from '../shared/types.ts'
-import { dateLabel, inWindow, readTiming, validIsoDate } from './dates.ts'
+import { dateLabel, groundedPhrase, inWindow, readTiming, validIsoDate } from './dates.ts'
 import type { TimingRead } from './dates.ts'
 import {
   extractMoneyMentions,
   groundableAmounts,
   hasForeignAmount,
+  mentionsOtherCurrency,
   priceMentions,
   quantityStated,
+  unclearAmounts,
 } from './money.ts'
+import type { MoneyMention } from './money.ts'
 
 export interface ChatInput {
   message: string
@@ -41,6 +44,7 @@ export type ClarifyReason =
   | 'payday_missing'
   | 'alternatives'
   | 'items_unclear'
+  | 'amount_unclear'
 
 export type InterpretResult =
   | { ok: true; interpretation: Interpretation }
@@ -194,6 +198,100 @@ export function mentionsItem(message: string, itemName: string | undefined) {
   return words(itemName!).some((w) => !ITEM_STOP.has(w) && text.has(w))
 }
 
+const NOT_ITEMS = new Set([
+  ...ITEM_STOP,
+  'another',
+  'different',
+  'other',
+  'cheaper',
+  'week',
+  'day',
+  'month',
+  'year',
+  'weekend',
+  'fortnight',
+  'paycheck',
+  'payday',
+  'salary',
+  'cushion',
+  'price',
+  'payment',
+  'payments',
+  'deal',
+  'discount',
+  'sale',
+  'bit',
+  'lot',
+  'while',
+  'card',
+  'credit',
+  'loan',
+  'question',
+  'idea',
+  'option',
+  'chance',
+  'way',
+  'time',
+  'moment',
+  'money',
+  'room',
+  'answer',
+  'version',
+  'model',
+])
+/** Whether the message names an item other than the one being discussed. */
+export function namesOtherItem(message: string, itemName: string | undefined) {
+  const named = new Set<string>()
+  const local = localItemName(message)
+  if (local) named.add(local)
+  for (const m of message.matchAll(
+    /\b(?:a|an|the|this|that|some|another|new|different|cheaper)\s+(?:(?:new|different|cheaper|other|used|nicer|smaller|bigger)\s+)?([a-z][\w'-]+)/gi,
+  ))
+    named.add(m[1]!)
+  const context = new Set(words(itemName ?? ''))
+  return [...named].some((name) => {
+    const significant = words(name).filter((w) => !NOT_ITEMS.has(w))
+    return significant.length > 0 && !significant.some((w) => context.has(w))
+  })
+}
+
+/**
+ * Whether the message states an amount that cannot be read as US dollars: a foreign or
+ * malformed amount, or another currency named without an amount. An amount marked as
+ * spent, saved or a past price is excluded.
+ */
+function currencyQuestion(message: string, mentions: MoneyMention[]) {
+  if (unclearAmounts(mentions).length) return true
+  let rest = message
+  for (const m of mentions.filter((m) => m.role === 'other')) {
+    const from = Math.max(0, m.index - 12)
+    const to = Math.min(rest.length, m.index + m.raw.length + 20)
+    rest = rest.slice(0, from) + ' '.repeat(to - from) + rest.slice(to)
+  }
+  return mentionsOtherCurrency(rest)
+}
+
+/** A US-dollar or unmarked amount that could not be read, such as "$1 199" or "$11,99". */
+function malformedAmount(mentions: MoneyMention[]) {
+  return mentions.some((m) => m.role !== 'other' && m.currency !== 'FOREIGN' && m.cents === null)
+}
+
+/** Stated prices that no item accounts for, counting repeated amounts separately. */
+function unaccounted(prices: { cents: number }[], read: InterpretedItem[]) {
+  const total = read.reduce((sum, item) => sum + item.amountCents * item.quantity, 0)
+  // A stated total only covers a reading that has more than one unit.
+  const combined = read.length > 1 || read.some((item) => item.quantity > 1)
+  const left = read.map((item) => item.amountCents)
+  return prices.filter((m) => {
+    const i = left.indexOf(m.cents)
+    if (i >= 0) {
+      left.splice(i, 1)
+      return false
+    }
+    return !(combined && m.cents === total)
+  })
+}
+
 /** A local guess at the item a message names; used only for labels and new-item detection. */
 export function localItemName(message: string) {
   const text = message.replace(/[’]/g, "'")
@@ -233,85 +331,109 @@ export function nextIncomeDate(data: ChatData) {
   )?.date
 }
 
+/** Claude's reading of the timing, as reported in the tool call. */
+interface ClaudeTiming {
+  /** True when Claude reported a timing phrase that appears word for word in the message. */
+  grounded: boolean
+  phrase: string | null
+  date: string | null
+}
+
+/**
+ * Decide the purchase date. Known phrases are read deterministically; Claude may resolve a
+ * phrase this reader does not know. When the two disagree, or the timing is not one day,
+ * the user is asked. Without any timing words the purchase is for today (or the date of the
+ * purchase being discussed), shown explicitly.
+ */
 function readDate(
   data: ChatData,
   timing: TimingRead,
-  proposed: string | null,
+  claude: ClaudeTiming | undefined,
   contextDate: string | undefined,
 ): { date: string; source: Interpretation['dateSource'] } | Exclude<InterpretResult, { ok: true }> {
   const end = addDays(data.today, 30)
   const window = `from today through ${dateLabel(end, data.today)}`
+  const ask = (
+    reason: ClarifyReason,
+    detail: string,
+    choices?: string[],
+  ): Exclude<InterpretResult, { ok: true }> => ({
+    ok: false,
+    reason,
+    retryable: false,
+    detail,
+    ...(choices?.length ? { choices } : {}),
+  })
+  const said = [...timing.phrases, ...(claude?.grounded && claude.phrase ? [claude.phrase] : [])]
+  const phrase = [...new Set(said.map((p) => p.toLowerCase()))].join(', ')
   if (timing.blocking === 'past')
-    return {
-      ok: false,
-      reason: 'date_past',
-      retryable: false,
-      detail: `The user named a past date. Ask for a purchase date ${window}.`,
-    }
+    return ask('date_past', `The user placed the purchase in the past. Ask for a date ${window}.`)
   if (timing.blocking === 'vague')
-    return {
-      ok: false,
-      reason: 'date_vague',
-      retryable: false,
-      detail: `The timing "${timing.phrases.join(', ')}" is too vague to pick one day. Ask for a date ${window}.`,
-    }
+    return ask('date_vague', `"${phrase}" is too vague to pick one day. Ask for a date ${window}.`)
   if (timing.blocking === 'invalid')
-    return {
-      ok: false,
-      reason: 'date_unresolved',
-      retryable: false,
-      detail: `"${timing.phrases.join(', ')}" is not a valid calendar date. Ask for a date ${window}.`,
-    }
+    return ask(
+      'date_unresolved',
+      `"${phrase}" is not a valid calendar date. Ask for a date ${window}.`,
+    )
   if (timing.blocking === 'payday_missing')
-    return {
-      ok: false,
-      reason: 'payday_missing',
-      retryable: false,
-      detail: 'The plan has no confirmed upcoming income date, so payday cannot be resolved.',
-    }
+    return ask(
+      'payday_missing',
+      'The plan has no confirmed upcoming income date, so payday cannot be resolved.',
+    )
+
+  const proposed = claude?.date && validIsoDate(claude.date) ? claude.date : null
   let date: string | undefined
   if (!timing.phrases.length) {
-    if (contextDate && inWindow(contextDate, data.today))
-      return { date: contextDate, source: 'context' }
-    return { date: data.today, source: 'default' }
-  }
-  if (timing.candidates?.length) {
-    if (proposed && timing.candidates.includes(proposed)) date = proposed
-    else if (proposed && validIsoDate(proposed))
-      return {
-        ok: false,
-        reason: 'date_unresolved',
-        retryable: true,
-        detail: `The user's timing "${timing.phrases.join(', ')}" means ${timing.candidates.join(' or ')}, not ${proposed}. Use one of those dates, or answer with intent clarify.`,
-        choices: timing.candidates,
-      }
+    if (!claude?.grounded) {
+      // No timing words. A date Claude reports without the user's words is ignored.
+      if (contextDate && inWindow(contextDate, data.today))
+        return { date: contextDate, source: 'context' }
+      return { date: data.today, source: 'default' }
+    }
+    if (!proposed)
+      return ask(
+        'date_unresolved',
+        `"${phrase}" was not resolved to one day. Ask for a date ${window}.`,
+      )
+    date = proposed
+  } else if (timing.candidates?.length) {
+    const candidates = timing.candidates.filter((d) => inWindow(d, data.today))
+    if (proposed) {
+      if (!timing.candidates.includes(proposed))
+        // Claude and the reader disagree: the user decides, neither reading is forced.
+        return ask(
+          'date_unresolved',
+          `"${phrase}" may mean ${[...timing.candidates.slice(0, 3), proposed].join(' or ')}. Ask which day.`,
+          [...new Set([...candidates.slice(0, 2), proposed])],
+        )
+      date = proposed
+    } else if (claude?.grounded || timing.unresolved)
+      return ask(
+        'date_unresolved',
+        `"${phrase}" was not resolved to one day. Ask for a date ${window}.`,
+        candidates.length <= 3 ? candidates : undefined,
+      )
     else if (timing.candidates.length === 1) date = timing.candidates[0]
     else if (timing.preferred) date = timing.preferred
     else
-      return {
-        ok: false,
-        reason: 'date_unresolved',
-        retryable: false,
-        detail: `"${timing.phrases.join(', ')}" could mean ${timing.candidates.join(' or ')}. Ask which date.`,
-        choices: timing.candidates.filter((d) => inWindow(d, data.today)),
-      }
-  } else if (timing.candidates === null && proposed && validIsoDate(proposed)) {
-    // A phrase only Claude could resolve; the server range-checks and echoes it.
+      return ask(
+        'date_unresolved',
+        `"${phrase}" could mean ${timing.candidates.join(' or ')}. Ask which day.`,
+        candidates,
+      )
+  } else if (timing.candidates === null && proposed && claude?.grounded) {
+    // A phrase only Claude could resolve; the server range-checks it and echoes it back.
     date = proposed
   } else
-    return {
-      ok: false,
-      reason: 'date_unresolved',
-      retryable: false,
-      detail: `The timing "${timing.phrases.join(', ')}" was not resolved to one date. Ask for a date ${window}.`,
-    }
+    return ask(
+      'date_unresolved',
+      `"${phrase}" was not resolved to one day. Ask for a date ${window}.`,
+    )
   if (!inWindow(date!, data.today))
-    return {
-      ok: false,
-      reason: 'date_window',
-      retryable: false,
-      detail: `${date} is outside the supported window ${data.today} to ${end}. Ask for a date in that range.`,
-    }
+    return ask(
+      'date_window',
+      `${date} is outside the supported window ${data.today} to ${end}. Ask for a date in that range.`,
+    )
   return { date: date!, source: 'stated' }
 }
 
@@ -334,7 +456,8 @@ function interpretation(
   }
 }
 
-const USD_CODES = new Set(['USD', 'US$', '$', 'DOLLAR', 'DOLLARS', 'US DOLLARS', 'UNKNOWN', ''])
+// Only an explicit US-dollar reading counts; an unknown or empty currency is asked about.
+const USD_CODES = new Set(['USD', 'US$', '$', 'DOLLAR', 'DOLLARS', 'US DOLLARS'])
 const describe = (cents: number) => `${money(cents)} (${cents} cents)`
 
 /** Validate Claude's structured reading against the user's own words. */
@@ -360,9 +483,16 @@ export function validateInterpretation(
       retryable: false,
       detail: 'The user is choosing between items. Ask which one to check.',
     }
+  if (malformedAmount(mentions))
+    return {
+      ok: false,
+      reason: 'amount_unclear',
+      retryable: false,
+      detail: 'An amount in the message could not be read. Ask for the total in USD.',
+    }
   if (
     items.some((item) => !USD_CODES.has(item.currency.trim().toUpperCase())) ||
-    (hasForeignAmount(mentions) && !prices.length)
+    currencyQuestion(message, mentions)
   )
     return {
       ok: false,
@@ -378,6 +508,7 @@ export function validateInterpretation(
     (raw.refers_to_previous_item || items.every((item) => isGeneric(item.name))) &&
     items.length <= 1 &&
     !newPrice &&
+    !namesOtherItem(message, context.itemName) &&
     (items.length === 0 || sameItem(items[0]!.name, context.itemName)) &&
     (items[0]?.amount_cents ?? context.amountCents) === context.amountCents
 
@@ -434,12 +565,12 @@ export function validateInterpretation(
           retryable: true,
           detail: `${describe(item.amount_cents)} is the user's budget or available money, not a price.${prices.length ? ` Prices the user stated: ${stated}.` : ' Ask for the item price.'}`,
         }
-      if (!quantityStated(message, item.quantity))
+      if (!quantityStated(message, item.quantity, item.name))
         return {
           ok: false,
           reason: 'items_unclear',
           retryable: true,
-          detail: `The user did not state a quantity of ${item.quantity}. Use quantity 1 unless they wrote a count.`,
+          detail: `Quantity ${item.quantity} needs a count written next to the item and a price marked as per item (for example "each"). Otherwise the stated price is the total: report quantity 1.`,
         }
       read.push({
         name: pendingName(item.name) ?? localItemName(message) ?? 'Your purchase',
@@ -447,9 +578,7 @@ export function validateInterpretation(
         quantity: item.quantity,
       })
     }
-    const used = new Set(read.map((item) => item.amountCents))
-    const total = read.reduce((sum, item) => sum + item.amountCents * item.quantity, 0)
-    const missed = prices.filter((m) => !used.has(m.cents) && m.cents !== total)
+    const missed = unaccounted(prices, read)
     if (missed.length)
       return {
         ok: false,
@@ -460,14 +589,13 @@ export function validateInterpretation(
   }
 
   const timing = readTiming(message, data.today, nextIncomeDate(data))
-  // Claude's phrase only counts if the user actually wrote it.
-  const claimedPhrase =
-    raw.date_phrase && message.toLowerCase().includes(raw.date_phrase.trim().toLowerCase())
-  const effective =
-    !timing.phrases.length && claimedPhrase && raw.date && raw.date !== data.today
-      ? { ...timing, phrases: [raw.date_phrase!], unresolved: true }
-      : timing
-  const date = readDate(data, effective, raw.date, followUp ? context.purchaseDate : undefined)
+  const date = readDate(
+    data,
+    timing,
+    // Claude's phrase only counts if it is about time and the user wrote it word for word.
+    { grounded: groundedPhrase(raw.date_phrase, message), phrase: raw.date_phrase, date: raw.date },
+    followUp ? context.purchaseDate : undefined,
+  )
   if ('ok' in date) {
     const total = read.reduce((sum, item) => sum + item.amountCents * item.quantity, 0)
     return { ...date, pending: { amountCents: total, itemName: itemLabel(read) } }
@@ -508,19 +636,27 @@ export function localInterpretation(input: ChatInput, data: ChatData): Interpret
   const prices = priceMentions(mentions)
   const context = validContext(input)
   const named = localItemName(message)
-  const amounts = [...new Set(prices.map((m) => m.cents))]
   const followUp =
     context &&
-    amounts.every((cents) => cents === context.amountCents) &&
-    sameItem(named, context.itemName)
-  if (hasForeignAmount(mentions) && !amounts.length)
+    prices.every((m) => m.cents === context.amountCents) &&
+    sameItem(named, context.itemName) &&
+    !namesOtherItem(message, context.itemName)
+  if (malformedAmount(mentions))
+    return {
+      ok: false,
+      reason: 'amount_unclear',
+      retryable: false,
+      detail: 'An amount could not be read.',
+    }
+  if (currencyQuestion(message, mentions))
     return {
       ok: false,
       reason: 'currency',
       retryable: false,
-      detail: 'The price is not in US dollars.',
+      detail: 'An amount is not in US dollars.',
     }
-  if (amounts.length > 1)
+  // Every stated price counts, including a repeated amount for a second item.
+  if (prices.length > 1 && !(followUp && prices.length === 1))
     return {
       ok: false,
       reason: / or /i.test(message) ? 'alternatives' : 'items_unclear',
@@ -537,12 +673,12 @@ export function localInterpretation(input: ChatInput, data: ChatData): Interpret
       amountCents: context.amountCents,
       quantity: 1,
     }
-  } else if (amounts.length === 1) {
+  } else if (prices.length === 1) {
     const each = message.match(
       /\b(\d{1,2}|two|three|four|five|six|seven|eight|nine|ten)\s+[a-z][\w'-]*\s+(?:at|for|@)\s+\S+\s+(?:each|apiece|a\s+piece|per\s+(?:item|piece|unit))\b/i,
     )?.[1]
     const quantity = each ? Number(each) || COUNT_WORDS.indexOf(each.toLowerCase()) + 2 : 1
-    item = { name: named ?? 'Your purchase', amountCents: amounts[0]!, quantity }
+    item = { name: named ?? 'Your purchase', amountCents: prices[0]!.cents, quantity }
   } else
     return {
       ok: false,
@@ -551,7 +687,7 @@ export function localInterpretation(input: ChatInput, data: ChatData): Interpret
       detail: 'No USD price was stated.',
     }
   const timing = readTiming(message, data.today, nextIncomeDate(data))
-  const date = readDate(data, timing, null, followUp ? context.purchaseDate : undefined)
+  const date = readDate(data, timing, undefined, followUp ? context.purchaseDate : undefined)
   if ('ok' in date)
     return {
       ...date,
@@ -580,6 +716,8 @@ export function clarificationText(
       return 'What is the total price in US dollars, including tax and shipping? For example: “Can I buy a $900 camera today?”'
     case 'alternatives':
       return 'Which one should I check? Tell me the item and its price, or say if you plan to buy them together.'
+    case 'amount_unclear':
+      return 'I couldn’t read one of the amounts. What is the total price in US dollars, written like $1,199.00?'
     case 'items_unclear':
       return 'I see more than one amount. Which total should I check, and are you buying these together?'
     case 'payday_missing':

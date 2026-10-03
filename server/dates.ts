@@ -257,7 +257,7 @@ const RULES: Rule[] = [
   },
   {
     pattern:
-      /\b(?:yesterday|last\s+(?:week|month|year|night|weekend|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|ago)\b/gi,
+      /\b(?:yesterday|last\s+(?:week|month|year|night|weekend|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|(?:\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|a\s+few|a\s+couple\s+of|several)\s+(?:days?|weeks?|months?|years?)\s+ago|ago)\b/gi,
     resolve: () => null,
     blocking: 'past',
   },
@@ -268,69 +268,141 @@ const RULES: Rule[] = [
     blocking: 'vague',
   },
 ]
-// Timing words the rules above do not resolve. Claude may resolve them; if it
-// cannot, the app asks.
+const ORDINAL_WORDS =
+  'first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|twentieth|twenty[-\\s]\\w+|thirtieth|thirty[-\\s]first'
+const MONTH_NAMES = MONTHS.filter((m) => m !== 'may').join('|')
+// Timing words the rules do not resolve. Claude may resolve them; local mode asks.
 const OTHER_TIMING = new RegExp(
-  String.raw`\b(?:before|after|until|till|by|once)\s+(?:my\s+|the\s+|i\s+)?[a-z]+|\b(?:in|on|by)\s+(?:${MONTHS.filter((m) => m !== 'may').join('|')})\b|\b(?:in|on|by)\s+may\b|\b(?:next|this|coming)\s+(?:${WEEKDAYS.join('|')}|week|weekend|month|year)\b|\bin\s+[^?!.]{0,25}\b(?:days?|weeks?|months?|years?)\b`,
+  [
+    String.raw`\b(?:fortnight|mid[-\s]?(?:month|week|year|${MONTH_NAMES}|may)|christmas(?:\s+eve)?|xmas|new\s+year'?s?(?:\s+eve)?|halloween|thanksgiving|easter|valentine'?s?|black\s+friday|cyber\s+monday|labou?r\s+day|memorial\s+day|holidays?|birthday|anniversary|tmrw|tmr|tmw|tmrow|tomm?orr?ow|tomorow|2moro|2morrow)\b`,
+    String.raw`\b(?:end\s+of\s+(?:the\s+|this\s+|next\s+)?|later\s+this\s+|early\s+(?:this|next)\s+|late\s+(?:this|next)\s+|this\s+|following\s+)(?:week|weekend|month|year)\b`,
+    String.raw`\b(?:${MONTH_NAMES})\b|\b(?:in|on|by|until|till|around)\s+may\b|\b(?:jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec)(?:\.\s*\d|\d)`,
+    String.raw`\bthe\s+(?:${ORDINAL_WORDS})\b|\b\d{1,2}(?:st|nd|rd|th)\b|\bthe\s+day\s+after\b`,
+    String.raw`\b(?:in|within)\s+(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|\d+|a\s+few|a\s+couple(?:\s+of)?|several)\s+(?:days?|weeks?|wks?|months?|mos?|years?|yrs?)\b`,
+    String.raw`\b(?:week|month)\s+or\s+(?:two|so)\b`,
+    String.raw`\b(?:before|after|until|till|by|once)\s+(?:my\s+|the\s+|i\s+)?[a-z]+`,
+  ].join('|'),
   'i',
 )
 const NON_TIMING_AFTER =
-  /^(?:before|after|until|till|by|once)\s+(?:my\s+|the\s+|i\s+)?(?:buying|buy|purchasing|purchase|spending|checking|deciding|paying|it|this|that|then|all|way|myself|itself|far|card|cash|credit|paypal|default|hand|chance|comparison|contrast|accident|mistake|itself)\b/i
+  /^(?:before|after|until|till|by|once)\s+(?:my\s+|the\s+|i\s+)?(?:buying|buy|purchasing|purchase|spending|checking|deciding|paying|it|this|that|then|all|way|myself|itself|far|card|cash|credit|paypal|default|hand|chance|comparison|contrast|accident|mistake)\b/i
+// Words in front of a timing phrase that change what it means.
+const MODIFIER_BEFORE = new RegExp(
+  String.raw`(?:\b(?:last|past|previous|black|cyber|good|every|each|following|early|late|mid|around|about|roughly|approximately|sometime)\s+|\b(?:\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|a\s+couple\s+of|a\s+few|several)\s+(?:days?|weeks?|wks?|months?|years?)\s+(?:from|after|before|past)\s+|\b(?:from|since)\s+)$`,
+  'i',
+)
+const MODIFIER_AFTER =
+  /^\s*(?:ago|week|fortnight|of\s+last|of\s+next|before\s+last|or\s+(?:two|three|four|so|more|less|longer|later|after))\b/i
+const PAST_VERB =
+  /\b(?:was|were|had|did|got|bought|paid|spent|saw|went|came|made|sold|took|gave|found|left|lost|told|said|(?!(?:need|feed|seed|speed|bleed|breed|proceed|exceed|succeed|indeed|embed|weed|greed)\b)[a-z]{3,}ed)\b/i
+const BOUNDARY = /[.;!?]|,\s|\s(?:but|and|so|because|though|although)\s/gi
+
+interface Span {
+  start: number
+  end: number
+  text: string
+  rule: Rule
+  match: RegExpMatchArray
+}
+function clauseAround(text: string, start: number, end: number) {
+  let from = 0
+  let to = text.length
+  for (const boundary of text.matchAll(BOUNDARY)) {
+    const index = boundary.index
+    if (index + boundary[0].length <= start) from = index + boundary[0].length
+    else if (index >= end) {
+      to = index
+      break
+    }
+  }
+  return text.slice(from, to)
+}
 
 /** Read the timing a message states. `incomeDate` is the next confirmed income date. */
 export function readTiming(text: string, today: string, incomeDate?: string): TimingRead {
-  let remaining = ` ${text.toLowerCase().replace(/[’']/g, "'")} `
+  const source = ` ${text.toLowerCase().replace(/[’']/g, "'")} `
     // A weekday written before a calendar date ("Fri, Oct 16") adds nothing to the date.
     .replace(
       /\b(?:mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)[a-z]*,?\s+(?=(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d)/g,
-      ' ',
+      (m) => ' '.repeat(m.length),
     )
+  // Every rule reads the original text; where spans overlap, the longest wins, so
+  // "two days from now" is not read as "now" and "last Friday" is not read as "Friday".
+  const found: Span[] = []
+  for (const rule of RULES)
+    for (const match of source.matchAll(rule.pattern))
+      found.push({
+        start: match.index,
+        end: match.index + match[0].length,
+        text: match[0].trim(),
+        rule,
+        match,
+      })
+  found.sort(
+    (a, b) => b.end - b.start - (a.end - a.start) || RULES.indexOf(a.rule) - RULES.indexOf(b.rule),
+  )
+  const chosen: Span[] = []
+  for (const span of found)
+    if (!chosen.some((c) => span.start < c.end && c.start < span.end)) chosen.push(span)
+  chosen.sort((a, b) => a.start - b.start)
+
   const phrases: string[] = []
   const candidates: string[][] = []
   let preferred: string | undefined
   let unresolved = false
   let blocking: TimingRead['blocking'] = null
-  for (const rule of RULES) {
-    remaining = remaining.replace(rule.pattern, (...args) => {
-      const match = args.slice(0, -2) as unknown as RegExpMatchArray
-      const offset = args.at(-2) as number
-      const before = (args.at(-1) as string).slice(Math.max(0, offset - 14), offset)
-      const relation = before.match(/\b(after|before|by)\s+(?:(?:the|this)\s*)?$/)?.[1]
-      const resolved = rule.resolve(match, today, incomeDate)
-      if (resolved && !resolved.length) return ' '
-      phrases.push(relation ? `${relation} ${match[0].trim()}` : match[0].trim())
-      if (!resolved) {
-        unresolved = true
-        if (rule.blocking && !blocking) blocking = rule.blocking
-        return ' '
-      }
-      let dates = resolved.map((value) =>
-        /^\d+$/.test(value) ? addDays(today, Number(value)) : value,
-      )
-      let prefer = dates.length > 1 && Boolean(rule.prefer?.(match))
-      if (relation) {
-        // "after the weekend" is the week that follows; "before" or "by" a day is a range.
-        const sorted = [...dates].sort()
-        const first = sorted[0]!
-        const last = sorted.at(-1)!
-        const span = (from: string, days: number) =>
-          Array.from({ length: days }, (_, i) => addDays(from, i))
-        dates =
-          relation === 'after'
-            ? span(addDays(last, 1), 7)
-            : span(
-                today,
-                Math.max(
-                  0,
-                  daysFrom(today, relation === 'by' ? last : first) + (relation === 'by' ? 1 : 0),
-                ),
-              )
-        prefer = relation === 'after'
-      }
-      if (!candidates.length && prefer) preferred = dates[0]
-      candidates.push(dates)
-      return ' '
-    })
+  let remaining = source
+  for (const span of chosen) {
+    remaining =
+      remaining.slice(0, span.start) + ' '.repeat(span.end - span.start) + remaining.slice(span.end)
+    const resolved = span.rule.resolve(span.match, today, incomeDate)
+    if (resolved && !resolved.length) continue
+    const before = source.slice(Math.max(0, span.start - 30), span.start)
+    if (span.rule.blocking === 'past') {
+      // A past event mentioned in passing ("the price dropped last Friday") is not
+      // a purchase date; only a purchase placed in the past needs a question.
+      const clause = clauseAround(source, span.start, span.end)
+      if (PAST_VERB.test(clause.replace(span.text, ' '))) continue
+    }
+    const relation = before.match(/\b(after|before|by)\s+(?:(?:the|this)\s*)?$/)?.[1]
+    const modified =
+      MODIFIER_BEFORE.test(before) || MODIFIER_AFTER.test(source.slice(span.end, span.end + 16))
+    phrases.push(relation ? `${relation} ${span.text}` : span.text)
+    if (modified && !span.rule.blocking) {
+      // e.g. "a week from Friday" or "Black Friday": a known word inside an unknown phrase.
+      unresolved = true
+      continue
+    }
+    if (!resolved) {
+      unresolved = true
+      if (span.rule.blocking && !blocking) blocking = span.rule.blocking
+      continue
+    }
+    let dates = resolved.map((value) =>
+      /^\d+$/.test(value) ? addDays(today, Number(value)) : value,
+    )
+    let prefer = dates.length > 1 && Boolean(span.rule.prefer?.(span.match))
+    if (relation) {
+      // "after the weekend" is the week that follows; "before" or "by" a day is a range.
+      const sorted = [...dates].sort()
+      const first = sorted[0]!
+      const last = sorted.at(-1)!
+      const range = (from: string, days: number) =>
+        Array.from({ length: days }, (_, i) => addDays(from, i))
+      dates =
+        relation === 'after'
+          ? range(addDays(last, 1), 7)
+          : range(
+              today,
+              Math.max(
+                0,
+                daysFrom(today, relation === 'by' ? last : first) + (relation === 'by' ? 1 : 0),
+              ),
+            )
+      prefer = relation === 'after'
+    }
+    if (!candidates.length && prefer) preferred = dates[0]
+    candidates.push(dates)
   }
   // Drop prepositions left behind by phrases already read, e.g. "after the" + weekend.
   remaining = remaining.replace(
@@ -352,6 +424,26 @@ export function readTiming(text: string, today: string, incomeDate?: string): Ti
     unresolved: unresolved || !common.length,
     blocking,
   }
+}
+
+// Words that make a phrase about timing rather than about the item or the price.
+const TIMING_TOKEN = new RegExp(
+  String.raw`^(?:today|tonight|tomorrow|tmrw?|tmw|now|yesterday|days?|weeks?|wks?|weekends?|fortnight|months?|years?|morning|afternoon|evening|night|noon|soon|later|payday|paycheck|paid|salary|christmas|xmas|halloween|thanksgiving|easter|holidays?|birthday|${WEEKDAYS.join('|')}|${MONTHS.join('|')}|jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec|mid|\d{1,4}(?:st|nd|rd|th)?|${ORDINAL_WORDS.replace(/\\s/g, ' ')})$`,
+  'i',
+)
+const tokens = (text: string) =>
+  text
+    .toLowerCase()
+    .replace(/[’']/g, "'")
+    .match(/[a-z0-9]+(?:'[a-z]+)?/g) ?? []
+/** Whether a reported timing phrase is about time and appears word for word in the message. */
+export function groundedPhrase(phrase: string | null | undefined, message: string) {
+  const wanted = tokens(phrase ?? '')
+  if (!wanted.length || !wanted.some((t) => TIMING_TOKEN.test(t))) return false
+  const words = tokens(message)
+  for (let i = 0; i + wanted.length <= words.length; i++)
+    if (wanted.every((t, j) => words[i + j] === t)) return true
+  return false
 }
 
 /** The purchase window the engine supports: today through 30 days ahead. */

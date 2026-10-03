@@ -262,14 +262,28 @@ describe('dates are resolved by Claude and checked by the server (C-12)', () => 
     ['on 2026-10-16', '2026-10-16'],
     ['on Oct 16', '2026-10-16'],
     ['at the end of the month', '2026-10-31'],
-  ])('resolves "%s" even when Claude leaves the date empty', async (timing, expected) => {
+  ])('resolves "%s" when Claude reports the same date or none', async (timing, expected) => {
     const message = `Can I buy a $900 camera ${timing}?`
-    const { provider } = model([
-      interpret([item('camera', 90000)], { date_phrase: timing }),
-      final(),
+    const agrees = model([
+      interpret([item('camera', 90000)], { date_phrase: timing, date: expected }),
     ])
-    expect((await provider.reply(ask(message), simple())).assessment?.purchaseDate).toBe(expected)
+    expect((await agrees.provider.reply(ask(message), simple())).assessment?.purchaseDate).toBe(
+      expected,
+    )
+    const silent = model([interpret([item('camera', 90000)])])
+    expect((await silent.provider.reply(ask(message), simple())).assessment?.purchaseDate).toBe(
+      expected,
+    )
     expect(fallbackReply(ask(message), simple()).assessment?.purchaseDate).toBe(expected)
+  })
+
+  it('asks when Claude reports a timing phrase but cannot resolve it', async () => {
+    const { provider } = model([
+      interpret([item('camera', 90000)], { date_phrase: 'in a fortnight', date: null }),
+    ])
+    const reply = await provider.reply(ask('Can I buy a $900 camera in a fortnight?'), simple())
+    expect(reply.intent).toBe('clarify')
+    expect(reply.pending).toEqual({ amountCents: 90000, itemName: 'camera' })
   })
 
   it('accepts Claude’s reading of an ambiguous phrase and echoes it; local mode asks', async () => {
@@ -286,14 +300,19 @@ describe('dates are resolved by Claude and checked by the server (C-12)', () => 
     expect(local.pending).toEqual({ amountCents: 119900, itemName: 'camera' })
   })
 
-  it('reads "after the weekend" as the following week', async () => {
+  it('reads "after the weekend" as the following week and asks about another reading', async () => {
     const message = 'Can I buy a $1199 camera after the weekend?'
-    const { provider } = model([
-      interpret([item('camera', 119900)], { date_phrase: 'after the weekend', date: '2026-10-16' }),
+    const agrees = model([
       interpret([item('camera', 119900)], { date_phrase: 'after the weekend', date: '2026-10-05' }),
-      final(),
     ])
-    expect((await provider.reply(ask(message), demo())).assessment?.purchaseDate).toBe('2026-10-05')
+    expect((await agrees.provider.reply(ask(message), demo())).assessment?.purchaseDate).toBe(
+      '2026-10-05',
+    )
+    const differs = model([
+      interpret([item('camera', 119900)], { date_phrase: 'after the weekend', date: '2026-10-16' }),
+    ])
+    const reply = await differs.provider.reply(ask(message), demo())
+    expect(reply.intent).toBe('clarify')
     expect(fallbackReply(ask(message), demo()).assessment?.purchaseDate).toBe('2026-10-05')
   })
 

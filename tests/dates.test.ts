@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dateLabel, readTiming } from '../server/dates.ts'
+import { dateLabel, groundedPhrase, readTiming } from '../server/dates.ts'
 
 const TODAY = '2026-10-03' // a Saturday
 const PAYDAY = '2026-10-15'
@@ -74,6 +74,54 @@ describe('timing in the user’s words', () => {
   it('flags conflicting or unrecognised timing for Claude or the user to resolve', () => {
     expect(read('on 2026-10-10 or tomorrow')).toMatchObject({ candidates: [], unresolved: true })
     expect(read('before rent is due')).toMatchObject({ candidates: null, unresolved: true })
+  })
+
+  it('reads the longest phrase, so a word inside it cannot win', () => {
+    expect(read('two days from now').candidates).toEqual(['2026-10-05'])
+    expect(read('a week from today').candidates).toEqual(['2026-10-10'])
+    expect(read('3 weeks from now').candidates).toEqual(['2026-10-24'])
+    expect(read('Monday after next').candidates).toEqual(['2026-10-12'])
+    expect(read('last Friday')).toMatchObject({ candidates: null, blocking: 'past' })
+    expect(read('3 days ago')).toMatchObject({ candidates: null, blocking: 'past' })
+  })
+
+  it.each([
+    'a week from Friday',
+    'on Black Friday',
+    'early next week',
+    'in a week or two',
+    'in a fortnight',
+    'mid-October',
+    'for Christmas',
+    'tmrw',
+    'at the end of the week',
+    'the sixteenth',
+    'in 2 wks',
+  ])('leaves an unknown phrase unresolved so it is asked about: %s', (text) => {
+    expect(read(`Can I buy a $1,199 camera ${text}?`)).toMatchObject({
+      unresolved: true,
+      candidates: null,
+    })
+  })
+
+  it('ignores a past event mentioned in passing but asks about a past purchase date', () => {
+    expect(readTiming('The price dropped last Friday. Can I buy the camera?', TODAY)).toMatchObject(
+      { phrases: [], blocking: null },
+    )
+    expect(readTiming('I bought one yesterday, can I buy another on Oct 16?', TODAY)).toMatchObject(
+      { candidates: ['2026-10-16'], blocking: null },
+    )
+    expect(readTiming('Can I buy it yesterday?', TODAY).blocking).toBe('past')
+  })
+
+  it('grounds a reported phrase only when it is about time and written word for word', () => {
+    const message = 'Can I buy a $1,199 camera two days from now?'
+    expect(groundedPhrase('two days from now', message)).toBe(true)
+    expect(groundedPhrase('Two days from now', message)).toBe(true)
+    expect(groundedPhrase(' ', message)).toBe(false)
+    expect(groundedPhrase('camera', message)).toBe(false)
+    expect(groundedPhrase('two days', 'Can I buy a $1,199 camera?')).toBe(false)
+    expect(groundedPhrase('now', 'Can I buy it nowhere else?')).toBe(false)
   })
 
   it('echoes dates in plain language', () => {
