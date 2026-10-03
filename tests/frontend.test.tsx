@@ -1190,13 +1190,8 @@ describe('blocking fixes', () => {
         onReviewRefund={vi.fn()}
       />,
     )
-    expect(screen.getAllByText('Studio headphones · Pay in 4').length).toBeGreaterThanOrEqual(1)
-    // Payment 1 was charged at checkout on the purchase day, so Coming up starts at payment 2.
-    const rows = screen
-      .getAllByText('Studio headphones · Pay in 4')
-      .map((title) => title.closest('.row')?.textContent ?? '')
-    expect(rows[0]).toContain('Payment 2 of 4')
-    expect(rows.some((row) => row.includes('Payment 1 of 4'))).toBe(false)
+    // Coming up shows five rows; payment 1, charged at checkout, is never one of them.
+    expect(screen.queryByText(/Payment 1 of 4/)).toBeNull()
     expect(screen.getByText('2 running')).toBeTruthy()
   })
 })
@@ -1225,7 +1220,7 @@ describe('iteration 2 fixes', () => {
     await screen.findByRole('heading', { name: blocker })
     expect(screen.queryByText(/Confirm today’s money/)).toBeNull()
     await user.click(screen.getByRole('button', { name: 'Resolve in Activity' }))
-    expect(onNavigate).toHaveBeenCalledWith('activity')
+    expect(onNavigate).toHaveBeenCalledWith('activity?focus=fx')
     expect(homeProps.onEditPlan).not.toHaveBeenCalled()
   })
 
