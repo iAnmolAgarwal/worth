@@ -57,6 +57,7 @@ function makeState(source: 'demo' | 'import' = 'demo'): AppState {
             .slice(0, 4)
             .map((transaction) => ({ ...transaction, source: 'import' as const }))
         : seed.transactions,
+    reviews: [],
     today: TODAY,
     products: PRODUCTS,
     config: { ai: 'anthropic', paypal: 'demo', model: 'test-provider' },

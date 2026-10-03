@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { addDays, assessPurchase, forecast, getUpcomingFlows } from '../shared/finance.ts'
+import {
+  addDays,
+  assessPurchase,
+  forecast,
+  getUpcomingFlows,
+  purchaseReviews,
+  REFUND_GUIDANCE,
+} from '../shared/finance.ts'
 import type { FinancialProfile, Purchase, ScheduledFlow } from '../shared/types.ts'
 
 const TODAY = '2026-10-03'
@@ -238,5 +245,42 @@ describe('refund review (engine side of acceptance 23)', () => {
       },
     )[0]!
     expect(point.baselineCents).toBe(200000)
+  })
+})
+
+describe('review prompts', () => {
+  it('asks to confirm the plan for PayPal checkouts and Pay Later purchases only', () => {
+    const reviews = purchaseReviews([
+      purchase({ id: 'sandbox' }),
+      purchase({ id: 'demo', mode: 'demo' }),
+      purchase({
+        id: 'later',
+        mode: 'demo',
+        paymentPlan: { product: 'payIn4', status: 'unconfirmed' },
+      }),
+      purchase({ id: 'full', paymentPlan: { product: 'full', confirmedAt: `${TODAY}T11:00:00Z` } }),
+      purchase({ id: 'open', status: 'pending' }),
+      purchase({ id: 'old', archived: true }),
+    ])
+    expect(reviews.map((item) => [item.kind, item.purchaseId, item.title])).toEqual([
+      ['confirmPlan', 'sandbox', 'Confirm your plan'],
+      ['confirmPlan', 'later', 'Confirm your plan'],
+    ])
+  })
+
+  it('lists refunds awaiting review with guidance on partial refunds and store credit', () => {
+    const [review] = purchaseReviews([
+      purchase({
+        paymentPlan: { product: 'full' },
+        refunds: [
+          { id: 'R1', amountCents: 34900, status: 'review', createdAt: `${TODAY}T12:00:00Z` },
+          { id: 'R0', amountCents: 100, status: 'confirmed', createdAt: `${TODAY}T11:00:00Z` },
+        ],
+      }),
+    ])
+    expect(review).toMatchObject({ kind: 'refund', refundId: 'R1', refundedCents: 34900 })
+    expect(review!.message).toContain(REFUND_GUIDANCE)
+    expect(REFUND_GUIDANCE).toContain('may shorten the plan or reduce the final payment')
+    expect(REFUND_GUIDANCE).toContain('Store credit does not reduce the loan')
   })
 })

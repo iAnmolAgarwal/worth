@@ -11,6 +11,7 @@ import type {
   PayIn4Comparison,
   PlanInstalment,
   Purchase,
+  PurchaseReview,
   ScheduledFlow,
   StackingWarning,
 } from './types.ts'
@@ -28,6 +29,8 @@ export const PAY_IN_4_OFFSETS = [0, 14, 28, 42] as const
 export const NEARBY_BILL_DAYS = 3
 export const PAY_IN_4_NOTICE = 'Illustrative. PayPal sets the exact terms at checkout.'
 export const PAY_IN_4_UNAVAILABLE = 'Not available for this amount'
+export const REFUND_GUIDANCE =
+  'A partial refund may shorten the plan or reduce the final payment. Store credit does not reduce the loan.'
 
 const DAY_MS = 86_400_000
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -932,4 +935,37 @@ export function compareOptions(
       'Pay in 4 is shown for comparison only. Its schedule is illustrative, and PayPal sets the exact terms at checkout.',
     ],
   }
+}
+
+/** Plans to confirm and refunds to review. Until the user acts, each purchase keeps its cash effect. */
+export function purchaseReviews(purchases: Purchase[]): PurchaseReview[] {
+  const reviews: PurchaseReview[] = []
+  for (const purchase of purchases) {
+    if (purchase.archived || purchase.status !== 'completed') continue
+    const plan = purchase.paymentPlan
+    if (
+      (plan?.product === 'payIn4' && plan.status === 'unconfirmed') ||
+      (!plan && purchase.mode === 'sandbox')
+    )
+      reviews.push({
+        kind: 'confirmPlan',
+        purchaseId: purchase.id,
+        name: purchase.name,
+        amountCents: purchase.amountCents,
+        title: 'Confirm your plan',
+        message: `PayPal doesn’t tell Worth whether you paid in full or chose Pay in 4. Until you confirm, Worth counts the full ${money(purchase.amountCents)} as paid on the day you bought it.`,
+      })
+    for (const refund of purchase.refunds ?? [])
+      if (refund.status === 'review')
+        reviews.push({
+          kind: 'refund',
+          purchaseId: purchase.id,
+          refundId: refund.id,
+          name: purchase.name,
+          refundedCents: refund.amountCents,
+          title: 'Review a refund',
+          message: `The merchant refunded ${money(refund.amountCents)}. Confirm how much came back to your available funds and, for Pay in 4, which payments remain. ${REFUND_GUIDANCE} Until you confirm, your spending room doesn’t change.`,
+        })
+  }
+  return reviews
 }

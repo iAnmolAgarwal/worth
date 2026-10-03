@@ -9,6 +9,7 @@ import {
   compareOptions,
   normalizeTimezone,
   payIn4InRange,
+  purchaseReviews,
 } from '../shared/finance.ts'
 import { createDemoState, DEMO_TIMEZONE, PRODUCTS, rebaseDemoState } from '../shared/seed.ts'
 import { parsePayPalCsv } from '../shared/csv.ts'
@@ -33,6 +34,7 @@ import type { ChatProvider } from './chat.ts'
 import { allowedOrigins, loadConfig } from './config.ts'
 import type { AppConfig } from './config.ts'
 import { WindowLimiter } from './limits.ts'
+import { confirmPlan, confirmRefund, PlanError, recordRefund } from './plans.ts'
 
 export type { AppConfig } from './config.ts'
 export interface AppOptions {
@@ -125,6 +127,14 @@ const compareSchema = z
     (input) => input.amountCents !== undefined || input.productId !== undefined,
     'Send a price or a product.',
   )
+const instalmentsSchema = z.array(z.object({ date, amountCents: cents }).strict()).max(4)
+const planSchema = z.discriminatedUnion('product', [
+  z.object({ product: z.literal('full') }).strict(),
+  z.object({ product: z.literal('payIn4'), instalments: instalmentsSchema.min(1) }).strict(),
+])
+const refundConfirmationSchema = z
+  .object({ returnedCents: cents, remainingInstalments: instalmentsSchema.optional() })
+  .strict()
 const chatSchema = z
   .object({
     message: z.string().trim().min(1).max(2000),
@@ -180,6 +190,13 @@ export function createApp(options: AppOptions = {}) {
   if (config.trustProxy) app.set('trust proxy', config.trustProxy)
   app.locals.store = store
   app.locals.cleanup = () => store.cleanup(now().getTime())
+  /** For payment webhooks: records a refund for the user to review, once per refund ID. */
+  app.locals.recordRefund = (
+    sessionId: string,
+    purchaseId: string,
+    refundId: string,
+    amountCents: number,
+  ) => recordRefund(store, sessionId, purchaseId, refundId, amountCents, now()).purchase
   const busy = new Set<string>()
   const chatBusy = new Set<string>()
   const requestLimiter = new WindowLimiter(config.requestsPerMinute, 60_000)
@@ -233,10 +250,12 @@ export function createApp(options: AppOptions = {}) {
     const data = store.get(id)
     if (!data)
       throw new HttpError(401, 'Session expired. Reload to begin again.', 'SESSION_EXPIRED')
+    const purchases = livePurchases(id).map(publicPurchase)
     return {
       ...data,
       sessionKey: createHash('sha256').update(id).digest('hex').slice(0, 20),
-      purchases: livePurchases(id).map(publicPurchase),
+      purchases,
+      reviews: purchaseReviews(purchases),
       products: PRODUCTS,
       today: today(data.profile.timezone),
       config: {
@@ -589,6 +608,32 @@ export function createApp(options: AppOptions = {}) {
         payIn4Eligible: payIn4InRange(amountCents),
       }),
     )
+  })
+  /** Saves a purchase's new cash effect and moves the plan version, so older answers expire. */
+  function savePurchase(id: string, purchase: StoredPurchase) {
+    store.atomic(() => {
+      store.putPurchase(id, purchase)
+      const data = store.get(id)!
+      data.profile.version += 1
+      store.save(id, data)
+    })
+  }
+  app.post('/api/purchases/:id/plan', (req, res) => {
+    const input = planSchema.parse(req.body)
+    const id = sessionId(res)
+    noActive(id)
+    savePurchase(id, confirmPlan(purchaseFor(req, res), input, now()))
+    res.json(state(id))
+  })
+  app.post('/api/purchases/:id/refunds/:refundId/confirm', (req, res) => {
+    const input = refundConfirmationSchema.parse(req.body)
+    const id = sessionId(res)
+    noActive(id)
+    savePurchase(
+      id,
+      confirmRefund(purchaseFor(req, res), String(req.params.refundId), input, now()),
+    )
+    res.json(state(id))
   })
   app.patch('/api/profile', (req, res) => {
     const input = z.object({ profile: profileSchema }).strict().parse(req.body)
@@ -1011,6 +1056,8 @@ export function createApp(options: AppOptions = {}) {
       return void res
         .status(400)
         .json({ error: error.issues[0]?.message ?? 'Invalid request.', code: 'INVALID_INPUT' })
+    if (error instanceof PlanError)
+      return void res.status(error.status).json({ error: error.message, code: error.code })
     if (error instanceof HttpError)
       return void res.status(error.status).json({
         error: error.message,

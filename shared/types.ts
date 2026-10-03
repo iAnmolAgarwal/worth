@@ -119,6 +119,25 @@ export interface Purchase {
   paymentPlan?: PaymentPlan
   refunds?: PurchaseRefund[]
 }
+/** Something the user must confirm before Worth changes how a purchase affects their plan. */
+export type PurchaseReview =
+  | {
+      kind: 'confirmPlan'
+      purchaseId: string
+      name: string
+      amountCents: number
+      title: string
+      message: string
+    }
+  | {
+      kind: 'refund'
+      purchaseId: string
+      refundId: string
+      name: string
+      refundedCents: number
+      title: string
+      message: string
+    }
 export interface ForecastEvent {
   id: string
   name: string
@@ -257,6 +276,8 @@ export interface AppState {
   profile: FinancialProfile
   transactions: Transaction[]
   purchases: Purchase[]
+  /** Persistent prompts: plans to confirm and refunds to review. */
+  reviews: PurchaseReview[]
   wishlist: string[]
   products: Product[]
   today: string

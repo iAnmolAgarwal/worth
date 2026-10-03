@@ -21,6 +21,7 @@ function makeState(): AppState {
       ...seed.profile,
       flows: seed.profile.flows.filter((flow) => ['salary', 'rent', 'music'].includes(flow.id)),
     },
+    reviews: [],
     products: PRODUCTS,
     today: TODAY,
     config: { ai: 'anthropic', paypal: 'demo' },
