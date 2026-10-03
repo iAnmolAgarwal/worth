@@ -77,6 +77,26 @@ export default function App() {
   const [menu, setMenu] = useState(false)
   /** The "Sandbox demo" chip's details: data source, assistant state and PayPal mode. */
   const [envOpen, setEnvOpen] = useState(false)
+  const envButton = useRef<HTMLButtonElement>(null)
+  // Escape anywhere closes the chip's details and returns focus to it; so does a click outside.
+  useEffect(() => {
+    if (!envOpen) return
+    const close = (event: Event) => {
+      if (event instanceof KeyboardEvent) {
+        if (event.key !== 'Escape') return
+        setEnvOpen(false)
+        envButton.current?.focus()
+        return
+      }
+      if (!envButton.current?.parentElement?.contains(event.target as Node)) setEnvOpen(false)
+    }
+    document.addEventListener('keydown', close)
+    document.addEventListener('mousedown', close)
+    return () => {
+      document.removeEventListener('keydown', close)
+      document.removeEventListener('mousedown', close)
+    }
+  }, [envOpen])
   const [toast, setToast] = useState('')
   const [checkout, setCheckout] = useState<CheckoutState>()
   const [review, setReview] = useState<ReviewState>()
@@ -360,7 +380,14 @@ export default function App() {
                 className="env env-btn"
                 aria-expanded={envOpen}
                 aria-controls="env-details"
+                ref={envButton}
                 onClick={() => setEnvOpen(!envOpen)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape' && envOpen) {
+                    event.stopPropagation()
+                    setEnvOpen(false)
+                  }
+                }}
                 onBlur={(event) => {
                   if (!event.currentTarget.parentElement?.contains(event.relatedTarget as Node))
                     setEnvOpen(false)

@@ -372,11 +372,32 @@ a:hover,
 /* ---------- Page frame: warm canvas + white rail ---------- */
 .page {
   min-height: calc(100vh - var(--topbar-h));
-  background: linear-gradient(
-    to right,
-    var(--c-canvas) calc(50% + 176px),
-    var(--c-surface) calc(50% + 176px)
-  );
+  background: var(--c-canvas);
+  /* The white rail is painted by the rail itself (below), so it lines up at every width. */
+  position: relative;
+  isolation: isolate;
+  overflow-x: clip;
+}
+@media (min-width: 1024px) {
+  .page:not(.plain) {
+    overflow-y: clip;
+  }
+  .page:not(.plain) .grid > .rail {
+    position: relative;
+  }
+  .page:not(.plain) .grid > .rail::before {
+    content: '';
+    position: absolute;
+    z-index: -1;
+    top: -100vh;
+    bottom: -200vh;
+    left: calc(var(--s-12) / -2);
+    right: -100vw;
+    background: var(--c-surface);
+  }
+  .page:not(.plain) .grid > .rail.decision-rail {
+    position: relative;
+  }
 }
 .page.plain {
   background: var(--c-canvas);
@@ -2738,4 +2759,62 @@ textarea.input {
   font-weight: var(--fw-semibold);
   font-size: var(--fs-body);
   min-height: 56px;
+}
+
+/* 1024–1279: the main column is narrow, so option cards stack as rows (as on phones). */
+@media (min-width: 1024px) and (max-width: 1279px) {
+  .options {
+    grid-template-columns: 1fr;
+    gap: var(--s-2);
+  }
+  .opt {
+    min-height: 0;
+    gap: 4px;
+    padding: var(--s-3) var(--s-4);
+  }
+  .opt .head {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+  .opt .kv {
+    margin-top: 0;
+    flex-direction: row;
+    align-items: baseline;
+    gap: var(--s-2);
+  }
+  .opt .v {
+    font-size: var(--fs-body);
+    line-height: var(--lh-body);
+    font-weight: var(--fw-bold);
+  }
+}
+/* Dates and short labels never break across lines; long lines balance instead of orphaning. */
+.opt .ot,
+.inst .when,
+.nowrap {
+  white-space: nowrap;
+}
+.inst .near,
+.opt .why,
+.lead,
+.verdict,
+.alert-body {
+  text-wrap: balance;
+}
+/* Mobile decision footer: one clear primary; the secondary is a quieter link. */
+@media (max-width: 767px) {
+  .actionbar .btn-text {
+    height: 36px;
+    font-size: var(--fs-body);
+    font-weight: var(--fw-semibold);
+  }
+  .detail .wrap {
+    padding-bottom: calc(148px + var(--safe-bottom));
+  }
+}
+@media (min-width: 1024px) {
+  /* The Ask rail stays sticky; sticky also anchors its painted background. */
+  .ask-page.page .grid > .rail {
+    position: sticky;
+  }
 }
