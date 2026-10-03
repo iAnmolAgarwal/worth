@@ -1165,6 +1165,58 @@ describe('hosted abuse limits', () => {
   })
 })
 
+describe('session storage bounds', () => {
+  it('indexes expiry and leaves expired-row cleanup to the timer', async () => {
+    const { app, store, agent } = setup()
+    const plan = store.db
+      .prepare('EXPLAIN QUERY PLAN DELETE FROM sessions WHERE expires <= ?')
+      .all(0) as { detail: string }[]
+    expect(plan.map((row) => row.detail).join(' ')).toContain('sessions_expires')
+    const cleanup = vi.spyOn(store, 'cleanup')
+    await state(agent)
+    await state(request.agent(app))
+    await post(agent, '/api/wishlist', { productId: 'chair' })
+    expect(cleanup).not.toHaveBeenCalled()
+    clock.value = new Date('2026-10-04T12:00:01Z')
+    expect(store.count(clock.value.getTime())).toBe(0)
+    expect(app.locals.cleanup()).toBe(2)
+    expect(cleanup).toHaveBeenCalledOnce()
+  })
+  it('limits new sessions per client IP without affecting existing sessions', async () => {
+    const { app } = setup({ config: { ...config, trustProxy: 1, sessionIpHourlyLimit: 2 } })
+    const visitor = (ip: string) => request.agent(app).get('/api/state').set('X-Forwarded-For', ip)
+    const existing = request.agent(app)
+    expect((await existing.get('/api/state').set('X-Forwarded-For', '203.0.113.7')).status).toBe(
+      200,
+    )
+    expect((await visitor('203.0.113.7')).status).toBe(200)
+    const limited = await visitor('203.0.113.7')
+    expect(limited.status).toBe(429)
+    expect(limited.body.code).toBe('SESSION_RATE_LIMITED')
+    expect(limited.headers['set-cookie']).toBeUndefined()
+    expect((await existing.get('/api/state').set('X-Forwarded-For', '203.0.113.7')).status).toBe(
+      200,
+    )
+    expect((await post(existing, '/api/reset').set('X-Forwarded-For', '203.0.113.7')).status).toBe(
+      200,
+    )
+    expect((await visitor('198.51.100.20')).status).toBe(200)
+    clock.value = new Date(clock.value.getTime() + 60 * 60_000)
+    expect((await visitor('203.0.113.7')).status).toBe(200)
+  })
+  it('refuses new sessions beyond the live-session cap and counts only unexpired ones', async () => {
+    const { app, store } = setup({ config: { ...config, maxSessions: 2 } })
+    expect((await request(app).get('/api/state')).status).toBe(200)
+    expect((await request(app).get('/api/state')).status).toBe(200)
+    const full = await request(app).get('/api/state')
+    expect(full.status).toBe(503)
+    expect(full.body.code).toBe('AT_CAPACITY')
+    expect(store.count(clock.value.getTime())).toBe(2)
+    clock.value = new Date('2026-10-04T12:00:01Z')
+    expect((await request(app).get('/api/state')).status).toBe(200)
+  })
+})
+
 describe('production browser hardening', () => {
   it('sends HSTS and a __Host- session cookie that authenticates later requests', async () => {
     const origin = 'https://worth.example.com'

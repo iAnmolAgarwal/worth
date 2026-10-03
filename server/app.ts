@@ -160,6 +160,7 @@ export function createApp(options: AppOptions = {}) {
   const busy = new Set<string>()
   const chatBusy = new Set<string>()
   const requestLimiter = new WindowLimiter(config.requestsPerMinute, 60_000)
+  const sessionLimiter = new WindowLimiter(config.sessionIpHourlyLimit, 60 * 60_000)
   // The __Host- prefix makes browsers require Secure, Path=/ and no Domain for the session cookie.
   const cookieName = config.production ? '__Host-worth_session' : 'worth_session'
   function today(timezone = 'UTC') {
@@ -202,11 +203,25 @@ export function createApp(options: AppOptions = {}) {
       },
     }
   }
-  function startSession(res: Response) {
+  function startSession(req: Request, res: Response, replacing = false) {
+    const time = now().getTime()
+    // A replacement (reset) deletes the previous session, so it cannot grow storage.
+    if (!replacing && store.count(time) >= config.maxSessions)
+      throw new HttpError(
+        503,
+        'Worth is at capacity right now. Please try again later.',
+        'AT_CAPACITY',
+      )
+    if (!replacing && !sessionLimiter.take(req.ip ?? 'local', time))
+      throw new HttpError(
+        429,
+        'Too many new sessions from this network. Please try again later.',
+        'SESSION_RATE_LIMITED',
+      )
     const seed = createDemoState(today('America/New_York'))
     const id = store.create(
       { profile: seed.profile, transactions: seed.transactions, wishlist: seed.wishlist },
-      now().getTime(),
+      time,
     )
     res.cookie(cookieName, id, {
       httpOnly: true,
@@ -462,11 +477,15 @@ export function createApp(options: AppOptions = {}) {
       return next(
         new HttpError(429, 'Please wait a moment before making more requests.', 'RATE_LIMITED'),
       )
-    store.cleanup(time)
+    // Expired rows are removed by the periodic cleanup timer, never by a per-request table scan.
     const cookie = req.cookies[cookieName] as unknown
-    if (typeof cookie === 'string' && /^[A-Za-z0-9_-]{43}$/.test(cookie) && store.get(cookie))
+    if (
+      typeof cookie === 'string' &&
+      /^[A-Za-z0-9_-]{43}$/.test(cookie) &&
+      store.isLive(cookie, time)
+    )
       res.locals.sessionId = cookie
-    else startSession(res)
+    else startSession(req, res)
     next()
   })
   app.get('/api/state', (_req, res) => res.json(state(sessionId(res))))
@@ -517,10 +536,12 @@ export function createApp(options: AppOptions = {}) {
     store.save(id, data)
     res.json(state(id))
   })
-  app.post('/api/reset', (_req, res) => {
-    noActive(sessionId(res))
-    store.delete(sessionId(res))
-    res.json(state(startSession(res)))
+  app.post('/api/reset', (req, res) => {
+    const previous = sessionId(res)
+    noActive(previous)
+    const id = startSession(req, res, true)
+    store.delete(previous)
+    res.json(state(id))
   })
   app.post('/api/wishlist', (req, res) => {
     const { productId } = z.object({ productId: identifier }).strict().parse(req.body)

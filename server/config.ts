@@ -10,6 +10,10 @@ export interface AppConfig {
   trustProxy: number
   /** API requests per client IP per minute. */
   requestsPerMinute: number
+  /** New sessions per client IP per hour. */
+  sessionIpHourlyLimit: number
+  /** Live sessions across the server; new visitors receive 503 beyond this. */
+  maxSessions: number
   paypalClientId?: string
   paypalSecret?: string
   paypalWebhookId?: string
@@ -77,6 +81,8 @@ export function loadConfig(env: Env = process.env, overrides: Partial<AppConfig>
     host: setting(env, 'HOST') ?? (production ? '0.0.0.0' : '127.0.0.1'),
     trustProxy: wholeNumber(env, 'TRUST_PROXY', production ? 1 : 0, 0, 10),
     requestsPerMinute: 180,
+    sessionIpHourlyLimit: wholeNumber(env, 'SESSION_IP_HOURLY_LIMIT', 30, 1),
+    maxSessions: wholeNumber(env, 'MAX_SESSIONS', 5000, 1),
     paypalClientId: setting(env, 'PAYPAL_CLIENT_ID'),
     paypalSecret: setting(env, 'PAYPAL_CLIENT_SECRET'),
     paypalWebhookId: setting(env, 'PAYPAL_WEBHOOK_ID'),
