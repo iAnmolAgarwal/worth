@@ -2170,7 +2170,25 @@ describe('production browser hardening', () => {
     expect(first.headers['strict-transport-security']).toBe('max-age=31536000; includeSubDomains')
     expect(first.headers['x-content-type-options']).toBe('nosniff')
     expect(first.headers['referrer-policy']).toBe('same-origin')
-    expect(first.headers['content-security-policy']).toBe("frame-ancestors 'none'")
+    const csp = Object.fromEntries(
+      (first.headers['content-security-policy'] as string)
+        .split('; ')
+        .map((directive) => [directive.split(' ')[0], directive.split(' ').slice(1)]),
+    )
+    for (const directive of ['script-src', 'frame-src', 'connect-src', 'img-src'])
+      expect(csp[directive]).toEqual(
+        expect.arrayContaining([
+          "'self'",
+          'https://www.paypal.com',
+          'https://www.sandbox.paypal.com',
+          'https://*.paypal.com',
+          'https://*.paypalobjects.com',
+        ]),
+      )
+    expect(csp['default-src']).toEqual(["'self'"])
+    expect(csp['frame-ancestors']).toEqual(["'none'"])
+    expect(csp['script-src']).not.toContain("'unsafe-inline'")
+    expect(JSON.stringify(csp)).not.toContain('fonts.googleapis.com')
     const cookie = first.headers['set-cookie'][0] as string
     expect(cookie).toMatch(/^__Host-worth_session=[A-Za-z0-9_-]{43};/)
     expect(cookie).toContain('Path=/')

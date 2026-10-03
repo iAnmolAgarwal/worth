@@ -53,6 +53,7 @@ import type { ChatActions, ChatProvider } from './chat.ts'
 import { allowedOrigins, loadConfig } from './config.ts'
 import type { AppConfig } from './config.ts'
 import { WindowLimiter } from './limits.ts'
+import { contentSecurityPolicy } from './csp.ts'
 import { confirmPlan, confirmRefund, PlanError, recordRefund } from './plans.ts'
 
 export type { AppConfig } from './config.ts'
@@ -745,8 +746,11 @@ export function createApp(options: AppOptions = {}) {
     res.setHeader('X-Content-Type-Options', 'nosniff')
     res.setHeader('Referrer-Policy', 'same-origin')
     res.setHeader('X-Frame-Options', 'DENY')
-    // Framing only. Script and connection rules wait until the PayPal SDK is tested live.
-    res.setHeader('Content-Security-Policy', "frame-ancestors 'none'")
+    // The full policy needs the built app; Vite's development server injects inline scripts.
+    res.setHeader(
+      'Content-Security-Policy',
+      config.contentSecurityPolicy ? contentSecurityPolicy() : "frame-ancestors 'none'",
+    )
     if (config.production)
       res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
     if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store')
