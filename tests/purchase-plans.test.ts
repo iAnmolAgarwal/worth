@@ -4,7 +4,7 @@ import { createApp } from '../server/app.ts'
 import { Store } from '../server/store.ts'
 import type { PayPalGateway } from '../server/paypal.ts'
 import { addDays } from '../shared/finance.ts'
-import type { AppState } from '../shared/types.ts'
+import type { AppState, Comparison } from '../shared/types.ts'
 
 const TODAY = '2026-10-03'
 const stores: Store[] = []
@@ -36,9 +36,61 @@ async function state(agent: Agent): Promise<AppState> {
   expect(result.status).toBe(200)
   return result.body
 }
-
 afterEach(() => {
   for (const store of stores.splice(0)) store.close()
+})
+
+describe('POST /api/compare', () => {
+  it('compares the persona’s camera using the catalog price', async () => {
+    const { agent } = setup()
+    const response = await post(agent, '/api/compare', { productId: 'camera' })
+    expect(response.status).toBe(200)
+    const result = response.body as Comparison
+    expect(result).toMatchObject({
+      itemName: 'Everyday camera',
+      amountCents: 119900,
+      today: TODAY,
+      window: { start: TODAY, end: addDays(TODAY, 60), days: 60 },
+      recommendation: 'wait',
+      buyToday: { outcome: 'tight' },
+      wait: { date: addDays(TODAY, 20), outcome: 'fits' },
+      spendLess: { maxPriceCents: 44001 },
+      payIn4: { available: true, outcome: 'tight', stacking: { activePlans: 1 } },
+    })
+  })
+
+  it('accepts a price alone, gates Pay in 4 on the range, and rejects a client price for a catalog item', async () => {
+    const { agent } = setup()
+    const small = await post(agent, '/api/compare', { amountCents: 999, itemName: 'Socks' })
+    expect(small.body).toMatchObject({
+      itemName: 'Socks',
+      recommendation: 'buyToday',
+      payIn4: { available: false, reason: 'Not available for this amount' },
+    })
+    expect((await post(agent, '/api/compare', { amountCents: 200001 })).body.payIn4.available).toBe(
+      false,
+    )
+    expect((await post(agent, '/api/compare', { amountCents: 1000 })).body.payIn4.available).toBe(
+      true,
+    )
+    const forged = await post(agent, '/api/compare', { productId: 'camera', amountCents: 100 })
+    expect(forged.status).toBe(400)
+    expect(forged.body.code).toBe('PRICE_MISMATCH')
+    expect((await post(agent, '/api/compare', { productId: 'yacht' })).status).toBe(404)
+    for (const body of [{}, { amountCents: -1 }, { amountCents: 1.5 }, { amountCents: 1, x: 1 }])
+      expect((await post(agent, '/api/compare', body)).status).toBe(400)
+  })
+
+  it('keeps /api/assess on the same fixed window', async () => {
+    const { agent } = setup()
+    const assessed = await post(agent, '/api/assess', { amountCents: 119900 })
+    expect(assessed.body).toMatchObject({
+      outcome: 'tight',
+      earliestDate: addDays(TODAY, 20),
+      horizonEnd: addDays(TODAY, 60),
+    })
+    expect(assessed.body.points).toHaveLength(61)
+  })
 })
 
 describe('profile instalment plans and items already paid today', () => {

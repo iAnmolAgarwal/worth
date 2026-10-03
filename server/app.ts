@@ -3,7 +3,13 @@ import type { ErrorRequestHandler, Request, Response } from 'express'
 import cookieParser from 'cookie-parser'
 import { createHash, randomUUID } from 'node:crypto'
 import { z } from 'zod'
-import { assessPurchase, addDays, normalizeTimezone } from '../shared/finance.ts'
+import {
+  assessPurchase,
+  addDays,
+  compareOptions,
+  normalizeTimezone,
+  payIn4InRange,
+} from '../shared/finance.ts'
 import { createDemoState, DEMO_TIMEZONE, PRODUCTS, rebaseDemoState } from '../shared/seed.ts'
 import { parsePayPalCsv } from '../shared/csv.ts'
 import type {
@@ -108,6 +114,17 @@ const assessmentSchema = z
     purchaseDate: date.optional(),
   })
   .strict()
+const compareSchema = z
+  .object({
+    amountCents: cents.optional(),
+    itemName: z.string().trim().min(1).max(150).optional(),
+    productId: identifier.optional(),
+  })
+  .strict()
+  .refine(
+    (input) => input.amountCents !== undefined || input.productId !== undefined,
+    'Send a price or a product.',
+  )
 const chatSchema = z
   .object({
     message: z.string().trim().min(1).max(2000),
@@ -554,6 +571,24 @@ export function createApp(options: AppOptions = {}) {
         'INVALID_DATE',
       )
     res.json(assessPurchase(current.profile, current.purchases, { ...input, today: current.today }))
+  })
+  app.post('/api/compare', (req, res) => {
+    const input = compareSchema.parse(req.body)
+    const product = input.productId ? PRODUCTS.find((p) => p.id === input.productId) : undefined
+    if (input.productId && !product) throw new HttpError(404, 'Product not found.', 'NOT_FOUND')
+    if (product && input.amountCents !== undefined && input.amountCents !== product.priceCents)
+      throw new HttpError(400, 'Use the catalog price for this product.', 'PRICE_MISMATCH')
+    const amountCents = product?.priceCents ?? input.amountCents!
+    const current = state(sessionId(res))
+    res.json(
+      compareOptions(current.profile, current.purchases, {
+        amountCents,
+        itemName: product?.name ?? input.itemName,
+        today: current.today,
+        // PayPal's own eligibility check arrives with the Pay Later button; until then, the range.
+        payIn4Eligible: payIn4InRange(amountCents),
+      }),
+    )
   })
   app.patch('/api/profile', (req, res) => {
     const input = z.object({ profile: profileSchema }).strict().parse(req.body)
