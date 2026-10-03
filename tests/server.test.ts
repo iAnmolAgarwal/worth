@@ -1636,6 +1636,70 @@ describe('real PayPal exports', () => {
   })
 })
 
+describe('acceptance case 24: a realistic personal export', () => {
+  it('imports, holds back a positive result until foreign spending is resolved, and keeps rent on month end', async () => {
+    const { agent } = setup()
+    const imported = await post(agent, '/api/import/commit', {
+      csv: fixture('paypal-personal-expanded.csv'),
+    })
+    expect(imported.status).toBe(200)
+    const profile = imported.body.profile as AppState['profile']
+    expect(profile.missingFields).toEqual([
+      'Confirm current available funds, income, upcoming bills, and everyday spending after import.',
+      'Your import shows a Pay in 4 or Pay Later plan (Test Store). Add any payments still due to your upcoming bills, or confirm it is paid off.',
+      'Resolve 1 foreign-currency payment from your import in Activity: enter what it cost in USD, or mark it as a one-off.',
+    ])
+    expect(profile.flows.find((flow) => flow.name === 'Maple Court Apartments rent')).toMatchObject(
+      {
+        nextDate: '2026-10-31',
+        anchorDay: 'last',
+        confirmed: false,
+      },
+    )
+    // The user confirms today's funds and every suggestion.
+    const confirm = (current: AppState['profile'], dailySpendCents: number) =>
+      patch(agent, {
+        profile: {
+          ...current,
+          balanceCents: 400000,
+          cushionCents: 50000,
+          dailySpendCents,
+          snapshotDate: '2026-10-03',
+          confirmed: true,
+          missingFields: [],
+          flows: current.flows.map((flow) => ({ ...flow, confirmed: true })),
+        },
+      })
+    const confirmed = await confirm(profile, profile.dailySpendCents)
+    expect(confirmed.status).toBe(200)
+    const held = await post(agent, '/api/assess', { amountCents: 10000 })
+    expect(held.body.outcome).toBe('incomplete')
+    expect(held.body.missingFields).toEqual([
+      'Resolve 1 foreign-currency payment from your import in Activity: enter what it cost in USD, or mark it as a one-off.',
+    ])
+    // Rent paid on Jul 31, Aug 31 and Sep 30 is next due on Oct 31, then Nov 30.
+    expect(
+      (held.body.drivers as { name: string; date: string }[])
+        .filter((driver) => driver.name === 'Maple Court Apartments rent')
+        .map((driver) => driver.date),
+    ).toEqual(['2026-10-31', '2026-11-30'])
+
+    const resolved = await post(
+      agent,
+      `/api/import/unresolved/${encodeURIComponent('paypal:PX0000016')}`,
+      { amountCents: 5340 },
+    )
+    expect(resolved.status).toBe(200)
+    const suggested = Math.round((20711 + 5340) / 63)
+    expect(resolved.body.profile.missingFields).toEqual([
+      `Review your everyday spending: with London theatre box office included, your imported history suggests $${(suggested / 100).toFixed(2)} a day, more than your $${(profile.dailySpendCents / 100).toFixed(2)} estimate.`,
+    ])
+    expect((await confirm(resolved.body.profile, suggested)).status).toBe(200)
+    const fits = await post(agent, '/api/assess', { amountCents: 10000 })
+    expect(fits.body).toMatchObject({ outcome: 'fits', missingFields: [] })
+  })
+})
+
 describe('foreign-currency imports', () => {
   it('imports a business export with a matched conversion, memo rows and holds', async () => {
     const { agent } = setup()

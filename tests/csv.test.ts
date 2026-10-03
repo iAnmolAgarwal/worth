@@ -486,6 +486,75 @@ describe('real PayPal export formats', () => {
     expect(warnings).not.toContain('not classified as salary')
   })
 
+  it('reads a realistic expanded personal export end to end', () => {
+    const result = parsePayPalCsv(fixture('paypal-personal-expanded.csv'))
+    expect(result.errors).toEqual([])
+    expect(result).toMatchObject({ totalRows: 25, dateOrder: 'MM/DD', needsDateOrder: false })
+    // The rideshare hold and release; the euro conversion leg and the unmatched pound payment.
+    expect(result.leftOut).toEqual({ memo: 0, holds: 2, otherCurrency: 2 })
+    const byId = new Map(result.transactions.map((item) => [item.id, item]))
+    expect(byId.get('paypal:PX0000006')).toMatchObject({
+      name: 'Lisbon bakery',
+      amountCents: -2061,
+      currency: 'USD',
+      kind: 'expense',
+    })
+    expect(byId.has('paypal:PX0000008')).toBe(false)
+    expect(byId.get('paypal:PX0000004')).toMatchObject({ kind: 'income', amountCents: 185000 })
+    expect(byId.get('paypal:PX0000002')!.kind).toBe('transfer')
+    expect(byId.get('paypal:PX0000019')!.kind).toBe('transfer')
+    expect(result.unresolved).toMatchObject([
+      { id: 'paypal:PX0000016', name: 'London theatre box office', currency: 'GBP' },
+    ])
+    expect(result.adjustments.map((item) => [item.name, item.amountCents])).toEqual([
+      ['General Account Correction', 500000],
+    ])
+    expect(result.instalmentPlans).toMatchObject([
+      {
+        name: 'Test Store',
+        purchaseCents: 119900,
+        paymentCents: 29975,
+        payments: [{ date: '2026-09-28', amountCents: 29975, status: 'pending' }],
+      },
+    ])
+    expect(
+      result.recurring.map(({ name, kind, cadence, nextDate, anchorDay }) => ({
+        name,
+        kind,
+        cadence,
+        nextDate,
+        anchorDay,
+      })),
+    ).toEqual([
+      {
+        name: 'Music streaming subscription',
+        kind: 'subscription',
+        cadence: 'monthly',
+        nextDate: '2026-10-03',
+        anchorDay: 3,
+      },
+      {
+        name: 'NORTHWIND LOGISTICS PAYROLL',
+        kind: 'income',
+        cadence: 'biweekly',
+        nextDate: '2026-10-16',
+        anchorDay: undefined,
+      },
+      {
+        name: 'Maple Court Apartments rent',
+        kind: 'bill',
+        cadence: 'monthly',
+        nextDate: '2026-10-31',
+        anchorDay: 'last',
+      },
+    ])
+    // Everyday spending: groceries, the bakery's USD cost, the ride and the bookshop over 63 days.
+    expect(result.coverageDays).toBe(63)
+    expect(result.suggestedDailySpendCents).toBe(
+      Math.round((6418 + 7192 + 2061 + 2640 + 2400) / 63),
+    )
+  })
+
   it('explains a sandbox export that has no rows yet', () => {
     const result = parsePayPalCsv(fixture('paypal-personal-sandbox-empty.csv'))
     expect(result.errors).toEqual([])
