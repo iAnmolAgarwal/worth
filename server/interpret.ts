@@ -292,6 +292,10 @@ function unaccounted(prices: { cents: number }[], read: InterpretedItem[]) {
   })
 }
 
+// Timing words end an item name: "a camera mid-October" names the camera.
+const TIMING_WORD =
+  /^(?:before|after|until|till|by|sometime|soon|later|tmrw|tmr|tmw|mid-?\w*|week|weekend|month|year|fortnight|christmas|xmas|payday|paycheck|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|today|tonight|yesterday)$/
+
 /** A local guess at the item a message names; used only for labels and new-item detection. */
 export function localItemName(message: string) {
   // "a pair of headphones" names the headphones.
@@ -303,7 +307,7 @@ export function localItemName(message: string) {
     const kept: string[] = []
     for (const word of fragment.split(/\s+/)) {
       const bare = word.toLowerCase().replace(/[^a-z'+-]/g, '')
-      if (!bare || ITEM_STOP.has(bare) || /^\d/.test(word)) break
+      if (!bare || ITEM_STOP.has(bare) || TIMING_WORD.test(bare) || /^\d/.test(word)) break
       kept.push(word.replace(/[^\p{L}\p{M}'+-]/gu, ''))
       if (kept.length === 3 || /[?.!,;]$/.test(word)) break
     }

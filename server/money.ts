@@ -106,6 +106,9 @@ const FOREIGN_WORDS: [RegExp, string][] = [
     'CRYPTO',
   ],
 ]
+// Places and qualifiers that make "dollars", "bucks" or "$" another country's dollar.
+const DOLLAR_COUNTRY =
+  /(?:hk|hong\s+kong|nz|new\s+zealand|aud?|aus|australian?|aussie|ca|cad|canadian?|canada|sgd?|singapore(?:an)?|taiwan(?:ese)?|ntd?|zimbabwe(?:an)?|jamaica(?:n)?|jmd|bahamas|bahamian|barbados|barbadian|belize(?:an)?|bermuda(?:n)?|brunei|caribbean|east\s+caribbean|xcd|fiji(?:an)?|guyana(?:ese)?|liberia(?:n)?|namibia(?:n)?|solomon|trinidad(?:ian)?|ttd|cayman|mexican|mexico|mxn)\b/i
 // Upper-case codes after a number that are units, not currencies.
 const NOT_CURRENCY_CODES = new Set(
   'USD GB TB MB KB GHZ MHZ MPH HDR RAM SSD HDD LED OLED LCD EST PST CST MST UTC GMT CET USB TV PC MAX PRO XL XXL LBS OZ PCS MPG KWH BTU DPI FPS'.split(
@@ -186,7 +189,7 @@ export function extractMoneyMentions(text: string): MoneyMention[] {
     }
     // "1.199,00 €": read the currency after a decimal-comma tail too.
     const tail = rest.replace(/^,\d+/, '')
-    const suffix = rest.match(/^\s?(?:\$|usd\b|dollars?\b|bucks?\b)/i)
+    const suffix = rest.match(/^\s?(?:\$|usd\b|(?:us|u\.s\.)\s+dollars?\b|dollars?\b|bucks?\b)/i)
     const code3 = tail.match(/^\s?([A-Z]{3,4})\b/)?.[1]
     const foreignSuffix =
       FOREIGN_WORDS.find(([word]) => word.test(tail.trimStart())) ??
@@ -203,6 +206,22 @@ export function extractMoneyMentions(text: string): MoneyMention[] {
       end += suffix[0].length
     } else if (suffix && currency === 'FOREIGN') {
       // "CA$500 dollars" stays foreign.
+    }
+    // "500 HK dollars", "$500 Canadian", "500 bucks Canadian" or "500 dollars (Hong Kong)":
+    // a country or currency word next to dollars means another dollar; ask which.
+    const between = rest.match(
+      /^\s+([A-Za-z][A-Za-z.]*(?:\s+[A-Za-z]+)?)\s+(?:dollars?|bucks?)\b/,
+    )?.[1]
+    if (
+      currency !== 'FOREIGN' &&
+      ((between &&
+        (DOLLAR_COUNTRY.test(between) || /^[A-Z]/.test(between)) &&
+        !/^(?:US|USD|U\.S\.?|American)$/i.test(between)) ||
+        (currency === 'USD' &&
+          new RegExp(`^\\s*\\(?\\s*${DOLLAR_COUNTRY.source}`, 'i').test(text.slice(end))))
+    ) {
+      currency = 'FOREIGN'
+      code = 'OTHER'
     }
     // A preceding foreign word such as "EUR 500" or "Rs 500" was handled by the prefix.
     if (currency === 'NONE') {

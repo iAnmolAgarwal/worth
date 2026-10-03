@@ -106,6 +106,12 @@ describe('purchase dates (judge regressions)', () => {
       })
   })
 
+  it('keeps timing words out of the item name', () => {
+    const result = local('Can I buy a $1,199 camera mid-October?')
+    expect(asked(result)).toBe('date_unresolved')
+    expect(result.ok ? undefined : result.pending?.itemName).toBe('camera')
+  })
+
   it('asks when two days are named', () => {
     const message = 'Can I buy a $1,199 camera on the 15th or 16th?'
     expect(asked(check(message, cam('on the 15th or 16th', '2026-10-16')))).toBe('date_unresolved')
@@ -131,6 +137,26 @@ describe('amounts and currencies (judge regressions)', () => {
   ])('asks for the US-dollar total: %s', (message, reading) => {
     expect(asked(check(message, raw([reading])))).toBe('currency')
     expect(asked(local(message))).toBe('currency')
+  })
+
+  it.each([
+    'Can I buy a bag for 500 HK dollars?',
+    'Can I buy a bag for 500 Zimbabwe dollars?',
+    'Can I buy a bag for $500 Canadian?',
+    'Can I buy a bag for 500 bucks Canadian?',
+    'Can I buy a bag for 500 dollars (Hong Kong)?',
+  ])('asks which dollar when a country sits next to it: %s', (message) => {
+    expect(asked(local(message))).toBe('currency')
+    expect(asked(check(message, raw([item('bag', 50000)])))).toBe('currency')
+  })
+
+  it('still reads plain and US dollars as US dollars', () => {
+    for (const message of [
+      'Can I buy a bag for 500 dollars?',
+      'Can I buy a bag for 500 US dollars?',
+    ])
+      expect(accepted(local(message)).amountCents).toBe(50000)
+    expect(accepted(local('Can I buy a $500 Sony camera?')).amountCents).toBe(50000)
   })
 
   it('still assesses a dollar price next to money that was only spent abroad', () => {
