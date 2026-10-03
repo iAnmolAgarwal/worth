@@ -374,6 +374,62 @@ describe('AI sharing consent in chat', () => {
   })
 })
 
+describe('interpretation chip', () => {
+  it('shows how the question was read, keeps the verdict and explanation, and lets the user correct it', async () => {
+    const user = userEvent.setup()
+    const state = makeState()
+    const requests: ChatRequest[] = []
+    const assessment = assessPurchase(state.profile, [], {
+      amountCents: 119900,
+      itemName: 'camera',
+      today: TODAY,
+    })
+    routeApi((path, data) => {
+      if (path !== '/chat') throw new Error(`Unexpected API request: ${path}`)
+      requests.push(data as ChatRequest)
+      return {
+        ...reply('full text', 'anthropic'),
+        intent: 'affordability',
+        assessment,
+        verdict: 'Camera at $1,199 would dip below your cushion if you buy it today.',
+        explanation: 'Rent lands before your paycheck.',
+        interpretation: {
+          items: [{ name: 'camera', amountCents: 119900, quantity: 1 }],
+          amountCents: 119900,
+          currency: 'USD',
+          date: TODAY,
+          dateLabel: 'today',
+          dateSource: 'default',
+          option: 'check',
+          source: 'ai',
+        },
+        toolCalls: ['interpret_purchase', 'interpret_purchase'],
+      } satisfies ChatReply
+    })
+    render(<Assistant state={state} onPlan={vi.fn()} onProduct={vi.fn()} visible={true} />)
+    await sendMessage(user, 'Can I afford a $1,199 camera?')
+    await screen.findByText('Camera at $1,199 would dip below your cushion if you buy it today.')
+    expect(screen.getByText('Rent lands before your paycheck.')).toBeTruthy()
+    expect(screen.queryByText('full text')).toBeNull()
+    const chip = screen.getByLabelText('How Worth read your question')
+    expect(chip.textContent).toContain('Read as: Camera · $1,199.00 · today')
+    expect(screen.getByText('Checked purchase forecast')).toBeTruthy()
+
+    await user.click(within(chip).getByRole('button', { name: 'Edit' }))
+    expect((screen.getByLabelText('Item') as HTMLInputElement).value).toBe('Camera')
+    expect((screen.getByLabelText(/Total USD price/) as HTMLInputElement).value).toBe('1199.00')
+    await user.clear(screen.getByLabelText(/Total USD price/))
+    await user.type(screen.getByLabelText(/Total USD price/), '1099')
+    await user.click(screen.getByRole('button', { name: /Check my plan/ }))
+    await waitFor(() => expect(requests).toHaveLength(2))
+    expect(requests[1]!.context).toEqual({
+      amountCents: 109900,
+      itemName: 'Camera',
+      purchaseDate: TODAY,
+    })
+  })
+})
+
 describe('uncertain checkout recovery', () => {
   it('recovers a server reservation after an uncertain create response and returns it through onUpdate', async () => {
     const user = userEvent.setup()

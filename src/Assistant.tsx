@@ -16,6 +16,7 @@ import type {
   Assessment,
   ChatMessage,
   ChatReply,
+  Interpretation,
   Product,
   PurchaseContext,
 } from '../shared/types'
@@ -100,7 +101,19 @@ export function Assistant({
           ...prev,
           { role: 'assistant', content: reply.message, reply, id: Date.now() },
         ])
-        if (reply.assessment)
+        // The server decides whether a later message is about the same purchase.
+        if (reply.interpretation)
+          setContext({
+            amountCents: reply.interpretation.amountCents,
+            itemName: reply.assessment?.itemName ?? itemLabel(reply.interpretation),
+            purchaseDate: reply.interpretation.date,
+          })
+        else if (reply.pending)
+          setContext({
+            amountCents: reply.pending.amountCents,
+            itemName: reply.pending.itemName ?? 'Your purchase',
+          })
+        else if (reply.assessment)
           setContext({
             amountCents: reply.assessment.amountCents,
             itemName: reply.assessment.itemName,
@@ -234,6 +247,19 @@ export function Assistant({
                       <p className="claude-explanation">{entry.reply.explanation}</p>
                     )}
                   </div>
+                  {entry.reply?.interpretation && (
+                    <ReadAsChip
+                      interpretation={entry.reply.interpretation}
+                      disabled={busy}
+                      onEdit={() => {
+                        const read = entry.reply!.interpretation!
+                        setItem(itemLabel(read))
+                        setAmount((read.amountCents / 100).toFixed(2))
+                        setDate(read.date)
+                        setCustom(true)
+                      }}
+                    />
+                  )}
                   {entry.reply?.assessment && (
                     <AssessmentCard
                       assessment={entry.reply.assessment}
@@ -467,6 +493,35 @@ export function Assistant({
           </button>
         </aside>
       </div>
+    </div>
+  )
+}
+
+function itemLabel(read: Interpretation) {
+  const label = read.items
+    .map((item) => (item.quantity > 1 ? `${item.quantity} × ${item.name}` : item.name))
+    .join(' + ')
+  return label.charAt(0).toUpperCase() + label.slice(1)
+}
+
+function ReadAsChip({
+  interpretation: read,
+  onEdit,
+  disabled,
+}: {
+  interpretation: Interpretation
+  onEdit: () => void
+  disabled: boolean
+}) {
+  return (
+    <div className="read-as" aria-label="How Worth read your question">
+      <span>
+        Read as: {itemLabel(read)} · {money(read.amountCents, true)} · {read.dateLabel}
+        {read.source === 'local' ? ' · local reading' : ''}
+      </span>
+      <button className="inline-link" onClick={onEdit} disabled={disabled}>
+        Edit
+      </button>
     </div>
   )
 }
