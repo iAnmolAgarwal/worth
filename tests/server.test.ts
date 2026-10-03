@@ -170,6 +170,24 @@ describe('HTTP sessions, profiles, and calculations', () => {
     )
     expect((await patch(agent, { profile: initial.profile })).status).toBe(409)
   })
+  it('keeps a recurrence anchor on saved flows and rejects an invalid one', async () => {
+    const { agent } = setup()
+    const initial = await state(agent)
+    const rent = {
+      ...initial.profile.flows[0]!,
+      cadence: 'monthly',
+      nextDate: '2026-10-31',
+      anchorDay: 'last',
+    }
+    for (const anchorDay of [0, 32, 1.5, 'first'])
+      expect(
+        (await patch(agent, { profile: { ...initial.profile, flows: [{ ...rent, anchorDay }] } }))
+          .status,
+      ).toBe(400)
+    const saved = await patch(agent, { profile: { ...initial.profile, flows: [rent] } })
+    expect(saved.status).toBe(200)
+    expect(saved.body.profile.flows[0]).toMatchObject({ anchorDay: 'last' })
+  })
   it('expires normalized personal data and deletes prior records on reset', async () => {
     const { agent, store } = setup()
     await state(agent)

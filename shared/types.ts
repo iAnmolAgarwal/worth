@@ -8,6 +8,11 @@ export interface ScheduledFlow {
   name: string
   amountCents: number
   nextDate: string
+  /**
+   * Day of the month that monthly and yearly items fall on: 1–31 (clamped to shorter months) or
+   * 'last' for the last day of each month. Without it, the day of `nextDate` is used.
+   */
+  anchorDay?: number | 'last'
   cadence: Cadence
   kind: FlowKind
   category: string

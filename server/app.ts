@@ -94,6 +94,7 @@ const profileSchema = z
             name: z.string().trim().min(1).max(100),
             amountCents: cents,
             nextDate: date,
+            anchorDay: z.union([z.number().int().min(1).max(31), z.literal('last')]).optional(),
             cadence: z.enum(['once', 'weekly', 'biweekly', 'monthly', 'yearly']),
             kind: z.enum(['income', 'subscription', 'bill', 'installment']),
             category: z.string().max(80),
