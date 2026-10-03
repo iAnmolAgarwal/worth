@@ -139,6 +139,7 @@ export default function App() {
     const onHash = () => {
       setRoute(parseRoute())
       setMenu(false)
+      setEnvOpen(false)
       // A dialog belongs to the screen it opened on; leaving the screen closes it.
       setCheckout(undefined)
       setReview(undefined)

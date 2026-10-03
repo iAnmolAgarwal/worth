@@ -261,7 +261,9 @@ export function BalanceChart({
           {marks.map((mark) => (
             <li
               key={`${mark.kind}-${mark.date}`}
-              className={`mark ${mark.kind}${mark.labelled ? ' labelled' : ''}`}
+              className={`mark ${mark.kind}${mark.labelled ? ' labelled' : ''}${
+                mark.at > 0.7 ? ' edge-end' : mark.at < 0.25 ? ' edge-start' : ''
+              }`}
               style={{ left: `calc(48px + (100% - 60px) * ${mark.at.toFixed(4)})` }}
               tabIndex={0}
               data-tip={`${mark.name} · ${dayLabel(mark.date)} · ${mark.amount}`}

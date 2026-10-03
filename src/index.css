@@ -2655,7 +2655,7 @@ textarea.input {
   list-style: none;
   margin: 2px 0 0;
   padding: 0;
-  height: 44px;
+  height: 60px;
   border-top: 1px solid var(--c-divider);
 }
 .strip .mark {
@@ -2701,7 +2701,19 @@ textarea.input {
   color: var(--c-text-strong);
 }
 .strip .mark.payday .mark-label {
-  top: 16px;
+  top: 34px;
+}
+.strip .mark.edge-end .mark-label {
+  left: auto;
+  right: -6px;
+  transform: none;
+}
+.strip .mark.payday.edge-end .mark-label {
+  right: -7px;
+}
+.strip .mark.edge-start .mark-label {
+  left: -6px;
+  transform: none;
 }
 .strip .mark:hover::after,
 .strip .mark:focus-visible::after {
