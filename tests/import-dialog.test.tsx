@@ -166,7 +166,7 @@ describe('import preview details', () => {
     expect(
       screen.getByText(/Test Store · \$1,199\.00 purchase · payments of about \$299\.75/),
     ).toBeTruthy()
-    expect(screen.getByText(/General Account Correction · Apr 3 · \$5,000\.00/)).toBeTruthy()
+    expect(screen.getByText(/General Account Correction · Apr 3 · \+\$5,000\.00/)).toBeTruthy()
     // Unresolved payments do not block the import itself.
     await user.click(screen.getByRole('checkbox', { name: /I reviewed this preview/ }))
     const importButton = screen.getByRole('button', { name: /Import and review my plan/ })
