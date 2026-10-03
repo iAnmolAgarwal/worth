@@ -2,6 +2,7 @@ import type {
   Assessment,
   FinancialProfile,
   ForecastPoint,
+  PlanInstalment,
   Purchase,
   ScheduledFlow,
 } from './types.ts'
@@ -142,7 +143,8 @@ function alreadyPaid(profile: FinancialProfile, flow: ScheduledFlow, date: strin
   return flow.paidOn === date && date <= profile.snapshotDate
 }
 
-function reservedPurchases(profile: FinancialProfile, purchases: Purchase[]): Purchase[] {
+/** Purchases that still affect the plan, with duplicate order or capture identities removed. */
+function livePurchases(purchases: Purchase[]): Purchase[] {
   const seen = new Set<string>()
   // A reconciled capture wins over an older pending copy of the same payment.
   return [...purchases]
@@ -157,10 +159,102 @@ function reservedPurchases(profile: FinancialProfile, purchases: Purchase[]): Pu
       ]
       if (identities.some((key) => seen.has(key))) return false
       identities.forEach((key) => seen.add(key))
-      if (purchase.status === 'completed' && profile.reflectedPurchaseIds.includes(purchase.id))
-        return false
       return Number.isSafeInteger(purchase.amountCents) && purchase.amountCents >= 0
     })
+}
+
+/** A dated outflow from a purchase made earlier. */
+interface PurchaseOutflow {
+  id: string
+  purchaseId: string
+  name: string
+  date: string
+  amountCents: number
+  /** Set for the payments of a confirmed Pay in 4 plan. */
+  planned: boolean
+}
+
+function validInstalments(items: PlanInstalment[] | undefined): PlanInstalment[] | undefined {
+  return items?.every(
+    (item) =>
+      validDate(item.date) && Number.isSafeInteger(item.amountCents) && item.amountCents > 0,
+  )
+    ? items
+    : undefined
+}
+
+/**
+ * The single cash effect of each purchase. A checkout in progress, or a completed purchase without
+ * a confirmed plan, is one full-price debit today unless the funds snapshot already reflects it. A
+ * confirmed Pay in 4 plan replaces that debit with its payments; payments dated before the
+ * snapshot are already reflected. Confirmed refund money reduces what is still to be paid, in date
+ * order, but never adds funds: a fresh funds snapshot picks that up.
+ */
+function purchaseOutflows(
+  profile: FinancialProfile,
+  purchases: Purchase[],
+  today: string,
+): PurchaseOutflow[] {
+  const result: PurchaseOutflow[] = []
+  for (const purchase of livePurchases(purchases)) {
+    const completed = purchase.status === 'completed'
+    const reflected = completed && profile.reflectedPurchaseIds.includes(purchase.id)
+    const refunds = completed
+      ? (purchase.refunds ?? []).filter((refund) => refund.status === 'confirmed')
+      : []
+    const plan = completed ? purchase.paymentPlan : undefined
+    const confirmedPlan =
+      plan?.product === 'payIn4' && plan.status === 'confirmed'
+        ? validInstalments(plan.instalments)
+        : undefined
+    let outflows: PurchaseOutflow[]
+    if (confirmedPlan) {
+      const remaining = refunds.findLast((refund) => refund.remainingInstalments)
+      const schedule = validInstalments(remaining?.remainingInstalments) ?? confirmedPlan
+      outflows = schedule
+        .map((item, index) => ({
+          id: `plan:${purchase.id}:${index + 1}`,
+          purchaseId: purchase.id,
+          name: `${purchase.name} · Pay in 4 payment ${index + 1} of ${schedule.length}`,
+          date: item.date,
+          amountCents: item.amountCents,
+          planned: true,
+        }))
+        .filter(
+          (item) =>
+            item.date >= today &&
+            (item.date > profile.snapshotDate ||
+              (item.date === profile.snapshotDate && !reflected)),
+        )
+    } else
+      outflows = reflected
+        ? []
+        : [
+            {
+              id: `reserved:${purchase.id}`,
+              purchaseId: purchase.id,
+              name: `${purchase.name} · ${completed ? 'paid' : 'reserved'}`,
+              date: today,
+              amountCents: purchase.amountCents,
+              planned: false,
+            },
+          ]
+    let returned = refunds.reduce(
+      (total, refund) =>
+        total +
+        (Number.isSafeInteger(refund.returnedCents) && refund.returnedCents! > 0
+          ? refund.returnedCents!
+          : 0),
+      0,
+    )
+    for (const outflow of outflows) {
+      const offset = Math.min(returned, outflow.amountCents)
+      outflow.amountCents -= offset
+      returned -= offset
+    }
+    result.push(...outflows.filter((outflow) => outflow.amountCents > 0))
+  }
+  return result
 }
 
 export function forecast(
@@ -180,7 +274,7 @@ export function forecast(
   )
     throw new Error('Enter a valid future purchase date and a non-negative price in cents.')
   const upcoming = getUpcomingFlows(profile, today, days)
-  const reservations = reservedPurchases(profile, purchases)
+  const previous = purchaseOutflows(profile, purchases, today)
   const dailySpend =
     Number.isSafeInteger(profile.dailySpendCents) && profile.dailySpendCents >= 0
       ? profile.dailySpendCents
@@ -204,16 +298,15 @@ export function forecast(
       minimum = Math.min(minimum, scenario)
       stressMinimum = Math.min(stressMinimum, stress)
     }
-    if (day === 0)
-      for (const purchase of reservations) {
-        outflow(purchase.amountCents)
-        events.push({
-          id: `reserved:${purchase.id}`,
-          name: `${purchase.name} · ${purchase.status === 'completed' ? 'paid' : 'reserved'}`,
-          amountCents: -purchase.amountCents,
-          kind: 'purchase',
-        })
-      }
+    for (const item of previous.filter((item) => item.date === date)) {
+      outflow(item.amountCents)
+      events.push({
+        id: item.id,
+        name: item.name,
+        amountCents: -item.amountCents,
+        kind: 'purchase',
+      })
+    }
     const dayFlows = upcoming.filter((item) => item.date === date)
     for (const { flow } of dayFlows.filter((item) => item.flow.kind !== 'income')) {
       outflow(flow.amountCents)

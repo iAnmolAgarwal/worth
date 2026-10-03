@@ -70,6 +70,36 @@ export interface Product {
   merchant: string
   tag?: string
 }
+export interface PlanInstalment {
+  date: string
+  amountCents: number
+}
+/**
+ * How a completed purchase is repaid. No plan means a single full-price debit. Pay in 4 replaces
+ * that debit only once the user confirms the amounts and dates PayPal gave them.
+ */
+export type PaymentPlan =
+  | { product: 'full'; confirmedAt?: string }
+  | { product: 'payIn4'; status: 'unconfirmed' }
+  | {
+      product: 'payIn4'
+      status: 'confirmed'
+      instalments: PlanInstalment[]
+      confirmedAt: string
+    }
+export interface PurchaseRefund {
+  /** PayPal refund ID; recording the same refund again changes nothing. */
+  id: string
+  /** What the merchant refunded. It changes nothing until the user confirms the effect. */
+  amountCents: number
+  status: 'review' | 'confirmed'
+  createdAt: string
+  /** Money that actually came back to available funds. Store credit and gift cards count as zero. */
+  returnedCents?: number
+  /** Pay in 4 only: the payments still due after the refund, replacing the earlier schedule. */
+  remainingInstalments?: PlanInstalment[]
+  confirmedAt?: string
+}
 export interface Purchase {
   id: string
   productId: string
@@ -86,6 +116,8 @@ export interface Purchase {
   assessmentDate: string
   /** Made as the synthetic persona and set aside when the user switched to imported data. */
   archived?: boolean
+  paymentPlan?: PaymentPlan
+  refunds?: PurchaseRefund[]
 }
 export interface ForecastEvent {
   id: string
