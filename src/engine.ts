@@ -177,7 +177,13 @@ export function purchasePlans(state: AppState): RunningPlan[] {
   return state.purchases.flatMap((purchase) => {
     if (purchase.archived) return []
     const schedule = confirmedSchedule(purchase)
-    const upcoming = schedule?.filter((item) => item.date >= state.today) ?? []
+    // Payment 1 on the purchase day was charged at checkout, so it is never "coming up".
+    const upcoming =
+      schedule?.filter(
+        (item, index) =>
+          item.date > state.today ||
+          (item.date === state.today && !(index === 0 && item.date === purchase.assessmentDate)),
+      ) ?? []
     if (!schedule || !upcoming.length) return []
     return [
       {
@@ -233,3 +239,11 @@ export function missingFix(field: string): { label: string; hash: string } | und
     return { label: 'Confirm your money', hash: 'plan/edit?step=0' }
   return { label: 'Review your plan', hash: 'plan/edit' }
 }
+
+/** Products bought through Worth (completed, not archived). */
+export const boughtProductIds = (state: AppState) =>
+  new Set(
+    state.purchases
+      .filter((purchase) => purchase.status === 'completed' && !purchase.archived)
+      .map((purchase) => purchase.productId),
+  )

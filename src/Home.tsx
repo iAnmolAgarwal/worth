@@ -13,6 +13,7 @@ import type { AppState, Purchase } from './contract'
 import { isActive } from './contract'
 import {
   allPlans,
+  boughtProductIds,
   cadenceLabel,
   flowIcon,
   kindLabel,
@@ -330,7 +331,11 @@ export function Home({
   onReviewRefund: (purchaseId: string, refundId: string) => void
 }) {
   const active = state.purchases.find(isActive)
-  const saved = state.products.filter((product) => state.wishlist.includes(product.id))
+  const bought = boughtProductIds(state)
+  // Bought items leave the Saved list on Home; the Saved page marks them instead.
+  const saved = state.products.filter(
+    (product) => state.wishlist.includes(product.id) && !bought.has(product.id),
+  )
   const income = state.profile.flows.find((flow) => flow.kind === 'income' && flow.active)
   const plans = allPlans(state)
   return (

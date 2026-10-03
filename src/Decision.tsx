@@ -22,6 +22,7 @@ import {
   missingFix,
   optionTitle,
   paydayOn,
+  purchasePlans,
   useComparison,
 } from './engine'
 import { cx, dayLabel, fromMoney, fullDate, money, shortDate, signed } from './format'
@@ -520,26 +521,37 @@ export function Decision({
         (p) => p.productId === product.id && p.status === 'completed' && !p.archived,
       )
     : undefined
+  const pending = product
+    ? state.purchases.find(
+        (p) => p.productId === product.id && ['created', 'pending', 'unknown'].includes(p.status),
+      )
+    : undefined
   const primary =
     product &&
-    (c.recommendation === 'buyToday'
+    (pending
       ? {
-          label: 'Buy now',
-          note: 'You’ll approve in PayPal, then confirm here. Nothing is charged until you do.',
+          label: 'Finish checkout',
+          note: 'Your order is waiting. Nothing is charged until you confirm.',
           run: () => onBuy(product, false),
         }
-      : c.recommendation === 'wait' && c.wait.date
+      : c.recommendation === 'buyToday'
         ? {
-            label: `Save for ${dayLabel(c.wait.date)}`,
-            note: 'Keeps it in Saved with this date. Nothing is bought.',
-            run: () => onSave(product, c.wait.date ?? undefined),
+            label: 'Buy now',
+            note: 'You’ll approve in PayPal, then confirm here. Nothing is charged until you do.',
+            run: () => onBuy(product, false),
           }
-        : {
-            label: 'Save for later',
-            note: 'Keeps it in Saved. Nothing is bought.',
-            run: () => onSave(product),
-          })
-  const anyway = product && c.recommendation !== 'buyToday' && c.recommendation !== null
+        : c.recommendation === 'wait' && c.wait.date
+          ? {
+              label: `Save for ${dayLabel(c.wait.date)}`,
+              note: 'Keeps it in Saved with this date. Nothing is bought.',
+              run: () => onSave(product, c.wait.date ?? undefined),
+            }
+          : {
+              label: 'Save for later',
+              note: 'Keeps it in Saved. Nothing is bought.',
+              run: () => onSave(product),
+            })
+  const anyway = product && !pending && c.recommendation !== 'buyToday' && c.recommendation !== null
   const breach = firstBelow(c.buyToday.points, c.cushionCents)
   const actions = (notes: boolean) => (
     <>
@@ -560,6 +572,9 @@ export function Decision({
       )}
     </>
   )
+  const boughtPlan = bought
+    ? purchasePlans(state).find((plan) => plan.planId === `purchase:${bought.id}`)
+    : undefined
   if (bought && !recheck)
     return (
       <Frame>
@@ -593,6 +608,19 @@ export function Decision({
               </p>
             </div>
           </div>
+          {boughtPlan ? (
+            <p className="meta strong">
+              Pay in 4 · next {money(boughtPlan.amountCents)} {dayLabel(boughtPlan.next)}
+            </p>
+          ) : (
+            state.reviews.some(
+              (review) => review.kind === 'confirmPlan' && review.purchaseId === bought.id,
+            ) && (
+              <p className="meta">
+                Paid in full or with Pay in 4? Confirm it from Home so Worth counts it right.
+              </p>
+            )
+          )}
           <div className="actions">
             <Button onClick={onViewActivity}>View in Activity</Button>
             <Button variant="text" onClick={() => setRecheck(true)}>

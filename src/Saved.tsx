@@ -12,6 +12,7 @@ import type { Product } from '../shared/types'
 import { api } from './api'
 import { ClaudeSwitch, JudgeBadge } from './Ask'
 import { CLAUDE_SHARED_DATA, CLAUDE_USES } from './copy'
+import { boughtProductIds } from './engine'
 import type { AppState } from './contract'
 import { isActive } from './contract'
 import { shortDate, money } from './format'
@@ -41,11 +42,13 @@ function Card({
   product,
   saved,
   planned,
+  bought,
   onOpen,
   onToggle,
 }: {
   product: Product
   saved: boolean
+  bought: boolean
   planned?: string
   onOpen: () => void
   onToggle: () => void
@@ -72,7 +75,11 @@ function Card({
           {money(product.priceCents)}
         </div>
       </div>
-      {planned && <Pill tone="sug">Planned for {shortDate(planned)}</Pill>}
+      {bought ? (
+        <Pill tone="ok">Bought</Pill>
+      ) : (
+        planned && <Pill tone="sug">Planned for {shortDate(planned)}</Pill>
+      )}
       <div className="foot">
         <button
           type="button"
@@ -112,6 +119,7 @@ export function Saved({
   onToast: (text: string) => void
 }) {
   const planned = readPlanned()
+  const bought = boughtProductIds(state)
   const saved = state.products.filter((p) => state.wishlist.includes(p.id))
   const more = state.products.filter((p) => !state.wishlist.includes(p.id))
   async function toggle(product: Product) {
@@ -127,6 +135,7 @@ export function Saved({
       key={product.id}
       product={product}
       saved={state.wishlist.includes(product.id)}
+      bought={bought.has(product.id)}
       planned={
         planned[product.id] && planned[product.id]! >= state.today ? planned[product.id] : undefined
       }
