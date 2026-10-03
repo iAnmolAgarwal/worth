@@ -9,7 +9,7 @@ const stores: Store[] = []
 afterEach(() => {
   for (const store of stores.splice(0)) store.close()
 })
-function setup() {
+function setup(now = '2026-10-03T12:00:00Z') {
   const store = new Store(':memory:')
   stores.push(store)
   const app = createApp({
@@ -23,12 +23,16 @@ function setup() {
       paypalSecret: undefined,
       anthropicKey: undefined,
     },
-    now: () => new Date('2026-10-03T12:00:00Z'),
+    now: () => new Date(now),
   })
   return request.agent(app)
 }
-const post = (agent: ReturnType<typeof setup>, path: string, body: object = {}) =>
-  agent.post(path).set('X-Worth-Client', 'web').send(body)
+const post = (
+  agent: ReturnType<typeof setup>,
+  path: string,
+  body: object = {},
+  timezone = 'America/New_York',
+) => agent.post(path).set('X-Worth-Client', 'web').set('X-Worth-Timezone', timezone).send(body)
 
 const hold = (patch: Partial<Purchase>): Purchase => ({
   id: 'p',
@@ -84,5 +88,29 @@ describe('an item is never assessed against its own checkout hold', () => {
     const camera = (await post(agent, '/api/compare', { productId: 'headphones' })).body
     const fresh = (await post(setup(), '/api/compare', { productId: 'headphones' })).body
     expect(camera.buyToday.lowestBalanceCents).toBe(fresh.buyToday.lowestBalanceCents - 12900)
+  })
+
+  it('dates a captured purchase on the buyer’s own calendar day', async () => {
+    // 8 pm UTC on Oct 3 is already Oct 4 in India.
+    const agent = setup('2026-10-03T20:00:00Z')
+    const zone = 'Asia/Kolkata'
+    const created = await post(
+      agent,
+      '/api/checkout/create',
+      { productId: 'backpack', acknowledgeShortfall: true },
+      zone,
+    )
+    const captured = await post(
+      agent,
+      `/api/checkout/${created.body.purchase.id}/capture`,
+      { acknowledgeShortfall: true },
+      zone,
+    )
+    expect(captured.status).toBe(200)
+    const row = captured.body.state.transactions.find(
+      (t: { source: string }) => t.source === 'purchase',
+    )
+    expect(row.date).toBe('2026-10-04')
+    expect(captured.body.purchase.assessmentDate).toBe('2026-10-04')
   })
 })

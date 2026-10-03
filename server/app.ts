@@ -7,6 +7,7 @@ import {
   assessPurchase,
   addDays,
   compareOptions,
+  dateInTimezone,
   money,
   normalizeTimezone,
   payIn4InRange,
@@ -460,7 +461,8 @@ export function createApp(options: AppOptions = {}) {
       ) {
         data.transactions.unshift({
           id: `purchase-${current.id}`,
-          date: completedAt.slice(0, 10),
+          // The user's own calendar day, not the UTC date of the timestamp.
+          date: dateInTimezone(completedAt, data.profile.timezone),
           name: current.name,
           amountCents: -current.amountCents,
           currency: 'USD',

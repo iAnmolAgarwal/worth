@@ -42,12 +42,17 @@ function validDate(value: string): boolean {
 }
 
 export function todayInTimezone(timezone = 'America/New_York'): string {
+  return dateInTimezone(new Date(), timezone)
+}
+
+/** The calendar day an instant falls on in a time zone, such as a capture's local date. */
+export function dateInTimezone(instant: Date | string, timezone = 'America/New_York'): string {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: timezone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).formatToParts(new Date())
+  }).formatToParts(typeof instant === 'string' ? new Date(instant) : instant)
   return `${parts.find((p) => p.type === 'year')!.value}-${parts.find((p) => p.type === 'month')!.value}-${parts.find((p) => p.type === 'day')!.value}`
 }
 
