@@ -69,7 +69,7 @@ export function ForeignPayments({
         </h2>
         Your import has no USD conversion for{' '}
         {open.length === 1 ? 'this payment' : 'these payments'}. Until each one has its USD cost or
-        is marked as a one-off, Worth won’t show a positive result.
+        is marked as a one-off, Worth won’t show room to spend.
       </Alert>
       <ul className="rows" style={{ listStyle: 'none', padding: 0, margin: '16px 0 0' }}>
         {open.map((payment) => (

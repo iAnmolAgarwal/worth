@@ -48,6 +48,9 @@ export function matchingSuggestions(reply: ChatReply | undefined) {
   })
 }
 
+/** Chip labels use typographic apostrophes; the question sent stays as written. */
+const curly = (text: string) => text.replace(/'/g, '’')
+
 /** Money in sentences uses a true minus sign: −$458.99. */
 export const minus = (text: string) => text.replace(/-\$/g, '−$')
 
@@ -149,17 +152,16 @@ function OptionRows({ c, at }: { c: Comparison; at?: Assessment }) {
         maxCents > 0
           ? `Up to ${money(maxCents)} ${later ? `on ${day}` : 'today'}`
           : `Nothing fits ${day}`,
+      // Spending exactly the most you can keeps you at your limit, whichever day it is.
       pill:
-        maxCents > 0
-          ? later
-            ? (['ok', 'Above cushion'] as const)
-            : status(c.spendLess)
-          : (['info', 'Nothing fits'] as const),
+        maxCents > 0 ? (['warn', 'At your limit'] as const) : (['info', 'Nothing fits'] as const),
     },
   ]
+  // Spending less only matters when the item doesn't fit as it is.
+  const shown = fits(buy) ? rows.filter((row) => row.key !== 'spendLess') : rows
   return (
     <div className="rows mini-opts" role="list" aria-label="Your options">
-      {rows.map((row) => (
+      {shown.map((row) => (
         <div className="row" role="listitem" key={row.key}>
           <div className="body">
             <div className="t">
@@ -611,7 +613,7 @@ export function Ask({
                         className="chip-suggest"
                         onClick={() => void send(text)}
                       >
-                        {text}
+                        {curly(text)}
                       </button>
                     ))}
                   </div>
@@ -796,7 +798,7 @@ export function Ask({
                     disabled={busy}
                     onClick={() => void send(text)}
                   >
-                    {text}
+                    {curly(text)}
                   </button>
                 ))}
               </div>
@@ -971,7 +973,7 @@ function Answer({
               disabled={busy}
               onClick={() => onSend(text)}
             >
-              {text}
+              {curly(text)}
             </button>
           ))}
         </div>

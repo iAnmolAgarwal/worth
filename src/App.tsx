@@ -9,6 +9,7 @@ import {
   Settings as SettingsIcon,
   SlidersHorizontal,
   Sparkles,
+  User,
   X,
   type LucideIcon,
 } from 'lucide-react'
@@ -420,7 +421,11 @@ export default function App() {
               onClick={() => setMenu(!menu)}
             >
               <span className="avatar" aria-hidden="true">
-                {state.profile.name.slice(0, 1).toUpperCase()}
+                {state.profile.name === 'Your plan' ? (
+                  <User size={18} strokeWidth={2} />
+                ) : (
+                  state.profile.name.slice(0, 1).toUpperCase()
+                )}
               </span>
             </button>
             {menu && (

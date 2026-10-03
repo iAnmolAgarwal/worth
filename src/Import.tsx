@@ -140,7 +140,8 @@ export function ImportDialog({
       (preview?.warnings ?? []).filter(
         (warning) =>
           !(preview?.unresolved.length && /currenc|USD conversion/i.test(warning)) &&
-          !(preview?.instalmentPlans.length && /pay later|pay in 4|instal/i.test(warning)),
+          !(preview?.instalmentPlans.length && /pay later|pay in 4|instal/i.test(warning)) &&
+          !(preview?.adjustments.length && /correction/i.test(warning)),
       ),
     ),
   ]
@@ -148,7 +149,7 @@ export function ImportDialog({
     ? [
         ...preview.unresolved.map(
           (payment) =>
-            `${payment.name} · ${shortDate(payment.date)} · ${currencyAmount(Math.abs(payment.originalCents), payment.currency)} has no USD cost yet. Resolve it in Activity; until then Worth won’t show a positive result.`,
+            `${payment.name} · ${shortDate(payment.date)} · ${currencyAmount(Math.abs(payment.originalCents), payment.currency)} has no USD cost yet. Resolve it in Activity; until then Worth won’t show room to spend.`,
         ),
         ...preview.instalmentPlans.map(
           (plan) =>

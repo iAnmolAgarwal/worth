@@ -527,7 +527,10 @@ export function Decision({
         <Skeleton />
       </Frame>
     )
-  const keys: OptionKey[] = ['buyToday', 'wait', 'spendLess']
+  // When the item fits, spending less isn't an option worth showing.
+  const keys: OptionKey[] = fits(c.buyToday)
+    ? ['buyToday', 'wait']
+    : ['buyToday', 'wait', 'spendLess']
   const selected: OptionKey = picked ?? c.recommendation ?? 'buyToday'
   const enabled = keys.filter((key) => optionOf(c, key))
   const move = (event: KeyboardEvent, key: OptionKey) => {
@@ -765,7 +768,12 @@ export function Decision({
               </Alert>
             )}
           </div>
-          <div role="radiogroup" aria-label="Your options" className="options">
+          <div
+            role="radiogroup"
+            aria-label="Your options"
+            className="options"
+            style={{ ['--opt-cols' as string]: keys.length }}
+          >
             {keys.map((key, index) => (
               <OptionCard
                 key={key}
