@@ -303,6 +303,29 @@ export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
 }
+export interface InterpretedItem {
+  name: string
+  /** Unit price in USD cents, as the user stated or confirmed it. */
+  amountCents: number
+  quantity: number
+}
+/** How a purchase question was read. Every value is the user's stated or confirmed input. */
+export interface Interpretation {
+  items: InterpretedItem[]
+  amountCents: number
+  currency: 'USD'
+  date: string
+  /** Echo of the date, e.g. "today" or "Fri, Oct 16". */
+  dateLabel: string
+  dateSource: 'stated' | 'context' | 'default'
+  option: 'check' | 'earliest_date' | 'max_price'
+  source: 'ai' | 'local'
+}
+export interface PurchaseContext {
+  amountCents: number
+  itemName?: string
+  purchaseDate?: string
+}
 export interface ChatReply {
   message: string
   /** Short visible lead-in when the assessment card already presents the numerical facts. */
