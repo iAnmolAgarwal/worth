@@ -12,7 +12,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react'
-import type { Product } from '../shared/types'
+import type { InstalmentPlanProposal, Product } from '../shared/types'
 import { Activity } from './Activity'
 import { api } from './api'
 import { Ask } from './Ask'
@@ -78,6 +78,8 @@ export default function App() {
   const [checkout, setCheckout] = useState<CheckoutState>()
   const [review, setReview] = useState<ReviewState>()
   const [importing, setImporting] = useState(false)
+  /** Pay in 4 plans the last import detected, offered pre-filled in the wizard. */
+  const [importedPlans, setImportedPlans] = useState<InstalmentPlanProposal[]>([])
   const [prompt, setPrompt] = useState<{ text: string; id: number }>()
   const [epoch, setEpoch] = useState(0)
   const [explanations, setExplanations] = useState<Record<string, Explanation>>({})
@@ -501,6 +503,7 @@ export default function App() {
             key={state.sessionKey}
             state={state}
             initialStep={Number(params.get('step') ?? 0)}
+            suggestedPlans={importedPlans}
             onClose={() => navigate('plan')}
             onSaved={(next) => {
               replaceState(next)
@@ -600,7 +603,10 @@ export default function App() {
             clearConversation()
             replaceState(next)
           }}
-          onReview={() => navigate('plan/edit')}
+          onReview={(plans) => {
+            setImportedPlans(plans)
+            navigate('plan/edit')
+          }}
         />
       )}
       {toast && (

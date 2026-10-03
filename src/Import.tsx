@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { CircleAlert, FileUp, Info } from 'lucide-react'
-import type { DateOrder, ImportPreview } from '../shared/types'
+import type { DateOrder, ImportPreview, InstalmentPlanProposal } from '../shared/types'
 import { CSV_IMPORT_LIMITS, CSV_SIZE_MESSAGE, utf8Bytes } from '../shared/limits'
 import { api } from './api'
 import type { AppState } from './contract'
@@ -10,6 +10,8 @@ import { currencyAmount, money, shortDate } from './format'
 import { Alert, Button, Dialog, Field } from './ui'
 
 type DialogProps = { state: AppState; onClose: () => void; onUpdate: (state: AppState) => void }
+const count = (n: number, noun: string) =>
+  `${n.toLocaleString('en-US')} ${noun}${n === 1 ? '' : 's'}`
 const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : 'Something went wrong. Please try again.'
 
@@ -18,7 +20,7 @@ export function ImportDialog({
   onClose,
   onUpdate,
   onReview,
-}: DialogProps & { onReview: () => void }) {
+}: DialogProps & { onReview: (plans: InstalmentPlanProposal[]) => void }) {
   const [csv, setCsv] = useState('')
   const [filename, setFilename] = useState('')
   const [preview, setPreview] = useState<ImportPreview | null>(null)
@@ -115,7 +117,7 @@ export function ImportDialog({
       })) as AppState
       onUpdate(updated)
       onClose()
-      onReview()
+      onReview(preview.instalmentPlans)
     } catch (failure) {
       setError(errorMessage(failure))
     } finally {
@@ -133,6 +135,23 @@ export function ImportDialog({
       ),
     ),
   ]
+  const attention = preview
+    ? [
+        ...preview.unresolved.map(
+          (payment) =>
+            `${payment.name} · ${shortDate(payment.date)} · ${currencyAmount(Math.abs(payment.originalCents), payment.currency)} has no USD cost yet. Resolve it in Activity; until then Worth won’t show a positive result.`,
+        ),
+        ...preview.instalmentPlans.map(
+          (plan) =>
+            `Possible Pay in 4: ${plan.name}${plan.purchaseCents !== null ? ` · ${money(plan.purchaseCents)} purchase` : ''} · payments of about ${money(plan.paymentCents)}. You’ll add what’s still due next.`,
+        ),
+        ...preview.adjustments.map(
+          (transaction) =>
+            `${transaction.name} · ${shortDate(transaction.date)} · ${money(transaction.amountCents)} is a PayPal balance correction, not counted.`,
+        ),
+        ...reviewItems,
+      ]
+    : []
   return (
     <Dialog
       title="Import PayPal activity"
@@ -204,7 +223,7 @@ export function ImportDialog({
               </span>
             </div>
           </div>
-          <details>
+          <details className="quiet-details">
             <summary>Or paste the CSV contents</summary>
             <Field label="PayPal CSV contents">
               <textarea
@@ -276,85 +295,26 @@ export function ImportDialog({
               ))}
             </fieldset>
           )}
-          <dl className="kvlist">
-            <div>
-              <dt>Rows in your file</dt>
-              <dd className="num">{preview.totalRows}</dd>
-            </div>
-            <div>
-              <dt>Days of history</dt>
-              <dd className="num">{preview.coverageDays}</dd>
-            </div>
-            <div>
-              <dt>New or updated transactions</dt>
-              <dd className="num">{preview.transactions.length}</dd>
-            </div>
-            <div>
-              <dt>Duplicate rows skipped</dt>
-              <dd className="num">{preview.duplicates}</dd>
-            </div>
-          </dl>
-          <p className="meta">
-            {preview.excluded} rows are excluded from everyday spending estimates. Suggested
-            everyday spending: <strong>{money(preview.suggestedDailySpendCents)} / day</strong>.{' '}
-            {preview.recurring.length} possible recurring{' '}
-            {preview.recurring.length === 1 ? 'item needs' : 'items need'} your review.
+          <p className="strong">
+            {count(preview.totalRows, 'row')} · {count(preview.coverageDays, 'day')} ·{' '}
+            {preview.transactions.length} new
+            {preview.duplicates ? ` · ${count(preview.duplicates, 'duplicate')} skipped` : ''}
           </p>
-          {preview.unresolved.length > 0 && (
+          <p className="meta">
+            Suggested everyday spending: {money(preview.suggestedDailySpendCents)} a day.{' '}
+            {preview.recurring.length > 0 &&
+              `${count(preview.recurring.length, 'repeating item')} to confirm next.`}
+          </p>
+          {attention.length > 0 && (
             <div className="alert warn">
               <div className="alert-body">
-                <strong>
-                  {preview.unresolved.length} foreign-currency{' '}
-                  {preview.unresolved.length === 1 ? 'payment has' : 'payments have'} no USD
-                  conversion
-                </strong>
+                <strong>Needs attention ({attention.length})</strong>
                 <ul>
-                  {preview.unresolved.slice(0, 8).map((payment) => (
-                    <li key={payment.id}>
-                      {payment.name} · {shortDate(payment.date)} ·{' '}
-                      {currencyAmount(Math.abs(payment.originalCents), payment.currency)}
-                    </li>
+                  {attention.slice(0, 3).map((item) => (
+                    <li key={item}>{item}</li>
                   ))}
                 </ul>
-                <p>
-                  After importing, give each one its USD cost under Activity or mark it as a
-                  one-off. Until then, Worth won’t show a positive result.
-                </p>
-              </div>
-            </div>
-          )}
-          {preview.instalmentPlans.length > 0 && (
-            <div className="alert info">
-              <div className="alert-body">
-                <strong>Possible Pay in 4 or Pay Later plans</strong>
-                <ul>
-                  {preview.instalmentPlans.map((plan) => (
-                    <li key={plan.id}>
-                      {plan.name}
-                      {plan.purchaseCents !== null && ` · ${money(plan.purchaseCents)} purchase`} ·
-                      payments of about {money(plan.paymentCents)}
-                    </li>
-                  ))}
-                </ul>
-                <p>
-                  These are not counted as everyday spending. Next, add any payments still due to
-                  your plan, or confirm the plan is paid off.
-                </p>
-              </div>
-            </div>
-          )}
-          {preview.adjustments.length > 0 && (
-            <div className="alert info">
-              <div className="alert-body">
-                <strong>PayPal balance corrections, not counted</strong>
-                <ul>
-                  {preview.adjustments.slice(0, 5).map((transaction) => (
-                    <li key={transaction.id}>
-                      {transaction.name} · {shortDate(transaction.date)} ·{' '}
-                      {money(transaction.amountCents)}
-                    </li>
-                  ))}
-                </ul>
+                {attention.length > 3 && <p>And {attention.length - 3} more.</p>}
               </div>
             </div>
           )}
@@ -377,21 +337,6 @@ export function ImportDialog({
                     And {preview.errors.length - 20} more issues. Correct these rows and preview the
                     file again.
                   </p>
-                )}
-              </div>
-            </div>
-          )}
-          {reviewItems.length > 0 && (
-            <div className="alert warn">
-              <div className="alert-body">
-                <strong>A few things to review</strong>
-                <ul>
-                  {reviewItems.slice(0, 3).map((warning) => (
-                    <li key={warning}>{warning}</li>
-                  ))}
-                </ul>
-                {reviewItems.length > 3 && (
-                  <p>And {reviewItems.length - 3} more. Check your export before continuing.</p>
                 )}
               </div>
             </div>

@@ -2,7 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { CircleAlert, FileUp, Info, Plus, ShieldCheck, Trash2 } from 'lucide-react'
 import { addDays, assessPurchase, getUpcomingFlows, todayInTimezone } from '../shared/finance'
-import type { Cadence, FinancialProfile, FlowKind, ScheduledFlow } from '../shared/types'
+import type {
+  Cadence,
+  FinancialProfile,
+  FlowKind,
+  InstalmentPlanProposal,
+  ScheduledFlow,
+} from '../shared/types'
 import { api } from './api'
 import { BalanceChart } from './BalanceChart'
 import type { AppState } from './contract'
@@ -53,11 +59,14 @@ const CADENCES: [Cadence, string][] = [
 export function PlanWizard({
   state,
   initialStep = 0,
+  suggestedPlans = [],
   onClose,
   onSaved,
 }: {
   state: AppState
   initialStep?: number
+  /** Pay in 4 plans found in the last import, offered pre-filled. */
+  suggestedPlans?: InstalmentPlanProposal[]
   onClose: () => void
   onSaved: (state: AppState) => void
 }) {
@@ -484,6 +493,7 @@ export function PlanWizard({
               </Button>
               {step === 2 && (
                 <InstalmentPlans
+                  suggestions={suggestedPlans}
                   flows={flows}
                   today={snapshotDate()}
                   locked={locked}
@@ -859,6 +869,7 @@ function InstalmentPlans({
   today,
   locked,
   adding,
+  suggestions = [],
   onAdding,
   onAdd,
   onRemove,
@@ -867,6 +878,7 @@ function InstalmentPlans({
   today: string
   locked: boolean
   adding: boolean
+  suggestions?: InstalmentPlanProposal[]
   onAdding: (on: boolean) => void
   onAdd: (items: FlowDraft[]) => void
   onRemove: (planId: string) => void
@@ -884,6 +896,21 @@ function InstalmentPlans({
   const [first, setFirst] = useState(addDays(today, 14))
   const [every, setEvery] = useState<'14' | 'month'>('14')
   const [error, setError] = useState('')
+  const known = new Set(plans.map((plan) => plan.name.toLowerCase()))
+  const offered = suggestions.filter((plan) => !known.has(plan.name.toLowerCase()))
+  /** Fill the form from what the import saw; the user checks it before adding. */
+  function prefill(plan: InstalmentPlanProposal) {
+    const last = plan.payments.at(-1)?.date ?? plan.startDate
+    let next = addDays(last, 14)
+    while (next < today) next = addDays(next, 14)
+    setName(`${plan.name} · Pay in 4`)
+    setAmount((plan.paymentCents / 100).toFixed(2))
+    setLeft(String(Math.max(1, 4 - plan.payments.length)))
+    setFirst(next)
+    setEvery('14')
+    setError('')
+    onAdding(true)
+  }
   function add() {
     const cents = Math.round(Number(amount) * 100)
     const count = Number(left)
@@ -970,6 +997,28 @@ function InstalmentPlans({
           </div>
         ))}
       </div>
+      {!adding &&
+        offered.map((plan) => (
+          <div className="row" key={plan.id}>
+            <Disc icon={flowIcon({ kind: 'installment' })} kind="plan" />
+            <div className="body">
+              <div className="t" style={{ fontSize: 'var(--fs-body)' }}>
+                {plan.name}
+              </div>
+              <div className="s">
+                <span className="soft">
+                  Found in your import · payments of about {money(plan.paymentCents)}
+                </span>
+              </div>
+              <div className="pills">
+                <Pill tone="warn">Needs review</Pill>
+              </div>
+            </div>
+            <Button variant="secondary" onClick={() => prefill(plan)} disabled={locked}>
+              Review
+            </Button>
+          </div>
+        ))}
       {adding ? (
         <div className="tile stack tight">
           <div className="form-grid">
