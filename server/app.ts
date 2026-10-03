@@ -84,6 +84,7 @@ const profileSchema = z
     missingFields: z.array(z.string().max(300)).max(30),
     reflectedPurchaseIds: z.array(identifier).max(1000),
     aiConsent: z.boolean(),
+    userEdited: z.boolean().optional(),
     flows: z
       .array(
         z
@@ -135,10 +136,10 @@ const CLAUDE_LIMIT_REASON = {
   daily: 'This demo’s Claude allowance for today is used up',
 }
 
-// Only the untouched, labelled sample persona can use external AI without opt-in.
-// Profile versions are advanced by the server for edits, imports, and captures.
+// Only the labelled sample persona, before the user saves their own financial inputs or imports
+// history, can use external AI without opt-in. Purchases and other server updates do not count.
 function mayUseExternalAi(profile: FinancialProfile) {
-  return profile.aiConsent || (profile.source === 'demo' && profile.version === 1)
+  return profile.aiConsent || (profile.source === 'demo' && profile.userEdited === false)
 }
 
 export function createApp(options: AppOptions = {}) {
@@ -551,6 +552,7 @@ export function createApp(options: AppOptions = {}) {
       source: data.profile.source,
       coverageDays: data.profile.coverageDays,
       confirmedAt: input.confirmed ? now().toISOString() : '',
+      userEdited: true,
     }
     store.save(id, data)
     res.json(state(id))
@@ -560,6 +562,15 @@ export function createApp(options: AppOptions = {}) {
     noActive(previous)
     const id = startSession(req, res, true)
     store.delete(previous)
+    res.json(state(id))
+  })
+  app.post('/api/consent', (req, res) => {
+    const { aiConsent } = z.object({ aiConsent: z.boolean() }).strict().parse(req.body)
+    const id = sessionId(res)
+    const data = dataFor(res)
+    // Consent changes no financial input, so it keeps the plan version and any active checkout.
+    data.profile.aiConsent = aiConsent
+    store.save(id, data)
     res.json(state(id))
   })
   app.post('/api/wishlist', (req, res) => {
@@ -639,6 +650,7 @@ export function createApp(options: AppOptions = {}) {
     data.profile.confirmed = false
     data.profile.confirmedAt = ''
     data.profile.version += 1
+    data.profile.userEdited = true
     data.profile.missingFields = [
       'Confirm current available funds, income, upcoming bills, and everyday spending after import.',
     ]

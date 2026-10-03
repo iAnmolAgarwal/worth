@@ -334,6 +334,38 @@ describe('queued assistant prompts', () => {
   })
 })
 
+describe('AI sharing consent in chat', () => {
+  const shared =
+    'your messages, recent chat history (including figures), a forecast summary, income and bill names with amounts and dates, and minimized merchant labels'
+  it('discloses what the untouched synthetic persona sends without asking for consent', () => {
+    render(<Assistant state={makeState()} onPlan={vi.fn()} onProduct={vi.fn()} visible />)
+    expect(
+      screen.getByText(`Synthetic persona. When Claude is connected, it receives ${shared}.`),
+    ).toBeTruthy()
+    expect(screen.queryByRole('checkbox', { name: /Share with Claude/ })).toBeNull()
+  })
+  it('toggles consent alone for personal data and reports the updated state', async () => {
+    const user = userEvent.setup()
+    const state = makeState('import')
+    const updated = { ...state, profile: { ...state.profile, aiConsent: true } }
+    const requests: [string, unknown][] = []
+    routeApi((path, data) => {
+      requests.push([path, data])
+      return updated
+    })
+    const onUpdate = vi.fn()
+    render(
+      <Assistant state={state} onPlan={vi.fn()} onProduct={vi.fn()} onUpdate={onUpdate} visible />,
+    )
+    const toggle = screen.getByRole('checkbox', { name: /Share with Claude/ })
+    expect((toggle as HTMLInputElement).checked).toBe(false)
+    expect(toggle.closest('label')!.textContent).toContain(`Sends ${shared} to Anthropic.`)
+    await user.click(toggle)
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledExactlyOnceWith(updated))
+    expect(requests).toEqual([['/consent', { aiConsent: true }]])
+  })
+})
+
 describe('uncertain checkout recovery', () => {
   it('recovers a server reservation after an uncertain create response and returns it through onUpdate', async () => {
     const user = userEvent.setup()

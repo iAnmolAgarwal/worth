@@ -528,6 +528,7 @@ export default function App() {
               onPlan={() => setDialog('plan')}
               onProduct={setProduct}
               onSessionChange={() => void load()}
+              onUpdate={replaceState}
               visible={page === 'assistant'}
             />
           </div>

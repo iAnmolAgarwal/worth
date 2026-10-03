@@ -69,6 +69,7 @@ export function createDemoState(today = todayInTimezone('America/New_York')): {
     missingFields: [],
     reflectedPurchaseIds: [],
     aiConsent: false,
+    userEdited: false,
     flows: [
       {
         id: 'rent',

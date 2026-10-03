@@ -328,6 +328,78 @@ describe('HTTP sessions, profiles, and calculations', () => {
     expect(reply).toHaveBeenCalledTimes(2)
     expect(categorize).toHaveBeenCalledTimes(2)
   })
+  it('keeps Claude for the synthetic persona after a purchase, and ignores a client-claimed untouched flag', async () => {
+    const reply = vi.fn(async () => ({
+      message: 'external',
+      mode: 'anthropic' as const,
+      intent: 'overview' as const,
+      suggestions: [],
+      toolCalls: [],
+    }))
+    const { agent, store } = setup({ chat: { reply } })
+    const ask = async () =>
+      (await post(agent, '/api/chat', { message: 'How is the sample plan?', history: [] })).body
+        .mode
+    const created = await post(agent, '/api/checkout/create', { productId: 'headphones' })
+    const captured = await post(agent, `/api/checkout/${created.body.purchase.id}/capture`)
+    expect(captured.body.state.profile.version).toBe(2)
+    expect(captured.body.state.profile.userEdited).toBe(false)
+    expect(await ask()).toBe('anthropic')
+    // A category correction on synthetic history adds no personal financial data.
+    const row = captured.body.state.transactions.find(
+      (t: { source: string }) => t.source === 'demo',
+    )
+    await agent
+      .patch(`/api/transactions/${encodeURIComponent(row.id)}`)
+      .set('X-Worth-Client', 'web')
+      .send({ category: 'Travel' })
+    expect(await ask()).toBe('anthropic')
+    const current = await state(agent)
+    const edited = await patch(agent, { profile: { ...current.profile, userEdited: false } })
+    expect(edited.body.profile.userEdited).toBe(true)
+    expect(await ask()).toBe('demo')
+    // Records written before the flag existed are treated as user data.
+    const id = [...(store.db.prepare('SELECT id FROM sessions').all() as { id: string }[])][0]!.id
+    const legacy = store.get(id)!
+    legacy.profile = { ...legacy.profile, userEdited: undefined, aiConsent: false }
+    store.save(id, legacy)
+    expect(await ask()).toBe('demo')
+    expect(reply).toHaveBeenCalledTimes(2)
+  })
+  it('toggles AI consent alone without editing the plan or an active checkout', async () => {
+    const reply = vi.fn(async () => ({
+      message: 'external',
+      mode: 'anthropic' as const,
+      intent: 'overview' as const,
+      suggestions: [],
+      toolCalls: [],
+    }))
+    const { agent } = setup({ chat: { reply } })
+    const imported = await post(agent, '/api/import/commit', {
+      csv: 'Date,Name,Net,Currency,Type,Status\n10/01/2026,Coffee,-5.00,USD,Payment,Completed',
+    })
+    expect(imported.body.profile.userEdited).toBe(true)
+    const ask = async () =>
+      (await post(agent, '/api/chat', { message: 'What did I spend?', history: [] })).body.mode
+    expect(await ask()).toBe('demo')
+    await simpleProfile(agent, { confirmed: true, missingFields: [] })
+    const created = await post(agent, '/api/checkout/create', { productId: 'headphones' })
+    expect(created.status).toBe(200)
+    const before = await state(agent)
+    expect((await agent.post('/api/consent').send({ aiConsent: true })).status).toBe(403)
+    expect((await post(agent, '/api/consent', { aiConsent: true, version: 1 })).status).toBe(400)
+    const on = await post(agent, '/api/consent', { aiConsent: true })
+    expect(on.status).toBe(200)
+    expect(on.body.profile).toEqual({ ...before.profile, aiConsent: true })
+    expect(await ask()).toBe('anthropic')
+    const captured = await post(agent, `/api/checkout/${created.body.purchase.id}/capture`)
+    expect(captured.body.purchase.status).toBe('completed')
+    expect((await post(agent, '/api/consent', { aiConsent: false })).body.profile.aiConsent).toBe(
+      false,
+    )
+    expect(await ask()).toBe('demo')
+    expect(reply).toHaveBeenCalledTimes(1)
+  })
   it('returns labelled deterministic assessment when AI is unavailable', async () => {
     const { agent } = setup()
     await simpleProfile(agent)
