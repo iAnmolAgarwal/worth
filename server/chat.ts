@@ -31,6 +31,7 @@ import {
   commitmentPlaceholders,
   commitments,
   commitmentsFacts,
+  describePlaceholders,
   fillFigures,
   OFF_TOPIC_REPLY,
   overviewFacts,
@@ -121,12 +122,15 @@ function placeholdersFor(answer: Answer, data: ChatData): Placeholders {
   if (answer.intent === 'spending') return spendingPlaceholders(data)
   if (answer.intent === 'overview') return overviewPlaceholders(data)
   if (answer.intent === 'clarify')
-    return {
-      cushion: money(data.profile.cushionCents),
-      window_end: dateLabel(addDays(data.today, 30), data.today),
-      ...(answer.clarify?.pending?.itemName ? { item: answer.clarify.pending.itemName } : {}),
-    }
+    return clarifyPlaceholders(data, answer.clarify?.pending?.itemName)
   return {}
+}
+function clarifyPlaceholders(data: ChatData, item?: string): Placeholders {
+  return {
+    cushion: money(data.profile.cushionCents),
+    window_end: dateLabel(addDays(data.today, 30), data.today),
+    ...(item ? { item } : {}),
+  }
 }
 function compose(answer: Answer, data: ChatData): ChatReply {
   const { assessment } = answer
@@ -236,18 +240,20 @@ Reading a purchase question
 - Report amounts exactly as stated, expanding shorthand such as k (thousand) or m (million). Keep the currency the user used; never convert or assume an exchange rate.
 - If the user names a different item from the one being discussed, it is a new purchase: refers_to_previous_item is false and it needs its own price.
 - Resolve timing words against today's date in the request context, and keep the user's exact timing words in date_phrase. If the timing is vague or could mean several different days, set date to null rather than choosing one. With no timing words, date_phrase and date are null and the app uses today.
-- If the tool returns an error, correct your call once when the user's words support a different reading; otherwise answer with intent "clarify".
+- A successful interpret_purchase result is final for this answer: do not call it again, not even as a follow-up to its own result. Call it again only to correct a call that returned an error, and only when the user's words support a different reading; otherwise answer with intent "clarify".
 - If the tool says the user must clarify, answer with intent "clarify"; the app asks the question.
 
 Other tools
 - list_commitments: upcoming bills and subscriptions. Use kind "subscriptions" when the user asks only about subscriptions and "bills" when they ask only about bills.
 - spending_summary: recorded spending over the last thirty days.
 - get_plan_summary: how much room the plan has before any new purchase.
+- Call each tool at most once per answer, unless it returned an error. After a successful result, write the final answer.
 
 Final answer (JSON)
 - intent: the kind of answer you are giving.
 - explanation: one or two short sentences that help the user understand the result: what drives it (for example a bill landing before a paycheck) or what they could consider (waiting, a lower price, checking that recorded bills are right). The app already shows the verdict sentence and every number, so do not restate the verdict.
-- Write no digits, prices, amounts, percentages, or calendar dates in the explanation. When a figure or date helps, use a placeholder exactly as listed under "placeholders" in the latest tool result, such as {{low_point}}. Use no other placeholders.
+- For a clarification, the explanation is one short sentence on why the detail is needed; the app asks the question itself.
+- Write no digits, counts, prices, amounts, percentages, weekdays, or calendar dates in the explanation. When a figure or date helps, write a placeholder name from "placeholders" in the latest tool result in double braces, such as {{low_point}}. Each placeholder lists its meaning and value: use it only for that meaning. Use no other placeholders.
 - Say a purchase fits or is affordable only when the tool result's outcome is "fits". Never approve, guarantee, or tell the user to buy.
 - Never suggest lowering or using the cushion; skipping, delaying, or paying any bill late; or credit, loans, financing, or buy now pay later to make a purchase fit. If the user asks about any of these, say plainly that you would not do that and point to waiting or a lower price.
 - suggestions: up to three short follow-up questions in the user's voice. They may use the same placeholders.
@@ -439,13 +445,13 @@ class Turn {
       this.kind = parsed.data.kind
       return this.ok(name, {
         ...commitments(this.data, parsed.data.kind),
-        placeholders: Object.keys(commitmentPlaceholders(this.data, parsed.data.kind)),
+        placeholders: describePlaceholders(commitmentPlaceholders(this.data, parsed.data.kind)),
       })
     }
     if (name === 'spending_summary')
       return this.ok(name, {
         ...spending(this.data),
-        placeholders: Object.keys(spendingPlaceholders(this.data)),
+        placeholders: describePlaceholders(spendingPlaceholders(this.data)),
       })
     if (name === 'get_plan_summary') {
       const base = baseline(this.data)
@@ -461,7 +467,7 @@ class Turn {
         low_date: base.lowestDate,
         cushion: money(base.cushionCents),
         missing: base.missingFields,
-        placeholders: Object.keys(overviewPlaceholders(this.data)),
+        placeholders: describePlaceholders(overviewPlaceholders(this.data)),
       })
     }
     return { content: `Unknown tool ${name}. Use only the listed read-only tools.`, isError: true }
@@ -487,7 +493,9 @@ class Turn {
           reason: result.reason,
           detail: result.detail,
           question_shown_by_app: clarificationText(result, this.data),
-          placeholders: ['cushion', 'window_end', ...(result.pending?.itemName ? ['item'] : [])],
+          placeholders: describePlaceholders(
+            clarifyPlaceholders(this.data, result.pending?.itemName),
+          ),
         }),
       }
     }
@@ -518,12 +526,22 @@ class Turn {
           date: d.date,
           amount: money(d.amountCents),
         })),
-        placeholders: Object.keys(assessmentPlaceholders(a, this.data)),
+        placeholders: describePlaceholders(assessmentPlaceholders(a, this.data)),
       }),
     }
   }
 }
 
+class DeadlineError extends Error {
+  override name = 'DeadlineError'
+}
+function timedOut(error: unknown) {
+  return (
+    error instanceof DeadlineError ||
+    error instanceof Anthropic.APIUserAbortError ||
+    error instanceof Anthropic.APIConnectionTimeoutError
+  )
+}
 function retryable(error: unknown) {
   return (
     error instanceof Anthropic.APIError &&
@@ -536,6 +554,7 @@ function retryable(error: unknown) {
 function describeError(error: unknown) {
   return {
     error: error instanceof Error ? error.name : 'UnknownError',
+    ...(timedOut(error) ? { timeout: true } : {}),
     ...(error instanceof Anthropic.APIError
       ? { status: error.status, type: error.type, requestId: error.requestID }
       : {}),
@@ -712,7 +731,7 @@ export function createChatProvider(
       const call = async (params: Anthropic.MessageCreateParamsNonStreaming, round: number) => {
         for (;;) {
           const remaining = deadline - Date.now()
-          if (remaining < 1000) throw new Error('Chat deadline reached')
+          if (remaining < 1000) throw new DeadlineError('Chat deadline reached')
           try {
             return await client.messages.create(params, {
               signal: AbortSignal.timeout(remaining),
@@ -733,8 +752,11 @@ export function createChatProvider(
 
       let final: z.infer<typeof finalSchema> | undefined
       try {
+        // Tools stay open only while a call needs correcting; after a round of successful
+        // results the next request is the final answer, with tools closed.
+        let settled = false
         for (let round = 0; round < MAX_ROUNDS; round++) {
-          const closing = round === MAX_ROUNDS - 1 || turn.attempts >= MAX_TOOL_CALLS
+          const closing = settled || round === MAX_ROUNDS - 1 || turn.attempts >= MAX_TOOL_CALLS
           if (closing && round > 0) {
             const last = messages.at(-1)!
             if (Array.isArray(last.content)) last.content.push({ type: 'text', text: TOOLS_CLOSED })
@@ -762,17 +784,16 @@ export function createChatProvider(
             break
           }
           messages.push({ role: 'assistant', content: response.content })
+          const outcomes = uses.map((use) => ({ use, outcome: turn.run(use.name, use.input) }))
+          settled = outcomes.every(({ outcome }) => !outcome.isError)
           messages.push({
             role: 'user',
-            content: uses.map((use) => {
-              const outcome = turn.run(use.name, use.input)
-              return {
-                type: 'tool_result' as const,
-                tool_use_id: use.id,
-                content: outcome.content,
-                ...(outcome.isError ? { is_error: true } : {}),
-              }
-            }),
+            content: outcomes.map(({ use, outcome }) => ({
+              type: 'tool_result' as const,
+              tool_use_id: use.id,
+              content: outcome.content,
+              ...(outcome.isError ? { is_error: true } : {}),
+            })),
           })
         }
       } catch (error) {

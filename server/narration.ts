@@ -187,7 +187,9 @@ export function commitmentPlaceholders(data: ChatData, kind: CommitmentKind): Pl
   return {
     ...planPlaceholders(data),
     subscriptions_total: money(subscriptions.totalCents),
+    subscription_count: String(subscriptions.events.length),
     bills_total: money(bills.totalCents),
+    bill_count: String(bills.events.length),
     ...(first ? { next_bill: first.name, next_bill_date: dateLabel(first.date, data.today) } : {}),
   }
 }
@@ -200,11 +202,49 @@ export function spendingPlaceholders(data: ChatData): Placeholders {
   }
 }
 
+const MEANINGS: Record<string, string> = {
+  item: 'the item as the user named it',
+  price: 'the total price being checked',
+  purchase_date: 'the day being checked',
+  low_point: 'the lowest projected balance in the plan window if they buy on that day',
+  low_date: 'the day of that low point',
+  cushion: "the user's chosen minimum balance",
+  shortfall: 'how far that low point falls below the cushion',
+  headroom: 'how much room stays above the cushion at the low point, after this purchase',
+  fits_on: 'the earliest day that buying in full keeps the cushion',
+  max_price: 'the most they could spend on the day being checked and keep the cushion',
+  stress_low: 'the low point if everyday spending runs 20% higher',
+  next_income_date: 'the next confirmed paycheck date',
+  next_bill: 'the next scheduled bill or subscription',
+  next_bill_date: 'the date of that next bill',
+  window_end: 'the last day the plan covers',
+  subscriptions_total: 'the total of subscriptions due in the next 30 days',
+  subscription_count: 'how many subscriptions are due in the next 30 days',
+  bills_total: 'the total of bills (not subscriptions) due in the next 30 days',
+  bill_count: 'how many bills are due in the next 30 days',
+  spending_total: 'recorded spending over the last 30 days',
+  top_category: 'the largest spending category over the last 30 days',
+}
+/** Placeholder names with their meaning and current value, for tool results. */
+export function describePlaceholders(values: Placeholders) {
+  return Object.fromEntries(
+    Object.entries(values).map(([name, value]) => [
+      name,
+      `${MEANINGS[name] ?? name.replaceAll('_', ' ')}: ${value}`,
+    ]),
+  )
+}
+
 // ---- Prose guard -----------------------------------------------------------------
 
 const PLACEHOLDER = /\{\{\s*([a-z_]+)\s*\}\}/g
-const FIGURE_WORDS =
-  /\b(?:dollars?|bucks?|usd|cents?|euros?|eur|gbp|pounds?|yen|rupees?|inr|quid|pesos?|hundreds?|thousands?|millions?|billions?|percent(?:age)?|dozens?|grand)\b/i
+const NUMBER_WORD = String.raw`(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|a\s+few|a\s+couple(?:\s+of)?|several|a)`
+const CURRENCY_WORD = String.raw`(?:dollars?|bucks?|usd|cents?|euros?|eur|gbp|pounds?|yen|rupees?|inr|quid|pesos?|grand)`
+// A bare currency name ("in US dollars") is not an amount; a spelled-out one is.
+const FIGURE_WORDS = new RegExp(
+  String.raw`\b(?:hundreds?|thousands?|millions?|billions?|percent(?:age)?|dozens?)\b|\b${NUMBER_WORD}\s+(?:\w+\s+)?${CURRENCY_WORD}\b`,
+  'i',
+)
 const COUNTED_UNIT =
   /\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|a\s+couple\s+of|a\s+few|several|couple\s+of)\s+(?:more\s+|extra\s+|short\s+)?(?:days?|weeks?|months?|years?|paychecks?|paydays?|bills?|payments?|subscriptions?)\b/i
 const CALENDAR =

@@ -32,6 +32,7 @@ describe('placeholder narration', () => {
       'Buying it today would pull your balance under your chosen cushion before your next paycheck arrives, so waiting or looking at a lower-priced camera would protect that cushion.',
       "Rent is a confirmed obligation, so I wouldn't plan around skipping it; a better route is waiting until after your next paycheck lands.",
       'Your biggest upcoming cost is rent, so it is worth checking that the recorded bills and subscriptions are still accurate.',
+      'The price is in euros, and your plan works only in US dollars.',
     ])
       expect(checkProse(text, values, 'tight').ok).toBe(true)
   })
@@ -39,6 +40,7 @@ describe('placeholder narration', () => {
   it.each([
     ['Buying it would drop you to $651 on Oct 15.', 'raw figure'],
     ['You would have nine hundred dollars left.', 'spelled-out figure'],
+    ['That leaves about fifty bucks.', 'spelled-out figure'],
     ['Wait two weeks and check again.', 'spelled-out figure'],
     ['Your spending will fall by twenty percent.', 'spelled-out figure'],
     ['Rent clears on Friday.', 'raw calendar date'],

@@ -521,18 +521,32 @@ describe('request shape and reliability (C-14)', () => {
     expect(params.output_config).toMatchObject({ effort: 'low' })
   })
 
-  it('closes tools on the fourth round and asks for the final JSON', async () => {
+  it('closes tools right after a round of successful results', async () => {
     const { provider, create } = model([
-      [tool('get_plan_summary', {})],
-      [tool('list_commitments', { kind: 'all' })],
-      [tool('spending_summary', {})],
-      final('Your next bill is {{next_bill}} on {{next_bill_date}}.', 'overview'),
+      [tool('list_commitments', { kind: 'subscriptions' })],
+      final('Your next bill is {{next_bill}} on {{next_bill_date}}.', 'subscriptions'),
     ])
-    const reply = await provider.reply(ask('How much can I comfortably spend?'), demo())
-    expect(create).toHaveBeenCalledTimes(4)
-    expect(request(create, 3).tool_choice).toEqual({ type: 'none' })
-    expect(JSON.stringify(request(create, 3).messages.at(-1))).toContain('Tools are now closed')
+    const reply = await provider.reply(ask('What subscriptions are coming up?'), demo())
+    expect(create).toHaveBeenCalledTimes(2)
+    expect(request(create, 0).tool_choice).toBeUndefined()
+    expect(request(create, 1).tool_choice).toEqual({ type: 'none' })
+    expect(JSON.stringify(request(create, 1).messages.at(-1))).toContain('Tools are now closed')
     expect(reply.explanation).toBe('Your next bill is Music streaming on Mon, Oct 5.')
+  })
+
+  it('keeps tools open while a call needs correcting, up to four rounds', async () => {
+    const { provider, create } = model([
+      interpret([item('laptop', 150)]),
+      interpret([item('laptop', 1500)]),
+      interpret([item('laptop', 15000)]),
+      final('', 'clarify'),
+    ])
+    const reply = await provider.reply(ask('Can I afford a $1.5k laptop?'), demo())
+    expect(create).toHaveBeenCalledTimes(4)
+    expect(request(create, 2).tool_choice).toBeUndefined()
+    expect(request(create, 3).tool_choice).toEqual({ type: 'none' })
+    expect(reply.intent).toBe('clarify')
+    expect(reply.assessment).toBeUndefined()
   })
 
   it('keeps the engine answer when the final round is empty', async () => {
