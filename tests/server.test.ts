@@ -1217,6 +1217,83 @@ describe('session storage bounds', () => {
   })
 })
 
+describe('Claude request budgets', () => {
+  function countingChat() {
+    let inFlight = 0
+    let peak = 0
+    const reply = vi.fn(async () => {
+      peak = Math.max(peak, ++inFlight)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      inFlight--
+      return {
+        message: 'external',
+        mode: 'anthropic' as const,
+        intent: 'overview' as const,
+        suggestions: [],
+        toolCalls: [],
+      }
+    })
+    const categorize = vi.fn(async () => ({
+      mode: 'anthropic' as const,
+      suggestions: [],
+      message: 'external proposals',
+    }))
+    return { chat: { reply, categorize }, peak: () => peak }
+  }
+  it('holds 40 parallel anonymous chat requests to the per-IP budget with labelled local answers', async () => {
+    const { chat, peak } = countingChat()
+    const { app } = setup({
+      chat,
+      config: { ...config, claudeIpHourlyLimit: 5, sessionIpHourlyLimit: 100 },
+    })
+    const replies = await Promise.all(
+      Array.from({ length: 40 }, () =>
+        post(request.agent(app), '/api/chat', { message: 'How is the sample plan?', history: [] }),
+      ),
+    )
+    expect(replies.every((r) => r.status === 200)).toBe(true)
+    expect(chat.reply).toHaveBeenCalledTimes(5)
+    expect(peak()).toBeLessThanOrEqual(5)
+    const local = replies.filter((r) => r.body.mode === 'demo')
+    expect(local).toHaveLength(35)
+    for (const r of local) {
+      expect(r.body.intro).toContain('Claude limit for the hour')
+      expect(r.body.message).toContain('not an AI response')
+    }
+    clock.value = new Date(clock.value.getTime() + 60 * 60_000)
+    const later = await post(request.agent(app), '/api/chat', { message: 'Hello?', history: [] })
+    expect(later.body.mode).toBe('anthropic')
+  })
+  it('enforces a server-wide daily budget across client IPs, including category proposals', async () => {
+    const { chat } = countingChat()
+    const { app } = setup({
+      chat,
+      config: { ...config, trustProxy: 1, claudeIpHourlyLimit: 100, claudeDailyLimit: 3 },
+    })
+    const ask = (ip: string) =>
+      post(request.agent(app), '/api/chat', { message: 'Hi', history: [] }).set(
+        'X-Forwarded-For',
+        ip,
+      )
+    const modes = []
+    for (const ip of ['203.0.113.1', '203.0.113.2', '203.0.113.3', '203.0.113.4'])
+      modes.push((await ask(ip)).body.mode)
+    expect(modes).toEqual(['anthropic', 'anthropic', 'anthropic', 'demo'])
+    const categories = await post(request.agent(app), '/api/transactions/categories').set(
+      'X-Forwarded-For',
+      '203.0.113.5',
+    )
+    expect(categories.body.mode).toBe('demo')
+    expect(categories.body.message).toContain('allowance for today is used up')
+    expect(chat.categorize).not.toHaveBeenCalled()
+    const exhausted = await ask('203.0.113.6')
+    expect(exhausted.body.intro).toContain('allowance for today is used up')
+    expect(chat.reply).toHaveBeenCalledTimes(3)
+    clock.value = new Date(clock.value.getTime() + 24 * 60 * 60_000)
+    expect((await ask('203.0.113.7')).body.mode).toBe('anthropic')
+  })
+})
+
 describe('stored transaction cap', () => {
   it('rejects imports that would exceed the per-session transaction cap with a clear message', async () => {
     const { agent } = setup({ config: { ...config, maxTransactions: 3 } })

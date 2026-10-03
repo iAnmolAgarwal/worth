@@ -130,6 +130,10 @@ const chatSchema = z
   .strict()
 const csvSchema = z.object({ csv: z.string().min(1).max(1_000_000) }).strict()
 const DAY = 86400000
+const CLAUDE_LIMIT_REASON = {
+  ip: 'You have reached this demo’s Claude limit for the hour',
+  daily: 'This demo’s Claude allowance for today is used up',
+}
 
 // Only the untouched, labelled sample persona can use external AI without opt-in.
 // Profile versions are advanced by the server for edits, imports, and captures.
@@ -167,6 +171,15 @@ export function createApp(options: AppOptions = {}) {
   const chatBusy = new Set<string>()
   const requestLimiter = new WindowLimiter(config.requestsPerMinute, 60_000)
   const sessionLimiter = new WindowLimiter(config.sessionIpHourlyLimit, 60 * 60_000)
+  const claudePerIp = new WindowLimiter(config.claudeIpHourlyLimit, 60 * 60_000)
+  const claudeDaily = new WindowLimiter(config.claudeDailyLimit, DAY, 1)
+  /** Spends one Claude request from the client's hourly and the server's daily allowance. */
+  function claudeLimit(req: Request): keyof typeof CLAUDE_LIMIT_REASON | undefined {
+    const time = now().getTime()
+    if (!claudePerIp.take(req.ip ?? 'local', time)) return 'ip'
+    if (!claudeDaily.take('all', time)) return 'daily'
+    return undefined
+  }
   // The __Host- prefix makes browsers require Secure, Path=/ and no Domain for the session cookie.
   const cookieName = config.production ? '__Host-worth_session' : 'worth_session'
   function today(timezone = 'UTC') {
@@ -644,6 +657,14 @@ export function createApp(options: AppOptions = {}) {
         ),
       )
     if (!chat?.categorize) return res.json(fallbackCategories(rows))
+    const limited = claudeLimit(req)
+    if (limited)
+      return res.json(
+        fallbackCategories(
+          rows,
+          `${CLAUDE_LIMIT_REASON[limited]}. These are your current categories, not AI proposals. You can correct them individually.`,
+        ),
+      )
     const id = sessionId(res)
     if (chatBusy.has(id))
       throw new HttpError(
@@ -713,6 +734,15 @@ export function createApp(options: AppOptions = {}) {
         ),
       )
     if (!chat) return res.json(fallbackReply(input, data))
+    const limited = claudeLimit(req)
+    if (limited)
+      return res.json(
+        fallbackReply(
+          input,
+          data,
+          `${CLAUDE_LIMIT_REASON[limited]}, so this answer uses local calculations, not an AI response.`,
+        ),
+      )
     const id = sessionId(res)
     if (chatBusy.has(id))
       throw new HttpError(

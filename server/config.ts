@@ -16,6 +16,10 @@ export interface AppConfig {
   maxSessions: number
   /** Stored transactions per session; imports beyond this are rejected. */
   maxTransactions: number
+  /** Claude requests per client IP per hour, then labelled local answers. */
+  claudeIpHourlyLimit: number
+  /** Claude requests across the server per day, then labelled local answers. */
+  claudeDailyLimit: number
   paypalClientId?: string
   paypalSecret?: string
   paypalWebhookId?: string
@@ -86,6 +90,8 @@ export function loadConfig(env: Env = process.env, overrides: Partial<AppConfig>
     sessionIpHourlyLimit: wholeNumber(env, 'SESSION_IP_HOURLY_LIMIT', 30, 1),
     maxSessions: wholeNumber(env, 'MAX_SESSIONS', 5000, 1),
     maxTransactions: wholeNumber(env, 'MAX_TRANSACTIONS', 20_000, 1),
+    claudeIpHourlyLimit: wholeNumber(env, 'CLAUDE_IP_HOURLY_LIMIT', 20),
+    claudeDailyLimit: wholeNumber(env, 'CLAUDE_DAILY_LIMIT', 200),
     paypalClientId: setting(env, 'PAYPAL_CLIENT_ID'),
     paypalSecret: setting(env, 'PAYPAL_CLIENT_SECRET'),
     paypalWebhookId: setting(env, 'PAYPAL_WEBHOOK_ID'),
