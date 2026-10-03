@@ -1572,6 +1572,19 @@ describe('Claude request budgets', () => {
     clock.value = new Date(clock.value.getTime() + 24 * 60 * 60_000)
     expect((await ask('203.0.113.7')).body.mode).toBe('anthropic')
   })
+  it('does not spend the Claude allowance on requests rejected while an answer is in flight', async () => {
+    const { chat } = countingChat()
+    const { agent } = setup({ chat, config: { ...config, claudeIpHourlyLimit: 2 } })
+    await agent.get('/api/state')
+    const burst = await Promise.all(
+      Array.from({ length: 3 }, () => post(agent, '/api/chat', { message: 'Hi', history: [] })),
+    )
+    expect(burst.filter((r) => r.status === 200 && r.body.mode === 'anthropic')).toHaveLength(1)
+    expect(burst.filter((r) => r.status === 429 && r.body.code === 'CHAT_BUSY')).toHaveLength(2)
+    const next = await post(agent, '/api/chat', { message: 'Hi again', history: [] })
+    expect(next.body.mode).toBe('anthropic')
+    expect(chat.reply).toHaveBeenCalledTimes(2)
+  })
 })
 
 describe('stored transaction cap', () => {

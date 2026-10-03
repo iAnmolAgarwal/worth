@@ -702,6 +702,13 @@ export function createApp(options: AppOptions = {}) {
         ),
       )
     if (!chat?.categorize) return res.json(fallbackCategories(rows))
+    const id = sessionId(res)
+    if (chatBusy.has(id))
+      throw new HttpError(
+        429,
+        'Your assistant is still answering. Please wait a moment.',
+        'CHAT_BUSY',
+      )
     const limited = claudeLimit(req)
     if (limited)
       return res.json(
@@ -709,13 +716,6 @@ export function createApp(options: AppOptions = {}) {
           rows,
           `${CLAUDE_LIMIT_REASON[limited]}. These are your current categories, not AI proposals. You can correct them individually.`,
         ),
-      )
-    const id = sessionId(res)
-    if (chatBusy.has(id))
-      throw new HttpError(
-        429,
-        'Your assistant is still answering. Please wait a moment.',
-        'CHAT_BUSY',
       )
     chatBusy.add(id)
     try {
@@ -779,6 +779,13 @@ export function createApp(options: AppOptions = {}) {
         ),
       )
     if (!chat) return res.json(fallbackReply(input, data))
+    const id = sessionId(res)
+    if (chatBusy.has(id))
+      throw new HttpError(
+        429,
+        'Your assistant is still answering. Please wait a moment.',
+        'CHAT_BUSY',
+      )
     const limited = claudeLimit(req)
     if (limited)
       return res.json(
@@ -787,13 +794,6 @@ export function createApp(options: AppOptions = {}) {
           data,
           `${CLAUDE_LIMIT_REASON[limited]}, so this answer uses local calculations, not an AI response.`,
         ),
-      )
-    const id = sessionId(res)
-    if (chatBusy.has(id))
-      throw new HttpError(
-        429,
-        'Your assistant is still answering. Please wait a moment.',
-        'CHAT_BUSY',
       )
     chatBusy.add(id)
     try {
