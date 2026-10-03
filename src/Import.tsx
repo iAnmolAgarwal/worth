@@ -1,15 +1,24 @@
 import { useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
-import { CircleAlert, FileUp, Info } from 'lucide-react'
+import { Banknote, CircleAlert, FileUp, Info, Store } from 'lucide-react'
 import type { DateOrder, ImportPreview, InstalmentPlanProposal } from '../shared/types'
 import { CSV_IMPORT_LIMITS, CSV_SIZE_MESSAGE, utf8Bytes } from '../shared/limits'
 import { api } from './api'
 import type { AppState } from './contract'
 import { isActive } from './contract'
-import { currencyAmount, money, shortDate } from './format'
-import { Alert, Button, Dialog, Field } from './ui'
+import { currencyAmount, money, shortDate, signed } from './format'
+import { Alert, Button, Dialog, Disc, Field } from './ui'
 
 type DialogProps = { state: AppState; onClose: () => void; onUpdate: (state: AppState) => void }
+const TYPE_LABEL: Record<ImportPreview['transactions'][number]['kind'], string> = {
+  expense: 'Payment',
+  income: 'Income',
+  transfer: 'Transfer',
+  refund: 'Refund',
+  adjustment: 'Balance correction',
+  installment: 'Instalment',
+  unknown: 'Needs review',
+}
 const count = (n: number, noun: string) =>
   `${n.toLocaleString('en-US')} ${noun}${n === 1 ? '' : 's'}`
 const errorMessage = (error: unknown) =>
@@ -147,7 +156,7 @@ export function ImportDialog({
         ),
         ...preview.adjustments.map(
           (transaction) =>
-            `${transaction.name} · ${shortDate(transaction.date)} · ${money(transaction.amountCents)} is a PayPal balance correction, not counted.`,
+            `${transaction.name} · ${shortDate(transaction.date)} · ${signed(transaction.amountCents, true)} is a PayPal balance correction, not counted.`,
         ),
         ...reviewItems,
       ]
@@ -198,64 +207,79 @@ export function ImportDialog({
             Finish or cancel your active checkout before importing new history.
           </Alert>
         )}
-        <section className="stack tight">
-          <Alert tone="info" icon={Info}>
-            <b>A PayPal activity export, in USD.</b> Use an English-language CSV with Date,
-            Currency, and Net, Amount or Gross. Up to 1 MB; about 90 days of history works well.
-          </Alert>
-          <div className="field">
-            <span id="csv-label">Your PayPal activity CSV</span>
-            <div className="file-pick">
-              <label className={`btn btn-secondary${busy ? ' is-disabled' : ''}`}>
-                <FileUp className="ico" aria-hidden="true" />
-                Choose a CSV file
-                <input
-                  className="sr"
-                  type="file"
-                  accept=".csv,text/csv"
-                  aria-labelledby="csv-label"
-                  onChange={(event) => void chooseFile(event)}
+        {preview ? (
+          <div className="row plain picked-file">
+            <Disc icon={FileUp} kind="plan" />
+            <div className="body">
+              <div className="t" style={{ fontSize: 'var(--fs-body)' }}>
+                {filename || 'Pasted CSV'}
+              </div>
+              <div className="s soft">Previewed below. Nothing is imported until you confirm.</div>
+            </div>
+            <Button variant="text" onClick={() => changeCsv('')} disabled={Boolean(busy)}>
+              Change
+            </Button>
+          </div>
+        ) : (
+          <section className="stack tight">
+            <Alert tone="info" icon={Info}>
+              <b>A PayPal activity export, in USD.</b> Use an English-language CSV with Date,
+              Currency, and Net, Amount or Gross. Up to 1 MB; about 90 days of history works well.
+            </Alert>
+            <div className="field">
+              <span id="csv-label">Your PayPal activity CSV</span>
+              <div className="file-pick">
+                <label className={`btn btn-secondary${busy ? ' is-disabled' : ''}`}>
+                  <FileUp className="ico" aria-hidden="true" />
+                  Choose a CSV file
+                  <input
+                    className="sr"
+                    type="file"
+                    accept=".csv,text/csv"
+                    aria-labelledby="csv-label"
+                    onChange={(event) => void chooseFile(event)}
+                    disabled={Boolean(busy)}
+                  />
+                </label>
+                <span className="meta">
+                  {filename || 'Download an activity report from your PayPal account.'}
+                </span>
+              </div>
+            </div>
+            <details className="quiet-details">
+              <summary>Or paste the CSV contents</summary>
+              <Field label="PayPal CSV contents">
+                <textarea
+                  className="input"
+                  rows={6}
+                  value={csv}
+                  maxLength={CSV_IMPORT_LIMITS.maxBytes}
+                  onChange={(event) => {
+                    setFilename('')
+                    changeCsv(event.target.value)
+                  }}
+                  spellCheck={false}
+                  placeholder={'Date,Name,Currency,Amount\n2026-01-01,Coffee shop,USD,-6.50'}
                   disabled={Boolean(busy)}
                 />
-              </label>
-              <span className="meta">
-                {filename || 'Download an activity report from your PayPal account.'}
-              </span>
-            </div>
-          </div>
-          <details className="quiet-details">
-            <summary>Or paste the CSV contents</summary>
-            <Field label="PayPal CSV contents">
-              <textarea
-                className="input"
-                rows={6}
-                value={csv}
-                maxLength={CSV_IMPORT_LIMITS.maxBytes}
-                onChange={(event) => {
-                  setFilename('')
-                  changeCsv(event.target.value)
-                }}
-                spellCheck={false}
-                placeholder={'Date,Name,Currency,Amount\n2026-01-01,Coffee shop,USD,-6.50'}
-                disabled={Boolean(busy)}
-              />
-            </Field>
-          </details>
-          <p className="caption">
-            {state.profile.source === 'demo'
-              ? 'Your own history replaces the sample transactions. Next, you’ll confirm your money, income and bills.'
-              : 'New transactions are merged with your history. Matching transaction IDs keep repeated imports from counting twice.'}
-          </p>
-          <Button
-            type="submit"
-            variant="secondary"
-            icon={FileUp}
-            loading={busy === 'preview'}
-            disabled={!csv.trim() || Boolean(busy) || activeCheckout}
-          >
-            Preview my history
-          </Button>
-        </section>
+              </Field>
+            </details>
+            <p className="caption">
+              {state.profile.source === 'demo'
+                ? 'Your own history replaces the sample transactions. Next, you’ll confirm your money, income and bills.'
+                : 'New transactions are merged with your history. Matching transaction IDs keep repeated imports from counting twice.'}
+            </p>
+            <Button
+              type="submit"
+              variant="secondary"
+              icon={FileUp}
+              loading={busy === 'preview'}
+              disabled={!csv.trim() || Boolean(busy) || activeCheckout}
+            >
+              Preview my history
+            </Button>
+          </section>
+        )}
       </form>
 
       {preview && (
@@ -306,17 +330,14 @@ export function ImportDialog({
               `${count(preview.recurring.length, 'repeating item')} to confirm next.`}
           </p>
           {attention.length > 0 && (
-            <div className="alert warn">
-              <div className="alert-body">
-                <strong>Needs attention ({attention.length})</strong>
-                <ul>
-                  {attention.slice(0, 3).map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-                {attention.length > 3 && <p>And {attention.length - 3} more.</p>}
-              </div>
-            </div>
+            <details className="quiet-details attention">
+              <summary>Needs attention ({attention.length})</summary>
+              <ul>
+                {attention.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </details>
           )}
           {preview.errors.length > 0 && (
             <div className="alert bad" role="alert">
@@ -342,37 +363,31 @@ export function ImportDialog({
             </div>
           )}
           {preview.transactions.length > 0 && (
-            <div className="preview-list">
-              <table>
-                <caption>
-                  Preview of your {Math.min(preview.transactions.length, 8)} most recent new or
-                  updated transactions
-                </caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Date</th>
-                    <th scope="col">Transaction</th>
-                    <th scope="col">Amount</th>
-                    <th scope="col">Type</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {preview.transactions.slice(0, 8).map((transaction) => (
-                    <tr key={transaction.id}>
-                      <td>{shortDate(transaction.date)}</td>
-                      <td>
-                        {transaction.name}
-                        {transaction.status !== 'completed' && (
-                          <small> · {transaction.status}</small>
-                        )}
-                      </td>
-                      <td>{money(transaction.amountCents)}</td>
-                      <td>{transaction.kind === 'unknown' ? 'Needs review' : transaction.kind}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <section aria-labelledby="preview-rows">
+              <h4 className="meta strong" id="preview-rows" style={{ margin: '4px 0' }}>
+                Newest in this file
+              </h4>
+              <div className="rows">
+                {preview.transactions.slice(0, 5).map((transaction) => (
+                  <div className="row plain small" key={transaction.id}>
+                    <Disc
+                      icon={transaction.amountCents > 0 ? Banknote : Store}
+                      kind={transaction.amountCents > 0 ? 'income' : undefined}
+                    />
+                    <div className="body">
+                      <div className="t">{transaction.name || TYPE_LABEL[transaction.kind]}</div>
+                      <div className="s soft">
+                        {shortDate(transaction.date)} · {TYPE_LABEL[transaction.kind]}
+                        {transaction.status !== 'completed' ? ' · pending' : ''}
+                      </div>
+                    </div>
+                    <div className={`amt num${transaction.amountCents > 0 ? ' pos' : ''}`}>
+                      {signed(transaction.amountCents, transaction.amountCents > 0)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
           )}
           {preview.errors.length === 0 && !preview.needsDateOrder && (
             <label className="check">

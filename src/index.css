@@ -2603,3 +2603,22 @@ textarea.input {
     display: none;
   }
 }
+
+.attention {
+  background: var(--c-warning-bg);
+  border-radius: var(--r-md);
+  padding: 0 var(--s-4);
+}
+.attention > summary {
+  color: var(--c-text-strong);
+}
+.attention ul {
+  margin: 0;
+  padding: 0 0 var(--s-3) var(--s-5);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  color: var(--c-text-strong);
+}
+.attention li + li {
+  margin-top: var(--s-1);
+}
