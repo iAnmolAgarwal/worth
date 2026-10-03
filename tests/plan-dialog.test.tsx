@@ -70,7 +70,7 @@ describe('financial picture wizard', () => {
     const user = userEvent.setup()
     render(<PlanDialog state={makeState()} onClose={vi.fn()} onUpdate={vi.fn()} />)
     expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBe('1')
-    expect(screen.queryByRole('button', { name: /Edit Monthly paycheck/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Edit Biweekly paycheck/ })).toBeNull()
     const funds = screen.getByRole('spinbutton', { name: /^Available funds/ })
     await user.clear(funds)
     await continueStep(user)
@@ -166,7 +166,7 @@ describe('financial picture wizard', () => {
     await continueStep(user)
     await continueStep(user)
     expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBe('2')
-    expect(screen.getByRole('alert').textContent).toContain('Review and confirm Monthly paycheck')
+    expect(screen.getByRole('alert').textContent).toContain('Review and confirm Biweekly paycheck')
     await user.click(screen.getByRole('button', { name: 'Confirm item' }))
     await continueStep(user)
     expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBe('3')
@@ -203,7 +203,7 @@ describe('financial picture wizard', () => {
     const view = render(<PlanDialog state={state} onUpdate={onUpdate} onClose={onClose} />)
     await reachReview(user)
     expect(screen.getByText('+$4,200.00')).toBeTruthy()
-    expect(screen.getByText('$1,761.99')).toBeTruthy()
+    expect(screen.getByText('$1,461.99')).toBeTruthy()
     expect(checked(/Use my financial context with Claude/)).toBe(false)
     expect(checked(/Already included headphones/)).toBe(true)
     expect(checked(/Recent camera/)).toBe(false)
@@ -233,9 +233,9 @@ describe('financial picture wizard', () => {
       aiConsent: true,
       missingFields: [],
       reflectedPurchaseIds: ['included-purchase', 'new-purchase'],
-      balanceCents: 420000,
-      cushionCents: 100000,
-      dailySpendCents: 3900,
+      balanceCents: 130000,
+      cushionCents: 30000,
+      dailySpendCents: 3000,
     })
     expect(Number.isFinite(Date.parse(submitted.confirmedAt))).toBe(true)
     expect(submitted.flows).toEqual(state.profile.flows)

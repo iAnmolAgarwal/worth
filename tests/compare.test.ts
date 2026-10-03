@@ -3,11 +3,13 @@ import {
   addDays,
   compareOptions,
   daysBetween,
+  getUpcomingFlows,
   PAY_IN_4_MAX_CENTS,
   PAY_IN_4_MIN_CENTS,
   PAY_IN_4_NOTICE,
   payIn4Schedule,
 } from '../shared/finance.ts'
+import { createDemoState, PRODUCTS, rebaseDemoState } from '../shared/seed.ts'
 import type {
   Comparison,
   FinancialProfile,
@@ -349,5 +351,105 @@ describe('existing instalment plans (acceptance 17)', () => {
     expect(payIn4(compare(profile(), 119900)).stacking).toBeNull()
     const inactive = existing().map((item) => ({ ...item, active: false }))
     expect(payIn4(compare(profile({ flows: inactive }), 119900)).stacking).toBeNull()
+  })
+})
+
+describe('synthetic persona: Maya at Larkspur Supply', () => {
+  const camera = PRODUCTS.find((item) => item.id === 'camera')!
+  const headphones = PRODUCTS.find((item) => item.id === 'headphones')!
+
+  it('sells generic items from a separately branded store', () => {
+    expect(new Set(PRODUCTS.map((item) => item.merchant))).toEqual(new Set(['Larkspur Supply']))
+    expect(PRODUCTS.map((item) => [item.id, item.priceCents])).toEqual([
+      ['headphones', 34900],
+      ['camera', 119900],
+      ['chair', 44900],
+      ['backpack', 12900],
+    ])
+  })
+
+  it('produces the demo story from the engine', () => {
+    const demo = createDemoState(TODAY)
+    expect(demo.profile.name).toBe('Maya')
+    const result = compareOptions(demo.profile, demo.purchases, {
+      amountCents: camera.priceCents,
+      itemName: camera.name,
+      today: TODAY,
+      payIn4Eligible: true,
+    })
+    expect(result.buyToday).toMatchObject({
+      outcome: 'tight',
+      lowestBalanceCents: -45899,
+      lowestDate: addDays(TODAY, 19),
+      lowPointCause: { name: 'Apartment rent', date: addDays(TODAY, 13) },
+    })
+    expect(result.wait).toMatchObject({ date: addDays(TODAY, 20), outcome: 'fits' })
+    expect(result.spendLess).toMatchObject({ maxPriceCents: 44001, outcome: 'fits' })
+    expect(result.recommendation).toBe('wait')
+    const scenario = payIn4(result)
+    expect(scenario.outcome).toBe('tight')
+    expect(scenario.label).toBe('An instalment would dip below your cushion on Oct 21')
+    expect(
+      scenario.instalments.map((item) => [
+        item.date,
+        item.amountCents,
+        item.nearestBill?.name ?? null,
+        item.belowCushion,
+      ]),
+    ).toEqual([
+      ['2026-10-03', 29975, 'Car insurance', false],
+      ['2026-10-17', 29975, 'Apartment rent', true],
+      ['2026-10-31', 29975, 'Laptop · Pay in 4', false],
+      ['2026-11-14', 29975, 'Apartment rent', false],
+    ])
+    expect(scenario.stacking).toMatchObject({ activePlans: 1, totalCents: 48000 })
+    expect(
+      compareOptions(demo.profile, demo.purchases, {
+        amountCents: headphones.priceCents,
+        today: TODAY,
+      }).buyToday.outcome,
+    ).toBe('fits')
+  })
+
+  it('keeps the story on every start date of a year once rolled forward', () => {
+    const demo = createDemoState(TODAY)
+    for (let day = 0; day < 366; day += 5) {
+      const today = addDays(TODAY, day)
+      const moved = rebaseDemoState(demo, today, demo.profile.timezone) ?? demo
+      const result = compareOptions(moved.profile, [], {
+        amountCents: camera.priceCents,
+        today,
+        payIn4Eligible: true,
+      })
+      const scenario = payIn4(result)
+      const rentDates = getUpcomingFlows(moved.profile, today, 60)
+        .filter(({ flow: item }) => item.id === 'rent')
+        .map((item) => item.date)
+      const summary = {
+        today,
+        buyToday: result.buyToday.outcome,
+        waitWithin30: result.wait.date !== null && result.wait.date <= addDays(today, 30),
+        spendLess: result.spendLess.maxPriceCents > 0,
+        payIn4: scenario.outcome,
+        nearRent: scenario.instalments.some((item) =>
+          rentDates.some((date) => Math.abs(daysBetween(item.date, date)) <= 3),
+        ),
+        headphones: compareOptions(moved.profile, [], {
+          amountCents: headphones.priceCents,
+          today,
+        }).buyToday.outcome,
+        missing: result.missingFields,
+      }
+      expect(summary).toEqual({
+        today,
+        buyToday: 'tight',
+        waitWithin30: true,
+        spendLess: true,
+        payIn4: 'tight',
+        nearRent: true,
+        headphones: 'fits',
+        missing: [],
+      })
+    }
   })
 })

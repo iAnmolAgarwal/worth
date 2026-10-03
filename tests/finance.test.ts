@@ -312,7 +312,7 @@ describe('calendar behavior and demo', () => {
     const camera = PRODUCTS.find((item) => item.id === 'camera')!.priceCents
     expect(
       assessPurchase(moved.profile, [], { amountCents: camera, today: yesterday }).earliestDate,
-    ).toBe(addDays(yesterday, 13))
+    ).toBe(addDays(yesterday, 20))
     const edited = { ...demo, profile: { ...demo.profile, userEdited: true } }
     expect(rebaseDemoState(edited, yesterday, 'Pacific/Honolulu')).toBeUndefined()
     const legacy = { ...demo, profile: { ...demo.profile, userEdited: undefined } }
@@ -333,6 +333,19 @@ describe('calendar behavior and demo', () => {
     ).toBe('fits')
     const camera = assess(demo.profile, PRODUCTS.find((item) => item.id === 'camera')!.priceCents)
     expect(camera.outcome).toBe('tight')
-    expect(camera.earliestDate).toBe(addDays(TODAY, 13))
+    expect(camera.earliestDate).toBe(addDays(TODAY, 20))
+    // The existing plan's first payment is history; the other three are scheduled.
+    expect(demo.transactions.filter((t) => t.name === 'Laptop · Pay in 4')).toHaveLength(1)
+    expect(demo.profile.flows.filter((f) => f.kind === 'installment')).toHaveLength(3)
+    // Past paychecks inside the 90-day history arrive every two weeks, ending nine days ago.
+    const paychecks = demo.transactions
+      .filter((t) => t.kind === 'income')
+      .map((t) => t.date)
+      .sort()
+    expect(paychecks.at(-1)).toBe(addDays(TODAY, -9))
+    expect(paychecks).toHaveLength(6)
+    expect(paychecks.slice(1).every((date, index) => date === addDays(paychecks[index]!, 14))).toBe(
+      true,
+    )
   })
 })

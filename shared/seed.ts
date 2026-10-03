@@ -1,55 +1,65 @@
-import type { FinancialProfile, Product, Purchase, Transaction } from './types.ts'
+import type { FinancialProfile, Product, Purchase, ScheduledFlow, Transaction } from './types.ts'
 import { addDays, daysBetween, todayInTimezone } from './finance.ts'
 
 /** Time zone for the synthetic persona when the viewer's own zone is unknown. */
 export const DEMO_TIMEZONE = 'America/New_York'
 
+/** A separately branded sandbox store. Worth acts for the buyer and sells nothing itself. */
+export const DEMO_MERCHANT = 'Larkspur Supply'
+
 export const PRODUCTS: Product[] = [
   {
     id: 'headphones',
     name: 'Studio headphones',
-    description: 'A little less noise. A lot more you. Make space for the music you love.',
+    description: 'Closed-back over-ear headphones for focused listening at home or on the go.',
     priceCents: 34900,
-    category: 'Everyday upgrade',
+    category: 'Audio',
     image: '/images/headphones.jpg',
     color: '#ebe6da',
-    merchant: 'Worth Demo Store',
+    merchant: DEMO_MERCHANT,
     tag: 'On your radar',
   },
   {
     id: 'camera',
     name: 'Everyday camera',
-    description: 'For the moments worth keeping. Turn everyday scenes into something special.',
+    description: 'A compact interchangeable-lens camera body for everyday photos and video.',
     priceCents: 119900,
-    category: 'Creative tools',
+    category: 'Cameras',
     image: '/images/camera.jpg',
     color: '#e9ece7',
-    merchant: 'Worth Demo Store',
+    merchant: DEMO_MERCHANT,
     tag: 'A bigger little dream',
   },
   {
     id: 'chair',
-    name: 'Form accent chair',
-    description:
-      'Your favorite corner, made a little more inviting. A considered addition to your space.',
+    name: 'Desk chair',
+    description: 'An upholstered chair with a supportive back for a small home workspace.',
     priceCents: 44900,
-    category: 'Your space',
+    category: 'Home office',
     image: '/images/chair.jpg',
     color: '#e8e1d9',
-    merchant: 'Worth Demo Store',
+    merchant: DEMO_MERCHANT,
   },
   {
-    id: 'weekend',
-    name: 'A weekend away',
-    description: 'A change of scenery. A little room to breathe. Plan your next escape.',
-    priceCents: 24900,
-    category: 'Out of office',
+    id: 'backpack',
+    name: 'Travel backpack',
+    description: 'A carry-on-sized backpack with a padded laptop sleeve for weekends away.',
+    priceCents: 12900,
+    category: 'Travel',
+    // Placeholder photograph until the catalog images are replaced.
     image: '/images/weekend.jpg',
     color: '#eee9dd',
-    merchant: 'Worth Demo Store',
+    merchant: DEMO_MERCHANT,
   },
 ]
 
+/** The persona's existing Pay in 4 plan: the first payment was two days ago. */
+const EXISTING_PLAN = { id: 'laptop-plan', name: 'Laptop · Pay in 4', paymentCents: 16000 }
+
+/**
+ * Maya is a labelled synthetic persona near the edge: paid every two weeks, rent due inside the
+ * comparison window, and one Pay in 4 plan already running. Every date is relative to today.
+ */
 export function createDemoState(
   today?: string,
   timezone = DEMO_TIMEZONE,
@@ -60,11 +70,22 @@ export function createDemoState(
   wishlist: string[]
 } {
   today ??= todayInTimezone(timezone)
+  const scheduled = (
+    days: number,
+    item: Omit<ScheduledFlow, 'nextDate' | 'cadence' | 'confirmed' | 'active'> &
+      Partial<Pick<ScheduledFlow, 'cadence'>>,
+  ): ScheduledFlow => ({
+    cadence: 'monthly',
+    confirmed: true,
+    active: true,
+    ...item,
+    nextDate: addDays(today, days),
+  })
   const profile: FinancialProfile = {
-    name: 'Alex',
-    balanceCents: 420000,
-    cushionCents: 100000,
-    dailySpendCents: 3900,
+    name: 'Maya',
+    balanceCents: 130000,
+    cushionCents: 30000,
+    dailySpendCents: 3000,
     currency: 'USD',
     timezone,
     snapshotDate: today,
@@ -78,97 +99,110 @@ export function createDemoState(
     aiConsent: false,
     userEdited: false,
     flows: [
-      {
-        id: 'rent',
-        name: 'Apartment rent',
-        amountCents: 175000,
-        nextDate: addDays(today, 5),
-        cadence: 'monthly',
-        kind: 'bill',
-        category: 'Home',
-        confirmed: true,
-        active: true,
-        color: '#d6af8e',
-        icon: 'home',
-      },
-      {
+      scheduled(5, {
         id: 'salary',
-        name: 'Monthly paycheck',
-        amountCents: 420000,
-        nextDate: addDays(today, 12),
-        cadence: 'monthly',
+        name: 'Biweekly paycheck',
+        amountCents: 210000,
+        cadence: 'biweekly',
         kind: 'income',
         category: 'Income',
-        confirmed: true,
-        active: true,
         color: '#b6d58d',
         icon: 'briefcase',
-      },
-      {
+      }),
+      scheduled(13, {
+        id: 'rent',
+        name: 'Apartment rent',
+        amountCents: 145000,
+        kind: 'bill',
+        category: 'Home',
+        color: '#d6af8e',
+        icon: 'home',
+      }),
+      scheduled(2, {
+        id: 'car-insurance',
+        name: 'Car insurance',
+        amountCents: 12800,
+        kind: 'bill',
+        category: 'Transport',
+        color: '#b1c8d9',
+        icon: 'car',
+      }),
+      scheduled(7, {
+        id: 'gym',
+        name: 'Gym membership',
+        amountCents: 3500,
+        kind: 'subscription',
+        category: 'Health',
+        color: '#bfd49e',
+        icon: 'dumbbell',
+      }),
+      scheduled(9, {
+        id: 'phone',
+        name: 'Phone plan',
+        amountCents: 6500,
+        kind: 'bill',
+        category: 'Utilities',
+        color: '#c4bee0',
+        icon: 'smartphone',
+      }),
+      scheduled(11, {
         id: 'music',
         name: 'Music streaming',
         amountCents: 1199,
-        nextDate: addDays(today, 2),
-        cadence: 'monthly',
         kind: 'subscription',
         category: 'Entertainment',
-        confirmed: true,
-        active: true,
         color: '#b8d99c',
         icon: 'music',
-      },
-      {
+      }),
+      scheduled(18, {
+        id: 'student-loan',
+        name: 'Student loan',
+        amountCents: 21000,
+        kind: 'bill',
+        category: 'Loans',
+        color: '#e7cbb1',
+        icon: 'graduation-cap',
+      }),
+      scheduled(22, {
+        id: 'internet',
+        name: 'Home internet',
+        amountCents: 6000,
+        kind: 'bill',
+        category: 'Home',
+        color: '#c4bee0',
+        icon: 'wifi',
+      }),
+      scheduled(24, {
         id: 'video',
         name: 'Video streaming',
         amountCents: 1549,
-        nextDate: addDays(today, 7),
-        cadence: 'monthly',
         kind: 'subscription',
         category: 'Entertainment',
-        confirmed: true,
-        active: true,
         color: '#edb6a8',
         icon: 'tv',
-      },
-      {
-        id: 'cloud-storage',
-        name: 'Cloud storage',
-        amountCents: 299,
-        nextDate: addDays(today, 18),
-        cadence: 'monthly',
-        kind: 'subscription',
-        category: 'Software',
-        confirmed: true,
-        active: true,
-        color: '#b9cddd',
-        icon: 'cloud',
-      },
-      {
-        id: 'design-software',
-        name: 'Design software',
-        amountCents: 2999,
-        nextDate: addDays(today, 23),
-        cadence: 'monthly',
-        kind: 'subscription',
-        category: 'Software',
-        confirmed: true,
-        active: true,
-        color: '#e7cbb1',
-        icon: 'pen-tool',
-      },
-      {
-        id: 'internet',
-        name: 'Home internet',
-        amountCents: 6500,
-        nextDate: addDays(today, 8),
-        cadence: 'monthly',
+      }),
+      scheduled(26, {
+        id: 'utilities',
+        name: 'Electric and gas',
+        amountCents: 9500,
         kind: 'bill',
         category: 'Home',
-        confirmed: true,
-        active: true,
-        color: '#c4bee0',
-        icon: 'wifi',
-      },
+        color: '#d7b897',
+        icon: 'zap',
+      }),
+      ...[12, 26, 40].map((days, index) =>
+        scheduled(days, {
+          id: `${EXISTING_PLAN.id}-${index + 2}`,
+          name: EXISTING_PLAN.name,
+          amountCents: EXISTING_PLAN.paymentCents,
+          cadence: 'once',
+          kind: 'installment',
+          category: 'Instalment plans',
+          color: '#c9c2e6',
+          icon: 'laptop',
+          planId: EXISTING_PLAN.id,
+        }),
+      ),
     ],
   }
   const transactions: Transaction[] = []
@@ -210,18 +244,25 @@ export function createDemoState(
         color: '#d7b897',
       })
   }
-  for (const flow of profile.flows) {
+  const pastOccurrences = (flow: ScheduledFlow): string[] => {
+    if (flow.cadence === 'once') return []
+    if (flow.cadence === 'biweekly')
+      return [1, 2, 3, 4, 5, 6, 7].map((cycles) => addDays(flow.nextDate, -14 * cycles))
     const [year, month, day] = flow.nextDate.split('-').map(Number)
-    for (let monthsAgo = 1; monthsAgo <= 4; monthsAgo++) {
+    return [1, 2, 3, 4].map((monthsAgo) => {
       const monthStart = new Date(Date.UTC(year, month - 1 - monthsAgo, 1, 12))
       const lastDay = new Date(
         Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 0, 12),
       ).getUTCDate()
-      const date = new Date(
+      return new Date(
         Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth(), Math.min(day, lastDay), 12),
       )
         .toISOString()
         .slice(0, 10)
+    })
+  }
+  for (const flow of profile.flows)
+    for (const date of pastOccurrences(flow)) {
       if (date > today || date < addDays(today, -89)) continue
       transactions.push({
         id: `demo:${flow.id}:${date}`,
@@ -236,8 +277,19 @@ export function createDemoState(
         color: flow.color,
       })
     }
-  }
   transactions.push(
+    {
+      id: `demo:${EXISTING_PLAN.id}-1`,
+      date: addDays(today, -2),
+      name: EXISTING_PLAN.name,
+      amountCents: -EXISTING_PLAN.paymentCents,
+      currency: 'USD',
+      category: 'Instalment plans',
+      kind: 'expense',
+      status: 'completed',
+      source: 'demo',
+      color: '#c9c2e6',
+    },
     {
       id: 'demo:transfer',
       date: addDays(today, -9),
