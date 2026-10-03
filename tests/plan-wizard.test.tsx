@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PlanPage, PlanWizard } from '../src/Plan'
@@ -124,7 +124,10 @@ describe('plan setup wizard', () => {
     await user.click(screen.getByRole('button', { name: 'Add a bill or subscription' }))
     await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Annual insurance')
     await user.type(screen.getByRole('spinbutton', { name: 'Amount, USD' }), '123.45')
-    fireEvent.change(screen.getByLabelText('Next due date'), { target: { value: '2026-11-20' } })
+    // The app's date control: seven weeks and back a day, from Sat, Oct 3 to Fri, Nov 20.
+    for (let i = 0; i < 7; i++)
+      await user.click(screen.getByRole('button', { name: 'Next due date: a week later' }))
+    await user.click(screen.getByRole('button', { name: 'Next due date: a day earlier' }))
     const often = screen.getByRole('radiogroup', { name: 'How often' })
     expect(
       within(often)
@@ -142,7 +145,9 @@ describe('plan setup wizard', () => {
     await user.click(screen.getByRole('button', { name: 'Back' }))
     await user.click(screen.getByRole('button', { name: 'Edit Annual insurance' }))
     expect(value(/^Amount/)).toBe('123.45')
-    expect((screen.getByLabelText('Next due date') as HTMLInputElement).value).toBe('2026-11-20')
+    expect(
+      screen.getByRole('spinbutton', { name: 'Next due date' }).getAttribute('aria-valuetext'),
+    ).toBe('Fri, Nov 20')
     expect(
       within(screen.getByRole('radiogroup', { name: 'How often' }))
         .getByRole('radio', { name: 'Yearly' })
@@ -181,7 +186,9 @@ describe('plan setup wizard', () => {
     await user.type(screen.getByRole('spinbutton', { name: 'Amount per payment' }), '37.50')
     await user.clear(screen.getByRole('spinbutton', { name: 'Payments left' }))
     await user.type(screen.getByRole('spinbutton', { name: 'Payments left' }), '2')
-    fireEvent.change(screen.getByLabelText('Next payment'), { target: { value: '2026-10-17' } })
+    expect(
+      screen.getByRole('spinbutton', { name: 'Next payment' }).getAttribute('aria-valuetext'),
+    ).toBe('Sat, Oct 17')
     await user.click(screen.getByRole('button', { name: 'Add plan' }))
     expect(screen.getByText(/2 of 4 paid · Next Sat, Oct 17/)).toBeTruthy()
     await continueStep(user)

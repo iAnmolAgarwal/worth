@@ -929,8 +929,11 @@ describe('after a purchase', () => {
     )
     await user.click(screen.getByRole('radio', { name: 'Pay in 4' }))
     expect((screen.getByLabelText(/^Payment 1 amount/) as HTMLInputElement).value).toBe('87.25')
-    expect((screen.getByLabelText('Payment 4 date') as HTMLInputElement).value).toBe('2026-11-14')
-    fireEvent.change(screen.getByLabelText('Payment 2 date'), { target: { value: '2026-10-19' } })
+    expect(
+      screen.getByRole('spinbutton', { name: 'Payment 4 date' }).getAttribute('aria-valuetext'),
+    ).toBe('Sat, Nov 14')
+    await user.click(screen.getByRole('button', { name: 'Payment 2 date: a day later' }))
+    await user.click(screen.getByRole('button', { name: 'Payment 2 date: a day later' }))
     await user.click(screen.getByRole('button', { name: 'Confirm plan' }))
     await waitFor(() => expect(onUpdate).toHaveBeenCalled())
     expect(apiMock).toHaveBeenCalledWith(`/purchases/${paid.id}/plan`, {
@@ -1156,7 +1159,9 @@ describe('blocking fixes', () => {
       <ConfirmPlanDialog state={state} purchaseId={paid.id} onClose={vi.fn()} onUpdate={vi.fn()} />,
     )
     await user.click(screen.getByRole('radio', { name: 'Pay in 4' }))
-    expect((screen.getByLabelText('Payment 1 date') as HTMLInputElement).value).toBe(TODAY)
+    expect(
+      screen.getByRole('spinbutton', { name: 'Payment 1 date' }).getAttribute('aria-valuetext'),
+    ).toBe('Sat, Oct 3')
   })
 
   it('shows confirmed Pay in 4 payments in Coming up and counts the plan on Home', async () => {

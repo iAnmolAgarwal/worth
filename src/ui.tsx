@@ -346,3 +346,107 @@ export function Dialog({
     </RadixDialog.Root>
   )
 }
+
+const shiftDay = (date: string, days: number) => {
+  const next = new Date(`${date}T12:00:00Z`)
+  next.setUTCDate(next.getUTCDate() + days)
+  return next.toISOString().slice(0, 10)
+}
+/**
+ * The app's date control: the date as people read it ("Sun, Oct 18") with day and week steps,
+ * instead of the browser's mm/dd/yyyy picker. Arrow keys on the value step a day; Page Up/Down a
+ * week. It is a spin button, so screen readers announce the date and its range.
+ */
+export function DateStepper({
+  label,
+  value,
+  onChange,
+  min,
+  max,
+  disabled,
+}: {
+  label: string
+  value: string
+  onChange: (date: string) => void
+  min?: string
+  max?: string
+  disabled?: boolean
+}) {
+  const id = useId()
+  const clamp = (date: string) => (min && date < min ? min : max && date > max ? max : date)
+  const step = (days: number) => onChange(clamp(shiftDay(value, days)))
+  const text = new Date(`${value}T12:00:00`).toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  })
+  return (
+    <div className="field">
+      <span id={id}>{label}</span>
+      <div className="date-step">
+        <button
+          type="button"
+          className="date-step-btn"
+          aria-label={`${label}: a week earlier`}
+          disabled={disabled || (min !== undefined && shiftDay(value, -1) < min)}
+          onClick={() => step(-7)}
+        >
+          «
+        </button>
+        <button
+          type="button"
+          className="date-step-btn"
+          aria-label={`${label}: a day earlier`}
+          disabled={disabled || (min !== undefined && shiftDay(value, -1) < min)}
+          onClick={() => step(-1)}
+        >
+          ‹
+        </button>
+        <span
+          className="date-step-value num"
+          role="spinbutton"
+          tabIndex={disabled ? -1 : 0}
+          aria-labelledby={id}
+          aria-valuetext={text}
+          aria-disabled={disabled || undefined}
+          onKeyDown={(event) => {
+            if (disabled) return
+            const days =
+              event.key === 'ArrowUp' || event.key === 'ArrowRight'
+                ? 1
+                : event.key === 'ArrowDown' || event.key === 'ArrowLeft'
+                  ? -1
+                  : event.key === 'PageUp'
+                    ? 7
+                    : event.key === 'PageDown'
+                      ? -7
+                      : 0
+            if (!days) return
+            event.preventDefault()
+            step(days)
+          }}
+        >
+          {text}
+        </span>
+        <button
+          type="button"
+          className="date-step-btn"
+          aria-label={`${label}: a day later`}
+          disabled={disabled || (max !== undefined && shiftDay(value, 1) > max)}
+          onClick={() => step(1)}
+        >
+          ›
+        </button>
+        <button
+          type="button"
+          className="date-step-btn"
+          aria-label={`${label}: a week later`}
+          disabled={disabled || (max !== undefined && shiftDay(value, 1) > max)}
+          onClick={() => step(7)}
+        >
+          »
+        </button>
+      </div>
+    </div>
+  )
+}

@@ -15,7 +15,7 @@ import type { AppState } from './contract'
 import { isActive } from './contract'
 import { allPlans, cadenceLabel, flowIcon, kindLabel, runningPlans } from './engine'
 import { cx, dayLabel, money, shortDate, signed } from './format'
-import { Alert, Button, Disc, Field, Pill, Ring, Toggle } from './ui'
+import { Alert, Button, DateStepper, Disc, Field, Pill, Ring, Toggle } from './ui'
 
 type FlowDraft = Omit<ScheduledFlow, 'amountCents'> & { amount: string }
 const timestamp = () => new Date().toISOString()
@@ -780,14 +780,11 @@ function FlowCard({
                 />
               </span>
             </Field>
-            <Field label={flow.kind === 'income' ? 'Next payday' : 'Next due date'}>
-              <input
-                className="input"
-                type="date"
-                value={flow.nextDate}
-                onChange={(event) => onChange({ nextDate: event.target.value })}
-              />
-            </Field>
+            <DateStepper
+              label={flow.kind === 'income' ? 'Next payday' : 'Next due date'}
+              value={flow.nextDate || today}
+              onChange={(nextDate) => onChange({ nextDate })}
+            />
             {flow.kind !== 'income' && (
               <Field label="Type">
                 <select
@@ -1085,15 +1082,7 @@ function InstalmentPlans({
                 onChange={(e) => setLeft(e.target.value)}
               />
             </Field>
-            <Field label="Next payment">
-              <input
-                className="input"
-                type="date"
-                min={today}
-                value={first}
-                onChange={(e) => setFirst(e.target.value)}
-              />
-            </Field>
+            <DateStepper label="Next payment" min={today} value={first} onChange={setFirst} />
           </div>
           <div className="field">
             <span id="plan-every">Payments every</span>

@@ -5,7 +5,7 @@ import type { PlanInstalment } from '../shared/types'
 import { api } from './api'
 import type { AppState } from './contract'
 import { fromMoney, money } from './format'
-import { Alert, Button, Dialog, Field } from './ui'
+import { Alert, Button, DateStepper, Dialog, Field } from './ui'
 
 type Draft = { date: string; amount: string }
 const toDraft = (items: PlanInstalment[]): Draft[] =>
@@ -36,19 +36,12 @@ function InstalmentFields({
       {drafts.map((draft, index) => (
         <fieldset key={index} className="form-grid" style={{ border: 0, padding: 0, margin: 0 }}>
           <legend className="sr">Payment {index + 1}</legend>
-          <Field label={`Payment ${index + 1} date`}>
-            <input
-              className="input"
-              type="date"
-              value={draft.date}
-              disabled={disabled}
-              onChange={(event) =>
-                onChange(
-                  drafts.map((d, i) => (i === index ? { ...d, date: event.target.value } : d)),
-                )
-              }
-            />
-          </Field>
+          <DateStepper
+            label={`Payment ${index + 1} date`}
+            value={draft.date}
+            disabled={disabled}
+            onChange={(date) => onChange(drafts.map((d, i) => (i === index ? { ...d, date } : d)))}
+          />
           <Field label={`Payment ${index + 1} amount`}>
             <span className="money-input">
               <span aria-hidden="true">$</span>
