@@ -11,6 +11,7 @@ import {
 import type { Product } from '../shared/types'
 import { api } from './api'
 import { ClaudeSwitch, JudgeBadge } from './Ask'
+import { CLAUDE_SHARED_DATA, CLAUDE_USES } from './copy'
 import type { AppState } from './contract'
 import { isActive } from './contract'
 import { shortDate, money } from './format'
@@ -219,23 +220,16 @@ export function Settings({
               What’s shared with Claude
             </h3>
             <dl className="kvlist">
-              <div>
-                <dt>Plan totals and dates</dt>
-                <dd>Yes</dd>
-              </div>
-              <div>
-                <dt>Bill and subscription names</dt>
-                <dd>Shortened labels</dd>
-              </div>
-              <div>
-                <dt>Your messages and recent chat</dt>
-                <dd>Yes</dd>
-              </div>
-              <div>
-                <dt>PayPal login and card numbers</dt>
-                <dd>Never</dd>
-              </div>
+              {CLAUDE_USES.map(([label, value]) => (
+                <div key={label}>
+                  <dt>{label}</dt>
+                  <dd>{value}</dd>
+                </div>
+              ))}
             </dl>
+            <p className="caption" style={{ marginTop: 8 }}>
+              When Claude answers, it receives {CLAUDE_SHARED_DATA}.
+            </p>
           </section>
           <section className="tile" aria-labelledby="set-data">
             <div className="sec-head">
@@ -302,7 +296,6 @@ export function Settings({
               </h2>
             </div>
             <p style={{ marginBottom: 12 }}>
-              {state.profile.source === 'demo' ? 'Sample data' : 'Your data'} ·{' '}
               <JudgeBadge state={state} />
             </p>
             <p className="meta">

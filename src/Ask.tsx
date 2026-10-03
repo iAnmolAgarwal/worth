@@ -12,9 +12,9 @@ import { addDays } from '../shared/finance'
 import type { ChatMessage, Interpretation, Product, PurchaseContext } from '../shared/types'
 import { api, ApiError } from './api'
 import type { AgentCheckout, AppState, ChatReply, Comparison } from './contract'
-import { CLAUDE_SHARED_DATA } from './copy'
+import { CLAUDE_USES } from './copy'
 import { breachLine, type DecisionRequest, type Explanation } from './Decision'
-import { fits, useComparison } from './engine'
+import { claudeOn, envLabel, fits, useComparison } from './engine'
 import { capitalize, cx, fromMoney, money } from './format'
 import { Alert, Button, Field, Pill, ReadAsChip, Toggle } from './ui'
 
@@ -48,15 +48,7 @@ export function matchProduct(products: Product[], name: string, amountCents: num
 }
 
 /** Claude on for this profile: the server's rule, read from state. */
-export function claudeAllowed(state: AppState) {
-  return (
-    state.config.ai === 'anthropic' &&
-    (state.profile.aiConsent ||
-      (state.profile.source === 'demo' && state.profile.userEdited === false))
-  )
-}
-const untouchedSample = (state: AppState) =>
-  state.profile.source === 'demo' && state.profile.userEdited === false
+export const claudeAllowed = claudeOn
 
 const TOOL_TRACE: Record<string, string> = {
   interpret_purchase: 'Claude read your question and checked it against your plan',
@@ -93,19 +85,26 @@ function OptionRows({ c }: { c: Comparison }) {
         : (breachLine(c.buyToday, c.cushionCents, true) ?? 'Below your cushion'),
       pill: fits(c.buyToday) ? (['ok', 'Fits'] as const) : (['bad', 'Dips below'] as const),
     },
-    c.wait.date
+    fits(c.buyToday)
       ? {
           key: 'wait',
-          title: `Wait until ${new Date(`${c.wait.date}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
-          sub: `${money(c.wait.headroomCents)} above cushion at lowest${c.wait.stressLowestCents < c.cushionCents ? ' · tight' : ''}`,
-          pill: ['ok', 'Fits'] as const,
-        }
-      : {
-          key: 'wait',
           title: 'Wait',
-          sub: 'No date in the next 30 days fits',
-          pill: ['info', 'No date'] as const,
-        },
+          sub: 'Not needed: it fits today',
+          pill: ['info', 'Not needed'] as const,
+        }
+      : c.wait.date
+        ? {
+            key: 'wait',
+            title: `Wait until ${new Date(`${c.wait.date}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
+            sub: `${money(c.wait.headroomCents)} above cushion at lowest${c.wait.stressLowestCents < c.cushionCents ? ' · tight' : ''}`,
+            pill: ['ok', 'Fits'] as const,
+          }
+        : {
+            key: 'wait',
+            title: 'Wait',
+            sub: 'No date in the next 30 days fits',
+            pill: ['info', 'No date'] as const,
+          },
     {
       key: 'spendLess',
       title: 'Spend less',
@@ -343,9 +342,9 @@ export function ClaudeSwitch({
   const [error, setError] = useState('')
   const note =
     state.config.ai !== 'anthropic'
-      ? 'Claude isn’t connected in this deployment, so answers use Worth’s own calculation.'
-      : untouchedSample(state)
-        ? 'On for the sample profile. Once you add your own data, Worth asks first.'
+      ? 'Claude isn’t connected here, so answers use Worth’s own calculation.'
+      : claudeOn(state)
+        ? 'On: Claude explains answers from your plan totals. Every number is Worth’s.'
         : 'Off: answers still work, using Worth’s own calculation.'
   const noteId = `claude-note-${compact ? 'm' : 'd'}`
   async function change(next: boolean) {
@@ -364,7 +363,8 @@ export function ClaudeSwitch({
       checked={claudeAllowed(state)}
       label={label}
       describedBy={noteId}
-      disabled={busy || state.config.ai !== 'anthropic' || untouchedSample(state)}
+      busy={busy}
+      disabled={state.config.ai !== 'anthropic'}
       onChange={(next) => void change(next)}
     />
   )
@@ -404,13 +404,12 @@ export function ClaudeSwitch({
   )
 }
 
+/** The environment, worded exactly as in the top bar. */
 export function JudgeBadge({ state }: { state: AppState }) {
-  const live = state.config.ai === 'anthropic'
   return (
-    <span className={cx('judge', !live && 'local')}>
+    <span className={cx('judge', !claudeOn(state) && 'local')}>
       <i aria-hidden="true" />
-      Claude: {live ? 'live' : 'local calculation'} · PayPal checkout:{' '}
-      {state.config.paypal === 'sandbox' ? 'sandbox' : 'simulated'}
+      {envLabel(state)}
     </span>
   )
 }
@@ -593,6 +592,7 @@ export function Ask({
                       onAnswer={() => input.current?.focus()}
                       onOpenDecision={onOpenDecision}
                       onOpenCheckout={onOpenCheckout}
+                      onNavigate={onNavigate}
                     />
                   </div>
                 ),
@@ -626,6 +626,23 @@ export function Ask({
                       <p className="meta">{error} Your question is still in the box.</p>
                     </div>
                   </div>
+                  {message.trim() && (
+                    <div className="actions" style={{ marginTop: 12 }}>
+                      <Button
+                        variant="secondary"
+                        onClick={() => {
+                          const text = message
+                          // Drop the unanswered question so the retry doesn't repeat it.
+                          setEntries((prev) =>
+                            prev.at(-1)?.role === 'user' ? prev.slice(0, -1) : prev,
+                          )
+                          setTimeout(() => void send(text), 0)
+                        }}
+                      >
+                        Try again
+                      </Button>
+                    </div>
+                  )}
                 </div>
               )}
               <div ref={bottom} />
@@ -670,7 +687,6 @@ export function Ask({
             </div>
           </div>
           <aside className="rail hide-m" aria-label="Claude and suggestions">
-            <JudgeBadge state={state} />
             <section aria-labelledby="claude-uses">
               <div className="sec-head">
                 <h2 className="h-section" id="claude-uses">
@@ -678,25 +694,19 @@ export function Ask({
                 </h2>
               </div>
               <dl className="kvlist">
-                <div>
-                  <dt>Plan totals and dates</dt>
-                  <dd>Yes</dd>
-                </div>
-                <div>
-                  <dt>Bills and subscriptions</dt>
-                  <dd>Names and amounts</dd>
-                </div>
-                <div>
-                  <dt>PayPal login or card numbers</dt>
-                  <dd>Never</dd>
-                </div>
+                {CLAUDE_USES.map(([label, value]) => (
+                  <div key={label}>
+                    <dt>{label}</dt>
+                    <dd>{value}</dd>
+                  </div>
+                ))}
               </dl>
               <div style={{ marginTop: 'var(--s-3)' }}>
                 <ClaudeSwitch state={state} onUpdate={onUpdate} />
               </div>
-              <p className="caption" style={{ marginTop: 8 }}>
-                When Claude answers, it receives {CLAUDE_SHARED_DATA}.
-              </p>
+              <a href="#settings" style={{ fontSize: 'var(--fs-meta)' }}>
+                Everything Claude receives
+              </a>
             </section>
             <section aria-labelledby="try-asking">
               <div className="sec-head">
@@ -759,6 +769,7 @@ function Answer({
   onAnswer,
   onOpenDecision,
   onOpenCheckout,
+  onNavigate,
 }: {
   entry: Entry
   state: AppState
@@ -771,8 +782,21 @@ function Answer({
   onAnswer: () => void
   onOpenDecision: (request: DecisionRequest, explanation?: Explanation) => void
   onOpenCheckout: (purchaseId: string, approveUrl?: string) => void
+  onNavigate: (hash: string) => void
 }) {
   const reply = entry.reply!
+  // An answer that can't go further says where to fix it instead of dead-ending.
+  const unresolved = (state.foreignPayments ?? []).some((payment) => !payment.resolution)
+  const blocked =
+    reply.assessment?.outcome === 'incomplete' ||
+    ((unresolved || !state.profile.confirmed) && !reply.assessment && reply.intent !== 'off_topic')
+  const fix = !blocked
+    ? undefined
+    : unresolved
+      ? { label: 'Resolve foreign-currency payments in Activity', hash: 'activity' }
+      : !state.profile.confirmed || reply.assessment?.outcome === 'incomplete'
+        ? { label: 'Review your plan', hash: 'plan/edit' }
+        : undefined
   const read = reply.interpretation
   const assessment = reply.assessment
   const stale =
@@ -846,6 +870,11 @@ function Answer({
         </section>
       )}
       {reply.checkout && <AgentHandoff checkout={reply.checkout} onOpen={onOpenCheckout} />}
+      {fix && last && (
+        <button type="button" className="link" onClick={() => onNavigate(fix.hash)}>
+          {fix.label} <ArrowRight size={16} aria-hidden="true" />
+        </button>
+      )}
       <div className="trace">
         <ListChecks className="ico" aria-hidden="true" />
         {traceText(reply, state)}

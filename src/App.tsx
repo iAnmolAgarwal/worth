@@ -19,6 +19,7 @@ import { Ask } from './Ask'
 import { Checkout } from './Checkout'
 import type { AppState, Purchase } from './contract'
 import { Decision, type DecisionRequest, type Explanation } from './Decision'
+import { envLabel } from './engine'
 import { dayLabel } from './format'
 import { Home, HomeSkeleton } from './Home'
 import { ImportDialog } from './Import'
@@ -285,7 +286,7 @@ export default function App() {
         ? 'plan'
         : screen
   const sample = state.profile.source === 'demo' ? 'Sample data' : 'Your data'
-  const env = `${sample} · Claude ${state.config.ai === 'anthropic' ? 'live' : 'off'} · PayPal ${state.config.paypal === 'sandbox' ? 'sandbox' : 'simulated'}`
+  const env = envLabel(state)
   const decisionProduct = decisionRequest?.productId
     ? state.products.find((p) => p.id === decisionRequest.productId)
     : undefined
@@ -464,6 +465,7 @@ export default function App() {
               }}
               onSave={(product, date) => void saveForLater(product, date)}
               onEditPlan={() => navigate('plan/edit')}
+              onViewActivity={() => navigate('activity')}
             />
           ) : (
             <div className="page plain">
@@ -484,6 +486,7 @@ export default function App() {
             onReviewRefund={(purchaseId, refundId) =>
               setReview({ kind: 'refund', purchaseId, refundId })
             }
+            onImport={() => setImporting(true)}
           />
         )}
         {screen === 'plan' && (
