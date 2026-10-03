@@ -308,6 +308,8 @@ export interface ChatReply {
   suggestions: string[]
   toolCalls: string[]
 }
+/** The order of day and month in a CSV's slash dates. */
+export type DateOrder = 'MM/DD' | 'DD/MM'
 export interface ImportPreview {
   transactions: Transaction[]
   errors: { row: number; message: string }[]
@@ -322,4 +324,11 @@ export interface ImportPreview {
   adjustments: Transaction[]
   /** Rows not imported because they never moved money: memo rows and authorization holds. */
   leftOut: { memo: number; holds: number }
+  /** The order used for slash dates; null when the file has none that could read differently. */
+  dateOrder: DateOrder | null
+  /**
+   * Every slash date could be read either way. Nothing was imported; preview again with an
+   * explicit `dateOrder`. The commit refuses such a file without one.
+   */
+  needsDateOrder: boolean
 }

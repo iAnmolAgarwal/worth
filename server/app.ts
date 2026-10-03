@@ -159,6 +159,8 @@ const csvSchema = z
       .string()
       .min(1)
       .refine((value) => utf8Bytes(value) <= CSV_IMPORT_LIMITS.maxBytes, CSV_SIZE_MESSAGE),
+    /** Needed only when every date in the file could be read either way. */
+    dateOrder: z.enum(['MM/DD', 'DD/MM']).optional(),
   })
   .strict()
 /**
@@ -730,22 +732,34 @@ export function createApp(options: AppOptions = {}) {
     return `This import would keep ${total.toLocaleString('en-US')} transactions, but a session holds at most ${config.maxTransactions.toLocaleString('en-US')}. Import a shorter date range.`
   }
   app.post('/api/import/preview', (req, res) => {
-    const { csv } = csvSchema.parse(req.body)
+    const { csv, dateOrder } = csvSchema.parse(req.body)
     const data = dataFor(res)
     const existing = retainedHistory(data)
-    const preview = parsePayPalCsv(csv, existing, { today: today(data.profile.timezone) })
+    const preview = parsePayPalCsv(csv, existing, {
+      today: today(data.profile.timezone),
+      dateOrder,
+    })
     const total = mergeTransactions(existing, preview.transactions).length
     if (total > config.maxTransactions)
       preview.errors.unshift({ row: 1, message: transactionLimitMessage(total) })
     res.json(preview)
   })
   app.post('/api/import/commit', (req, res) => {
-    const { csv } = csvSchema.parse(req.body)
+    const { csv, dateOrder } = csvSchema.parse(req.body)
     const id = sessionId(res)
     noActive(id)
     const data = dataFor(res)
     const retained = retainedHistory(data)
-    const preview = parsePayPalCsv(csv, retained, { today: today(data.profile.timezone) })
+    const preview = parsePayPalCsv(csv, retained, {
+      today: today(data.profile.timezone),
+      dateOrder,
+    })
+    if (preview.needsDateOrder)
+      throw new HttpError(
+        400,
+        'Choose whether this file’s dates are month/day or day/month, then import it again. No history was changed.',
+        'DATE_ORDER_REQUIRED',
+      )
     if (preview.errors.length)
       throw new HttpError(
         400,

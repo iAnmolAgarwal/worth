@@ -5,6 +5,8 @@ import { CSV_IMPORT_LIMITS } from '../shared/limits.ts'
 import type { Transaction } from '../shared/types.ts'
 
 const HEADER = 'Date,Time,Name,Type,Status,Currency,Gross,Fee,Net,Transaction ID,Reference Txn ID'
+/** Every date in these hand-written US rows could be read either way, so the order is given. */
+const US = { dateOrder: 'MM/DD' } as const
 function csv(...rows: string[]): string {
   return [HEADER, ...rows].join('\n')
 }
@@ -30,6 +32,8 @@ describe('PayPal CSV normalization', () => {
         '09/04/2026,12:00:00,Store,Refund,Completed,USD,40.25,0,40.25,refund-1,spend-1',
         '09/05/2026,12:00:00,Friend,Payment Received,Completed,USD,20.00,0,20.00,friend-1,',
       ),
+      [],
+      US,
     )
     expect(result.errors).toEqual([])
     expect(result.transactions.find((item) => item.id === 'paypal:spend-1')).toMatchObject({
@@ -89,7 +93,7 @@ describe('PayPal CSV normalization', () => {
       (day, index) =>
         `${day}/2026,06:00:00,ACME CORP PAYROLL,Direct Deposit,Completed,USD,"2,100.00",0,"2,100.00",dd-${index},`,
     )
-    const result = parsePayPalCsv(csv(...rows))
+    const result = parsePayPalCsv(csv(...rows), [], US)
     expect(result.errors).toEqual([])
     expect(result.transactions.every((item) => item.kind === 'income')).toBe(true)
     expect(result.recurring).toMatchObject([
@@ -249,6 +253,7 @@ describe('identity and recurring spending', () => {
         '10/02/2026,12:00:00,Worth merchant,Refund,Completed,USD,349.00,0,349.00,REFUND-A,CAPTURE-A',
       ),
       [capturedPurchase],
+      US,
     )
     expect(result.errors).toEqual([])
     expect(result.transactions).toHaveLength(1)
@@ -259,10 +264,10 @@ describe('identity and recurring spending', () => {
   it('deduplicates native transaction IDs within a file and across repeated imports', () => {
     const row =
       '09/01/2026,12:00:00,Coffee,Express Checkout Payment,Completed,USD,-6.50,0,-6.50,abc,'
-    const first = parsePayPalCsv(csv(row, row))
+    const first = parsePayPalCsv(csv(row, row), [], US)
     expect(first.duplicates).toBe(1)
     expect(first.transactions).toHaveLength(1)
-    const second = parsePayPalCsv(csv(row), first.transactions)
+    const second = parsePayPalCsv(csv(row), first.transactions, US)
     expect(second.duplicates).toBe(1)
     expect(second.transactions).toHaveLength(0)
   })
@@ -274,6 +279,8 @@ describe('identity and recurring spending', () => {
         '09/01/2026,12:00:00,Coffee,Express Checkout Payment,Completed,USD,-6.50,0,-6.50,b,',
         '09/02/2026,12:00:00,Coffee,Refund,Completed,USD,6.50,0,6.50,c,a',
       ),
+      [],
+      US,
     )
     expect(result.transactions).toHaveLength(3)
     expect(result.duplicates).toBe(0)
@@ -283,14 +290,14 @@ describe('identity and recurring spending', () => {
     const pending =
       '09/01/2026,12:00:00,Coffee,Express Checkout Payment,Pending,USD,-6.50,0,-6.50,a,'
     const completed = pending.replace('Pending', 'Completed')
-    const first = parsePayPalCsv(csv(pending))
-    const second = parsePayPalCsv(csv(completed), first.transactions)
+    const first = parsePayPalCsv(csv(pending), [], US)
+    const second = parsePayPalCsv(csv(completed), first.transactions, US)
     expect(second.transactions).toHaveLength(1)
     expect(second.transactions[0]!.status).toBe('completed')
-    const together = parsePayPalCsv(csv(pending, completed))
+    const together = parsePayPalCsv(csv(pending, completed), [], US)
     expect(together.transactions).toHaveLength(1)
     expect(together.transactions[0]!.status).toBe('completed')
-    const stale = parsePayPalCsv(csv(completed, pending))
+    const stale = parsePayPalCsv(csv(completed, pending), [], US)
     expect(stale.transactions[0]!.status).toBe('completed')
   })
 
@@ -307,6 +314,8 @@ describe('identity and recurring spending', () => {
         '09/01/2026,12:00:00,Grocery market,Payment Sent,Completed,USD,-100.00,0,-100.00,a,',
         '09/02/2026,12:00:00,Grocery market,Refund,Completed,USD,25.00,0,25.00,b,a',
       ),
+      [],
+      US,
     )
     expect(result.suggestedDailySpendCents).toBe(3750)
   })
@@ -350,7 +359,7 @@ describe('identity and recurring spending', () => {
         `${month}/01/2026,12:00:00,Acme payroll,Payment Received,Completed,USD,4200.00,0,4200.00,pay-${month},`,
       )
     }
-    const result = parsePayPalCsv(csv(...rows))
+    const result = parsePayPalCsv(csv(...rows), [], US)
     expect(result.errors).toEqual([])
     expect(result.recurring).toHaveLength(3)
     expect(result.recurring.every((item) => item.confirmed === false)).toBe(true)
@@ -374,6 +383,8 @@ describe('identity and recurring spending', () => {
               `${date},12:00:00,Apartment rent,Payment Sent,Completed,USD,-1750.00,0,-1750.00,rent-${index},`,
           ),
         ),
+        [],
+        US,
       ).recurring
     // Jul 31, Aug 31, Sep 30 are all month ends, so the next rent is Oct 31, not Oct 30.
     expect(rent('07/31/2026', '08/31/2026', '09/30/2026')).toMatchObject([
@@ -397,7 +408,7 @@ describe('identity and recurring spending', () => {
       (day, index) =>
         `${day}/2026,06:00:00,Acme payroll,Payment Received,Completed,USD,2100.00,0,2100.00,pay-${index},`,
     )
-    const [payroll] = parsePayPalCsv(csv(...rows)).recurring
+    const [payroll] = parsePayPalCsv(csv(...rows), [], US).recurring
     expect(payroll).toMatchObject({ cadence: 'biweekly', nextDate: '2026-10-16' })
     expect(payroll).not.toHaveProperty('anchorDay')
   })
@@ -500,5 +511,97 @@ describe('real PayPal export formats', () => {
       'General Withdrawal',
       'Phone case',
     ])
+  })
+})
+
+describe('date order', () => {
+  it('detects a UK day/month export from any day above 12', () => {
+    const result = parsePayPalCsv(fixture('paypal-uk-ddmm.csv'))
+    expect(result.errors).toEqual([])
+    expect(result).toMatchObject({ needsDateOrder: false, dateOrder: 'DD/MM' })
+    expect(result.transactions.map((item) => item.date)).toEqual([
+      '2026-09-30',
+      '2026-09-21',
+      '2026-09-14',
+      '2026-09-05',
+      '2026-09-01',
+      '2026-08-31',
+      '2026-08-28',
+      '2026-08-14',
+      '2026-08-05',
+      '2026-07-31',
+    ])
+    expect(result.coverageDays).toBe(62)
+    // Groceries only: 192.15 over 62 days. Rent and the subscription are recurring suggestions.
+    expect(result.suggestedDailySpendCents).toBe(Math.round(19215 / 62))
+    expect(result.recurring).toMatchObject([
+      { name: 'Video streaming subscription', kind: 'subscription', anchorDay: 5 },
+      { name: 'Riverside Lettings rent', kind: 'bill', amountCents: 120000, anchorDay: 'last' },
+    ])
+    expect(result.recurring.map((item) => item.nextDate)).toEqual(['2026-10-05', '2026-10-31'])
+  })
+
+  it('asks instead of guessing when every date reads both ways', () => {
+    const text = fixture('paypal-ambiguous-dates.csv')
+    const unanswered = parsePayPalCsv(text)
+    expect(unanswered).toMatchObject({
+      needsDateOrder: true,
+      dateOrder: null,
+      errors: [],
+      transactions: [],
+      totalRows: 10,
+    })
+    expect(unanswered.warnings.join(' ')).toContain('03/04/2026 could be March 4 or April 3')
+    const dayFirst = parsePayPalCsv(text, [], { dateOrder: 'DD/MM' })
+    expect(dayFirst).toMatchObject({
+      needsDateOrder: false,
+      dateOrder: 'DD/MM',
+      coverageDays: 36,
+      suggestedDailySpendCents: Math.round(42118 / 36),
+    })
+    expect(dayFirst.recurring).toMatchObject([
+      { name: 'Video streaming subscription', nextDate: '2026-10-05' },
+    ])
+    // Read the other way, the same rows span January to September and the subscription vanishes.
+    const monthFirst = parsePayPalCsv(text, [], { dateOrder: 'MM/DD' })
+    expect(monthFirst).toMatchObject({ dateOrder: 'MM/DD', coverageDays: 244, recurring: [] })
+  })
+
+  it('never reads 03/04/2026 without an answer', () => {
+    const file = (date: string) => `Date,Name,Currency,Amount\n${date},Shop,USD,-1.00`
+    expect(parsePayPalCsv(file('03/04/2026'))).toMatchObject({
+      needsDateOrder: true,
+      transactions: [],
+    })
+    expect(
+      parsePayPalCsv(file('03/04/2026'), [], { dateOrder: 'MM/DD' }).transactions[0]!.date,
+    ).toBe('2026-03-04')
+    expect(
+      parsePayPalCsv(file('03/04/2026'), [], { dateOrder: 'DD/MM' }).transactions[0]!.date,
+    ).toBe('2026-04-03')
+    // Dates that read the same either way need no answer.
+    for (const date of ['03/03/2026', '2026-03-04'])
+      expect(parsePayPalCsv(file(date))).toMatchObject({ needsDateOrder: false, dateOrder: null })
+  })
+
+  it('lets the file overrule a contradicting answer and rejects mixed orders', () => {
+    const decided = parsePayPalCsv(
+      'Date,Name,Currency,Amount,Transaction ID\n03/04/2026,Shop,USD,-1.00,a\n25/04/2026,Shop,USD,-2.00,b',
+      [],
+      { dateOrder: 'MM/DD' },
+    )
+    expect(decided.dateOrder).toBe('DD/MM')
+    expect(decided.transactions.map((item) => item.date)).toEqual(['2026-04-25', '2026-04-03'])
+    const mixed = parsePayPalCsv(
+      'Date,Name,Currency,Amount\n25/04/2026,Shop,USD,-1.00\n04/25/2026,Shop,USD,-2.00',
+    )
+    expect(mixed.errors).toEqual([
+      {
+        row: 1,
+        message:
+          'Dates in this file mix month/day and day/month order. Export it again so every date uses one format.',
+      },
+    ])
+    expect(mixed.transactions).toEqual([])
   })
 })

@@ -2550,6 +2550,18 @@ button svg {
 .import-dialog .notice strong {
   font-weight: 500;
 }
+.import-date-order {
+  border: 0;
+  margin: 0 0 12px;
+  padding: 0;
+}
+.import-date-order legend {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.import-date-order .check-row {
+  margin: 8px 0;
+}
 .import-stats .notice {
   margin: 0;
   padding: 12px;

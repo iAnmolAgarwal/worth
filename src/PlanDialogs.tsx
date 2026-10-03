@@ -16,6 +16,7 @@ import {
 import type {
   AppState,
   Cadence,
+  DateOrder,
   FinancialProfile,
   FlowKind,
   ImportPreview,
@@ -982,6 +983,8 @@ export function ImportDialog({
   const [preview, setPreview] = useState<ImportPreview | null>(null)
   const [previewedCsv, setPreviewedCsv] = useState('')
   const [acknowledged, setAcknowledged] = useState(false)
+  // Asked only when every date in the file could be read either way.
+  const [dateOrder, setDateOrder] = useState<DateOrder>()
   const [busy, setBusy] = useState<'read' | 'preview' | 'commit' | null>(null)
   const [error, setError] = useState('')
   const activeCheckout = state.purchases.some((purchase) => activeStatuses.has(purchase.status))
@@ -990,6 +993,7 @@ export function ImportDialog({
     setPreview(null)
     setPreviewedCsv('')
     setAcknowledged(false)
+    setDateOrder(undefined)
     setError('')
   }
 
@@ -1016,8 +1020,17 @@ export function ImportDialog({
     }
   }
 
-  const getPreview = async (event: FormEvent<HTMLFormElement>) => {
+  const getPreview = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    void runPreview(dateOrder)
+  }
+
+  const chooseDateOrder = (order: DateOrder) => {
+    setDateOrder(order)
+    void runPreview(order)
+  }
+
+  const runPreview = async (order: DateOrder | undefined) => {
     setError('')
     setAcknowledged(false)
     if (!csv.trim()) {
@@ -1030,7 +1043,10 @@ export function ImportDialog({
     }
     setBusy('preview')
     try {
-      const result = await api<ImportPreview>('/import/preview', { csv })
+      const result = await api<ImportPreview>('/import/preview', {
+        csv,
+        ...(order ? { dateOrder: order } : {}),
+      })
       setPreview(result)
       setPreviewedCsv(csv)
     } catch (failure) {
@@ -1041,11 +1057,21 @@ export function ImportDialog({
   }
 
   const commit = async () => {
-    if (!preview || preview.errors.length || csv !== previewedCsv || !acknowledged) return
+    if (
+      !preview ||
+      preview.errors.length ||
+      preview.needsDateOrder ||
+      csv !== previewedCsv ||
+      !acknowledged
+    )
+      return
     setError('')
     setBusy('commit')
     try {
-      const updated = await api<AppState>('/import/commit', { csv })
+      const updated = await api<AppState>('/import/commit', {
+        csv,
+        ...(dateOrder ? { dateOrder } : {}),
+      })
       onUpdate(updated)
       onClose()
       onReview()
@@ -1138,6 +1164,34 @@ export function ImportDialog({
           aria-live="polite"
         >
           <h3 id="import-preview-heading">Here’s what we found</h3>
+          {(preview.needsDateOrder || dateOrder) && (
+            <fieldset className="import-date-order" disabled={Boolean(busy)}>
+              <legend>How does this file write dates?</legend>
+              <p className="muted">
+                Every date here could be read two ways. Choose the order your PayPal account uses.
+              </p>
+              {(
+                [
+                  ['MM/DD', 'Month first, as in the US', '03/04/2026 is March 4'],
+                  ['DD/MM', 'Day first, as in the UK', '03/04/2026 is 3 April'],
+                ] as const
+              ).map(([order, label, example]) => (
+                <label className="check-row" key={order}>
+                  <input
+                    type="radio"
+                    name="import-date-order"
+                    value={order}
+                    checked={dateOrder === order}
+                    onChange={() => chooseDateOrder(order)}
+                  />
+                  <span>
+                    <strong>{label}</strong>
+                    <small>{example}</small>
+                  </span>
+                </label>
+              ))}
+            </fieldset>
+          )}
           <div className="form-grid import-stats">
             <div className="notice">
               <strong>{preview.totalRows}</strong>
@@ -1233,7 +1287,7 @@ export function ImportDialog({
               </table>
             </div>
           )}
-          {preview.errors.length === 0 && (
+          {preview.errors.length === 0 && !preview.needsDateOrder && (
             <label className="check-row">
               <input
                 type="checkbox"
@@ -1272,6 +1326,7 @@ export function ImportDialog({
           disabled={
             !preview ||
             preview.errors.length > 0 ||
+            preview.needsDateOrder ||
             !acknowledged ||
             csv !== previewedCsv ||
             Boolean(busy) ||

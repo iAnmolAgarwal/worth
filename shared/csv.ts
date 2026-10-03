@@ -1,5 +1,5 @@
 import Papa from 'papaparse'
-import type { Cadence, ImportPreview, ScheduledFlow, Transaction } from './types.ts'
+import type { Cadence, DateOrder, ImportPreview, ScheduledFlow, Transaction } from './types.ts'
 import { occurrence, todayInTimezone } from './finance.ts'
 import { CSV_IMPORT_LIMITS, CSV_SIZE_MESSAGE, utf8Bytes } from './limits.ts'
 
@@ -48,13 +48,45 @@ function hash(value: string): string {
   return `${(first >>> 0).toString(36)}${(second >>> 0).toString(36)}`
 }
 
-function parseDate(value: string): string | null {
+const SLASH_DATE = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/
+
+/**
+ * Reads the order of a file's slash dates. PayPal formats dates by the account's country, so the
+ * file decides: a first part above 12 means DD/MM and a second part above 12 means MM/DD. When no
+ * date settles it, `ambiguous` reports whether any date would read differently either way.
+ */
+function detectDateOrder(values: string[]): {
+  order: DateOrder | null
+  ambiguous: boolean
+  mixed: boolean
+} {
+  let dayFirst = false
+  let monthFirst = false
+  let ambiguous = false
+  for (const value of values) {
+    const match = value.trim().match(SLASH_DATE)
+    if (!match) continue
+    const [first, second] = [Number(match[1]), Number(match[2])]
+    if (first > 12) dayFirst = true
+    else if (second > 12) monthFirst = true
+    else if (first !== second) ambiguous = true
+  }
+  return {
+    order: dayFirst === monthFirst ? null : dayFirst ? 'DD/MM' : 'MM/DD',
+    ambiguous: !dayFirst && !monthFirst && ambiguous,
+    mixed: dayFirst && monthFirst,
+  }
+}
+
+function parseDate(value: string, order: DateOrder): string | null {
   let candidate: string
   const iso = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T].*)?$/)
-  const us = value.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  const slash = value.trim().match(SLASH_DATE)
   if (iso) candidate = `${iso[1]}-${iso[2]}-${iso[3]}`
-  else if (us) candidate = `${us[3]}-${us[1]!.padStart(2, '0')}-${us[2]!.padStart(2, '0')}`
-  else return null
+  else if (slash) {
+    const [month, day] = order === 'DD/MM' ? [slash[2]!, slash[1]!] : [slash[1]!, slash[2]!]
+    candidate = `${slash[3]}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
+  } else return null
   const date = new Date(`${candidate}T12:00:00Z`)
   return Number.isFinite(date.valueOf()) && date.toISOString().slice(0, 10) === candidate
     ? candidate
@@ -262,10 +294,17 @@ function recurringSuggestions(
   return { flows: flows.sort((a, b) => a.nextDate.localeCompare(b.nextDate)), ids }
 }
 
+export interface ParseOptions {
+  /** Today in the profile's time zone. Without it, today in New York is used. */
+  today?: string
+  /** The user's answer when every slash date in the file could be read either way. */
+  dateOrder?: DateOrder
+}
+
 export function parsePayPalCsv(
   text: string,
   existing: Transaction[] = [],
-  options: { today?: string } = {},
+  options: ParseOptions = {},
 ): ImportPreview {
   const result: ImportPreview = {
     transactions: [],
@@ -279,6 +318,8 @@ export function parsePayPalCsv(
     warnings: [],
     adjustments: [],
     leftOut: { memo: 0, holds: 0 },
+    dateOrder: null,
+    needsDateOrder: false,
   }
   if (!text.trim()) {
     result.errors.push({ row: 1, message: 'The file is empty.' })
@@ -319,6 +360,25 @@ export function parsePayPalCsv(
   }
   const get = (row: Record<string, string>, field: keyof typeof aliases) =>
     (selected[field] ? (row[selected[field]!] ?? '') : '').trim()
+  const dates = detectDateOrder(parsed.data.map((row) => get(row, 'date')))
+  if (dates.mixed) {
+    result.errors.push({
+      row: 1,
+      message:
+        'Dates in this file mix month/day and day/month order. Export it again so every date uses one format.',
+    })
+    return result
+  }
+  // A date such as 03/04/2026 is never guessed: the file decides, or the user does.
+  if (dates.ambiguous && !options.dateOrder) {
+    result.needsDateOrder = true
+    result.warnings.push(
+      'Every date in this file could be read two ways; 03/04/2026 could be March 4 or April 3. Choose whether it uses month/day (US) or day/month order.',
+    )
+    return result
+  }
+  result.dateOrder = dates.order ?? (dates.ambiguous ? options.dateOrder! : null)
+  const dateOrder = result.dateOrder ?? 'MM/DD'
   const knownById = new Map(existing.map((transaction) => [transaction.id, transaction]))
   const capturedPurchases = new Map(
     existing
@@ -332,7 +392,7 @@ export function parsePayPalCsv(
   for (let index = 0; index < parsed.data.length; index++) {
     const row = parsed.data[index]!
     const rowNumber = index + 2
-    const date = parseDate(get(row, 'date'))
+    const date = parseDate(get(row, 'date'), dateOrder)
     const amount = parseCents(get(row, 'amount'))
     const currency = get(row, 'currency').toUpperCase()
     const type = get(row, 'type')
@@ -351,7 +411,7 @@ export function parsePayPalCsv(
     if (!date) {
       result.errors.push({
         row: rowNumber,
-        message: 'Invalid date. Use YYYY-MM-DD or the US MM/DD/YYYY format.',
+        message: `Invalid date. Use YYYY-MM-DD or ${dateOrder}/YYYY, the order the rest of this file uses.`,
       })
       continue
     }

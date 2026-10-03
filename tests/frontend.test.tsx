@@ -233,6 +233,8 @@ describe('conversation isolation across financial sessions', () => {
       warnings: [],
       adjustments: [],
       leftOut: { memo: 0, holds: 0 },
+      dateOrder: null,
+      needsDateOrder: false,
     }
     routeApi((path, data) => {
       if (path === '/state') return demo

@@ -198,7 +198,7 @@ describe('HTTP sessions, profiles, and calculations', () => {
     await state(agent)
     const csv =
       'Date,Name,Net,Currency,Type,Status,Transaction ID\n10/01/2026,Coffee,-5.00,USD,Payment,Completed,ABC123'
-    expect((await post(agent, '/api/import/commit', { csv })).status).toBe(200)
+    expect((await post(agent, '/api/import/commit', { csv, dateOrder: 'MM/DD' })).status).toBe(200)
     expect((await state(agent)).profile.source).toBe('import')
     clock.value = new Date('2026-10-04T12:00:01Z')
     expect((await state(agent)).profile.source).toBe('demo')
@@ -214,16 +214,19 @@ describe('HTTP sessions, profiles, and calculations', () => {
     const { agent } = setup()
     const csv =
       'Date,Name,Net,Currency,Type,Status,Transaction ID\n10/01/2026,Coffee,-5.00,USD,Payment,Completed,ABC123'
-    const first = await post(agent, '/api/import/commit', { csv })
+    const first = await post(agent, '/api/import/commit', { csv, dateOrder: 'MM/DD' })
     expect(first.status).toBe(200)
     expect(first.body.profile.balanceCents).toBe(0)
     expect(first.body.profile.flows).toEqual([])
     expect(first.body.profile.confirmed).toBe(false)
-    expect((await post(agent, '/api/import/commit', { csv })).body.transactions).toHaveLength(1)
+    expect(
+      (await post(agent, '/api/import/commit', { csv, dateOrder: 'MM/DD' })).body.transactions,
+    ).toHaveLength(1)
     expect(
       (
         await post(agent, '/api/import/commit', {
           csv: csv + '\n10/02/2026,Bad,-3.00,EUR,Payment,Completed,ABC124',
+          dateOrder: 'MM/DD',
         })
       ).status,
     ).toBe(400)
@@ -240,6 +243,7 @@ describe('HTTP sessions, profiles, and calculations', () => {
     const { agent } = setup({ chat: { reply } })
     await post(agent, '/api/import/commit', {
       csv: 'Date,Name,Net,Currency,Type,Status\n10/01/2026,Coffee,-5.00,USD,Payment,Completed',
+      dateOrder: 'MM/DD',
     })
     const response = await post(agent, '/api/chat', { message: 'What did I spend?', history: [] })
     expect(response.body.mode).toBe('demo')
@@ -262,6 +266,7 @@ describe('HTTP sessions, profiles, and calculations', () => {
     const { agent } = setup({ chat: { reply } })
     await post(agent, '/api/import/commit', {
       csv: 'Date,Name,Net,Currency,Type,Status\n10/01/2026,Coffee,-5.00,USD,Payment,Completed',
+      dateOrder: 'MM/DD',
     })
     const personal = await state(agent)
     await patch(agent, { profile: { ...personal.profile, aiConsent: true } })
@@ -401,6 +406,7 @@ describe('HTTP sessions, profiles, and calculations', () => {
     const { agent } = setup({ chat: { reply } })
     const imported = await post(agent, '/api/import/commit', {
       csv: 'Date,Name,Net,Currency,Type,Status\n10/01/2026,Coffee,-5.00,USD,Payment,Completed',
+      dateOrder: 'MM/DD',
     })
     expect(imported.body.profile.userEdited).toBe(true)
     const ask = async () =>
@@ -776,7 +782,7 @@ describe('reviewable transaction category proposals', () => {
     const { agent } = setup({ chat })
     const csv =
       'Date,Name,Net,Currency,Type,Status,Transaction ID\n10/01/2026,Coffee,-5.00,USD,Payment,Completed,PRIVATE123'
-    await post(agent, '/api/import/commit', { csv })
+    await post(agent, '/api/import/commit', { csv, dateOrder: 'MM/DD' })
     expect((await post(agent, '/api/transactions/categories')).body.mode).toBe('demo')
     expect(categorize).not.toHaveBeenCalled()
     const current = await state(agent)
@@ -789,7 +795,7 @@ describe('reviewable transaction category proposals', () => {
     const { app, agent } = setup()
     const csv =
       'Date,Name,Net,Currency,Type,Status,Transaction ID\n10/01/2026,Coffee,-5.00,USD,Payment,Completed,PRIVATE123'
-    await post(agent, '/api/import/commit', { csv })
+    await post(agent, '/api/import/commit', { csv, dateOrder: 'MM/DD' })
     const before = await state(agent)
     const transaction = before.transactions[0]!
     const other = request.agent(app)
@@ -1630,6 +1636,45 @@ describe('real PayPal exports', () => {
   })
 })
 
+describe('import date order', () => {
+  it('refuses to import an ambiguous file until the user chooses the date order', async () => {
+    const { agent } = setup()
+    const csv = fixture('paypal-ambiguous-dates.csv')
+    const preview = await post(agent, '/api/import/preview', { csv })
+    expect(preview.body).toMatchObject({ needsDateOrder: true, dateOrder: null, transactions: [] })
+    const refused = await post(agent, '/api/import/commit', { csv })
+    expect(refused.status).toBe(400)
+    expect(refused.body.code).toBe('DATE_ORDER_REQUIRED')
+    expect((await state(agent)).profile.source).toBe('demo')
+    expect((await post(agent, '/api/import/commit', { csv, dateOrder: 'D/M' })).status).toBe(400)
+    const imported = await post(agent, '/api/import/commit', { csv, dateOrder: 'DD/MM' })
+    expect(imported.status).toBe(200)
+    expect(imported.body.transactions.map((t: { date: string }) => t.date).slice(-2)).toEqual([
+      '2026-09-01',
+      '2026-08-05',
+    ])
+    expect(imported.body.profile).toMatchObject({ coverageDays: 36, dailySpendCents: 1170 })
+    expect(imported.body.profile.flows).toMatchObject([
+      { name: 'Video streaming subscription', nextDate: '2026-10-05', confirmed: false },
+    ])
+  })
+  it('imports a UK export without asking because its dates decide the order', async () => {
+    const { agent } = setup()
+    const csv = fixture('paypal-uk-ddmm.csv')
+    expect((await post(agent, '/api/import/preview', { csv })).body).toMatchObject({
+      needsDateOrder: false,
+      dateOrder: 'DD/MM',
+      errors: [],
+    })
+    const imported = await post(agent, '/api/import/commit', { csv })
+    expect(imported.status).toBe(200)
+    expect(imported.body.profile.flows.map((f: { nextDate: string }) => f.nextDate)).toEqual([
+      '2026-10-05',
+      '2026-10-31',
+    ])
+  })
+})
+
 describe('import size limit', () => {
   it('accepts a fully quoted export just under 1 MB and rejects one just over it', async () => {
     const { agent } = setup()
@@ -1669,18 +1714,28 @@ describe('stored transaction cap', () => {
     const rows = (ids: string[]) =>
       'Date,Name,Net,Currency,Type,Status,Transaction ID\n' +
       ids.map((id) => `10/01/2026,Coffee ${id},-5.00,USD,Payment,Completed,${id}`).join('\n')
-    expect((await post(agent, '/api/import/commit', { csv: rows(['A', 'B']) })).status).toBe(200)
+    expect(
+      (await post(agent, '/api/import/commit', { csv: rows(['A', 'B']), dateOrder: 'MM/DD' }))
+        .status,
+    ).toBe(200)
     // Re-importing known rows does not count twice.
-    expect((await post(agent, '/api/import/commit', { csv: rows(['A', 'B', 'C']) })).status).toBe(
-      200,
-    )
-    const preview = await post(agent, '/api/import/preview', { csv: rows(['D', 'E']) })
+    expect(
+      (await post(agent, '/api/import/commit', { csv: rows(['A', 'B', 'C']), dateOrder: 'MM/DD' }))
+        .status,
+    ).toBe(200)
+    const preview = await post(agent, '/api/import/preview', {
+      csv: rows(['D', 'E']),
+      dateOrder: 'MM/DD',
+    })
     expect(preview.body.errors[0]).toEqual({
       row: 1,
       message:
         'This import would keep 5 transactions, but a session holds at most 3. Import a shorter date range.',
     })
-    const rejected = await post(agent, '/api/import/commit', { csv: rows(['D', 'E']) })
+    const rejected = await post(agent, '/api/import/commit', {
+      csv: rows(['D', 'E']),
+      dateOrder: 'MM/DD',
+    })
     expect(rejected.status).toBe(400)
     expect(rejected.body.code).toBe('TOO_MANY_TRANSACTIONS')
     expect(rejected.body.error).toContain('at most 3')
