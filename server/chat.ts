@@ -504,9 +504,8 @@ class Turn {
   clarify?: Exclude<InterpretResult, { ok: true }>
   kind?: CommitmentKind
   read = new Set<string>()
-  presentation?: Presentation
-  /** Presentation from the purchase reading, which wins over other tools in the same round. */
-  purchasePresentation?: Presentation
+  /** What Claude chose to show, kept per tool so the answer uses the choice made for it. */
+  presentations = new Map<string, Presentation>()
   constructor(
     readonly input: ChatInput,
     readonly data: ChatData,
@@ -557,7 +556,7 @@ class Turn {
   private ok(name: string, chosen: Presentation, result: unknown): ToolOutcome {
     this.calls.push(name)
     this.read.add(name)
-    this.presentation = chosen
+    this.presentations.set(name, chosen)
     return { content: JSON.stringify(result) }
   }
 
@@ -572,7 +571,7 @@ class Turn {
     if (!result.ok) {
       this.clarify = result
       if (result.retryable) return { content: result.detail, isError: true }
-      this.purchasePresentation = chosen
+      this.presentations.set('interpret_purchase', chosen)
       return {
         content: JSON.stringify({
           status: 'needs_clarification',
@@ -585,7 +584,7 @@ class Turn {
     this.clarify = undefined
     this.interpretation = result.interpretation
     this.assessment = assess(this.data, result.interpretation)
-    this.purchasePresentation = chosen
+    this.presentations.set('interpret_purchase', chosen)
     this.calls.push('interpret_purchase')
     const a = this.assessment
     return {
@@ -659,7 +658,6 @@ function suggestionsFor(raw: string[], data: ChatData): string[] {
 function answerFor(turn: Turn, final: Final | undefined): Answer {
   const { input, data } = turn
   const base = { mode: 'anthropic' as const, toolCalls: turn.calls }
-  const chosen = turn.purchasePresentation ?? turn.presentation
   let answer: Answer
   if (turn.assessment)
     answer = {
@@ -697,11 +695,22 @@ function answerFor(turn: Turn, final: Final | undefined): Answer {
         kind: turn.kind ?? commitmentKind(input.message),
       }
   }
-  // Claude's fact choice applies only to the facts of the tool that produced this answer.
-  const fromTool =
-    (answer.assessment && turn.assessment && turn.purchasePresentation) ||
-    (!answer.assessment && turn.calls.length > 0 && turn.presentation)
-  if (fromTool && chosen) answer.presentation = chosen
+  // Claude's choice of facts and lead-in applies only with the tool that produced this
+  // answer; with two tools in one round, each keeps its own choice.
+  const source =
+    answer.assessment || answer.intent === 'clarify'
+      ? turn.assessment || turn.clarify
+        ? 'interpret_purchase'
+        : undefined
+      : answer.intent === 'subscriptions'
+        ? 'list_commitments'
+        : answer.intent === 'spending'
+          ? 'spending_summary'
+          : answer.intent === 'overview'
+            ? 'get_plan_summary'
+            : undefined
+  const chosen = source ? turn.presentations.get(source) : undefined
+  if (chosen) answer.presentation = chosen
   const followUps = chosen?.followUps ?? final?.follow_ups ?? []
   if (answer.intent !== 'off_topic') answer.suggestions = suggestionsFor(followUps, data)
   return answer

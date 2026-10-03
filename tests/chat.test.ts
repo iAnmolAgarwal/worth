@@ -562,6 +562,23 @@ describe('Claude picks engine facts; the server writes them (C-13)', () => {
     expect(reply.points?.map((p) => p.id)).toEqual(['wait', 'spend_less'])
   })
 
+  it('keeps each tool’s own lead-in and facts when two tools run in one round', async () => {
+    const { provider } = model([
+      [
+        ...readTool('list_commitments', {
+          kind: 'subscriptions',
+          points: ['total'],
+          lead_in: 'coming_up',
+        }),
+        ...readTool('get_plan_summary', { points: ['room_today'], lead_in: 'room' }),
+      ],
+    ])
+    const reply = await provider.reply(ask('What subscriptions are coming up?'), demo())
+    expect(reply.intent).toBe('subscriptions')
+    expect(reply.lead).toBe('Here’s what’s coming up:')
+    expect(reply.points?.map((p) => p.id)).toEqual(['total'])
+  })
+
   it('shows no points when Claude chose none, and never in local mode', async () => {
     const { provider } = model([interpret([item('camera', 119900)], { points: [] })])
     const reply = await provider.reply(ask('Can I afford a $1,199 camera?'), demo())

@@ -5,7 +5,7 @@ import type { ProbeResult, Recorded } from '../eval/harness.ts'
 import { EVAL_TODAY, PROBES } from '../eval/probes.ts'
 
 // Fixture mode of the AI eval: recorded model responses are replayed through the real
-// server pipeline (validation, engine, templates, narration guard), so a change to any
+// server pipeline (validation, engine, fact catalogs, chip filter), so a change to any
 // of them is graded against real model behaviour without calling the API.
 
 interface Fixture {
