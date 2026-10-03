@@ -631,7 +631,13 @@ export function createApp(options: AppOptions = {}) {
     noActive(id)
     savePurchase(
       id,
-      confirmRefund(purchaseFor(req, res), String(req.params.refundId), input, now()),
+      confirmRefund(
+        purchaseFor(req, res),
+        String(req.params.refundId),
+        input,
+        now(),
+        today(dataFor(res).profile.timezone),
+      ),
     )
     res.json(state(id))
   })

@@ -1,4 +1,4 @@
-import { addDays } from '../shared/finance.ts'
+import { addDays, confirmedSchedule } from '../shared/finance.ts'
 import type { PlanInstalment, PurchaseRefund } from '../shared/types.ts'
 import type { Store, StoredPurchase } from './store.ts'
 
@@ -57,7 +57,14 @@ function checkSchedule(purchase: StoredPurchase, instalments: PlanInstalment[]) 
  */
 export function confirmPlan(purchase: StoredPurchase, input: PlanInput, now: Date): StoredPurchase {
   settled(purchase)
-  if (purchase.refunds?.some((refund) => refund.status === 'confirmed'))
+  // After a confirmed refund the schedule is fixed, but an unconfirmed product can still be settled
+  // as a full payment so its prompt clears.
+  const plan = purchase.paymentPlan
+  const scheduled = plan?.product === 'payIn4' && plan.status === 'confirmed'
+  if (
+    purchase.refunds?.some((refund) => refund.status === 'confirmed') &&
+    (input.product !== 'full' || scheduled)
+  )
     throw new PlanError(
       409,
       'A confirmed refund already set the remaining payments for this purchase.',
@@ -150,6 +157,7 @@ export function confirmRefund(
   refundId: string,
   input: RefundConfirmation,
   now: Date,
+  today: string,
 ): StoredPurchase {
   settled(purchase)
   const refund = purchase.refunds?.find((item) => item.id === refundId)
@@ -187,6 +195,17 @@ export function confirmRefund(
       throw new PlanError(
         400,
         'The remaining payments can’t add up to more than the purchase.',
+        'INVALID_REFUND',
+      )
+    // A refund can't cancel more of the plan, plus the money returned, than the merchant refunded.
+    // A payment due today may already be taken, so only later payments count as still owed.
+    const owed = (confirmedSchedule(purchase) ?? [])
+      .filter((item) => item.date > today)
+      .reduce((sum, item) => sum + item.amountCents, 0)
+    if (owed - total + input.returnedCents > refund.amountCents)
+      throw new PlanError(
+        400,
+        'The payments removed and the money returned can’t add up to more than the refund.',
         'INVALID_REFUND',
       )
   }

@@ -198,6 +198,14 @@ describe('confirming how a purchase is repaid', () => {
     const compared = (await post(agent, '/api/compare', { productId: 'headphones' })).body
     expect(compared.payIn4.stacking.activePlans).toBe(2)
 
+    // A day later, before Maya refreshes her funds, the whole price still counts.
+    clock.value = new Date(`${addDays(TODAY, 1)}T05:00:00Z`)
+    const nextDay = await purchaseOutflows(agent)
+    expect(nextDay.reduce((total, [, cents]) => total + (cents as number), 0)).toBe(119900)
+    expect(nextDay[0]).toEqual([addDays(TODAY, 1), 29975])
+    expect((await post(agent, '/api/assess', { amountCents: 0 })).body.outcome).toBe('tight')
+    clock.value = new Date(`${TODAY}T12:00:00Z`)
+
     // Correcting the product back to a full payment restores the single debit.
     const full = await post(agent, `/api/purchases/${camera.id}/plan`, { product: 'full' })
     expect(full.body.purchases[0].paymentPlan).toMatchObject({ product: 'full' })
@@ -347,6 +355,66 @@ describe('refund review', () => {
     expect(
       (await post(agent, `/api/purchases/${camera.id}/plan`, { product: 'full' })).body.code,
     ).toBe('REFUND_CONFIRMED')
+  })
+
+  it('uses entered remaining payments exactly, even when money also came back', async () => {
+    const { agent, camera, record } = await plannedCamera()
+    record('REFUND-1', 34900)
+    const remaining = [
+      { date: addDays(TODAY, 14), amountCents: 29975 },
+      { date: addDays(TODAY, 28), amountCents: 29975 },
+      { date: addDays(TODAY, 42), amountCents: 20000 },
+    ]
+    // Today's payment was made: $299.75 + $149 returned + $99.75 off the last payment = $349.
+    const confirmed = await post(agent, `/api/purchases/${camera.id}/refunds/REFUND-1/confirm`, {
+      returnedCents: 14900,
+      remainingInstalments: remaining,
+    })
+    expect(confirmed.status).toBe(200)
+    expect(await purchaseOutflows(agent)).toEqual(
+      remaining.map((item) => [item.date, item.amountCents]),
+    )
+  })
+
+  it('refuses a refund that would cancel more than the merchant refunded', async () => {
+    const { agent, camera, record } = await plannedCamera()
+    record('REFUND-1', 100)
+    const path = `/api/purchases/${camera.id}/refunds/REFUND-1/confirm`
+    const wiped = await post(agent, path, { returnedCents: 0, remainingInstalments: [] })
+    expect(wiped.status).toBe(400)
+    expect(wiped.body.code).toBe('INVALID_REFUND')
+    const schedule = payIn4Schedule(119900, TODAY)
+    const lastPayment = { ...schedule[3]!, amountCents: schedule[3]!.amountCents - 100 }
+    const overReturned = await post(agent, path, {
+      returnedCents: 1,
+      remainingInstalments: [...schedule.slice(1, 3), lastPayment],
+    })
+    expect(overReturned.status).toBe(400)
+    const exact = await post(agent, path, {
+      returnedCents: 0,
+      remainingInstalments: [...schedule.slice(1, 3), lastPayment],
+    })
+    expect(exact.status).toBe(200)
+  })
+
+  it('lets a full payment clear the plan prompt after a refund is confirmed', async () => {
+    const { app, store, agent } = setup(fakePayPal())
+    const camera = await buy(agent, 'camera')
+    ;(app.locals.recordRefund as (...args: unknown[]) => Purchase)(
+      sessionOf(store),
+      camera.id,
+      'REFUND-1',
+      10000,
+    )
+    await post(agent, `/api/purchases/${camera.id}/refunds/REFUND-1/confirm`, { returnedCents: 0 })
+    const full = await post(agent, `/api/purchases/${camera.id}/plan`, { product: 'full' })
+    expect(full.status).toBe(200)
+    expect(full.body.reviews).toEqual([])
+    const payIn4 = await post(agent, `/api/purchases/${camera.id}/plan`, {
+      product: 'payIn4',
+      instalments: payIn4Schedule(119900, TODAY),
+    })
+    expect(payIn4.body.code).toBe('REFUND_CONFIRMED')
   })
 
   it('leaves the payments due after a store-credit refund', async () => {
