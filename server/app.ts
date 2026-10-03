@@ -11,6 +11,7 @@ import {
   normalizeTimezone,
   payIn4InRange,
   purchaseReviews,
+  withoutOwnHold,
 } from '../shared/finance.ts'
 import { createDemoState, DEMO_TIMEZONE, PRODUCTS, rebaseDemoState } from '../shared/seed.ts'
 import {
@@ -905,7 +906,12 @@ export function createApp(options: AppOptions = {}) {
         'Choose a purchase date from today through 30 days ahead.',
         'INVALID_DATE',
       )
-    res.json(assessPurchase(current.profile, current.purchases, { ...input, today: current.today }))
+    res.json(
+      assessPurchase(current.profile, withoutOwnHold(current.purchases, input), {
+        ...input,
+        today: current.today,
+      }),
+    )
   })
   app.post('/api/compare', async (req, res) => {
     const input = compareSchema.parse(req.body)
@@ -917,12 +923,20 @@ export function createApp(options: AppOptions = {}) {
     // PayPal's eligibility check runs first; the session is read afterwards so it is current.
     const eligibility = await payIn4Eligibility(amountCents)
     const current = state(sessionId(res))
-    const comparison = compareOptions(current.profile, current.purchases, {
-      amountCents,
-      itemName: product?.name ?? input.itemName,
-      today: current.today,
-      payIn4Eligible: eligibility !== 'unavailable',
-    })
+    const comparison = compareOptions(
+      current.profile,
+      withoutOwnHold(current.purchases, {
+        productId: product?.id,
+        itemName: product?.name ?? input.itemName,
+        amountCents,
+      }),
+      {
+        amountCents,
+        itemName: product?.name ?? input.itemName,
+        today: current.today,
+        payIn4Eligible: eligibility !== 'unavailable',
+      },
+    )
     res.json({ ...comparison, payIn4: { ...comparison.payIn4, eligibility } })
   })
   /** Saves a purchase's new cash effect and moves the plan version, so older answers expire. */

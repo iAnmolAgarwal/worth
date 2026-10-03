@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
-import { addDays, assessPurchase, money } from '../shared/finance.ts'
+import { addDays, assessPurchase, money, withoutOwnHold } from '../shared/finance.ts'
 import { PRODUCTS } from '../shared/seed.ts'
 import type {
   Assessment,
@@ -198,9 +198,14 @@ function compose(answer: Answer, data: ChatData): ChatReply {
   }
 }
 function assess(data: ChatData, interpretation: Interpretation) {
-  return assessPurchase(data.profile, data.purchases, {
+  const itemName = itemLabel(interpretation.items)
+  const purchases = withoutOwnHold(data.purchases, {
+    itemName,
     amountCents: interpretation.amountCents,
-    itemName: itemLabel(interpretation.items),
+  })
+  return assessPurchase(data.profile, purchases, {
+    amountCents: interpretation.amountCents,
+    itemName,
     purchaseDate: interpretation.date,
     today: data.today,
   })
@@ -653,7 +658,11 @@ class Turn {
     const product = PRODUCTS.find((p) => p.id === parsed.data.item_id)
     // The answer shows the engine's assessment of the item, at its catalog price, today.
     if (product && !this.assessment && !this.clarify) {
-      this.assessment = assessPurchase(this.data.profile, this.data.purchases, {
+      const purchases = withoutOwnHold(this.data.purchases, {
+        productId: product.id,
+        amountCents: product.priceCents,
+      })
+      this.assessment = assessPurchase(this.data.profile, purchases, {
         amountCents: product.priceCents,
         itemName: product.name,
         today: this.data.today,

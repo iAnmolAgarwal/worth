@@ -698,6 +698,30 @@ function fullPurchase(date: string, amountCents: number, itemName: string): Scen
   return [{ id: `proposed:${date}`, name: itemName, date, amountCents }]
 }
 
+const HOLD_STATUSES = new Set<Purchase['status']>(['created', 'pending', 'unknown'])
+const nameWords = (name = '') => new Set(name.toLowerCase().match(/[a-z]{4,}/g) ?? [])
+/**
+ * Purchases to count when assessing an item, without that item's own checkout hold. A hold for
+ * the item already reduces the plan; counting it again would judge the item against itself.
+ * The hold is matched by product, or by price and a shared word in the name.
+ */
+export function withoutOwnHold(
+  purchases: Purchase[],
+  item: { productId?: string; itemName?: string; amountCents: number },
+): Purchase[] {
+  const words = nameWords(item.itemName)
+  return purchases.filter(
+    (purchase) =>
+      !(
+        HOLD_STATUSES.has(purchase.status) &&
+        (item.productId
+          ? purchase.productId === item.productId
+          : purchase.amountCents === item.amountCents &&
+            [...nameWords(purchase.name)].some((word) => words.has(word)))
+      ),
+  )
+}
+
 /**
  * The illustrative Pay in 4 schedule: four whole-cent payments on days 0, 14, 28 and 42, with any
  * remainder on the first. $1,199.00 is 4 × $299.75; $10.03 is $2.53 then 3 × $2.50.
