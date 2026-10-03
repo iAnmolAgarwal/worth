@@ -13,6 +13,7 @@ import {
 import type { Assessment, Product } from '../shared/types'
 import { api, ApiError } from './api'
 import type { AppState, Comparison, Purchase } from './contract'
+import { dateInTimezone } from '../shared/finance'
 import { firstBelow, lower } from './engine'
 import { cx, dayLabel, money, signed } from './format'
 import { PayPalButton, useEligibility, type SdkStatus } from './paypal'
@@ -20,21 +21,35 @@ import type { PayPalSdkInstance, PayPalSessionCallbacks } from './paypalSdk'
 import { Alert, Button, Dialog } from './ui'
 
 export type CheckoutView =
-  'review' | 'waiting' | 'approved' | 'completed' | 'declined' | 'failed' | 'cancelled' | 'checking'
+  | 'review'
+  | 'approve'
+  | 'waiting'
+  | 'approved'
+  | 'completed'
+  | 'declined'
+  | 'failed'
+  | 'cancelled'
+  | 'checking'
 
 /** Status drives everything: heading, icon, body and action all come from the purchase status. */
-export function checkoutView(purchase: Purchase | undefined, approved: boolean): CheckoutView {
+export function checkoutView(
+  purchase: Purchase | undefined,
+  approved: boolean,
+  /** PayPal was opened from this screen; until then a created order leads with the button. */
+  opened = true,
+): CheckoutView {
   if (!purchase) return 'review'
   if (purchase.status === 'completed') return 'completed'
   if (purchase.status === 'cancelled') return 'cancelled'
   if (purchase.needsReapproval) return 'declined'
   if (purchase.status === 'failed') return 'failed'
   if (purchase.status === 'pending' || purchase.status === 'unknown') return 'checking'
-  return approved || purchase.mode === 'demo' ? 'approved' : 'waiting'
+  return approved || purchase.mode === 'demo' ? 'approved' : opened ? 'waiting' : 'approve'
 }
 
 const STEP: Record<CheckoutView, number> = {
   review: 1,
+  approve: 2,
   waiting: 2,
   declined: 2,
   approved: 3,
@@ -105,6 +120,8 @@ export function Checkout({
   )
   const purchase = state.purchases.find((p) => p.id === localPurchase?.id) ?? localPurchase
   const [approved, setApproved] = useState(returnedApproved)
+  /** Whether PayPal was opened from this screen. A reopened or agent-prepared order starts closed. */
+  const [opened, setOpened] = useState(false)
   const [assessment, setAssessment] = useState<Assessment>()
   const [room, setRoom] = useState<Comparison>()
   const [fundsOk, setFundsOk] = useState(false)
@@ -120,7 +137,7 @@ export function Checkout({
   /** The server asks for an explicit "buy anyway" before capturing below the cushion. */
   const [shortfall, setShortfall] = useState(false)
   const heading = useRef<HTMLHeadingElement>(null)
-  const view = checkoutView(purchase, approved)
+  const view = checkoutView(purchase, approved, opened)
   const hasPurchase = Boolean(purchase)
   const sandbox = state.config.paypal === 'sandbox'
   const eligibility = useEligibility(sandbox ? instance : undefined, product.priceCents)
@@ -168,8 +185,10 @@ export function Checkout({
           setNotice('')
         } else setNotice('PayPal approved a different order. Check this checkout before you pay.')
       },
-      onCancel: () =>
-        setNotice('You closed PayPal before approving. Reopen PayPal, or cancel this checkout.'),
+      onCancel: () => {
+        setOpened(false)
+        setNotice('You closed PayPal before approving. Open it again, or cancel this checkout.')
+      },
       onError: (failure) =>
         setError(
           `PayPal’s window couldn’t finish${failure?.code ? ` (${failure.code})` : ''}. Reopen PayPal to try again.`,
@@ -186,6 +205,7 @@ export function Checkout({
   }
 
   async function create() {
+    setOpened(true)
     setBusy(true)
     setError('')
     setNotice('')
@@ -244,6 +264,7 @@ export function Checkout({
     setError('')
     setNotice('')
     setApproved(false)
+    setOpened(true)
     if (sandbox && sdkReady && instance && purchase.orderId) {
       try {
         await instance
@@ -356,6 +377,12 @@ export function Checkout({
             ? 'Fresh check: buying today takes you below your cushion.'
             : 'Funds confirmed today · fresh check passed.',
     },
+    approve: {
+      icon: Lock,
+      tone: 'neutral',
+      title: 'Approve in PayPal',
+      body: 'Your order is ready. Approve it in PayPal, then confirm here. Nothing is charged until you do.',
+    },
     waiting: {
       icon: LoaderCircle,
       spin: true,
@@ -376,7 +403,7 @@ export function Checkout({
       icon: Check,
       tone: 'ok',
       title: `Paid ${money(purchase?.amountCents ?? product.priceCents)}`,
-      body: `${product.merchant} · ${dayLabel((purchase?.completedAt ?? state.today).slice(0, 10))} · ${mode === 'sandbox' ? 'PayPal sandbox' : 'simulated'}`,
+      body: `${product.merchant} · ${dayLabel(purchase?.completedAt ? dateInTimezone(purchase.completedAt, state.profile.timezone) : state.today)} · ${mode === 'sandbox' ? 'PayPal sandbox' : 'simulated'}`,
     },
     declined: {
       icon: CircleAlert,
@@ -424,7 +451,7 @@ export function Checkout({
             Review your plan
           </Button>
         ) : sdkPending ? (
-          <span className="sk" style={{ height: 48 }} aria-label="Loading PayPal" role="img" />
+          <PayPalLoading />
         ) : sandbox && sdkReady ? (
           ready ? (
             <PayPalButton onClick={() => void create()} />
@@ -436,6 +463,16 @@ export function Checkout({
         ) : (
           <Button block disabled={!ready} loading={busy} onClick={() => void create()}>
             {sandbox ? 'Continue to PayPal sandbox' : `Start simulated checkout`}
+          </Button>
+        ))}
+      {view === 'approve' &&
+        (sdkPending ? (
+          <PayPalLoading />
+        ) : sandbox && sdkReady ? (
+          <PayPalButton onClick={() => void reopen()} />
+        ) : (
+          <Button block icon={ExternalLink} onClick={() => void reopen()} disabled={busy}>
+            Continue to PayPal sandbox
           </Button>
         ))}
       {view === 'waiting' && (
@@ -485,7 +522,7 @@ export function Checkout({
           Back to the {lower(product.name)}
         </Button>
       )}
-      {['waiting', 'approved', 'declined', 'checking'].includes(view) && (
+      {['approve', 'waiting', 'approved', 'declined', 'checking'].includes(view) && (
         <Button variant="text" onClick={() => void cancel()} disabled={busy}>
           Cancel checkout
         </Button>
@@ -542,7 +579,7 @@ export function Checkout({
               <dt>{view === 'approved' ? `Pay ${product.merchant}` : product.merchant}</dt>
               <dd className="num">{amount}</dd>
             </div>
-            {(view === 'review' || view === 'approved') && lowestAfter}
+            {(view === 'review' || view === 'approve' || view === 'approved') && lowestAfter}
           </dl>
         )}
         {view === 'completed' && (
@@ -589,5 +626,15 @@ export function Checkout({
         )}
       </div>
     </Dialog>
+  )
+}
+
+/** Holds the official button's place while PayPal's SDK loads, with a visible label. */
+function PayPalLoading() {
+  return (
+    <span className="pp-loading" role="status">
+      <LoaderCircle className="ico spin" aria-hidden="true" />
+      Loading PayPal…
+    </span>
   )
 }
