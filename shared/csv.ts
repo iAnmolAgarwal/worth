@@ -3,25 +3,32 @@ import type { Cadence, ImportPreview, ScheduledFlow, Transaction } from './types
 import { occurrence, todayInTimezone } from './finance.ts'
 import { CSV_IMPORT_LIMITS, CSV_SIZE_MESSAGE, utf8Bytes } from './limits.ts'
 
+/**
+ * Header aliases in order of preference. PayPal's personal export has Amount, Fees and Total; the
+ * business "Download activity" export has Gross, Fee and Net, plus Reference Txn ID and Balance
+ * Impact. The amount is the first of Net, Total, Amount and Gross, so fees are always included.
+ */
 const aliases = {
   date: ['date', 'transactiondate', 'transactiondatetime'],
   time: ['time', 'transactiontime'],
-  name: [
-    'name',
-    'merchantname',
-    'merchant',
-    'recipientname',
-    'sendername',
-    'description',
-    'itemtitle',
-    'subject',
+  name: ['name', 'merchantname', 'merchant', 'recipientname', 'sendername', 'description'],
+  title: ['itemtitle', 'subject'],
+  amount: [
+    'net',
+    'netamount',
+    'total',
+    'totalamount',
+    'amount',
+    'transactionamount',
+    'gross',
+    'grossamount',
   ],
-  amount: ['net', 'netamount', 'amount', 'gross', 'grossamount', 'transactionamount'],
   currency: ['currency', 'currencycode', 'transactioncurrency'],
   type: ['type', 'transactiontype'],
   status: ['status', 'transactionstatus'],
   id: ['transactionid', 'transactionidd', 'txn id', 'txnid'],
   reference: ['referencetxnid', 'referencetransactionid', 'referenceid'],
+  impact: ['balanceimpact'],
 } satisfies Record<string, string[]>
 
 function key(value: string): string {
@@ -73,6 +80,9 @@ function classify(
   amount: number,
 ): Pick<Transaction, 'category' | 'kind' | 'color'> {
   const content = `${name} ${type}`.toLowerCase()
+  // PayPal's own balance corrections (for example a sandbox top-up) are neither income nor spending.
+  if (/\b(account correction|correction|adjustment)\b/.test(type.toLowerCase()))
+    return { kind: 'adjustment', category: 'Account adjustment', color: '#c4c6bb' }
   if (
     /\b(transfer|deposit|withdrawal|conversion|top.?up|funding)\b/.test(type.toLowerCase()) ||
     /\btransfer (from|to)\b/.test(name.toLowerCase())
@@ -247,6 +257,7 @@ export function parsePayPalCsv(
     suggestedDailySpendCents: 0,
     recurring: [],
     warnings: [],
+    adjustments: [],
   }
   if (!text.trim()) {
     result.errors.push({ row: 1, message: 'The file is empty.' })
@@ -274,7 +285,7 @@ export function parsePayPalCsv(
     if (!selected[required])
       result.errors.push({
         row: 1,
-        message: `Missing ${required} column. Use a PayPal English-language activity export with Date, Currency, and Net, Amount, or Gross.`,
+        message: `Missing ${required} column. Use a PayPal English-language activity export with Date, Currency, and Net, Total, Amount, or Gross.`,
       })
   result.totalRows = parsed.data.length
   if (result.errors.some((error) => error.row === 1)) return result
@@ -303,8 +314,10 @@ export function parsePayPalCsv(
     const date = parseDate(get(row, 'date'))
     const amount = parseCents(get(row, 'amount'))
     const currency = get(row, 'currency').toUpperCase()
-    const name = get(row, 'name').slice(0, 180) || 'PayPal transaction'
     const type = get(row, 'type')
+    // Funding legs and corrections often have no counterparty; fall back to the item, then the type.
+    const name =
+      (get(row, 'name') || get(row, 'title') || type).slice(0, 180) || 'PayPal transaction'
     if (!date) {
       result.errors.push({
         row: rowNumber,
@@ -475,13 +488,20 @@ export function parsePayPalCsv(
   result.excluded = result.transactions.filter(
     (transaction) =>
       transaction.status !== 'completed' ||
-      ['transfer', 'refund', 'unknown'].includes(transaction.kind) ||
+      ['transfer', 'refund', 'unknown', 'adjustment'].includes(transaction.kind) ||
       transaction.amountCents === 0,
   ).length
   const unknownIncoming = combined.filter(
     (transaction) => transaction.kind === 'unknown' && transaction.amountCents > 0,
   ).length
   const pending = combined.filter((transaction) => transaction.status === 'pending').length
+  result.adjustments = result.transactions.filter(
+    (transaction) => transaction.kind === 'adjustment',
+  )
+  if (!parsed.data.length)
+    result.warnings.push(
+      'This export has no transactions. PayPal reports can take a few hours to include recent activity; download it again later.',
+    )
   if (result.errors.length)
     result.warnings.push(
       'Some rows could not be imported. Correct them or explicitly review the missing spending before trusting a forecast.',
@@ -509,6 +529,10 @@ export function parsePayPalCsv(
     result.warnings.push(
       `${pending} pending payments are excluded from spending history. Add any outstanding commitments to your financial picture.`,
     )
+  if (result.adjustments.length)
+    result.warnings.push(
+      `${result.adjustments.length} account ${result.adjustments.length === 1 ? 'correction is' : 'corrections are'} listed but not counted as income or spending.`,
+    )
   if (result.recurring.length)
     result.warnings.push(
       'Likely recurring items are suggestions, not confirmed commitments. Their historical amounts are excluded from the everyday spending estimate; confirm each item or adjust that estimate.',
@@ -517,5 +541,6 @@ export function parsePayPalCsv(
     'Transfers and refunds do not count as salary or everyday spending. Historical transactions never change your current available-funds snapshot.',
   )
   result.transactions.sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id))
+  result.adjustments.sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id))
   return result
 }

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { parsePayPalCsv } from '../shared/csv.ts'
 import { CSV_IMPORT_LIMITS } from '../shared/limits.ts'
@@ -6,6 +7,9 @@ import type { Transaction } from '../shared/types.ts'
 const HEADER = 'Date,Time,Name,Type,Status,Currency,Gross,Fee,Net,Transaction ID,Reference Txn ID'
 function csv(...rows: string[]): string {
   return [HEADER, ...rows].join('\n')
+}
+function fixture(name: string): string {
+  return readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8')
 }
 
 beforeEach(() => {
@@ -357,5 +361,63 @@ describe('identity and recurring spending', () => {
     expect(
       parsePayPalCsv('Date,Name,Currency,Amount\n2026-09-01,"unclosed,USD,-1.00').errors.length,
     ).toBeGreaterThan(0)
+  })
+})
+
+describe('real PayPal export formats', () => {
+  it('imports the actual sandbox personal export as an uncounted account correction', () => {
+    const result = parsePayPalCsv(fixture('paypal-personal-sandbox.csv'))
+    expect(result.errors).toEqual([])
+    expect(result.totalRows).toBe(1)
+    expect(result.transactions).toEqual([
+      {
+        id: 'paypal:1TM185724V044315C',
+        date: '2026-09-30',
+        name: 'General Account Correction',
+        amountCents: 500000,
+        currency: 'USD',
+        kind: 'adjustment',
+        category: 'Account adjustment',
+        color: '#c4c6bb',
+        status: 'completed',
+        source: 'import',
+      },
+    ])
+    expect(result.adjustments).toEqual(result.transactions)
+    expect(result.excluded).toBe(1)
+    expect(result.suggestedDailySpendCents).toBe(0)
+    expect(result.recurring).toEqual([])
+    const warnings = result.warnings.join(' ')
+    expect(warnings).toContain('1 account correction is listed but not counted')
+    expect(warnings).not.toContain('not classified as salary')
+  })
+
+  it('explains a sandbox export that has no rows yet', () => {
+    const result = parsePayPalCsv(fixture('paypal-personal-sandbox-empty.csv'))
+    expect(result.errors).toEqual([])
+    expect(result.totalRows).toBe(0)
+    expect(result.transactions).toEqual([])
+    expect(result.warnings[0]).toContain('This export has no transactions')
+  })
+
+  it('reads the amount from Net, then Total, then Amount, then Gross', () => {
+    const amount = (header: string, values: string) =>
+      parsePayPalCsv(`Date,Name,Currency,${header}\n2026-09-01,Shop,USD,${values}`).transactions[0]!
+        .amountCents
+    expect(amount('Gross,Fee,Net', '-10.00,-0.50,-10.50')).toBe(-1050)
+    expect(amount('Amount,Fees,Total', '-10.00,-0.50,-10.50')).toBe(-1050)
+    expect(amount('Gross,Total,Net', '-12.00,-11.00,-10.00')).toBe(-1000)
+    expect(amount('Gross,Amount', '-12.00,-10.00')).toBe(-1000)
+    expect(amount('Gross', '-12.00')).toBe(-1200)
+  })
+
+  it('names rows without a counterparty after the item, then the type', () => {
+    const result = parsePayPalCsv(
+      'Date,Name,Type,Currency,Amount,Item Title,Transaction ID\n2026-09-01,,Express Checkout Payment,USD,-5.00,Phone case,a\n2026-09-02,,General Withdrawal,USD,-50.00,,b',
+    )
+    expect(result.transactions.map((item) => item.name)).toEqual([
+      'General Withdrawal',
+      'Phone case',
+    ])
   })
 })

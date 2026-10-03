@@ -58,7 +58,8 @@ export interface Transaction {
   amountCents: number
   currency: string
   category: string
-  kind: 'expense' | 'income' | 'transfer' | 'refund' | 'unknown'
+  /** `adjustment` is a PayPal balance correction: listed, but neither income nor spending. */
+  kind: 'expense' | 'income' | 'transfer' | 'refund' | 'unknown' | 'adjustment'
   status: 'completed' | 'pending' | 'excluded'
   source: 'demo' | 'import' | 'purchase'
   color?: string
@@ -317,4 +318,6 @@ export interface ImportPreview {
   suggestedDailySpendCents: number
   recurring: ScheduledFlow[]
   warnings: string[]
+  /** Balance corrections from this file, such as "General Account Correction". Never counted. */
+  adjustments: Transaction[]
 }

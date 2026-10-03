@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import request from 'supertest'
 import { createApp } from '../server/app.ts'
@@ -10,6 +11,9 @@ import { addDays } from '../shared/finance.ts'
 import { CSV_IMPORT_LIMITS, utf8Bytes } from '../shared/limits.ts'
 
 const stores: Store[] = []
+function fixture(name: string): string {
+  return readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8')
+}
 const config = {
   production: false,
   origin: 'http://localhost:5173',
@@ -1603,6 +1607,26 @@ describe('Claude request budgets', () => {
     const next = await post(agent, '/api/chat', { message: 'Hi again', history: [] })
     expect(next.body.mode).toBe('anthropic')
     expect(chat.reply).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('real PayPal exports', () => {
+  it('imports the actual sandbox personal export without counting its account correction', async () => {
+    const { agent } = setup()
+    const csv = fixture('paypal-personal-sandbox.csv')
+    const preview = await post(agent, '/api/import/preview', { csv })
+    expect(preview.body.errors).toEqual([])
+    expect(preview.body.adjustments).toHaveLength(1)
+    const imported = await post(agent, '/api/import/commit', { csv })
+    expect(imported.status).toBe(200)
+    expect(imported.body.profile).toMatchObject({ source: 'import', dailySpendCents: 0, flows: [] })
+    expect(imported.body.transactions).toMatchObject([
+      { name: 'General Account Correction', amountCents: 500000, kind: 'adjustment' },
+    ])
+    const empty = await post(agent, '/api/import/commit', {
+      csv: fixture('paypal-personal-sandbox-empty.csv'),
+    })
+    expect(empty.body.code).toBe('EMPTY_IMPORT')
   })
 })
 
