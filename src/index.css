@@ -2351,3 +2351,33 @@ textarea.input {
   position: absolute;
   inset: -10px -8px;
 }
+
+/* Activity borrows PayPal's own activity page: white canvas and a narrower list. */
+.page.activity {
+  background: var(--c-surface);
+}
+.page.activity .wrap {
+  max-width: calc(960px + 2 * var(--gutter));
+}
+.page.activity .row {
+  padding: var(--s-5) var(--s-4);
+}
+.page.activity .round-btn {
+  background: #f1efea;
+}
+
+/* Compact prompts under the balance tile: one row, action on the right. */
+.tile.notice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-3) var(--s-4);
+  padding: var(--s-4);
+}
+.tile.notice > .row {
+  flex: 1 1 280px;
+  padding: 0;
+}
+.tile.notice > .actions {
+  margin-top: 0 !important;
+}

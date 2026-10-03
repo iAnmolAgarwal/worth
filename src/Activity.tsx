@@ -199,7 +199,7 @@ export function Activity({
   const nothing = !pending.length && !completed.length && !active.length && !refunds.length
 
   return (
-    <div className="page plain">
+    <div className="page plain activity">
       <div className="wrap">
         <h1 className="sr">Activity</h1>
         <div className="search-row">

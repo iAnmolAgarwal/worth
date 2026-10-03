@@ -232,7 +232,7 @@ function ChartTile({
           {payIn4 && (
             <span>
               <i className="sw p4" />
-              Pay in 4 · illustrative
+              Pay in 4 from today · illustrative
             </span>
           )}
         </div>
@@ -339,7 +339,7 @@ function PayIn4Panel({
           </span>
           <span className="meta">
             4 payments {amounts.size > 1 ? 'from' : 'of'}{' '}
-            {money(p4.instalments.at(-1)!.amountCents)} · illustrative
+            {money(p4.instalments.at(-1)!.amountCents)}, starting today · illustrative
           </span>
         </span>
         <ChevronDown className="ico chev" aria-hidden="true" />

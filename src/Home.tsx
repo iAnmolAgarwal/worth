@@ -289,8 +289,9 @@ export function Home({
         <h1 className="sr">Home</h1>
         <div className="grid">
           <div className="stack">
+            <HeroTile state={state} onAsk={() => onAsk()} onPlan={onEditPlan} />
             {active && (
-              <section className="tile" aria-label="Checkout to finish">
+              <section className="tile notice" aria-label="Checkout to finish">
                 <div className="row plain">
                   <Disc icon={ReceiptText} />
                   <div className="body">
@@ -310,7 +311,7 @@ export function Home({
             )}
             {state.reviews.map((review) => (
               <section
-                className="tile"
+                className="tile notice"
                 key={review.kind === 'refund' ? review.refundId : review.purchaseId}
                 aria-label={review.title}
               >
@@ -344,7 +345,6 @@ export function Home({
                 </div>
               </section>
             ))}
-            <HeroTile state={state} onAsk={() => onAsk()} onPlan={onEditPlan} />
             <section className="tile" aria-labelledby="ask-title">
               <div className="sec-head">
                 <h2 className="h-section" id="ask-title">
