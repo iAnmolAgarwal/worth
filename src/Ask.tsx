@@ -14,7 +14,7 @@ import { api, ApiError } from './api'
 import type { AgentCheckout, AppState, ChatReply, Comparison } from './contract'
 import { CLAUDE_USES } from './copy'
 import { breachLine, type DecisionRequest, type Explanation } from './Decision'
-import { claudeOn, envLabel, fits, useComparison } from './engine'
+import { claudeOn, envLabel, fits, missingFix, useComparison } from './engine'
 import { capitalize, cx, fromMoney, money } from './format'
 import { Alert, Button, Field, Pill, ReadAsChip, Toggle } from './ui'
 
@@ -790,13 +790,15 @@ function Answer({
   const blocked =
     reply.assessment?.outcome === 'incomplete' ||
     ((unresolved || !state.profile.confirmed) && !reply.assessment && reply.intent !== 'off_topic')
-  const fix = !blocked
-    ? undefined
-    : unresolved
-      ? { label: 'Resolve foreign-currency payments in Activity', hash: 'activity' }
-      : !state.profile.confirmed || reply.assessment?.outcome === 'incomplete'
-        ? { label: 'Review your plan', hash: 'plan/edit' }
-        : undefined
+  const field =
+    reply.assessment?.outcome === 'incomplete'
+      ? reply.assessment.missingFields[0]
+      : unresolved
+        ? 'foreign-currency payment'
+        : !state.profile.confirmed
+          ? 'Review and confirm your financial picture.'
+          : undefined
+  const fix = blocked && field ? missingFix(field) : undefined
   const read = reply.interpretation
   const assessment = reply.assessment
   const stale =

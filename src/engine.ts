@@ -214,3 +214,22 @@ export function envLabel(state: AppState) {
     state.config.ai !== 'anthropic' ? 'not connected' : claudeOn(state) ? 'on' : 'off'
   } · PayPal ${state.config.paypal === 'sandbox' ? 'sandbox' : 'simulated'}`
 }
+
+/**
+ * Where to fix each kind of missing input the engine reports, so a blocked answer always leads
+ * to the exact screen instead of back to the start of the plan.
+ */
+export function missingFix(field: string): { label: string; hash: string } | undefined {
+  if (/foreign-currency|amount or currency/i.test(field))
+    return { label: 'Resolve in Activity', hash: 'activity' }
+  if (/instal|pay in 4|pay later/i.test(field))
+    return { label: 'Review your plans', hash: 'plan/edit?step=2' }
+  if (/everyday spending/i.test(field))
+    return { label: 'Review everyday spending', hash: 'plan/edit?step=0' }
+  if (/before relying|amount or date for|already happened/i.test(field))
+    return { label: 'Review your bills and income', hash: 'plan/edit?step=1' }
+  if (/only usd/i.test(field)) return undefined
+  if (/funds|cushion|payment changed|financial picture|commitments/i.test(field))
+    return { label: 'Confirm your money', hash: 'plan/edit?step=0' }
+  return { label: 'Review your plan', hash: 'plan/edit' }
+}

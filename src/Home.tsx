@@ -11,7 +11,15 @@ import { getUpcomingFlows } from '../shared/finance'
 import type { Product } from '../shared/types'
 import type { AppState, Purchase } from './contract'
 import { isActive } from './contract'
-import { allPlans, cadenceLabel, flowIcon, kindLabel, purchasePlans, useComparison } from './engine'
+import {
+  allPlans,
+  cadenceLabel,
+  flowIcon,
+  kindLabel,
+  missingFix,
+  purchasePlans,
+  useComparison,
+} from './engine'
 import { dayLabel, daysFrom, money, signed } from './format'
 import { Button, Disc, Pill, SkeletonRow } from './ui'
 
@@ -63,10 +71,12 @@ function HeroTile({
   state,
   onAsk,
   onPlan,
+  onNavigate,
 }: {
   state: AppState
   onAsk: () => void
   onPlan: () => void
+  onNavigate: (hash: string) => void
 }) {
   const { comparison: room, loading } = useComparison(
     { amountCents: 0, itemName: 'Room to spend' },
@@ -75,7 +85,7 @@ function HeroTile({
   const income = getUpcomingFlows(state.profile, state.today, 30).find(
     ({ flow }) => flow.kind === 'income',
   )
-  if (!state.profile.confirmed || (room && room.recommendation === null))
+  if (!state.profile.confirmed)
     return (
       <section className="balance unconfirmed" aria-labelledby="bal-k">
         <Pill tone="warn">
@@ -91,6 +101,24 @@ function HeroTile({
         <Button onClick={onPlan}>Confirm</Button>
       </section>
     )
+  if (room && room.recommendation === null) {
+    // The plan is confirmed, so name the one thing that still blocks an answer and where to fix it.
+    const [first, ...rest] = room.missingFields
+    const fix = first ? missingFix(first) : undefined
+    return (
+      <section className="balance unconfirmed" aria-labelledby="bal-k">
+        <Pill tone="warn">
+          <CircleAlert size={14} aria-hidden="true" />{' '}
+          {rest.length ? `${rest.length + 1} things to fix` : 'One thing to fix'}
+        </Pill>
+        <h2 className="h-section" id="bal-k">
+          {first ?? 'Your plan needs a detail before Worth can show room to spend.'}
+        </h2>
+        <p className="meta">Room to spend shows again once this is done.</p>
+        {fix && <Button onClick={() => onNavigate(fix.hash)}>{fix.label}</Button>}
+      </section>
+    )
+  }
   if (loading || !room)
     return (
       <section className="balance" aria-busy="true" aria-label="Room to spend today">
@@ -311,7 +339,12 @@ export function Home({
         <h1 className="sr">Home</h1>
         <div className="grid">
           <div className="stack">
-            <HeroTile state={state} onAsk={() => onAsk()} onPlan={onEditPlan} />
+            <HeroTile
+              state={state}
+              onAsk={() => onAsk()}
+              onPlan={onEditPlan}
+              onNavigate={onNavigate}
+            />
             {active && (
               <section className="tile notice" aria-label="Checkout to finish">
                 <div className="row plain">

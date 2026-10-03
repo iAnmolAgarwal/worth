@@ -14,7 +14,16 @@ import { dateInTimezone } from '../shared/finance'
 import type { OptionResult, Product } from '../shared/types'
 import { BalanceChart } from './BalanceChart'
 import type { AppState, Comparison, PayIn4 } from './contract'
-import { billOn, firstBelow, fits, lower, optionTitle, paydayOn, useComparison } from './engine'
+import {
+  billOn,
+  firstBelow,
+  fits,
+  lower,
+  missingFix,
+  optionTitle,
+  paydayOn,
+  useComparison,
+} from './engine'
 import { cx, dayLabel, fromMoney, fullDate, money, shortDate, signed } from './format'
 import { PayPalMessage } from './paypal'
 import type { PayPalSdkInstance } from './paypalSdk'
@@ -441,7 +450,6 @@ export function Decision({
   onBack,
   onBuy,
   onSave,
-  onEditPlan,
   onViewActivity,
 }: {
   state: AppState
@@ -452,7 +460,8 @@ export function Decision({
   onBack: () => void
   onBuy: (product: Product, acknowledgeShortfall: boolean) => void
   onSave: (product: Product, waitDate?: string) => void
-  onEditPlan: () => void
+  /** Kept for callers; missing inputs now link to their exact fix. */
+  onEditPlan?: () => void
   onViewActivity: () => void
 }) {
   const [override, setOverride] = useState<DecisionRequest>()
@@ -626,15 +635,17 @@ export function Decision({
         </p>
         {c.recommendation === null && (
           <Alert tone="warn" icon={CircleAlert}>
-            <b>Confirm these first:</b>
+            <b>Fix these first:</b>
             <ul>
-              {c.missingFields.map((field) => (
-                <li key={field}>{field}</li>
-              ))}
+              {c.missingFields.map((field) => {
+                const fix = missingFix(field)
+                return (
+                  <li key={field}>
+                    {field} {fix && <a href={`#${fix.hash}`}>{fix.label}</a>}
+                  </li>
+                )
+              })}
             </ul>
-            <Button variant="secondary" onClick={onEditPlan} style={{ marginTop: 12 }}>
-              Review your plan
-            </Button>
           </Alert>
         )}
       </div>
