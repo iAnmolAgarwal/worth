@@ -2622,3 +2622,28 @@ textarea.input {
 .attention li + li {
   margin-top: var(--s-1);
 }
+
+/* The Ask rail stays in view while the thread scrolls. */
+@media (min-width: 768px) {
+  .ask-page .rail {
+    position: sticky;
+    top: calc(var(--topbar-h) + var(--s-6));
+  }
+}
+/* A new answer scrolls in below the sticky bar, Read-as chip included. */
+.bot,
+.bubble-user {
+  scroll-margin-top: calc(var(--topbar-h) + var(--s-3));
+}
+/* Option cards on desktop: the status pill always sits on its own line under the name. */
+@media (min-width: 768px) {
+  .opt .head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+.steps .dot {
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  padding-top: 1px;
+}

@@ -444,18 +444,25 @@ function PayIn4Panel({
 
 function Skeleton() {
   return (
-    <div className="stack" aria-busy="true">
-      <span className="sk" style={{ width: '60%', height: 28 }} />
-      <span className="sk" style={{ width: '80%' }} />
-      <div className="options">
-        {[0, 1, 2].map((i) => (
-          <span key={i} className="sk block" style={{ height: 168 }} />
-        ))}
+    <div className="grid" aria-busy="true">
+      <div className="stack">
+        <span className="sk" style={{ width: '60%', height: 28 }} />
+        <span className="sk" style={{ width: '80%' }} />
+        <div className="options">
+          {[0, 1, 2].map((i) => (
+            <span key={i} className="sk block" style={{ height: 168 }} />
+          ))}
+        </div>
+        <span className="sk block" />
+        <p className="caption" role="status">
+          Checking your plan…
+        </p>
       </div>
-      <span className="sk block" />
-      <p className="caption" role="status">
-        Checking your plan…
-      </p>
+      <div className="rail decision-rail" aria-hidden="true">
+        <span className="sk block" style={{ height: 220 }} />
+        <span className="sk" style={{ width: '60%' }} />
+        <span className="sk" style={{ width: '45%' }} />
+      </div>
     </div>
   )
 }
@@ -590,56 +597,87 @@ export function Decision({
   if (bought && !recheck)
     return (
       <Frame>
-        <button
-          type="button"
-          className="link hide-m"
-          onClick={onBack}
-          style={{ fontSize: 'var(--fs-meta)' }}
-        >
-          <ArrowLeft size={16} aria-hidden="true" />
-          {backLabel}
-        </button>
-        <h1 className="title" style={{ margin: '12px 0 24px' }}>
-          {product!.name}, {money(bought.amountCents)}
-        </h1>
-        <section className="tile co" style={{ maxWidth: 560 }} aria-label="Bought">
-          <div className="co-head">
-            <span className="co-icon ok" aria-hidden="true">
-              <CircleCheck className="ico" />
-            </span>
-            <div>
-              <h2>You bought this</h2>
-              <p>
-                {product!.merchant} ·{' '}
-                {dayLabel(
-                  bought.completedAt
-                    ? dateInTimezone(bought.completedAt, state.profile.timezone)
-                    : bought.assessmentDate,
-                )}{' '}
-                · {bought.mode === 'sandbox' ? 'PayPal sandbox' : 'simulated'}
-              </p>
+        <div className="grid">
+          <div className="stack tight">
+            <button
+              type="button"
+              className="link hide-m"
+              onClick={onBack}
+              style={{ fontSize: 'var(--fs-meta)' }}
+            >
+              <ArrowLeft size={16} aria-hidden="true" />
+              {backLabel}
+            </button>
+            <h1 className="title" style={{ margin: '0 0 8px' }}>
+              {product!.name}, {money(bought.amountCents)}
+            </h1>
+            <section className="tile co" style={{ maxWidth: 560 }} aria-label="Bought">
+              <div className="co-head">
+                <span className="co-icon ok" aria-hidden="true">
+                  <CircleCheck className="ico" />
+                </span>
+                <div>
+                  <h2>You bought this</h2>
+                  <p>
+                    {product!.merchant} ·{' '}
+                    {dayLabel(
+                      bought.completedAt
+                        ? dateInTimezone(bought.completedAt, state.profile.timezone)
+                        : bought.assessmentDate,
+                    )}{' '}
+                    · {bought.mode === 'sandbox' ? 'PayPal sandbox' : 'simulated'}
+                  </p>
+                </div>
+              </div>
+              {boughtPlan ? (
+                <p className="meta strong">
+                  Pay in 4 · next {money(boughtPlan.amountCents)} {dayLabel(boughtPlan.next)}
+                </p>
+              ) : (
+                state.reviews.some(
+                  (review) => review.kind === 'confirmPlan' && review.purchaseId === bought.id,
+                ) && (
+                  <p className="meta">
+                    Paid in full or with Pay in 4? Confirm it from Home so Worth counts it right.
+                  </p>
+                )
+              )}
+              <div className="actions">
+                <Button onClick={onViewActivity}>View in Activity</Button>
+                <Button variant="text" onClick={() => setRecheck(true)}>
+                  Check it again
+                </Button>
+              </div>
+            </section>
+          </div>
+          <aside className="rail decision-rail" aria-label="Your purchase">
+            <div className="tile">
+              <div className="product">
+                <img src={product!.image} alt={product!.name} />
+                <div>
+                  <div className="pt">{product!.name}</div>
+                  <div className="meta">{product!.merchant} · demo store</div>
+                  <div className="num strong" style={{ fontWeight: 700, marginTop: 4 }}>
+                    {money(bought.amountCents)}
+                  </div>
+                </div>
+              </div>
+              {boughtPlan?.total && (
+                <div className="row plain" style={{ marginTop: 16 }}>
+                  <Ring part={boughtPlan.total - boughtPlan.left} of={boughtPlan.total} />
+                  <div className="body">
+                    <div className="t" style={{ fontSize: 'var(--fs-body)' }}>
+                      {boughtPlan.total - boughtPlan.left} of {boughtPlan.total} paid
+                    </div>
+                    <div className="s soft">
+                      Next {money(boughtPlan.amountCents)} · {dayLabel(boughtPlan.next)}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
-          {boughtPlan ? (
-            <p className="meta strong">
-              Pay in 4 · next {money(boughtPlan.amountCents)} {dayLabel(boughtPlan.next)}
-            </p>
-          ) : (
-            state.reviews.some(
-              (review) => review.kind === 'confirmPlan' && review.purchaseId === bought.id,
-            ) && (
-              <p className="meta">
-                Paid in full or with Pay in 4? Confirm it from Home so Worth counts it right.
-              </p>
-            )
-          )}
-          <div className="actions">
-            <Button onClick={onViewActivity}>View in Activity</Button>
-            <Button variant="text" onClick={() => setRecheck(true)}>
-              Check it again
-            </Button>
-          </div>
-        </section>
+          </aside>
+        </div>
       </Frame>
     )
   return (

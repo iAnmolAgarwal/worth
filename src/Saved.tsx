@@ -81,14 +81,20 @@ function Card({
         planned && <Pill tone="sug">Planned for {shortDate(planned)}</Pill>
       )}
       <div className="foot">
-        <button
-          type="button"
-          className="link"
-          onClick={onOpen}
-          aria-label={`Check ${product.name}`}
-        >
-          Check
-        </button>
+        {bought ? (
+          <button type="button" className="link" onClick={onOpen}>
+            View
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="link"
+            onClick={onOpen}
+            aria-label={`Check ${product.name}`}
+          >
+            Check
+          </button>
+        )}
         <button
           type="button"
           className="icon-btn quiet"
