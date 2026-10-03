@@ -109,6 +109,7 @@ const profileSchema = z
     reflectedPurchaseIds: z.array(identifier).max(1000),
     aiConsent: z.boolean(),
     userEdited: z.boolean().optional(),
+    aiChoiceMade: z.boolean().optional(),
     flows: z
       .array(
         z
@@ -225,7 +226,10 @@ const CLAUDE_LIMIT_REASON = {
 // Only the labelled sample persona, before the user saves their own financial inputs or imports
 // history, can use external AI without opt-in. Purchases and other server updates do not count.
 function mayUseExternalAi(profile: FinancialProfile) {
-  return profile.aiConsent || (profile.source === 'demo' && profile.userEdited === false)
+  return (
+    profile.aiConsent ||
+    (profile.source === 'demo' && profile.userEdited === false && !profile.aiChoiceMade)
+  )
 }
 
 export function createApp(options: AppOptions = {}) {
@@ -1026,6 +1030,8 @@ export function createApp(options: AppOptions = {}) {
     const data = dataFor(res)
     // Consent changes no financial input, so it keeps the plan version and any active checkout.
     data.profile.aiConsent = aiConsent
+    // An explicit choice, so the sample profile's default no longer applies.
+    data.profile.aiChoiceMade = true
     store.save(id, data)
     res.json(state(id))
   })

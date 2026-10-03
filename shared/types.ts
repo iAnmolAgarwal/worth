@@ -50,6 +50,11 @@ export interface FinancialProfile {
    * Purchases and other server updates never set it. Absent on older records, which count as edited.
    */
   userEdited?: boolean
+  /**
+   * Set once the user turns Claude on or off themselves. The untouched sample profile uses Claude
+   * by default; this records an explicit opt-out so it is respected.
+   */
+  aiChoiceMade?: boolean
 }
 export interface Transaction {
   id: string

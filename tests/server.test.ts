@@ -381,6 +381,27 @@ describe('HTTP sessions, profiles, and calculations', () => {
     expect(reply).toHaveBeenCalledTimes(2)
     expect(categorize).toHaveBeenCalledTimes(2)
   })
+  it('lets the untouched sample profile turn Claude off and on again', async () => {
+    const reply = vi.fn(async () => ({
+      message: 'external',
+      mode: 'anthropic' as const,
+      intent: 'overview' as const,
+      suggestions: [],
+      toolCalls: [],
+    }))
+    const { agent } = setup({ chat: { reply } })
+    const ask = async () =>
+      (await post(agent, '/api/chat', { message: 'How is the sample plan?', history: [] })).body
+        .mode
+    expect(await ask()).toBe('anthropic')
+    const off = await post(agent, '/api/consent', { aiConsent: false })
+    expect(off.body.profile.aiChoiceMade).toBe(true)
+    expect(off.body.profile.userEdited).toBe(false)
+    expect(await ask()).toBe('demo')
+    await post(agent, '/api/consent', { aiConsent: true })
+    expect(await ask()).toBe('anthropic')
+    expect(reply).toHaveBeenCalledTimes(2)
+  })
   it('keeps Claude for the synthetic persona after a purchase, and ignores a client-claimed untouched flag', async () => {
     const reply = vi.fn(async () => ({
       message: 'external',
