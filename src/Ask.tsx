@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import {
   ArrowRight,
   ArrowUp,
@@ -25,7 +25,8 @@ import { claudeOn, envLabel, fits, missingFix, useComparison } from './engine'
 import { capitalize, cx, dayLabel, fromMoney, money } from './format'
 import { Alert, Button, Field, Pill, ReadAsChip, Toggle } from './ui'
 
-type Entry = ChatMessage & { reply?: ChatReply; id: number }
+/** `trace` is fixed when the answer arrives, so a later switch change never relabels it. */
+type Entry = ChatMessage & { reply?: ChatReply; id: number; trace?: string }
 
 export const ASK_STARTERS = [
   'Can I afford a $1,199 camera?',
@@ -389,7 +390,7 @@ export function ClaudeSwitch({
       : claudeOn(state)
         ? 'On: the assistant explains answers from your plan totals. Every number is Worth’s.'
         : 'Off: answers still work, using Worth’s own calculation.'
-  const noteId = `claude-note-${compact ? 'm' : 'd'}`
+  const noteId = useId()
   async function change(next: boolean) {
     setBusy(true)
     setError('')
@@ -489,6 +490,10 @@ export function Ask({
   const latest = useRef<HTMLDivElement>(null)
   const entriesRef = useRef(entries)
   const contextRef = useRef(context)
+  const stateRef = useRef(state)
+  useEffect(() => {
+    stateRef.current = state
+  }, [state])
   useEffect(() => {
     entriesRef.current = entries
   }, [entries])
@@ -517,7 +522,13 @@ export function Ask({
         })) as ChatReply
         setEntries((prev) => [
           ...prev,
-          { role: 'assistant', content: reply.message, reply, id: Date.now() + 1 },
+          {
+            role: 'assistant',
+            content: reply.message,
+            reply,
+            id: Date.now() + 1,
+            trace: traceText(reply, stateRef.current),
+          },
         ])
         // The server decides whether a later message is about the same purchase.
         if (reply.interpretation)
@@ -833,6 +844,7 @@ function Answer({
   onNavigate: (hash: string) => void
 }) {
   const reply = entry.reply!
+  const [allFacts, setAllFacts] = useState(false)
   // An answer that can't go further says where to fix it instead of dead-ending.
   const unresolved = (state.foreignPayments ?? []).some((payment) => !payment.resolution)
   const blocked =
@@ -921,10 +933,21 @@ function Answer({
           </span>
           {reply.lead && <p style={{ marginTop: 8 }}>{reply.lead}</p>}
           <ul>
-            {reply.points.map((point) => (
+            {(allFacts ? reply.points : reply.points.slice(0, 2)).map((point) => (
               <li key={point.id}>{minus(point.text)}</li>
             ))}
           </ul>
+          {reply.points.length > 2 && (
+            <button
+              type="button"
+              className="link"
+              aria-expanded={allFacts}
+              onClick={() => setAllFacts(!allFacts)}
+              style={{ fontSize: 'var(--fs-meta)' }}
+            >
+              {allFacts ? 'Less' : `More (${reply.points.length - 2})`}
+            </button>
+          )}
         </section>
       )}
       {reply.checkout && <AgentHandoff checkout={reply.checkout} onOpen={onOpenCheckout} />}
@@ -935,7 +958,7 @@ function Answer({
       )}
       <div className="trace">
         <ListChecks className="ico" aria-hidden="true" />
-        {traceText(reply, state)}
+        {entry.trace ?? traceText(reply, state)}
       </div>
       {last && matchingSuggestions(reply).length > 0 && (
         // Desktop shows these in the rail; the thread keeps them only on mobile.

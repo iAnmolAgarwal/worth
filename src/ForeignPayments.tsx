@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ForeignPayment } from '../shared/types'
 import type { AppState } from './contract'
 import { CircleAlert } from 'lucide-react'
@@ -23,6 +23,11 @@ export function ForeignPayments({
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState('')
   const open = (state.foreignPayments ?? []).filter((payment) => !payment.resolution)
+  const card = useRef<HTMLElement>(null)
+  // Arriving from "Resolve in Activity" puts focus on this card.
+  useEffect(() => {
+    if (window.location.hash.includes('focus=fx')) card.current?.focus()
+  }, [])
   if (!open.length) return null
 
   async function resolve(payment: ForeignPayment, resolution: Resolution) {
@@ -53,7 +58,7 @@ export function ForeignPayments({
   }
 
   return (
-    <section className="tile" aria-labelledby="foreign-payments-heading">
+    <section className="tile" aria-labelledby="foreign-payments-heading" ref={card} tabIndex={-1}>
       <Alert tone="warn" icon={CircleAlert}>
         <h2
           id="foreign-payments-heading"

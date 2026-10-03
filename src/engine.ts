@@ -233,7 +233,7 @@ export function envLabel(state: AppState) {
  */
 export function missingFix(field: string): { label: string; hash: string } | undefined {
   if (/foreign-currency|amount or currency/i.test(field))
-    return { label: 'Resolve in Activity', hash: 'activity' }
+    return { label: 'Resolve in Activity', hash: 'activity?focus=fx' }
   if (/instal|pay in 4|pay later/i.test(field))
     return { label: 'Review your plans', hash: 'plan/edit?step=2' }
   if (/everyday spending/i.test(field))

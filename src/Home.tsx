@@ -196,11 +196,10 @@ function ComingUp({ state, onShowAll }: { state: AppState; onShowAll: () => void
   const upcoming = [...getUpcomingFlows(state.profile, state.today, 30), ...bought].sort(
     (a, b) => a.date.localeCompare(b.date) || b.flow.amountCents - a.flow.amountCents,
   )
-  const soon = upcoming.filter(({ date }) => daysFrom(state.today, date) <= 14)
-  const later = upcoming.filter(({ date }) => daysFrom(state.today, date) > 14)
-  const biggest = soon
-    .filter(({ flow }) => flow.kind === 'bill')
-    .sort((a, b) => b.flow.amountCents - a.flow.amountCents)[0]
+  // Five rows at most; the rest live behind "Show all".
+  const shown = upcoming.slice(0, 5)
+  const soon = shown.filter(({ date }) => daysFrom(state.today, date) <= 14)
+  const later = shown.filter(({ date }) => daysFrom(state.today, date) > 14)
   const sameMonth = later.every(({ date }) => date.slice(0, 7) === state.today.slice(0, 7))
   const row = ({ flow, date }: (typeof upcoming)[number]) => {
     const plan =
@@ -209,7 +208,6 @@ function ComingUp({ state, onShowAll }: { state: AppState; onShowAll: () => void
         : undefined
     const index = plan ? plan.dates.indexOf(date) : -1
     const paymentNumber = plan?.total ? plan.total - plan.left + index + 1 : undefined
-    const days = daysFrom(state.today, date)
     return (
       <div className="row" key={`${flow.id}-${date}`}>
         <Disc
@@ -221,10 +219,7 @@ function ComingUp({ state, onShowAll }: { state: AppState; onShowAll: () => void
         <div className="body">
           <div className="t">{flow.name}</div>
           <div className="s">
-            {dayLabel(date)}
-            {biggest?.flow.id === flow.id && biggest.date === date && days > 1
-              ? ` · in ${days} days`
-              : ''}{' '}
+            {dayLabel(date)}{' '}
             <span className="soft">
               ·{' '}
               {paymentNumber
@@ -274,7 +269,7 @@ function ComingUp({ state, onShowAll }: { state: AppState; onShowAll: () => void
           <h3 className="group-label" style={{ marginTop: 'var(--s-4)' }}>
             {sameMonth ? 'Later this month' : 'Later'}
           </h3>
-          <div className="rows">{later.slice(0, 4).map(row)}</div>
+          <div className="rows">{later.map(row)}</div>
         </>
       )}
     </section>
