@@ -103,6 +103,37 @@ describe('PayPal CSV normalization', () => {
     ])
   })
 
+  it('leaves out memo rows and authorization holds, and never counts pending rows', () => {
+    const header =
+      'Date,Time,Name,Type,Status,Currency,Gross,Fee,Net,Transaction ID,Reference Txn ID,Balance Impact'
+    const result = parsePayPalCsv(
+      [
+        header,
+        // A hold and its release without a reference between them.
+        '09/25/2026,22:10:00,Uber,Account Hold for Open Authorization,Completed,USD,-25.00,0,-25.00,H1,,Debit',
+        '09/25/2026,23:40:00,Uber,Reversal of General Account Hold,Completed,USD,25.00,0,25.00,H2,,Credit',
+        '09/25/2026,23:40:00,Uber,Express Checkout Payment,Completed,USD,-23.40,0,-23.40,U1,,Debit',
+        '10/02/2026,10:00:00,Netflix.com,General Authorization,Pending,USD,-15.49,0,-15.49,N1,,Memo',
+        '10/01/2026,10:00:00,Bookshop,Express Checkout Payment,Completed,USD,-30.00,0,-30.00,M1,,Memo',
+        '10/02/2026,18:20:00,Whole Foods Market,Express Checkout Payment,Pending,USD,-87.10,0,-87.10,P1,,Debit',
+      ].join('\n'),
+    )
+    expect(result.errors).toEqual([])
+    expect(result.totalRows).toBe(6)
+    expect(result.leftOut).toEqual({ memo: 2, holds: 2 })
+    expect(result.transactions.map((item) => [item.id, item.status])).toEqual([
+      ['paypal:P1', 'pending'],
+      ['paypal:U1', 'completed'],
+    ])
+    // Only the completed $23.40 counts: 2340 cents over Sep 25 to Oct 2 (8 days).
+    expect(result.coverageDays).toBe(8)
+    expect(result.suggestedDailySpendCents).toBe(Math.round(2340 / 8))
+    const warnings = result.warnings.join(' ')
+    expect(warnings).toContain('2 memo rows were left out')
+    expect(warnings).toContain('2 authorization holds or releases were left out')
+    expect(warnings).toContain('1 pending payments are excluded')
+  })
+
   it('handles quoted commas, BOM headers, and parentheses without float rounding', () => {
     const result = parsePayPalCsv(
       '\uFEFFDate,Name,Currency,Amount,Transaction ID\r\n2026-09-01,"Shop, Inc.",USD,"(1,234.56)",a\r\n2026-09-02,Coffee,USD,-0.29,b',

@@ -232,6 +232,7 @@ describe('conversation isolation across financial sessions', () => {
       recurring: [],
       warnings: [],
       adjustments: [],
+      leftOut: { memo: 0, holds: 0 },
     }
     routeApi((path, data) => {
       if (path === '/state') return demo

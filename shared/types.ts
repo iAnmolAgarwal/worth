@@ -320,4 +320,6 @@ export interface ImportPreview {
   warnings: string[]
   /** Balance corrections from this file, such as "General Account Correction". Never counted. */
   adjustments: Transaction[]
+  /** Rows not imported because they never moved money: memo rows and authorization holds. */
+  leftOut: { memo: number; holds: number }
 }

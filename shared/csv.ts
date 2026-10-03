@@ -80,6 +80,8 @@ const FUNDING_TYPE =
 /** Money moved out to the user's own bank or card. */
 const WITHDRAWAL_TYPE =
   /\b(?:withdrawal|withdraw|transfer to (?:bank|checking|savings|(?:debit )?card)|instant transfer|standard transfer)\b/
+/** Authorization holds, their releases and voids; the completed payment is a separate row. */
+const HOLD_TYPE = /\b(?:holds?|authori[sz]ations?)\b/i
 /** A plain bank transfer type with no other detail. */
 const BANK_TRANSFER_TYPE = /^(?:bank )?transfer$/
 
@@ -276,6 +278,7 @@ export function parsePayPalCsv(
     recurring: [],
     warnings: [],
     adjustments: [],
+    leftOut: { memo: 0, holds: 0 },
   }
   if (!text.trim()) {
     result.errors.push({ row: 1, message: 'The file is empty.' })
@@ -336,6 +339,15 @@ export function parsePayPalCsv(
     // Funding legs and corrections often have no counterparty; fall back to the item, then the type.
     const name =
       (get(row, 'name') || get(row, 'title') || type).slice(0, 180) || 'PayPal transaction'
+    // Memo rows and authorization holds (and their releases) never moved money.
+    if (get(row, 'impact').toLowerCase() === 'memo') {
+      result.leftOut.memo++
+      continue
+    }
+    if (HOLD_TYPE.test(type)) {
+      result.leftOut.holds++
+      continue
+    }
     if (!date) {
       result.errors.push({
         row: rowNumber,
@@ -546,6 +558,15 @@ export function parsePayPalCsv(
   if (pending)
     result.warnings.push(
       `${pending} pending payments are excluded from spending history. Add any outstanding commitments to your financial picture.`,
+    )
+  const { memo, holds } = result.leftOut
+  if (memo)
+    result.warnings.push(
+      `${memo} memo ${memo === 1 ? 'row was' : 'rows were'} left out. Memo rows never change your balance.`,
+    )
+  if (holds)
+    result.warnings.push(
+      `${holds} authorization ${holds === 1 ? 'hold or release was' : 'holds or releases were'} left out. A payment counts once it completes.`,
     )
   if (result.adjustments.length)
     result.warnings.push(
