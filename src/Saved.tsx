@@ -54,7 +54,7 @@ function Card({
   onToggle: () => void
 }) {
   return (
-    <article className="saved-card">
+    <article className="saved-card" style={{ position: 'relative' }}>
       <img className="hide-m" src={product.image} alt={product.name} />
       <div className="row plain show-m" style={{ padding: 0 }}>
         <img className="thumb" src={product.image} alt="" />
@@ -75,11 +75,8 @@ function Card({
           {money(product.priceCents)}
         </div>
       </div>
-      {bought ? (
-        <Pill tone="ok">Bought</Pill>
-      ) : (
-        planned && <Pill tone="sug">Planned for {shortDate(planned)}</Pill>
-      )}
+      {bought && <span className="corner-pill">Bought</span>}
+      {!bought && planned && <Pill tone="sug">Planned for {shortDate(planned)}</Pill>}
       <div className="foot">
         {bought ? (
           <button type="button" className="link" onClick={onOpen}>
@@ -155,19 +152,13 @@ export function Saved({
         <h1 className="title" style={{ marginBottom: 'var(--s-6)' }}>
           Saved
         </h1>
-        {saved.length ? (
-          <div className="saved-grid">{saved.map(card)}</div>
-        ) : (
-          <p className="meta">Nothing saved yet. Save an item to check it again later.</p>
-        )}
-        {more.length > 0 && (
-          <>
-            <h2 className="list-head">
-              More from {state.products[0]?.merchant ?? 'the demo store'}
-            </h2>
-            <div className="saved-grid">{more.map(card)}</div>
-          </>
-        )}
+        <p className="meta" style={{ margin: '-12px 0 var(--s-5)' }}>
+          {saved.length
+            ? `${saved.length} saved · more from ${state.products[0]?.merchant ?? 'the demo store'} below`
+            : 'Nothing saved yet. Save an item to check it again later.'}
+        </p>
+        {/* One full grid: saved items first, then the rest of the store. */}
+        <div className="saved-grid">{[...saved, ...more].map(card)}</div>
         <p className="caption" style={{ marginTop: 'var(--s-6)' }}>
           A demo store for the PayPal sandbox. Nothing is sold or shipped.
         </p>

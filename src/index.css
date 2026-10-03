@@ -2852,3 +2852,24 @@ textarea.input {
     position: sticky;
   }
 }
+
+/* "Bought" as a compact pill in the card corner. */
+.corner-pill {
+  position: absolute;
+  top: var(--s-5);
+  right: var(--s-5);
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--r-pill);
+  background: var(--c-success-bg);
+  color: var(--c-success);
+  font-size: var(--fs-caption);
+  line-height: 22px;
+  font-weight: var(--fw-semibold);
+}
+@media (max-width: 767px) {
+  .corner-pill {
+    position: static;
+    align-self: flex-start;
+  }
+}
