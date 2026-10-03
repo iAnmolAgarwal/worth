@@ -15,6 +15,61 @@ import { shortDate, signed } from './format'
 const TEXT_2 = '#545D68'
 const STRONG = '#001435'
 
+type LabelBox = { viewBox?: { x?: number; y?: number; width?: number; height?: number } }
+/** A chart label with a white halo, so it stays legible where it crosses a line. */
+function halo(text: string, place: 'left' | 'right' | 'top-left') {
+  function HaloLabel({ viewBox }: LabelBox) {
+    const x = viewBox?.x ?? 0
+    const y = viewBox?.y ?? 0
+    const w = viewBox?.width ?? 0
+    const h = viewBox?.height ?? 0
+    const at =
+      place === 'top-left'
+        ? { x: x + 6, y: y + 12, anchor: 'start' as const }
+        : place === 'right'
+          ? { x: x + w + 8, y: y + h / 2 + 4, anchor: 'start' as const }
+          : { x: x - 8, y: y + h / 2 + 4, anchor: 'end' as const }
+    return (
+      <text
+        x={at.x}
+        y={at.y}
+        textAnchor={at.anchor}
+        fontSize={12}
+        fontWeight={700}
+        fill={STRONG}
+        stroke="#fff"
+        strokeWidth={4}
+        strokeLinejoin="round"
+        paintOrder="stroke"
+      >
+        {text}
+      </text>
+    )
+  }
+  return HaloLabel
+}
+
+/** Payday: a small upward mark on the axis. Big bill: a small square. Shapes carry the meaning. */
+function PaydayMark({ cx = 0, cy = 0 }: { cx?: number; cy?: number }) {
+  return <path d={`M${cx} ${cy - 9} l5 8 h-10 z`} fill="#0C6E11" stroke="#fff" strokeWidth={1.5} />
+}
+function BillMark({ cx = 0, cy = 0 }: { cx?: number; cy?: number }) {
+  return (
+    <rect
+      x={cx - 4}
+      y={cy - 9}
+      width={8}
+      height={8}
+      rx={1.5}
+      fill="#003087"
+      stroke="#fff"
+      strokeWidth={1.5}
+    />
+  )
+}
+/** Bills large enough to mark on the timing strip. */
+export const BIG_BILL_CENTS = 10_000
+
 /** Chart ticks are the one place money drops its cents: "$1k", "−$1k" (brief §7). */
 function tick(cents: number) {
   if (cents === 0) return '$0'
@@ -67,6 +122,14 @@ export function BalanceChart({
   const { lo, hi, ticks } = niceDomain(values, cushionCents)
   const low = data.reduce((min, point) => (point.balance < min.balance ? point : min), data[0]!)
   const lowIndex = data.indexOf(low)
+  const paydays = points.filter((point) => point.events.some((event) => event.kind === 'income'))
+  const bills = points.filter((point) =>
+    point.events.some(
+      (event) =>
+        (event.kind === 'bill' || event.kind === 'installment') &&
+        -event.amountCents >= BIG_BILL_CENTS,
+    ),
+  )
   const xTicks = data.filter((_, index) => index % 14 === 0).map((point) => point.date)
   return (
     <div className="chart" role="img" aria-label={label}>
@@ -136,14 +199,10 @@ export function BalanceChart({
               x={purchase.date}
               stroke={STRONG}
               strokeDasharray="2 3"
-              label={{
-                value: `Buy ${shortDate(purchase.date)} · ${signed(-purchase.amountCents).replace(/\.00$/, '')}`,
-                position: 'insideTopLeft',
-                fill: STRONG,
-                fontSize: 12,
-                fontWeight: 700,
-                offset: 6,
-              }}
+              label={halo(
+                `Buy ${shortDate(purchase.date)} · ${signed(-purchase.amountCents).replace(/\.00$/, '')}`,
+                'top-left',
+              )}
             />
           )}
           {payIn4?.instalments.map((instalment) => (
@@ -157,6 +216,26 @@ export function BalanceChart({
               strokeWidth={1.5}
             />
           ))}
+          {bills.map((point) => (
+            <ReferenceDot
+              key={`bill-${point.date}`}
+              x={point.date}
+              y={lo}
+              r={0}
+              shape={<BillMark />}
+              ifOverflow="visible"
+            />
+          ))}
+          {paydays.map((point) => (
+            <ReferenceDot
+              key={`pay-${point.date}`}
+              x={point.date}
+              y={lo}
+              r={0}
+              shape={<PaydayMark />}
+              ifOverflow="visible"
+            />
+          ))}
           <ReferenceDot
             x={low.date}
             y={low.balance}
@@ -164,15 +243,11 @@ export function BalanceChart({
             fill="#fff"
             stroke={STRONG}
             strokeWidth={2}
-            label={{
-              value: `Lowest ${signed(low.balance)}`,
-              // Beside its marker, on the side with room, clear of the cushion line.
-              position: lowIndex > data.length * 0.7 ? 'left' : 'right',
-              fill: STRONG,
-              fontSize: 12,
-              fontWeight: 700,
-              offset: 8,
-            }}
+            label={halo(
+              `Lowest ${signed(low.balance)}`,
+              // Beside its marker, on the side with room.
+              lowIndex > data.length * 0.7 ? 'left' : 'right',
+            )}
           />
         </ComposedChart>
       </ResponsiveContainer>

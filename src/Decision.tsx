@@ -253,6 +253,18 @@ function ChartTile({
             <i className="sw zone" />
             Below cushion
           </span>
+          <span>
+            <svg width="10" height="9" viewBox="0 0 10 9">
+              <path d="M5 0l5 8H0z" fill="#0C6E11" />
+            </svg>
+            Payday
+          </span>
+          <span>
+            <svg width="9" height="9" viewBox="0 0 9 9">
+              <rect width="8" height="8" rx="1.5" fill="#003087" />
+            </svg>
+            Big bill
+          </span>
           {payIn4 && (
             <span>
               <i className="sw p4" />
@@ -632,59 +644,61 @@ export function Decision({
     )
   return (
     <Frame actions={product ? actions(false) : undefined}>
-      <div className="stack tight" style={{ marginBottom: 'var(--s-6)' }}>
-        <button
-          type="button"
-          className="link hide-m"
-          onClick={onBack}
-          style={{ fontSize: 'var(--fs-meta)', alignSelf: 'flex-start' }}
-        >
-          <ArrowLeft size={16} aria-hidden="true" />
-          {backLabel}
-        </button>
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px 16px' }}>
-          <h1 className="title">
-            {c.itemName}, {money(c.amountCents)}
-          </h1>
-          {!editing && <ReadAsChip value={readAs} onAction={() => setEditing(true)} />}
-        </div>
-        {editing && (
-          <EditPurchase
-            name={c.itemName}
-            amountCents={c.amountCents}
-            onCancel={() => setEditing(false)}
-            onSubmit={(next) => {
-              setEditing(false)
-              setPicked(undefined)
-              setOverride(
-                product && next.amountCents === product.priceCents
-                  ? { productId: product.id }
-                  : next,
-              )
-            }}
-          />
-        )}
-        <p className="lead">
-          <AnswerSentence c={c} />
-        </p>
-        {c.recommendation === null && (
-          <Alert tone="warn" icon={CircleAlert}>
-            <b>Fix these first:</b>
-            <ul>
-              {c.missingFields.map((field) => {
-                const fix = missingFix(field)
-                return (
-                  <li key={field}>
-                    {field} {fix && <a href={`#${fix.hash}`}>{fix.label}</a>}
-                  </li>
-                )
-              })}
-            </ul>
-          </Alert>
-        )}
-      </div>
       <div className="grid">
         <div className="stack">
+          <div className="stack tight decision-head">
+            <button
+              type="button"
+              className="link hide-m"
+              onClick={onBack}
+              style={{ fontSize: 'var(--fs-meta)', alignSelf: 'flex-start' }}
+            >
+              <ArrowLeft size={16} aria-hidden="true" />
+              {backLabel}
+            </button>
+            <h1 className="title">
+              {c.itemName}, {money(c.amountCents)}
+            </h1>
+            {!editing && (
+              <div>
+                <ReadAsChip value={readAs} onAction={() => setEditing(true)} />
+              </div>
+            )}
+            {editing && (
+              <EditPurchase
+                name={c.itemName}
+                amountCents={c.amountCents}
+                onCancel={() => setEditing(false)}
+                onSubmit={(next) => {
+                  setEditing(false)
+                  setPicked(undefined)
+                  setOverride(
+                    product && next.amountCents === product.priceCents
+                      ? { productId: product.id }
+                      : next,
+                  )
+                }}
+              />
+            )}
+            <p className="lead">
+              <AnswerSentence c={c} />
+            </p>
+            {c.recommendation === null && (
+              <Alert tone="warn" icon={CircleAlert}>
+                <b>Fix these first:</b>
+                <ul>
+                  {c.missingFields.map((field) => {
+                    const fix = missingFix(field)
+                    return (
+                      <li key={field}>
+                        {field} {fix && <a href={`#${fix.hash}`}>{fix.label}</a>}
+                      </li>
+                    )
+                  })}
+                </ul>
+              </Alert>
+            )}
+          </div>
           <div role="radiogroup" aria-label="Your options" className="options">
             {keys.map((key, index) => (
               <OptionCard
@@ -709,7 +723,7 @@ export function Decision({
             instance={instance}
           />
         </div>
-        <aside className="rail" aria-label="Item and reasons">
+        <aside className="rail decision-rail" aria-label="Item and reasons">
           <div className="tile">
             <div className="product">
               {product && <img src={product.image} alt={product.name} />}

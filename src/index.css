@@ -2492,3 +2492,14 @@ textarea.input {
 #root {
   max-width: 100vw;
 }
+
+/* Decision header lives in the main column so the rail's product card aligns with the title. */
+.decision-head .lead {
+  margin-top: var(--s-1);
+}
+@media (min-width: 1024px) {
+  /* Line the product card up with the item title, below the back link. */
+  .decision-rail {
+    padding-top: 60px;
+  }
+}
