@@ -181,6 +181,7 @@ const resolutionSchema = z.union([
  */
 const IMPORT_BODY_LIMIT = 2 * CSV_IMPORT_LIMITS.maxBytes + 64 * 1024
 const DAY = 86400000
+const SPENDING_REVIEW = 'Review your everyday spending:'
 const CLAUDE_LIMIT_REASON = {
   ip: 'You have reached this demo’s Claude limit for the hour',
   daily: 'This demo’s Claude allowance for today is used up',
@@ -872,9 +873,12 @@ export function createApp(options: AppOptions = {}) {
             !names.has(flow.name.toLowerCase()),
         ),
       )
+      data.profile.missingFields = data.profile.missingFields.filter(
+        (field) => !field.startsWith(SPENDING_REVIEW),
+      )
       if (analysis.suggestedDailySpendCents > data.profile.dailySpendCents)
         data.profile.missingFields.push(
-          `Review your everyday spending: with ${payment.name.slice(0, 60)} included, your imported history suggests ${money(analysis.suggestedDailySpendCents)} a day, more than your ${money(data.profile.dailySpendCents)} estimate.`,
+          `${SPENDING_REVIEW} with ${payment.name.slice(0, 60)} included, your imported history suggests ${money(analysis.suggestedDailySpendCents)} a day, more than your ${money(data.profile.dailySpendCents)} estimate.`,
         )
     }
     data.profile.missingFields = withForeignPaymentGate(

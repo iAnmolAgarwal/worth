@@ -1824,6 +1824,24 @@ describe('unresolved foreign-currency payments', () => {
     )
   })
 
+  it('keeps a single spending-review entry however many payments are resolved', async () => {
+    const { agent } = setup()
+    await post(agent, '/api/import/commit', {
+      csv: [
+        'Date,Time,Name,Type,Status,Currency,Net,Transaction ID',
+        '2026-09-14,09:00:00,Coffee,Express Checkout Payment,Completed,USD,-4.00,U1',
+        '2026-09-10,10:00:00,Shop one,Express Checkout Payment,Completed,EUR,-10.00,E1',
+        '2026-09-11,11:00:00,Shop two,Express Checkout Payment,Completed,EUR,-10.00,E2',
+      ].join('\n'),
+    })
+    await simpleProfile(agent, { confirmed: true, missingFields: [] })
+    for (const id of ['paypal:E1', 'paypal:E2']) await resolve(agent, id, { amountCents: 1100 })
+    const fields = (await state(agent)).profile.missingFields
+    expect(
+      fields.filter((field) => field.startsWith('Review your everyday spending')),
+    ).toHaveLength(1)
+    expect(fields.at(-1)).toContain('with Shop two included')
+  })
   it('keeps answered payments when a later import adds new ones', async () => {
     const { agent } = setup()
     await post(agent, '/api/import/commit', { csv })
