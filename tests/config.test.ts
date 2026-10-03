@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import request from 'supertest'
 import { createApp } from '../server/app.ts'
 import { allowedOrigins, ConfigError, loadConfig } from '../server/config.ts'
+import { WindowLimiter } from '../server/limits.ts'
 import { Store } from '../server/store.ts'
 
 describe('deployment configuration', () => {
@@ -81,5 +82,30 @@ describe('deployment configuration', () => {
     expect((await write('http://127.0.0.1:5174')).status).toBe(403)
     expect((await write('https://attacker.example')).status).toBe(403)
     store.close()
+  })
+})
+
+describe('window limiter', () => {
+  it('counts per key, resets after the window, and bounds tracked keys', () => {
+    const limiter = new WindowLimiter(2, 1000, 3)
+    expect([limiter.take('a', 0), limiter.take('a', 1), limiter.take('a', 2)]).toEqual([
+      true,
+      true,
+      false,
+    ])
+    expect(limiter.take('b', 2)).toBe(true)
+    expect(limiter.take('a', 1000)).toBe(true)
+    for (const key of ['c', 'd', 'e', 'f']) limiter.take(key, 1001)
+    expect(
+      (limiter as unknown as { windows: Map<string, unknown> }).windows.size,
+    ).toBeLessThanOrEqual(3)
+  })
+  it('reads the trusted proxy hop count from TRUST_PROXY', () => {
+    expect(loadConfig({}).trustProxy).toBe(0)
+    expect(loadConfig({ NODE_ENV: 'production', APP_ORIGIN: 'https://w.example' }).trustProxy).toBe(
+      1,
+    )
+    expect(loadConfig({ TRUST_PROXY: '2' }).trustProxy).toBe(2)
+    expect(() => loadConfig({ TRUST_PROXY: 'true' })).toThrow(/TRUST_PROXY/)
   })
 })

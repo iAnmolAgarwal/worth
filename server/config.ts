@@ -6,6 +6,10 @@ export interface AppConfig {
   production: boolean
   port: number
   host: string
+  /** Reverse-proxy hops whose X-Forwarded-For entry is trusted as the client IP; 0 disables. */
+  trustProxy: number
+  /** API requests per client IP per minute. */
+  requestsPerMinute: number
   paypalClientId?: string
   paypalSecret?: string
   paypalWebhookId?: string
@@ -71,6 +75,8 @@ export function loadConfig(env: Env = process.env, overrides: Partial<AppConfig>
     production,
     port,
     host: setting(env, 'HOST') ?? (production ? '0.0.0.0' : '127.0.0.1'),
+    trustProxy: wholeNumber(env, 'TRUST_PROXY', production ? 1 : 0, 0, 10),
+    requestsPerMinute: 180,
     paypalClientId: setting(env, 'PAYPAL_CLIENT_ID'),
     paypalSecret: setting(env, 'PAYPAL_CLIENT_SECRET'),
     paypalWebhookId: setting(env, 'PAYPAL_WEBHOOK_ID'),

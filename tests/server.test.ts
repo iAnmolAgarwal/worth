@@ -1137,3 +1137,30 @@ describe('AI financial grounding', () => {
     expect(result.message).toContain('$1,100')
   })
 })
+
+describe('hosted abuse limits', () => {
+  it('rate-limits by the client IP appended by the trusted proxy, not by spoofable entries', async () => {
+    const { app } = setup({ config: { ...config, trustProxy: 1, requestsPerMinute: 3 } })
+    const visitor = request.agent(app)
+    const get = (forwardedFor: string, agent = visitor) =>
+      agent.get('/api/state').set('X-Forwarded-For', forwardedFor)
+    for (let i = 0; i < 3; i++) expect((await get('203.0.113.7')).status).toBe(200)
+    expect((await get('203.0.113.7')).status).toBe(429)
+    expect((await get('198.51.100.20', request.agent(app))).status).toBe(200)
+    // Only the hop appended by the proxy is trusted, so a forged left-hand entry changes nothing.
+    expect((await get('192.0.2.1, 203.0.113.7')).status).toBe(429)
+    clock.value = new Date(clock.value.getTime() + 60_000)
+    expect((await get('203.0.113.7')).status).toBe(200)
+  })
+  it('ignores X-Forwarded-For when no proxy is trusted', async () => {
+    const { app } = setup({ config: { ...config, trustProxy: 0, requestsPerMinute: 3 } })
+    const visitor = request.agent(app)
+    for (let i = 0; i < 3; i++)
+      expect(
+        (await visitor.get('/api/state').set('X-Forwarded-For', `203.0.113.${i}`)).status,
+      ).toBe(200)
+    expect(
+      (await request.agent(app).get('/api/state').set('X-Forwarded-For', '198.51.100.20')).status,
+    ).toBe(429)
+  })
+})

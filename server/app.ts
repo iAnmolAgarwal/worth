@@ -20,6 +20,7 @@ import {
 import type { ChatProvider } from './chat.ts'
 import { allowedOrigins, loadConfig } from './config.ts'
 import type { AppConfig } from './config.ts'
+import { WindowLimiter } from './limits.ts'
 
 export type { AppConfig } from './config.ts'
 export interface AppOptions {
@@ -152,11 +153,13 @@ export function createApp(options: AppOptions = {}) {
       : undefined)
   const app = express()
   app.disable('x-powered-by')
+  // Behind a proxy, req.ip must be the client address the proxy appended, not the proxy itself.
+  if (config.trustProxy) app.set('trust proxy', config.trustProxy)
   app.locals.store = store
   app.locals.cleanup = () => store.cleanup(now().getTime())
   const busy = new Set<string>()
   const chatBusy = new Set<string>()
-  const rates = new Map<string, { count: number; until: number }>()
+  const requestLimiter = new WindowLimiter(config.requestsPerMinute, 60_000)
   function today(timezone = 'UTC') {
     const parts = new Intl.DateTimeFormat('en-CA', {
       timeZone: timezone,
@@ -449,15 +452,7 @@ export function createApp(options: AppOptions = {}) {
         return next(new HttpError(415, 'Send a JSON request.', 'INVALID_CONTENT_TYPE'))
     }
     const time = now().getTime()
-    if (rates.size > 5000)
-      for (const [key, value] of rates) if (value.until < time) rates.delete(key)
-    const key = req.ip ?? 'local'
-    let rate = rates.get(key)
-    if (!rate || rate.until < time) {
-      rate = { count: 0, until: time + 60000 }
-      rates.set(key, rate)
-    }
-    if (++rate.count > 180)
+    if (!requestLimiter.take(req.ip ?? 'local', time))
       return next(
         new HttpError(429, 'Please wait a moment before making more requests.', 'RATE_LIMITED'),
       )
