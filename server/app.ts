@@ -819,8 +819,14 @@ export function createApp(options: AppOptions = {}) {
     data.profile.version += 1
     data.profile.userEdited = true
     const known = switching ? [] : (data.foreignPayments ?? [])
+    const inHistory = new Set(merged.map((t) => t.id))
     data.foreignPayments = [
-      ...known,
+      // A payment this export pairs with its USD conversion is answered by PayPal's own figure.
+      ...known.map((payment) =>
+        preview.converted.includes(payment.id) || (!payment.resolution && inHistory.has(payment.id))
+          ? { ...payment, resolution: { kind: 'matched' as const } }
+          : payment,
+      ),
       ...preview.unresolved.filter((payment) => !known.some((item) => item.id === payment.id)),
     ]
     const plans = instalmentPlanReview(preview.instalmentPlans)
@@ -849,6 +855,12 @@ export function createApp(options: AppOptions = {}) {
     if (!payment) throw new HttpError(404, 'Foreign-currency payment not found.', 'NOT_FOUND')
     if (payment.resolution)
       throw new HttpError(409, 'This payment is already resolved.', 'ALREADY_RESOLVED')
+    if (data.transactions.some((t) => t.id === payment.id))
+      throw new HttpError(
+        409,
+        'This payment is already in your history with its USD cost.',
+        'ALREADY_IN_HISTORY',
+      )
     if ('oneOff' in input) payment.resolution = { kind: 'oneOff' }
     else {
       if (data.transactions.length >= config.maxTransactions)

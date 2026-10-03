@@ -326,8 +326,11 @@ export interface ForeignPayment {
   currency: string
   /** Hundredths of the payment's own currency, as exported; negative for money out. */
   originalCents: number
-  /** The user's answer: what it cost in USD, or a one-off left out of the history. */
-  resolution?: { kind: 'usd'; amountCents: number } | { kind: 'oneOff' }
+  /**
+   * How it was resolved: the user's answer (what it cost in USD, or a one-off left out of the
+   * history), or `matched` once a later export paired it with its USD conversion.
+   */
+  resolution?: { kind: 'usd'; amountCents: number } | { kind: 'oneOff' } | { kind: 'matched' }
 }
 /** A Pay in 4 or Pay Later plan found in an import, proposed to the user for confirmation. */
 export interface InstalmentPlanProposal {
@@ -372,6 +375,8 @@ export interface ImportPreview {
   needsDateOrder: boolean
   /** Foreign-currency spending without a matching USD conversion, to be resolved after import. */
   unresolved: ForeignPayment[]
+  /** Foreign payments whose USD cost this file supplies through a matched conversion. */
+  converted: string[]
   /** Possible existing Pay in 4 or Pay Later plans. Their rows are never ordinary spending. */
   instalmentPlans: InstalmentPlanProposal[]
 }

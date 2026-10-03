@@ -427,30 +427,51 @@ function isConversion(row: Row): boolean {
   return /\bconversion\b/i.test(row.type)
 }
 
-/** A completed payment out in another currency, the kind a USD conversion pays for. */
-function isForeignSpend(row: Row): boolean {
+/** A payment out in another currency, the kind a USD conversion pays for. */
+function isForeignPayment(row: Row): boolean {
   return (
     row.currency !== 'USD' &&
     !isConversion(row) &&
     row.amount < 0 &&
-    row.status === 'completed' &&
+    row.status !== 'excluded' &&
     classify(row.name, row.type, row.amount).kind === 'expense'
   )
 }
 
+/** A completed foreign-currency payment: spending that must be counted, one way or another. */
+function isForeignSpend(row: Row): boolean {
+  return isForeignPayment(row) && row.status === 'completed'
+}
+
+/** Seconds since midnight for an HH:MM[:SS] time, or null when it is missing or unreadable. */
+function secondsOfDay(time: string): number | null {
+  const match = time.trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/)
+  return match ? Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3] ?? 0) : null
+}
+
+/** Conversion legs can be stamped a second or two away from the payment they paid for. */
+const MOMENT_SECONDS = 2
+
 /**
  * Matches USD currency-conversion legs to the foreign-currency payments they paid for. Business
  * exports link the legs to the payment through Reference Txn ID. Personal exports have no
- * reference, so a leg pairs with the one foreign payment that has exactly the same date and time.
+ * reference, so rows within a couple of seconds of each other form one moment:
+ * - one payment and one USD leg pair directly;
+ * - with several, each payment pairs through the foreign-currency leg of its own currency and
+ *   amount, whose USD side is the nearest USD leg in the file;
+ * - a payment left over beside a USD leg left over is `covered`: that leg counts as the spending,
+ *   so the payment is not raised again.
  * A leg that converted money the user received or already held is a transfer; a USD debit with no
  * payment to pair with is `unmatched`.
  */
 function pairConversions(rows: Row[]): {
   paid: Map<Row, Row[]>
   legs: Map<Row, 'paid' | 'transfer' | 'unmatched'>
+  covered: Set<Row>
 } {
   const paid = new Map<Row, Row[]>()
   const legs = new Map<Row, 'paid' | 'transfer' | 'unmatched'>()
+  const covered = new Set<Row>()
   const link = (leg: Row, payment: Row) => {
     paid.set(payment, [...(paid.get(payment) ?? []), leg])
     legs.set(leg, 'paid')
@@ -460,25 +481,64 @@ function pairConversions(rows: Row[]): {
   for (const leg of usdLegs) {
     const target = leg.reference ? byId.get(leg.reference) : undefined
     if (!target || target === leg) continue
-    if (leg.amount < 0 && isForeignSpend(target)) link(leg, target)
+    if (leg.amount < 0 && isForeignPayment(target)) link(leg, target)
     else legs.set(leg, 'transfer')
   }
-  const moments = new Map<string, { legs: Row[]; payments: Row[] }>()
-  for (const row of rows) {
-    const leg = usdLegs.has(row) && !legs.has(row) && row.amount < 0
-    const payment = isForeignSpend(row) && !paid.has(row)
-    if (!row.time || (!leg && !payment)) continue
-    const key = `${row.date}|${row.time}`
-    const moment = moments.get(key) ?? { legs: [], payments: [] }
-    ;(leg ? moment.legs : moment.payments).push(row)
-    moments.set(key, moment)
+  const isDebitLeg = (row: Row) => usdLegs.has(row) && !legs.has(row) && row.amount < 0
+  const isCreditLeg = (row: Row) => row.currency !== 'USD' && isConversion(row) && row.amount > 0
+  const timed = rows
+    .filter(
+      (row) =>
+        secondsOfDay(row.time) !== null &&
+        (isDebitLeg(row) || isCreditLeg(row) || (isForeignPayment(row) && !paid.has(row))),
+    )
+    .sort(
+      (a, b) =>
+        a.date.localeCompare(b.date) ||
+        secondsOfDay(a.time)! - secondsOfDay(b.time)! ||
+        a.rowNumber - b.rowNumber,
+    )
+  const moments: Row[][] = []
+  for (const row of timed) {
+    const moment = moments[moments.length - 1]
+    const last = moment?.[moment.length - 1]
+    if (
+      last &&
+      last.date === row.date &&
+      secondsOfDay(row.time)! - secondsOfDay(last.time)! <= MOMENT_SECONDS
+    )
+      moment!.push(row)
+    else moments.push([row])
   }
-  for (const moment of moments.values())
-    if (moment.legs.length === 1 && moment.payments.length === 1)
-      link(moment.legs[0]!, moment.payments[0]!)
+  for (const moment of moments) {
+    const payments = moment.filter((row) => isForeignPayment(row) && !paid.has(row))
+    const debits = moment.filter(isDebitLeg)
+    if (payments.length === 1 && debits.length === 1) {
+      link(debits[0]!, payments[0]!)
+      continue
+    }
+    const free = new Set(debits)
+    const credits = new Set(moment.filter(isCreditLeg))
+    for (const payment of payments) {
+      const credit = [...credits].find(
+        (row) => row.currency === payment.currency && row.amount === -payment.amount,
+      )
+      const leg = credit
+        ? [...free].sort(
+            (a, b) =>
+              Math.abs(a.rowNumber - credit.rowNumber) - Math.abs(b.rowNumber - credit.rowNumber),
+          )[0]
+        : undefined
+      if (!credit || !leg) continue
+      credits.delete(credit)
+      free.delete(leg)
+      link(leg, payment)
+    }
+    if (free.size) for (const payment of payments) if (!paid.has(payment)) covered.add(payment)
+  }
   for (const leg of usdLegs)
     if (!legs.has(leg)) legs.set(leg, leg.amount < 0 ? 'unmatched' : 'transfer')
-  return { paid, legs }
+  return { paid, legs, covered }
 }
 
 /** A recorded Pay in 4 or Pay Later row, and the credit that financed it when there is one. */
@@ -599,6 +659,7 @@ export function parsePayPalCsv(
     adjustments: [],
     leftOut: { memo: 0, holds: 0, otherCurrency: 0 },
     unresolved: [],
+    converted: [],
     instalmentPlans: [],
     dateOrder: null,
     needsDateOrder: false,
@@ -759,6 +820,7 @@ export function parsePayPalCsv(
     occurrences.set(fingerprint, ordinal)
     return row.nativeId ? `paypal:${row.nativeId}` : `import:${fingerprint}:${ordinal}`
   }
+  const knownForeign = new Map((options.foreignPayments ?? []).map((item) => [item.id, item]))
   const record = (
     row: Row,
     override: { amount?: number; classification?: Classification } = {},
@@ -814,10 +876,17 @@ export function parsePayPalCsv(
     }
     const previous = knownById.get(id)
     if (previous) {
+      // A USD cost the user entered gives way to the conversion a later export shows.
+      const replacesEntered =
+        override.amount !== undefined &&
+        knownForeign.get(id)?.resolution?.kind === 'usd' &&
+        previous.amountCents !== amount &&
+        previous.date === date
       if (
-        previous.amountCents !== amount ||
-        previous.date !== date ||
-        previous.currency !== currency
+        !replacesEntered &&
+        (previous.amountCents !== amount ||
+          previous.date !== date ||
+          previous.currency !== currency)
       ) {
         result.errors.push({
           row: rowNumber,
@@ -825,9 +894,12 @@ export function parsePayPalCsv(
         })
         return
       }
-      if (previous.status === status || (status === 'pending' && previous.status !== 'pending')) {
+      if (
+        !replacesEntered &&
+        (previous.status === status || (status === 'pending' && previous.status !== 'pending'))
+      ) {
         result.duplicates++
-        return
+        return previous
       }
       // A later settled/failed row replaces its pending representation; never add a second payment.
       const previousIndex = result.transactions.findIndex((item) => item.id === id)
@@ -844,7 +916,6 @@ export function parsePayPalCsv(
   }
 
   // 3. Foreign-currency payments count once, through the USD conversion that paid for them.
-  const knownForeign = new Map((options.foreignPayments ?? []).map((item) => [item.id, item]))
   const conversions = pairConversions(rows)
   const financed = financedPurchases(rows)
   const payLater: PayLaterRecord[] = []
@@ -852,11 +923,26 @@ export function parsePayPalCsv(
     if (row.currency !== 'USD') {
       const legs = conversions.paid.get(row)
       if (legs) {
-        record(row, { amount: legs.reduce((sum, leg) => sum + leg.amount, 0) })
+        // A leg already in history as spending covers this payment; recording it would count twice.
+        if (legs.some((leg) => leg.nativeId && knownById.has(`paypal:${leg.nativeId}`))) {
+          result.converted.push(identify(row))
+          result.duplicates++
+          continue
+        }
+        const transaction = record(row, {
+          amount: legs.reduce((sum, leg) => sum + leg.amount, 0),
+        })
+        if (transaction) result.converted.push(transaction.id)
         continue
       }
       result.leftOut.otherCurrency++
       if (!isForeignSpend(row)) continue
+      if (conversions.covered.has(row)) {
+        result.warnings.push(
+          `Row ${row.rowNumber}: this foreign-currency payment shares its time with a USD conversion that counts as spending, so it is not counted again.`,
+        )
+        continue
+      }
       // Spending in another currency without its USD cost is unresolved, never silently dropped.
       const id = identify(row)
       if (row.nativeId && capturedPurchases.has(row.nativeId)) {
@@ -866,11 +952,26 @@ export function parsePayPalCsv(
         })
         continue
       }
+      const listed = result.unresolved.find((payment) => payment.id === id)
+      const known = listed ?? knownForeign.get(id)
+      if (
+        known &&
+        (known.originalCents !== row.amount ||
+          known.date !== row.date ||
+          known.currency !== row.currency)
+      ) {
+        result.errors.push({
+          row: row.rowNumber,
+          message: `Transaction ${row.nativeId || id} appears with conflicting amounts or dates. Resolve the conflict before importing.`,
+        })
+        continue
+      }
       if (knownById.has(id) || knownForeign.get(id)?.resolution) {
         result.duplicates++
         continue
       }
-      if (!result.unresolved.some((payment) => payment.id === id))
+      if (listed) result.duplicates++
+      else
         result.unresolved.push({
           id,
           date: row.date,

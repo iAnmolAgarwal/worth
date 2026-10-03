@@ -52,6 +52,7 @@ function preview(overrides: Partial<ImportPreview> = {}): ImportPreview {
     dateOrder: null,
     needsDateOrder: false,
     unresolved: [],
+    converted: [],
     instalmentPlans: [],
     ...overrides,
   }

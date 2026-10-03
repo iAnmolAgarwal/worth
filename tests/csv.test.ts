@@ -1094,3 +1094,159 @@ describe('Pay in 4 and Pay Later rows', () => {
     expect(result.transactions.every((item) => item.kind === 'expense')).toBe(true)
   })
 })
+
+describe('foreign payments across moments and imports', () => {
+  const bakery = (status = 'Completed') =>
+    [
+      ...personalRow(
+        '09/15/2026',
+        '12:00:00',
+        'Lisbon bakery',
+        'Express Checkout Payment',
+        'EUR',
+        '-18.50',
+        'P1',
+      ),
+    ].map((cell) => (cell === 'Completed' ? status : cell))
+  const bakeryLegs = [
+    personalRow('09/15/2026', '12:00:00', '', 'General Currency Conversion', 'EUR', '18.50', 'C1'),
+    personalRow('09/15/2026', '12:00:01', '', 'General Currency Conversion', 'USD', '-20.61', 'C2'),
+  ]
+  const spent = (result: ReturnType<typeof parsePayPalCsv>) =>
+    result.transactions.map((item) => [item.id, item.amountCents, item.status])
+
+  it('pairs two conversions at one moment through their foreign-currency legs', () => {
+    const result = parsePayPalCsv(
+      personal(
+        bakery(),
+        ...bakeryLegs,
+        personalRow(
+          '09/15/2026',
+          '12:00:01',
+          'Porto shop',
+          'Express Checkout Payment',
+          'EUR',
+          '-100.00',
+          'P2',
+        ),
+        personalRow(
+          '09/15/2026',
+          '12:00:02',
+          '',
+          'General Currency Conversion',
+          'EUR',
+          '100.00',
+          'C3',
+        ),
+        personalRow(
+          '09/15/2026',
+          '12:00:02',
+          '',
+          'General Currency Conversion',
+          'USD',
+          '-111.40',
+          'C4',
+        ),
+      ),
+    )
+    expect(result.errors).toEqual([])
+    expect(result.unresolved).toEqual([])
+    expect(spent(result)).toEqual([
+      ['paypal:P1', -2061, 'completed'],
+      ['paypal:P2', -11140, 'completed'],
+    ])
+    expect(result.converted).toEqual(['paypal:P1', 'paypal:P2'])
+  })
+
+  it('counts a leftover USD leg once and does not raise the payments it may cover', () => {
+    const result = parsePayPalCsv(
+      personal(
+        bakery(),
+        personalRow(
+          '09/15/2026',
+          '12:00:00',
+          'Porto shop',
+          'Express Checkout Payment',
+          'EUR',
+          '-100.00',
+          'P2',
+        ),
+        personalRow(
+          '09/15/2026',
+          '12:00:01',
+          '',
+          'General Currency Conversion',
+          'USD',
+          '-131.97',
+          'C9',
+        ),
+      ),
+    )
+    expect(result.unresolved).toEqual([])
+    expect(spent(result)).toEqual([['paypal:C9', -13197, 'completed']])
+    expect(result.warnings.join(' ')).toContain(
+      'Row 2: this foreign-currency payment shares its time',
+    )
+  })
+
+  it('pairs a pending payment so its completed export replaces it instead of adding to it', () => {
+    const first = parsePayPalCsv(personal(bakery('Pending'), ...bakeryLegs))
+    expect(spent(first)).toEqual([['paypal:P1', -2061, 'pending']])
+    const second = parsePayPalCsv(personal(bakery(), ...bakeryLegs), first.transactions)
+    expect(spent(second)).toEqual([['paypal:P1', -2061, 'completed']])
+    expect(second.suggestedDailySpendCents).toBe(2061)
+  })
+
+  it('does not add a payment whose USD leg is already in history as spending', () => {
+    const legOnly = parsePayPalCsv(personal(bakeryLegs[1]!))
+    expect(spent(legOnly)).toEqual([['paypal:C2', -2061, 'completed']])
+    const later = parsePayPalCsv(personal(bakery(), ...bakeryLegs), legOnly.transactions)
+    expect(later.transactions).toEqual([])
+    expect(later.converted).toEqual(['paypal:P1'])
+    expect(later.unresolved).toEqual([])
+  })
+
+  it('replaces a USD cost the user entered with the conversion a later export shows', () => {
+    const payment = parsePayPalCsv(personal(bakery())).unresolved[0]!
+    const entered = foreignPaymentTransaction(payment, 2000)
+    const later = parsePayPalCsv(personal(bakery(), ...bakeryLegs), [entered], {
+      foreignPayments: [{ ...payment, resolution: { kind: 'usd', amountCents: 2000 } }],
+    })
+    expect(later.errors).toEqual([])
+    expect(spent(later)).toEqual([['paypal:P1', -2061, 'completed']])
+  })
+
+  it('reports one foreign transaction ID with two different amounts as a conflict', () => {
+    const result = parsePayPalCsv(
+      personal(
+        bakery(),
+        personalRow(
+          '09/15/2026',
+          '12:00:00',
+          'Lisbon bakery',
+          'Express Checkout Payment',
+          'EUR',
+          '-5.00',
+          'P1',
+        ),
+      ),
+    )
+    expect(result.errors).toEqual([
+      {
+        row: 3,
+        message:
+          'Transaction P1 appears with conflicting amounts or dates. Resolve the conflict before importing.',
+      },
+    ])
+  })
+
+  it('keeps proposing a Pay in 4 plan when the same file is imported again', () => {
+    const text = personal(
+      personalRow('09/28/2026', '14:02:11', 'Test Store', 'Pay in 4', 'USD', '-1,199.00', 'S1'),
+    )
+    const first = parsePayPalCsv(text)
+    const again = parsePayPalCsv(text, first.transactions)
+    expect(again.duplicates).toBe(1)
+    expect(again.instalmentPlans).toEqual(first.instalmentPlans)
+  })
+})
