@@ -75,7 +75,18 @@ export function breachLine(option: OptionResult, cushion: number, short = false)
   return `${first}. Lowest ${dayLabel(option.lowestDate)}${paydayOn(option.points, option.lowestDate) ? ', before payday' : ''}.`
 }
 
-export function AnswerSentence({ c }: { c: Comparison }) {
+/** The verdict as a headline: what to do, before anything else. */
+export function verdictTitle(c: Comparison) {
+  if (c.recommendation === null) return 'Your plan needs a detail first'
+  if (c.recommendation === 'buyToday') return 'Buy today'
+  if (c.recommendation === 'wait' && c.wait.date) return `Wait until ${dayLabel(c.wait.date)}`
+  return c.spendLess.maxPriceCents > 0
+    ? `Spend up to ${money(c.spendLess.maxPriceCents)} today`
+    : 'Nothing fits right now'
+}
+
+/** The sentence under the headline: the margin it leaves and what buying today would do. */
+export function AnswerDetail({ c }: { c: Comparison }) {
   const cushion = money(c.cushionCents)
   const breach = firstBelow(c.buyToday.points, c.cushionCents)
   const bill = billOn(breach)
@@ -83,45 +94,27 @@ export function AnswerSentence({ c }: { c: Comparison }) {
     <>
       {' '}
       Buying today puts you below it{' '}
-      {breach.date === c.today ? (
-        <b>right away</b>
-      ) : (
-        <>
-          from <b>{dayLabel(breach.date)}</b>
-        </>
-      )}
+      {breach.date === c.today ? 'right away' : `from ${dayLabel(breach.date)}`}
       {bill ? `, when ${lower(bill)} is due` : ''}.
     </>
   )
   if (c.recommendation === null)
-    return <>Your plan needs a few details before Worth can compare these options.</>
+    return <>Worth can compare these options once the details below are in.</>
   if (c.recommendation === 'buyToday')
     return (
       <>
-        <b>Buy today</b> and you stay {money(c.buyToday.headroomCents)} above your {cushion}{' '}
-        cushion.
+        You stay {money(c.buyToday.headroomCents)} above your {cushion} cushion.
       </>
     )
   if (c.recommendation === 'wait' && c.wait.date)
     return (
       <>
-        <b>Wait until {dayLabel(c.wait.date)}</b> and you stay {money(c.wait.headroomCents)} above
-        your {cushion} cushion.{today}
+        You stay {money(c.wait.headroomCents)} above your {cushion} cushion.{today}
       </>
     )
   if (c.spendLess.maxPriceCents <= 0)
-    return (
-      <>
-        No date in the next 30 days keeps your {cushion} cushion, and your plan already reaches it
-        without this purchase.
-      </>
-    )
-  return (
-    <>
-      No date in the next 30 days keeps your {cushion} cushion.{' '}
-      <b>Spend up to {money(c.spendLess.maxPriceCents)} today</b> and you keep it.
-    </>
-  )
+    return <>Your plan already reaches your {cushion} cushion without this purchase.</>
+  return <>No date in the next 30 days keeps your {cushion} cushion at the full price.</>
 }
 
 function OptionCard({
@@ -725,9 +718,10 @@ export function Decision({
               <ArrowLeft size={16} aria-hidden="true" />
               {backLabel}
             </button>
-            <h1 className="title">
+            <p className="meta strong" style={{ margin: 0 }}>
               {c.itemName}, {money(c.amountCents)}
-            </h1>
+            </p>
+            <h1 className="title">{verdictTitle(c)}</h1>
             {!editing && (
               <div>
                 <ReadAsChip value={readAs} onAction={() => setEditing(true)} />
@@ -750,7 +744,7 @@ export function Decision({
               />
             )}
             <p className="lead">
-              <AnswerSentence c={c} />
+              <AnswerDetail c={c} />
             </p>
             {c.recommendation === null && (
               <Alert tone="warn" icon={CircleAlert}>

@@ -766,51 +766,54 @@ export function Ask({
                 Everything sent to Anthropic (Claude)
               </a>
             </section>
-            <section aria-labelledby="try-asking">
-              <div className="sec-head">
-                <h2 className="h-section" id="try-asking">
-                  Try asking
-                </h2>
-                {entries.length > 0 && (
-                  <button
-                    type="button"
-                    className="link"
-                    disabled={busy}
-                    onClick={() => {
-                      setEntries([])
-                      setContext(undefined)
-                      setError('')
-                    }}
-                  >
-                    Start over
-                  </button>
-                )}
-              </div>
-              <div className="chips">
-                {(matchingSuggestions(entries.at(-1)?.reply).length
-                  ? matchingSuggestions(entries.at(-1)?.reply)
-                  : ASK_STARTERS
-                ).map((text) => (
-                  <button
-                    type="button"
-                    key={text}
-                    className="chip-suggest"
-                    disabled={busy}
-                    onClick={() => void send(text)}
-                  >
-                    {curly(text)}
-                  </button>
-                ))}
-              </div>
-              <button
-                type="button"
-                className="link"
-                style={{ marginTop: 8, fontSize: 'var(--fs-meta)' }}
-                onClick={() => onNavigate('saved')}
-              >
-                Browse saved items
-              </button>
-            </section>
+            {/* The empty thread already offers the starters; the rail adds follow-ups later. */}
+            {entries.length > 0 && (
+              <section aria-labelledby="try-asking">
+                <div className="sec-head">
+                  <h2 className="h-section" id="try-asking">
+                    Try asking
+                  </h2>
+                  {entries.length > 0 && (
+                    <button
+                      type="button"
+                      className="link"
+                      disabled={busy}
+                      onClick={() => {
+                        setEntries([])
+                        setContext(undefined)
+                        setError('')
+                      }}
+                    >
+                      Start over
+                    </button>
+                  )}
+                </div>
+                <div className="chips">
+                  {(matchingSuggestions(entries.at(-1)?.reply).length
+                    ? matchingSuggestions(entries.at(-1)?.reply)
+                    : ASK_STARTERS
+                  ).map((text) => (
+                    <button
+                      type="button"
+                      key={text}
+                      className="chip-suggest"
+                      disabled={busy}
+                      onClick={() => void send(text)}
+                    >
+                      {curly(text)}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="link"
+                  style={{ marginTop: 8, fontSize: 'var(--fs-meta)' }}
+                  onClick={() => onNavigate('saved')}
+                >
+                  Browse saved items
+                </button>
+              </section>
+            )}
           </aside>
         </div>
       </div>
