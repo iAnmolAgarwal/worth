@@ -10,6 +10,7 @@ import {
   Sparkles,
   TriangleAlert,
 } from 'lucide-react'
+import { dateInTimezone } from '../shared/finance'
 import type { OptionResult, Product } from '../shared/types'
 import { BalanceChart } from './BalanceChart'
 import type { AppState, Comparison, PayIn4 } from './contract'
@@ -40,7 +41,8 @@ export function optionStatus(option: OptionResult): { tone: Tone; text: string }
 
 /** The option keys the comparison can show, in order, with the wait card disabled without a date. */
 function optionOf(c: Comparison, key: OptionKey): OptionResult | undefined {
-  if (key === 'wait') return c.wait.date ? c.wait : undefined
+  // Waiting only matters when buying today does not fit.
+  if (key === 'wait') return c.wait.date && !fits(c.buyToday) ? c.wait : undefined
   return c[key]
 }
 
@@ -130,16 +132,22 @@ function OptionCard({
 }) {
   const option = optionOf(c, k)
   const title = optionTitle(k, c)
-  if (!option)
+  if (!option) {
+    const notNeeded = fits(c.buyToday)
     return (
       <div className="opt" role="radio" aria-checked="false" aria-disabled="true" tabIndex={-1}>
         <span className="head">
-          <span className="ot">{title}</span>
-          <Pill tone="info">No date fits</Pill>
+          <span className="ot">Wait</span>
+          <Pill tone="info">{notNeeded ? 'Not needed' : 'No date fits'}</Pill>
         </span>
-        <span className="why">No date in the next 30 days keeps your cushion.</span>
+        <span className="why">
+          {notNeeded
+            ? 'It fits today, so there’s nothing to wait for.'
+            : 'No date in the next 30 days keeps your cushion.'}
+        </span>
       </div>
     )
+  }
   const status = optionStatus(option)
   const below = option.lowestBalanceCents < c.cushionCents
   const fragile = fits(option) && option.stressLowestCents < c.cushionCents
@@ -434,6 +442,7 @@ export function Decision({
   onBuy,
   onSave,
   onEditPlan,
+  onViewActivity,
 }: {
   state: AppState
   request: DecisionRequest
@@ -444,6 +453,7 @@ export function Decision({
   onBuy: (product: Product, acknowledgeShortfall: boolean) => void
   onSave: (product: Product, waitDate?: string) => void
   onEditPlan: () => void
+  onViewActivity: () => void
 }) {
   const [override, setOverride] = useState<DecisionRequest>()
   const active = override ?? request
@@ -452,6 +462,7 @@ export function Decision({
   const [p4Open, setP4Open] = useState(false)
   const [editing, setEditing] = useState(false)
   const [confirmBuy, setConfirmBuy] = useState(false)
+  const [recheck, setRecheck] = useState(false)
   const radios = useRef<(HTMLButtonElement | null)[]>([])
   const product = active.productId
     ? state.products.find((item) => item.id === active.productId)
@@ -489,24 +500,43 @@ export function Decision({
   const p4 = c.payIn4.available ? c.payIn4 : undefined
   const selectedOption = optionOf(c, selected) ?? c.buyToday
   const readAs = explanation?.readAs ?? `${c.itemName} · ${money(c.amountCents)} · today`
+  const bought = product
+    ? state.purchases.find(
+        (p) => p.productId === product.id && p.status === 'completed' && !p.archived,
+      )
+    : undefined
   const primary =
     product &&
     (c.recommendation === 'buyToday'
-      ? { label: 'Buy now', run: () => onBuy(product, false) }
+      ? {
+          label: 'Buy now',
+          note: 'You’ll approve in PayPal, then confirm here. Nothing is charged until you do.',
+          run: () => onBuy(product, false),
+        }
       : c.recommendation === 'wait' && c.wait.date
         ? {
-            label: `Plan to buy on ${dayLabel(c.wait.date)}`,
+            label: `Save for ${dayLabel(c.wait.date)}`,
+            note: 'Keeps it in Saved with this date. Nothing is bought.',
             run: () => onSave(product, c.wait.date ?? undefined),
           }
-        : { label: 'Save for later', run: () => onSave(product) })
+        : {
+            label: 'Save for later',
+            note: 'Keeps it in Saved. Nothing is bought.',
+            run: () => onSave(product),
+          })
   const anyway = product && c.recommendation !== 'buyToday' && c.recommendation !== null
   const breach = firstBelow(c.buyToday.points, c.cushionCents)
-  const actions = (
+  const actions = (notes: boolean) => (
     <>
       {primary && (
         <Button block onClick={primary.run}>
           {primary.label}
         </Button>
+      )}
+      {notes && primary && (
+        <p className="caption" style={{ textAlign: 'center' }}>
+          {primary.note}
+        </p>
       )}
       {anyway && (
         <Button variant="text" onClick={() => setConfirmBuy(true)}>
@@ -515,8 +545,50 @@ export function Decision({
       )}
     </>
   )
+  if (bought && !recheck)
+    return (
+      <Frame>
+        <button
+          type="button"
+          className="link hide-m"
+          onClick={onBack}
+          style={{ fontSize: 'var(--fs-meta)' }}
+        >
+          <ArrowLeft size={16} aria-hidden="true" />
+          {backLabel}
+        </button>
+        <h1 className="title" style={{ margin: '12px 0 24px' }}>
+          {product!.name}, {money(bought.amountCents)}
+        </h1>
+        <section className="tile co" style={{ maxWidth: 560 }} aria-label="Bought">
+          <div className="co-head">
+            <span className="co-icon ok" aria-hidden="true">
+              <CircleCheck className="ico" />
+            </span>
+            <div>
+              <h2>You bought this</h2>
+              <p>
+                {product!.merchant} ·{' '}
+                {dayLabel(
+                  bought.completedAt
+                    ? dateInTimezone(bought.completedAt, state.profile.timezone)
+                    : bought.assessmentDate,
+                )}{' '}
+                · {bought.mode === 'sandbox' ? 'PayPal sandbox' : 'simulated'}
+              </p>
+            </div>
+          </div>
+          <div className="actions">
+            <Button onClick={onViewActivity}>View in Activity</Button>
+            <Button variant="text" onClick={() => setRecheck(true)}>
+              Check it again
+            </Button>
+          </div>
+        </section>
+      </Frame>
+    )
   return (
-    <Frame actions={product ? actions : undefined}>
+    <Frame actions={product ? actions(false) : undefined}>
       <div className="stack tight" style={{ marginBottom: 'var(--s-6)' }}>
         <button
           type="button"
@@ -608,22 +680,10 @@ export function Decision({
                 </div>
               </div>
             </div>
-            {product && (
-              <div className="rail-actions">
-                {actions}
-                <p className="caption" style={{ textAlign: 'center' }}>
-                  You’ll approve in PayPal, then confirm here. Nothing is charged until you do.
-                </p>
-              </div>
-            )}
+            {product && <div className="rail-actions">{actions(true)}</div>}
           </div>
           <WhyThisAnswer explanation={explanation} />
-          <section aria-labelledby="inputs-title">
-            <div className="sec-head">
-              <h2 className="h-section" id="inputs-title">
-                What went into this
-              </h2>
-            </div>
+          <Fold id="inputs" title="What went into this">
             <dl className="kvlist">
               <div>
                 <dt>Money available</dt>
@@ -661,7 +721,7 @@ export function Decision({
                 </dd>
               </div>
             </dl>
-          </section>
+          </Fold>
         </aside>
       </div>
       {confirmBuy && product && (
@@ -726,21 +786,35 @@ function Frame({ children, actions }: { children: ReactNode; actions?: ReactNode
   )
 }
 
-const TOOL_LABELS: Record<string, string> = {
-  interpret_purchase: 'interpret_purchase',
-  compare_options: 'compare_options',
-  prepare_checkout: 'prepare_checkout',
+/** A rail section that opens on request, so the answer above stays the one thing to read. */
+function Fold({ id, title, children }: { id: string; title: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <section className="fold" data-open={open} aria-labelledby={`${id}-head`}>
+      <h2 className="h-section">
+        <button
+          type="button"
+          id={`${id}-head`}
+          className="fold-head"
+          aria-expanded={open}
+          aria-controls={`${id}-body`}
+          onClick={() => setOpen(!open)}
+        >
+          {title}
+          <ChevronDown className="ico chev" aria-hidden="true" />
+        </button>
+      </h2>
+      <div id={`${id}-body`} hidden={!open} className="fold-body">
+        {children}
+      </div>
+    </section>
+  )
 }
+
 function WhyThisAnswer({ explanation }: { explanation?: Explanation }) {
   const claude = explanation?.mode === 'anthropic' && explanation.points.length > 0
-  const tools = [...new Set(explanation?.toolCalls ?? [])]
   return (
-    <section aria-labelledby="why-title">
-      <div className="sec-head">
-        <h2 className="h-section" id="why-title">
-          Why this answer
-        </h2>
-      </div>
+    <Fold id="why" title="Why this answer">
       {claude ? (
         <>
           {explanation!.lead && <p className="strong">{explanation!.lead}</p>}
@@ -749,10 +823,6 @@ function WhyThisAnswer({ explanation }: { explanation?: Explanation }) {
               <li key={point}>{point}</li>
             ))}
           </ul>
-          <div className="claude">
-            <Sparkles className="ico" aria-hidden="true" />
-            Explained by Claude · numbers from your plan
-          </div>
         </>
       ) : (
         <p className="strong" style={{ marginBottom: 12 }}>
@@ -760,13 +830,17 @@ function WhyThisAnswer({ explanation }: { explanation?: Explanation }) {
           your money, bills, income and everyday spending.
         </p>
       )}
-      <div className="trace" style={{ marginTop: 6 }}>
-        <ListChecks className="ico" aria-hidden="true" />
-        {tools.length
-          ? `Tool: ${tools.map((tool) => TOOL_LABELS[tool] ?? tool).join(', ')} · next 60 days`
+      <div className="trace">
+        {claude ? (
+          <Sparkles className="ico" aria-hidden="true" />
+        ) : (
+          <ListChecks className="ico" aria-hidden="true" />
+        )}
+        {claude
+          ? 'Claude picked these facts for your question · every number is Worth’s'
           : 'Worth’s own calculation · next 60 days'}
       </div>
-    </section>
+    </Fold>
   )
 }
 

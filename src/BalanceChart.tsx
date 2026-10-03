@@ -66,6 +66,7 @@ export function BalanceChart({
   ]
   const { lo, hi, ticks } = niceDomain(values, cushionCents)
   const low = data.reduce((min, point) => (point.balance < min.balance ? point : min), data[0]!)
+  const lowIndex = data.indexOf(low)
   const xTicks = data.filter((_, index) => index % 14 === 0).map((point) => point.date)
   return (
     <div className="chart" role="img" aria-label={label}>
@@ -103,6 +104,7 @@ export function BalanceChart({
             tickLine={false}
             axisLine={false}
             width={48}
+            allowDataOverflow
           />
           <Area
             type="linear"
@@ -120,8 +122,9 @@ export function BalanceChart({
               type="linear"
               dataKey="p4"
               stroke="#003087"
-              strokeWidth={1.5}
-              strokeDasharray="5 4"
+              strokeWidth={2.5}
+              strokeDasharray="0.1 5"
+              strokeLinecap="round"
               dot={false}
               activeDot={false}
               isAnimationActive={false}
@@ -163,7 +166,8 @@ export function BalanceChart({
             strokeWidth={2}
             label={{
               value: `Lowest ${signed(low.balance)}`,
-              position: 'bottom',
+              // Beside its marker, on the side with room, clear of the cushion line.
+              position: lowIndex > data.length * 0.7 ? 'left' : 'right',
               fill: STRONG,
               fontSize: 12,
               fontWeight: 700,
