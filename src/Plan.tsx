@@ -19,12 +19,19 @@ import { Alert, Button, Disc, Field, Pill, Ring, Toggle } from './ui'
 
 type FlowDraft = Omit<ScheduledFlow, 'amountCents'> & { amount: string }
 const timestamp = () => new Date().toISOString()
+/** "1300" → "1,300.00"; anything that isn't an amount is left as typed, for the error to explain. */
+const formatAmount = (value: string) => {
+  const plain = value.trim().replace(/,/g, '')
+  return /^\d+(?:\.\d{0,2})?$/.test(plain)
+    ? Number(plain).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : value
+}
 const dollars = (cents: number) => (cents / 100).toFixed(2)
 const message = (error: unknown) =>
   error instanceof Error ? error.message : 'Something went wrong. Please try again.'
 
 function readMoney(value: string, label: string): number {
-  const normalized = value.trim()
+  const normalized = value.trim().replace(/,/g, '')
   if (!/^\d+(?:\.\d{1,2})?$/.test(normalized))
     throw new FieldError(`Enter an amount of $0 or more for ${label.toLowerCase()}.`, label)
   const cents = Math.round(Number(normalized) * 100)
@@ -73,7 +80,7 @@ export function PlanWizard({
   const [openedVersion] = useState(state.profile.version)
   const [step, setStep] = useState(Math.min(3, Math.max(0, initialStep)))
   const [name, setName] = useState(state.profile.name)
-  const [balance, setBalance] = useState(dollars(state.profile.balanceCents))
+  const [balance, setBalance] = useState(formatAmount(dollars(state.profile.balanceCents)))
   const [cushion, setCushion] = useState(dollars(state.profile.cushionCents))
   const [dailySpend, setDailySpend] = useState(dollars(state.profile.dailySpendCents))
   const [timezone, setTimezone] = useState(state.profile.timezone)
@@ -288,21 +295,38 @@ export function PlanWizard({
     <Field label={label} hint={hint} error={fieldError(label)}>
       <span className={cx('money-input', xl && 'xl')}>
         <span aria-hidden="true">$</span>
-        <input
-          className="input num"
-          type="number"
-          inputMode="decimal"
-          min="0"
-          max="1000000"
-          step="0.01"
-          value={value}
-          aria-invalid={Boolean(fieldError(label))}
-          disabled={locked}
-          onChange={(event) => {
-            changed()
-            set(event.target.value)
-          }}
-        />
+        {xl ? (
+          // The headline amount reads like money ("1,300.00"); digits and commas both work.
+          <input
+            className="input num"
+            type="text"
+            inputMode="decimal"
+            value={value}
+            aria-invalid={Boolean(fieldError(label))}
+            disabled={locked}
+            onChange={(event) => {
+              changed()
+              set(event.target.value)
+            }}
+            onBlur={() => set(formatAmount(value))}
+          />
+        ) : (
+          <input
+            className="input num"
+            type="number"
+            inputMode="decimal"
+            min="0"
+            max="1000000"
+            step="0.01"
+            value={value}
+            aria-invalid={Boolean(fieldError(label))}
+            disabled={locked}
+            onChange={(event) => {
+              changed()
+              set(event.target.value)
+            }}
+          />
+        )}
       </span>
     </Field>
   )
@@ -376,7 +400,10 @@ export function PlanWizard({
                   '$ a day, not counting bills.',
                 )}
               </div>
-              <details className="tile" style={{ padding: 'var(--s-4)' }}>
+              <details
+                className="tile quiet-details plain-summary"
+                style={{ padding: '0 var(--s-4)' }}
+              >
                 <summary
                   className="strong"
                   style={{ cursor: 'pointer', fontWeight: 600, minHeight: 28 }}
@@ -960,7 +987,9 @@ function InstalmentPlans({
       <h2 className="h-section" id="plans-title" style={{ marginTop: 16 }}>
         Pay in 4 and other instalment plans
       </h2>
-      {plans.length === 0 && <p className="meta">No plans running. Add any you’re still paying.</p>}
+      {plans.length === 0 && offered.length === 0 && (
+        <p className="meta">No plans running. Add any you’re still paying.</p>
+      )}
       <div className="rows">
         {plans.map((plan) => (
           <div className="row" key={plan.planId}>
@@ -1136,7 +1165,7 @@ function Review({
   locked: boolean
   children: ReactNode
 }) {
-  const asCents = (value: string) => Math.round(Number(value) * 100)
+  const asCents = (value: string) => Math.round(Number(value.replace(/,/g, '')) * 100)
   const profile = {
     ...state.profile,
     flows: flows.map(({ amount, ...f }) => ({ ...f, amountCents: asCents(amount) })),

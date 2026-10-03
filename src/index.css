@@ -2720,3 +2720,10 @@ textarea.input {
   border-radius: var(--r-xs);
   z-index: 5;
 }
+
+.plain-summary > summary {
+  color: var(--c-text-strong);
+  font-weight: var(--fw-semibold);
+  font-size: var(--fs-body);
+  min-height: 56px;
+}

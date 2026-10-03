@@ -375,7 +375,7 @@ export function Checkout({
           ? 'Your plan needs a few details before you buy.'
           : tight
             ? 'Fresh check: buying today takes you below your cushion.'
-            : 'Funds confirmed today · fresh check passed.',
+            : `Checked just now: you keep your ${money(assessment.cushionCents)} cushion.`,
     },
     approve: {
       icon: Lock,

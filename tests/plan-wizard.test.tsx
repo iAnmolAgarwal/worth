@@ -78,7 +78,7 @@ describe('plan setup wizard', () => {
     const progress = screen.getByRole('progressbar')
     expect(progress.getAttribute('aria-valuenow')).toBe('1')
     expect(screen.getByText('Step 1 of 4 · Funds')).toBeTruthy()
-    const funds = screen.getByRole('spinbutton', { name: /^Money available/ })
+    const funds = screen.getByRole('textbox', { name: /^Money available/ })
     await user.clear(funds)
     await continueStep(user)
     expect(screen.getByRole('alert').textContent).toContain('Enter an amount of $0 or more')
@@ -94,7 +94,9 @@ describe('plan setup wizard', () => {
       'Step 2 of 4: Income',
     )
     await user.click(screen.getByRole('button', { name: 'Back' }))
-    expect(value(/^Money available/)).toBe('4800.25')
+    expect(
+      (screen.getByRole('textbox', { name: /^Money available/ }) as HTMLInputElement).value,
+    ).toBe('4,800.25')
     await user.click(screen.getByText(/Name and time zone/))
     const zone = screen.getByRole('combobox', { name: 'Time zone' })
     await user.clear(zone)
@@ -317,7 +319,7 @@ describe('plan setup wizard', () => {
     const next = screen.getByRole('button', { name: 'Continue' }) as HTMLButtonElement
     expect(next.disabled).toBe(true)
     expect(
-      (screen.getByRole('spinbutton', { name: /^Money available/ }) as HTMLInputElement).disabled,
+      (screen.getByRole('textbox', { name: /^Money available/ }) as HTMLInputElement).disabled,
     ).toBe(true)
     await user.click(next)
     cleanup()
