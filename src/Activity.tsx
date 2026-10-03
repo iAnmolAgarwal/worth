@@ -10,9 +10,10 @@ import {
   Search,
   SlidersHorizontal,
   Store,
+  Upload,
   type LucideIcon,
 } from 'lucide-react'
-import { addDays } from '../shared/finance'
+import { addDays, dateInTimezone } from '../shared/finance'
 import type { Transaction } from '../shared/types'
 import { api } from './api'
 import type { AppState, Purchase } from './contract'
@@ -63,6 +64,7 @@ export function Activity({
   onOpenCheckout,
   onConfirmPlan,
   onReviewRefund,
+  onImport,
 }: {
   state: AppState
   onUpdate: (state: AppState) => void
@@ -70,6 +72,7 @@ export function Activity({
   onOpenCheckout: (purchase: Purchase) => void
   onConfirmPlan: (purchaseId: string) => void
   onReviewRefund: (purchaseId: string, refundId: string) => void
+  onImport?: () => void
 }) {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<Filter>('all')
@@ -237,6 +240,16 @@ export function Activity({
           >
             <Download className="ico" aria-hidden="true" />
           </button>
+          {onImport && (
+            <button
+              type="button"
+              className="round-btn"
+              aria-label="Import PayPal activity"
+              onClick={onImport}
+            >
+              <Upload className="ico" aria-hidden="true" />
+            </button>
+          )}
         </div>
         <div style={{ marginTop: 'var(--s-6)' }}>
           <p
@@ -330,7 +343,7 @@ export function Activity({
                   <div className="body">
                     <div className="t">{purchase.name}</div>
                     <div className="s">
-                      {shortDate(purchase.createdAt.slice(0, 10))} ·{' '}
+                      {shortDate(dateInTimezone(purchase.createdAt, state.profile.timezone))} ·{' '}
                       {purchase.status === 'created'
                         ? 'Waiting for PayPal'
                         : 'PayPal is confirming'}

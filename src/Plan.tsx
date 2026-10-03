@@ -8,7 +8,7 @@ import { BalanceChart } from './BalanceChart'
 import type { AppState } from './contract'
 import { isActive } from './contract'
 import { CLAUDE_SHARED_DATA } from './copy'
-import { cadenceLabel, flowIcon, kindLabel, runningPlans } from './engine'
+import { allPlans, cadenceLabel, flowIcon, kindLabel, runningPlans } from './engine'
 import { cx, dayLabel, money, shortDate, signed } from './format'
 import { Alert, Button, Disc, Field, Pill, Ring, Toggle } from './ui'
 
@@ -77,7 +77,13 @@ export function PlanWizard({
   )
   const [editingId, setEditingId] = useState<string | null>(null)
   const [reflectedIds, setReflectedIds] = useState(state.profile.reflectedPurchaseIds)
-  const [aiConsent, setAiConsent] = useState(state.profile.aiConsent)
+  // The untouched sample profile uses Claude unless the user turned it off.
+  const [aiConsent, setAiConsent] = useState(
+    state.profile.aiConsent ||
+      (state.profile.source === 'demo' &&
+        state.profile.userEdited === false &&
+        !state.profile.aiChoiceMade),
+  )
   const [confirmed, setConfirmed] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<{ text: string; field?: string }>()
@@ -1170,7 +1176,7 @@ export function PlanPage({
   onImport: () => void
 }) {
   const [tab, setTab] = useState<'bill' | 'subscription' | 'plans' | 'income'>('bill')
-  const plans = runningPlans(state.profile.flows, state.today)
+  const plans = allPlans(state)
   const items = state.profile.flows
     .filter((flow) => flow.active && (tab === 'plans' ? false : flow.kind === tab))
     .sort((a, b) => a.nextDate.localeCompare(b.nextDate))
@@ -1238,14 +1244,16 @@ export function PlanPage({
                       </div>
                       <div style={{ textAlign: 'right' }}>
                         <div className="amt num">{signed(-plan.amountCents)}</div>
-                        <button
-                          type="button"
-                          className="link edit-link"
-                          onClick={() => onEdit(2)}
-                          aria-label={`Edit ${plan.name}`}
-                        >
-                          Edit
-                        </button>
+                        {!plan.planId.startsWith('purchase:') && (
+                          <button
+                            type="button"
+                            className="link edit-link"
+                            onClick={() => onEdit(2)}
+                            aria-label={`Edit ${plan.name}`}
+                          >
+                            Edit
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))

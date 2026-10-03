@@ -11,7 +11,7 @@ import { getUpcomingFlows } from '../shared/finance'
 import type { Product } from '../shared/types'
 import type { AppState, Purchase } from './contract'
 import { isActive } from './contract'
-import { cadenceLabel, flowIcon, kindLabel, runningPlans, useComparison } from './engine'
+import { allPlans, cadenceLabel, flowIcon, kindLabel, purchasePlans, useComparison } from './engine'
 import { dayLabel, daysFrom, money, signed } from './format'
 import { Button, Disc, Pill, SkeletonRow } from './ui'
 
@@ -143,8 +143,30 @@ function HeroTile({
 }
 
 function ComingUp({ state, onShowAll }: { state: AppState; onShowAll: () => void }) {
-  const upcoming = getUpcomingFlows(state.profile, state.today, 30)
-  const plans = runningPlans(state.profile.flows, state.today)
+  const plans = allPlans(state)
+  // Confirmed Pay in 4 payments for Worth purchases join the plan's own commitments.
+  const bought = purchasePlans(state).flatMap((plan) =>
+    plan.dates
+      .map((date, index) => ({
+        date,
+        flow: {
+          id: `${plan.planId}-${index}`,
+          planId: plan.planId,
+          name: plan.name,
+          amountCents: plan.amounts?.[index] ?? plan.amountCents,
+          nextDate: date,
+          cadence: 'once' as const,
+          kind: 'installment' as const,
+          category: 'Instalment plans',
+          confirmed: true,
+          active: true,
+        },
+      }))
+      .filter(({ date }) => daysFrom(state.today, date) <= 30),
+  )
+  const upcoming = [...getUpcomingFlows(state.profile, state.today, 30), ...bought].sort(
+    (a, b) => a.date.localeCompare(b.date) || b.flow.amountCents - a.flow.amountCents,
+  )
   const soon = upcoming.filter(({ date }) => daysFrom(state.today, date) <= 14)
   const later = upcoming.filter(({ date }) => daysFrom(state.today, date) > 14)
   const biggest = soon
@@ -282,7 +304,7 @@ export function Home({
   const active = state.purchases.find(isActive)
   const saved = state.products.filter((product) => state.wishlist.includes(product.id))
   const income = state.profile.flows.find((flow) => flow.kind === 'income' && flow.active)
-  const plans = runningPlans(state.profile.flows, state.today)
+  const plans = allPlans(state)
   return (
     <div className="page">
       <div className="wrap">

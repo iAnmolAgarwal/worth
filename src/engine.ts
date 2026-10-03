@@ -19,9 +19,10 @@ import {
   Zap,
   type LucideIcon,
 } from 'lucide-react'
+import { confirmedSchedule } from '../shared/finance'
 import type { ForecastPoint, OptionResult, ScheduledFlow } from '../shared/types'
 import { api } from './api'
-import type { Comparison } from './contract'
+import type { AppState, Comparison } from './contract'
 import { dayLabel } from './format'
 
 /** The first day the balance goes below the cushion, if it does. */
@@ -106,6 +107,8 @@ export interface RunningPlan {
   total?: number
   next: string
   dates: string[]
+  /** Per payment, when they differ (purchase plans). */
+  amounts?: number[]
 }
 export function runningPlans(flows: ScheduledFlow[], today: string): RunningPlan[] {
   const groups = new Map<string, ScheduledFlow[]>()
@@ -165,3 +168,49 @@ export const optionTitle = (key: 'buyToday' | 'wait' | 'spendLess', c: Compariso
       : c.wait.date
         ? `Wait until ${dayLabel(c.wait.date).replace(/^\w+, /, '')}`
         : 'Wait'
+
+/**
+ * Pay in 4 plans confirmed for Worth purchases: the payments still to come, read from the
+ * engine's confirmed schedule (after any confirmed refund).
+ */
+export function purchasePlans(state: AppState): RunningPlan[] {
+  return state.purchases.flatMap((purchase) => {
+    if (purchase.archived) return []
+    const schedule = confirmedSchedule(purchase)
+    const upcoming = schedule?.filter((item) => item.date >= state.today) ?? []
+    if (!schedule || !upcoming.length) return []
+    return [
+      {
+        planId: `purchase:${purchase.id}`,
+        name: `${purchase.name} · Pay in 4`,
+        amountCents: upcoming[0]!.amountCents,
+        left: upcoming.length,
+        total: Math.max(schedule.length, 4),
+        next: upcoming[0]!.date,
+        dates: upcoming.map((item) => item.date),
+        amounts: upcoming.map((item) => item.amountCents),
+      },
+    ]
+  })
+}
+/** Every instalment plan in view: the ones in the plan and the ones bought through Worth. */
+export const allPlans = (state: AppState) => [
+  ...runningPlans(state.profile.flows, state.today),
+  ...purchasePlans(state),
+]
+
+/** Claude answers for this profile: the server's consent rule, read from state. */
+export function claudeOn(state: AppState) {
+  const { profile } = state
+  return (
+    state.config.ai === 'anthropic' &&
+    (profile.aiConsent ||
+      (profile.source === 'demo' && profile.userEdited === false && !profile.aiChoiceMade))
+  )
+}
+/** The one environment label, shared by the top bar and Settings. */
+export function envLabel(state: AppState) {
+  return `${state.profile.source === 'demo' ? 'Sample data' : 'Your data'} · Claude ${
+    state.config.ai !== 'anthropic' ? 'not connected' : claudeOn(state) ? 'on' : 'off'
+  } · PayPal ${state.config.paypal === 'sandbox' ? 'sandbox' : 'simulated'}`
+}

@@ -87,7 +87,8 @@ export function ConfirmPlanDialog({
   const review = state.reviews.find(
     (item) => item.kind === 'confirmPlan' && item.purchaseId === purchaseId,
   )
-  const start = (purchase?.completedAt ?? state.today).slice(0, 10)
+  // The purchase's own local day, which the server checks payments against; never the UTC date.
+  const start = purchase?.assessmentDate ?? state.today
   const [product, setProduct] = useState<'full' | 'payIn4'>('full')
   const [drafts, setDrafts] = useState<Draft[]>(() =>
     toDraft(payIn4Schedule(purchase?.amountCents ?? 0, start)),
