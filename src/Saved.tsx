@@ -221,12 +221,12 @@ export function Settings({
                   aria-hidden="true"
                   style={{ verticalAlign: -3, marginRight: 8 }}
                 />
-                Claude
+                Ask Worth assistant
               </h2>
             </div>
             <ClaudeSwitch state={state} onUpdate={onUpdate} />
             <h3 className="meta strong" style={{ margin: '16px 0 4px', fontWeight: 700 }}>
-              What’s shared with Claude
+              What goes to Anthropic (Claude)
             </h3>
             <dl className="kvlist">
               {claudeUses(claudeOn(state)).map(([label, value]) => (
@@ -237,8 +237,10 @@ export function Settings({
               ))}
             </dl>
             <details className="quiet-details">
-              <summary>Everything Claude receives</summary>
-              <p className="caption">When Claude answers, it receives {CLAUDE_SHARED_DATA}.</p>
+              <summary>Everything sent to Anthropic (Claude)</summary>
+              <p className="caption">
+                When the assistant is on, these go to Anthropic (Claude): {CLAUDE_SHARED_DATA}.
+              </p>
             </details>
           </section>
           <section className="tile" aria-labelledby="set-data">

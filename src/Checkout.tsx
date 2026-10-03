@@ -545,7 +545,8 @@ export function Checkout({
       <div className="co">
         {purchase?.preparedBy === 'agent' && view !== 'completed' && (
           <p className="caption">
-            Prepared by Claude from your question. You approve in PayPal and confirm here.
+            Prepared by Worth’s assistant from your question. You approve in PayPal and confirm
+            here.
           </p>
         )}
         <Steps view={view} />

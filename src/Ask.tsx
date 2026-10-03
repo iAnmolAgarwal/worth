@@ -60,21 +60,21 @@ export function matchProduct(products: Product[], name: string, amountCents: num
 export const claudeAllowed = claudeOn
 
 const TOOL_TRACE: Record<string, string> = {
-  interpret_purchase: 'Claude read your question and checked it against your plan',
-  list_commitments: 'Claude looked up your upcoming bills',
-  spending_summary: 'Claude summed up your recent spending',
-  get_plan_summary: 'Claude read your plan totals',
-  prepare_checkout: 'Claude prepared a PayPal checkout',
+  interpret_purchase: 'Worth’s assistant read your question and checked it against your plan',
+  list_commitments: 'Worth’s assistant looked up your upcoming bills',
+  spending_summary: 'Worth’s assistant summed up your recent spending',
+  get_plan_summary: 'Worth’s assistant read your plan totals',
+  prepare_checkout: 'Worth’s assistant prepared a PayPal checkout',
 }
 function traceText(reply: ChatReply, state: AppState) {
   if (reply.mode !== 'anthropic')
     return claudeAllowed(state)
-      ? 'Worth’s own calculation · Claude unavailable for this answer'
-      : 'Worth’s own calculation · Claude off'
+      ? 'Worth’s own calculation · assistant unavailable for this answer'
+      : 'Worth’s own calculation · assistant off'
   const tools = [...new Set(reply.toolCalls)].map(
-    (tool) => TOOL_TRACE[tool] ?? 'Claude used your plan',
+    (tool) => TOOL_TRACE[tool] ?? 'Worth’s assistant used your plan',
   )
-  return [...new Set(tools)].join(' · ') || 'Claude answered from your plan'
+  return [...new Set(tools)].join(' · ') || 'Worth’s assistant used your plan'
 }
 
 /** The answer's own text; the facts Claude picked are shown separately. */
@@ -313,7 +313,7 @@ function AgentHandoff({
         <Alert tone="bad" icon={TriangleAlert}>
           <b>Buying {checkout.itemName} today takes you below your cushion.</b>
           <br />
-          You asked Claude to go ahead anyway. Confirm once more before PayPal opens.
+          You asked Worth’s assistant to go ahead anyway. Confirm once more before PayPal opens.
         </Alert>
         <div className="actions" style={{ marginTop: 12 }}>
           <Button onClick={() => setConfirmed(true)}>Yes, continue</Button>
@@ -324,13 +324,13 @@ function AgentHandoff({
       </section>
     )
   return (
-    <section className="tile" style={{ width: '100%' }} aria-label="Checkout prepared by Claude">
+    <section className="tile" style={{ width: '100%' }} aria-label="Prepared by Worth’s assistant">
       <div className="h-section">
         Checkout ready: {checkout.itemName}, {money(checkout.amountCents)}
       </div>
       <p className="meta" style={{ marginTop: 4 }}>
-        Claude prepared this in the PayPal sandbox. You approve in PayPal, then confirm here.
-        Nothing is charged until you do.
+        Worth’s assistant prepared this in the PayPal sandbox. You approve in PayPal, then confirm
+        here. Nothing is charged until you do.
       </p>
       <div className="actions" style={{ marginTop: 12 }}>
         <Button
@@ -347,7 +347,7 @@ function AgentHandoff({
 export function ClaudeSwitch({
   state,
   onUpdate,
-  label = 'Use Claude for explanations',
+  label = 'Use the assistant (powered by Claude)',
   compact,
 }: {
   state: AppState
@@ -359,9 +359,9 @@ export function ClaudeSwitch({
   const [error, setError] = useState('')
   const note =
     state.config.ai !== 'anthropic'
-      ? 'Claude isn’t connected here, so answers use Worth’s own calculation.'
+      ? 'The assistant isn’t connected here, so answers use Worth’s own calculation.'
       : claudeOn(state)
-        ? 'On: Claude explains answers from your plan totals. Every number is Worth’s.'
+        ? 'On: the assistant explains answers from your plan totals. Every number is Worth’s.'
         : 'Off: answers still work, using Worth’s own calculation.'
   const noteId = `claude-note-${compact ? 'm' : 'd'}`
   async function change(next: boolean) {
@@ -393,7 +393,7 @@ export function ClaudeSwitch({
           style={{ fontWeight: 600, fontSize: 'var(--fs-meta)' }}
           aria-hidden="true"
         >
-          Claude
+          Assistant
         </span>
         {toggle}
         <span className="sr" id={noteId}>
@@ -405,7 +405,7 @@ export function ClaudeSwitch({
     <>
       <div className="switch-row">
         <span className="strong" style={{ fontWeight: 700 }}>
-          Claude explanations
+          Assistant
         </span>
         {toggle}
       </div>
@@ -690,14 +690,14 @@ export function Ask({
               <div className="dock-line">
                 <span className="caption hide-m" style={{ color: 'var(--c-text-2)' }}>
                   {claudeOn(state)
-                    ? 'Claude sees your plan totals, never your login. '
-                    : 'Claude is off. Answers use Worth’s own calculation. '}
+                    ? 'The assistant sees your plan totals, never your login. '
+                    : 'The assistant is off. Answers use Worth’s own calculation. '}
                   <a href="#settings" style={{ fontSize: 'inherit' }}>
                     What’s shared
                   </a>
                 </span>
                 <a className="show-m" href="#settings" style={{ fontSize: 'var(--fs-meta)' }}>
-                  What Claude sees
+                  What it sees
                 </a>
                 <span className="show-m">
                   <ClaudeSwitch state={state} onUpdate={onUpdate} compact />
@@ -705,11 +705,11 @@ export function Ask({
               </div>
             </div>
           </div>
-          <aside className="rail hide-m" aria-label="Claude and suggestions">
+          <aside className="rail hide-m" aria-label="Assistant and suggestions">
             <section aria-labelledby="claude-uses">
               <div className="sec-head">
                 <h2 className="h-section" id="claude-uses">
-                  What Claude can use
+                  What the assistant can use
                 </h2>
               </div>
               <dl className="kvlist">
@@ -724,7 +724,7 @@ export function Ask({
                 <ClaudeSwitch state={state} onUpdate={onUpdate} />
               </div>
               <a href="#settings" style={{ fontSize: 'var(--fs-meta)' }}>
-                Everything Claude receives
+                Everything sent to Anthropic (Claude)
               </a>
             </section>
             <section aria-labelledby="try-asking">
@@ -888,10 +888,10 @@ function Answer({
         paragraphs(reply).map((text, index) => <p key={index}>{text}</p>)
       )}
       {!!reply.points?.length && (
-        <section className="picked" aria-label="Points picked by Claude">
+        <section className="picked" aria-label="Picked for your question">
           <span className="claude">
             <Sparkles className="ico" aria-hidden="true" />
-            Picked by Claude for your question
+            Picked for your question
           </span>
           {reply.lead && <p style={{ marginTop: 8 }}>{reply.lead}</p>}
           <ul>

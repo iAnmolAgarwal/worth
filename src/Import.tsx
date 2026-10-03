@@ -391,8 +391,8 @@ export function ImportDialog({
         </section>
       )}
       <p className="caption">
-        Raw CSV files aren’t saved. Imported history stays in this session and isn’t sent to Claude
-        without your permission. Past activity doesn’t set your money available.
+        Raw CSV files aren’t saved. Imported history stays in this session and isn’t sent to
+        Anthropic (Claude) without your permission. Past activity doesn’t set your money available.
       </p>
     </Dialog>
   )

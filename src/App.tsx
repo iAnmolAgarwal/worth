@@ -36,13 +36,14 @@ const LEGACY: Record<string, Screen> = {
   recurring: 'plan',
   wishlist: 'saved',
 }
-const NAV: { screen: Screen; label: string; icon: LucideIcon; tab: boolean }[] = [
-  { screen: 'home', label: 'Home', icon: House, tab: true },
-  { screen: 'ask', label: 'Ask', icon: Sparkles, tab: true },
-  { screen: 'activity', label: 'Activity', icon: ReceiptText, tab: true },
-  { screen: 'plan', label: 'Plan', icon: SlidersHorizontal, tab: true },
-  { screen: 'saved', label: 'Saved', icon: Bookmark, tab: false },
-]
+const NAV: { screen: Screen; label: string; tabLabel?: string; icon: LucideIcon; tab: boolean }[] =
+  [
+    { screen: 'home', label: 'Home', icon: House, tab: true },
+    { screen: 'ask', label: 'Ask Worth', tabLabel: 'Ask', icon: Sparkles, tab: true },
+    { screen: 'activity', label: 'Activity', icon: ReceiptText, tab: true },
+    { screen: 'plan', label: 'Plan', icon: SlidersHorizontal, tab: true },
+    { screen: 'saved', label: 'Saved', icon: Bookmark, tab: false },
+  ]
 const DETAIL: Screen[] = ['decision', 'plan-edit', 'settings']
 
 function parseRoute(): { screen: Screen; params: URLSearchParams } {
@@ -550,7 +551,7 @@ export default function App() {
             aria-current={current === item.screen ? 'page' : undefined}
           >
             <item.icon className="ico" strokeWidth={2} aria-hidden="true" />
-            {item.label}
+            {item.tabLabel ?? item.label}
           </a>
         ))}
       </nav>

@@ -572,11 +572,11 @@ export function PlanWizard({
               <section className="tile" aria-labelledby="claude-setting">
                 <div className="switch-row">
                   <span className="strong" style={{ fontWeight: 700 }} id="claude-setting">
-                    Use Claude for explanations
+                    Use the assistant (powered by Claude)
                   </span>
                   <Toggle
                     checked={aiConsent}
-                    label="Use Claude for explanations"
+                    label="Use the assistant (powered by Claude)"
                     disabled={locked}
                     describedBy="claude-setting-note"
                     onChange={(on) => {
@@ -586,8 +586,9 @@ export function PlanWizard({
                   />
                 </div>
                 <p className="caption" id="claude-setting-note">
-                  Claude gets your plan totals and bill names, never your login. Answers still work
-                  with this off. <a href="#settings">What’s shared</a>
+                  When the assistant is on, your plan totals and bill names go to Anthropic
+                  (Claude), never your login. Answers still work with this off.{' '}
+                  <a href="#settings">What’s shared</a>
                 </p>
               </section>
               <label className="check">

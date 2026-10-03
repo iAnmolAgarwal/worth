@@ -216,9 +216,15 @@ export function claudeOn(state: AppState) {
 }
 /** The one environment label, shared by the top bar and Settings. */
 export function envLabel(state: AppState) {
-  return `${state.profile.source === 'demo' ? 'Sample data' : 'Your data'} · Claude ${
-    state.config.ai !== 'anthropic' ? 'not connected' : claudeOn(state) ? 'on' : 'off'
-  } · PayPal ${state.config.paypal === 'sandbox' ? 'sandbox' : 'simulated'}`
+  const assistant =
+    state.config.ai !== 'anthropic'
+      ? 'Assistant not connected · Worth’s own calculations'
+      : claudeOn(state)
+        ? 'Assistant: powered by Claude'
+        : 'Assistant off · Worth’s own calculations'
+  return `${state.profile.source === 'demo' ? 'Sample data' : 'Your data'} · ${assistant} · PayPal checkout: ${
+    state.config.paypal === 'sandbox' ? 'sandbox' : 'simulated'
+  }`
 }
 
 /**

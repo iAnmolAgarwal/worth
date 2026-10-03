@@ -896,7 +896,7 @@ function WhyThisAnswer({ explanation }: { explanation?: Explanation }) {
           <ListChecks className="ico" aria-hidden="true" />
         )}
         {claude
-          ? 'Claude picked these facts for your question · every number is Worth’s'
+          ? 'Worth’s assistant picked these facts for your question · every number is Worth’s'
           : 'Worth’s own calculation · next 60 days'}
       </div>
     </Fold>
