@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import request from 'supertest'
 import { createApp } from '../server/app.ts'
@@ -161,5 +162,12 @@ describe('window limiter', () => {
     expect(loadConfig({ ...hosted, TRUST_PROXY: '0' }).trustProxy).toBe(0)
     expect(loadConfig({ TRUST_PROXY: '2' }).trustProxy).toBe(2)
     expect(() => loadConfig({ TRUST_PROXY: 'true' })).toThrow(/TRUST_PROXY/)
+  })
+})
+
+describe('Render blueprint', () => {
+  it('keeps the hosted decline demo off unless turned on deliberately', () => {
+    const blueprint = readFileSync(new URL('../render.yaml', import.meta.url), 'utf8')
+    expect(blueprint).toMatch(/key: PAYPAL_NEGATIVE_TESTING\n\s+value: 'false'/)
   })
 })
