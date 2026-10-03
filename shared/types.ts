@@ -136,6 +136,11 @@ export interface Purchase {
   needsReapproval?: boolean
   /** The last problem with this checkout, written for the user; never raw PayPal output. */
   lastError?: { code: string; message: string }
+  /**
+   * True for an order Claude prepared although it dips below the cushion. The UI shows a confirm
+   * step, and capture requires `{ acknowledgeShortfall: true }` from the user.
+   */
+  proceedConfirmRequired?: boolean
   /** 'agent' when Claude's prepare_checkout created the order; absent on older purchases. */
   preparedBy?: 'agent' | 'user'
 }

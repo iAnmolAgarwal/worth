@@ -10,8 +10,8 @@ export interface PrepareCheckoutRequest {
   itemId: string
   option: CheckoutOption
   /**
-   * Claude's reading that the user chose to go ahead despite a shortfall. Advisory only: the
-   * server decides from the user's own words.
+   * Claude's reading that the user chose to go ahead despite a shortfall. Required, but never
+   * enough alone: the user's own words must say so too.
    */
   proceedDespiteShortfall: boolean
 }
@@ -31,20 +31,66 @@ export type PrepareRefusal =
   | 'PAYPAL_UNAVAILABLE'
   | 'ALREADY_PREPARED'
 
-/** A request to check out now, in the user's own words, rather than a question about affording. */
-const CHECKOUT_REQUEST =
-  /\b(?:buy|order|purchase|check\s*out|checkout|get|go\s+ahead|proceed|prepare)\b/i
-const QUESTION_ONLY =
-  /\b(?:can|could|should|may|would)\s+i\s+(?:afford|buy|get|purchase|order)\b|\bafford\b|\bwhen\s+(?:can|could|should)\b|\bhow\s+much\b/i
-/** The user's own words choosing to go ahead although the plan dips below the cushion. */
-const EXPLICIT_PROCEED =
-  /\b(?:anyway|any\s+way|regardless|despite|even\s+(?:though|if|so)|proceed|go\s+ahead|i\s+understand|i\s+accept)\b/i
-
-export function asksToCheckOut(message: string) {
-  return CHECKOUT_REQUEST.test(message) && !QUESTION_ONLY.test(message)
+/**
+ * The user's own words: quoted text and anything pasted after "says:", "page says", "wrote:" or a
+ * role label such as "system:" is dropped, so merchant copy or injected text never counts.
+ */
+export function ownWords(message: string) {
+  return message
+    .replace(/[“"«][^”"»]*[”"»]/g, ' ')
+    .replace(/(^|[\s:([])[‘'`][^’'`]*[’'`](?=$|[\s.,!?;:)\]])/g, '$1 ')
+    .replace(
+      /(?:\bpage\s+says|\b(?:says|said|wrote|reads)\s*:|\b(?:system|assistant|developer|tool|admin)\s*:)[\s\S]*$/i,
+      ' ',
+    )
 }
+
+/** Clauses: split at sentence and clause punctuation, so a negation applies to its own clause. */
+function clauses(text: string) {
+  return text
+    .split(/[.,;:!?\n]+|\s[-–—]\s/)
+    .map((clause) => clause.trim())
+    .filter(Boolean)
+}
+/** Words that make a clause negative, conditional or contrastive. */
+const QUALIFIER =
+  /\b(?:don['’]?t|do\s+not|doesn['’]?t|not|never|no|if|unless|but|won['’]?t|wouldn['’]?t|shouldn['’]?t|can['’]?t|cannot|without|until|yet)\b/i
+/** A purchase instruction at the start of a clause, optionally after "please" or "go ahead and". */
+const INSTRUCTION =
+  /^(?:(?:ok(?:ay)?|yes|please|so|now|then|great)\s+)*(?:(?:go\s+ahead\s+and|let['’]?s|i\s+(?:want|would\s+like)\s+to|i['’]d\s+like\s+to|i['’]?ll|i\s+will)\s+)?(?:buy|order|purchase|check\s*out|get|place\s+the\s+order|prepare\s+the\s+order)\b|^(?:(?:please|ok(?:ay)?|yes)\s+)*(?:check\s*out|place\s+(?:the|an|my)\s+order)\b/i
+/** A message phrased as a question asks for advice, never for an order. */
+const QUESTION_START =
+  /^\s*(?:should|shall|is|are|am|do|does|did|can|could|would|will|may|might|when|what|how|which|why|where|who|whether)\b/i
+/** Explicit words choosing to go ahead although the purchase dips below the cushion. */
+const PROCEED =
+  /\b(?:anyway|regardless|go\s+ahead|proceed|despite\s+(?:the|it|that|this)|even\s+though|even\s+so|i\s+accept)\b/i
+
+/**
+ * True only for an explicit purchase instruction in the user's own words: not a question, and no
+ * clause tells Worth not to buy, or to buy only under a condition.
+ */
+export function asksToCheckOut(message: string) {
+  const own = ownWords(message)
+  if (/\?/.test(own) || QUESTION_START.test(own)) return false
+  const parts = clauses(own)
+  const instructions = parts.filter((clause) => INSTRUCTION.test(clause))
+  if (!instructions.length || instructions.some((clause) => QUALIFIER.test(clause))) return false
+  // "Don't buy …", "I won't order …" and the like anywhere in the message cancel the request.
+  return !parts.some(
+    (clause) =>
+      QUALIFIER.test(clause) &&
+      /\b(?:buy|order|purchase|check\s*out|get|go\s+ahead|proceed)\b/i.test(clause),
+  )
+}
+
+/**
+ * True only when the user's own words say, without negation or condition, to go ahead although
+ * the purchase dips below the cushion. Any qualified proceed phrase in the message refuses.
+ */
 export function explicitlyProceeds(message: string) {
-  return EXPLICIT_PROCEED.test(message)
+  const parts = clauses(ownWords(message))
+  const proceeding = parts.filter((clause) => PROCEED.test(clause))
+  return proceeding.length > 0 && !proceeding.some((clause) => QUALIFIER.test(clause))
 }
 
 export interface CheckoutDecisionInput {
@@ -87,7 +133,7 @@ export function decideAgentCheckout(input: CheckoutDecisionInput): CheckoutDecis
   if (!product)
     return refuse('UNKNOWN_ITEM', 'Worth can prepare orders only for items in its sandbox catalog.')
   if (
-    !mentionsItem(message, product.name) &&
+    !mentionsItem(ownWords(message), product.name) &&
     !mentionsItem(input.contextItemName ?? '', product.name)
   )
     return refuse(
@@ -130,9 +176,13 @@ export function decideAgentCheckout(input: CheckoutDecisionInput): CheckoutDecis
     fits = comparison.buyToday.outcome === 'fits'
   } else fits = comparison.buyToday.outcome === 'fits'
   if (!fits) {
-    // Going ahead below the cushion rests on the user's own words. Claude's flag alone is never
-    // enough, and the UI still asks the user to confirm before PayPal approval.
-    if (request.option !== 'buyToday' || !explicitlyProceeds(message))
+    // Going ahead below the cushion needs both Claude's reading and the user's own unqualified
+    // words. Even then the order is stored unacknowledged, and capture asks the user again.
+    if (
+      request.option !== 'buyToday' ||
+      !request.proceedDespiteShortfall ||
+      !explicitlyProceeds(message)
+    )
       return refuse(
         'SHORTFALL_NOT_CONFIRMED',
         'Buying this today dips below your cushion. Worth prepares the order only if you say you want to go ahead anyway.',

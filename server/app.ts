@@ -615,6 +615,11 @@ export function createApp(options: AppOptions = {}) {
     product: Product,
     options: {
       acknowledgeShortfall: boolean
+      /**
+       * Claude's order below the cushion: it may be created, but it is stored unacknowledged and
+       * capture needs the user's own explicit acknowledgement.
+       */
+      confirmAtCapture?: boolean
       preparedBy: 'agent' | 'user'
       /** The plan the agent's assessment used; any change since makes it stale. */
       assessed?: { profileVersion: number; today: string }
@@ -643,7 +648,10 @@ export function createApp(options: AppOptions = {}) {
           'Your plan or the date changed. Check this purchase again before checkout.',
           'ASSESSMENT_EXPIRED',
         )
-      assertAssessment(assessment, options.acknowledgeShortfall)
+      assertAssessment(
+        assessment,
+        options.acknowledgeShortfall || options.confirmAtCapture === true,
+      )
       const created: StoredPurchase = {
         id: randomUUID(),
         productId: product.id,
@@ -656,6 +664,7 @@ export function createApp(options: AppOptions = {}) {
         profileVersion: assessment.profileVersion,
         assessmentDate: assessment.today,
         acknowledgedShortfall: options.acknowledgeShortfall,
+        ...(options.confirmAtCapture ? { proceedConfirmRequired: true } : {}),
         preparedBy: options.preparedBy,
         ...(payLater ? { payLaterCapable: payLater !== 'unavailable' } : {}),
       }
@@ -696,7 +705,8 @@ export function createApp(options: AppOptions = {}) {
     let purchase: StoredPurchase
     try {
       purchase = await startCheckout(id, decision.product, {
-        acknowledgeShortfall: !decision.fits,
+        acknowledgeShortfall: false,
+        confirmAtCapture: !decision.fits,
         preparedBy: 'agent',
         assessed: { profileVersion: decision.profileVersion, today: decision.today },
       })
@@ -1325,9 +1335,15 @@ export function createApp(options: AppOptions = {}) {
       mode: purchase.mode,
     })
   })
-  const captureSchema = z.object({ mockDecline: z.literal(true).optional() }).strict()
+  const captureSchema = z
+    .object({
+      mockDecline: z.literal(true).optional(),
+      /** The user's explicit decision, at payment time, to go ahead below the cushion. */
+      acknowledgeShortfall: z.boolean().optional(),
+    })
+    .strict()
   app.post('/api/checkout/:id/capture', async (req, res) => {
-    const { mockDecline = false } = captureSchema.parse(req.body)
+    const { mockDecline = false, acknowledgeShortfall = false } = captureSchema.parse(req.body)
     if (mockDecline && !config.paypalNegativeTesting)
       throw new HttpError(
         400,
@@ -1369,9 +1385,19 @@ export function createApp(options: AppOptions = {}) {
           'The date or financial plan changed. Cancel this checkout, confirm your current funds, and assess again.',
           'ASSESSMENT_EXPIRED',
         )
+      // An order Claude prepared below the cushion is paid only on the user's own confirmation,
+      // sent with this capture request; nothing earlier in the chat counts.
+      if (purchase.proceedConfirmRequired && !acknowledgeShortfall)
+        throw new HttpError(
+          409,
+          'This purchase dips below your cushion. Confirm that you want to go ahead before Worth completes the payment.',
+          'SHORTFALL_ACKNOWLEDGEMENT_REQUIRED',
+          undefined,
+          { purchase: publicPurchase(purchase) },
+        )
       assertAssessment(
         assessmentFor(id, purchase.amountCents, purchase.name, purchase.id),
-        purchase.acknowledgedShortfall,
+        purchase.acknowledgedShortfall || acknowledgeShortfall,
       )
       if (purchase.mode === 'demo')
         return complete(id, purchase, `demo-${purchase.id}`, now().toISOString())
