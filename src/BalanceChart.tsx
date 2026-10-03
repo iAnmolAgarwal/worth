@@ -10,7 +10,7 @@ import {
   YAxis,
 } from 'recharts'
 import type { ForecastPoint, InstalmentDetail } from '../shared/types'
-import { useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { dayLabel, shortDate, signed } from './format'
 
 const TEXT_2 = '#545D68'
@@ -272,6 +272,8 @@ type Mark = {
 }
 /** Events this many days apart or closer share one marker, so none overlap on a phone. */
 const MERGE_DAYS = 3
+const maxAt = (marks: Mark[]) =>
+  Math.max(...marks.map((mark) => mark.at)) - Math.min(...marks.map((mark) => mark.at))
 const dayIndex = (date: string) => Math.round(Date.parse(`${date}T12:00:00Z`) / 86_400_000)
 
 /**
@@ -280,11 +282,26 @@ const dayIndex = (date: string) => Math.round(Date.parse(`${date}T12:00:00Z`) / 
  * strip is one tab stop: arrow keys move between markers.
  */
 function TimingStrip({ marks }: { marks: Mark[] }) {
+  // Merge by distance on screen: markers closer than one marker's width share one.
+  const list = useRef<HTMLOListElement>(null)
+  const [width, setWidth] = useState(600)
+  useEffect(() => {
+    const element = list.current
+    if (!element || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(([entry]) => setWidth(entry!.contentRect.width))
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
   const sorted = [...marks].sort((a, b) => a.date.localeCompare(b.date))
+  const span = Math.max(1, dayIndex(sorted.at(-1)!.date) - dayIndex(sorted[0]!.date))
+  const plot = Math.max(1, width - 60)
+  const pxPerDay =
+    sorted.length > 1 && marks.some((m) => m.at > 0) ? (plot * maxAt(marks)) / span : plot / 60
+  const mergeDays = Math.max(MERGE_DAYS, Math.ceil(30 / Math.max(pxPerDay, 0.1)))
   const groups: Mark[][] = []
   for (const mark of sorted) {
     const group = groups.at(-1)
-    if (group && dayIndex(mark.date) - dayIndex(group[0]!.date) <= MERGE_DAYS) group.push(mark)
+    if (group && dayIndex(mark.date) - dayIndex(group.at(-1)!.date) <= mergeDays) group.push(mark)
     else groups.push([mark])
   }
   const [active, setActive] = useState(0)
@@ -315,7 +332,7 @@ function TimingStrip({ marks }: { marks: Mark[] }) {
         const label = group.find((mark) => mark.labelled)
         // The bill behind the low point keeps its label on phones; the payday label is extra.
         const primary = label?.kind === 'bill'
-        const at = group[0]!.at
+        const at = group.reduce((sum, mark) => sum + mark.at, 0) / group.length
         return (
           <li
             key={group[0]!.date}
