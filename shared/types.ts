@@ -136,6 +136,8 @@ export interface Purchase {
   needsReapproval?: boolean
   /** The last problem with this checkout, written for the user; never raw PayPal output. */
   lastError?: { code: string; message: string }
+  /** 'agent' when Claude's prepare_checkout created the order; absent on older purchases. */
+  preparedBy?: 'agent' | 'user'
 }
 /** Something the user must confirm before Worth changes how a purchase affects their plan. */
 export type PurchaseReview =
@@ -366,6 +368,19 @@ export interface ChatReply {
   suggestions: string[]
   /** Tools that ran successfully for this answer. */
   toolCalls: string[]
+  /** A PayPal order Claude prepared for the user to approve. Capture stays a separate user action. */
+  checkout?: CheckoutHandoff
+}
+/** What the UI needs to hand a prepared order to PayPal for approval. */
+export interface CheckoutHandoff {
+  purchaseId: string
+  orderId: string
+  approveUrl: string
+  itemName: string
+  amountCents: number
+  option: 'buyToday' | 'wait' | 'spendLess'
+  /** True when the user chose to go ahead despite a shortfall; the UI confirms that first. */
+  requiresProceedConfirm: boolean
 }
 /**
  * A completed payment in another currency with no matching USD conversion in the export. Until it

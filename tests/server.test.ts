@@ -940,6 +940,12 @@ describe('payment lifecycle: declines, cancels and late events (C-8)', () => {
     expect(stranger.status).toBe(303)
     expect((await state(agent)).purchases[0]?.lastError).toBeUndefined()
   })
+  it('marks a purchase created by the checkout button as user-prepared', async () => {
+    const { gateway } = fakePayPal()
+    const { agent } = setup({ paypal: gateway })
+    await checkout(agent)
+    expect((await state(agent)).purchases[0]?.preparedBy).toBe('user')
+  })
 })
 
 describe('PayPal webhooks (PP-5, SB-9)', () => {

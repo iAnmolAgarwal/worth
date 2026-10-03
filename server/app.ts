@@ -41,6 +41,8 @@ import {
   validateOrder,
 } from './paypal.ts'
 import type { PayPalGateway, PayPalOrder } from './paypal.ts'
+import { decideAgentCheckout } from './agentCheckout.ts'
+import type { PrepareCheckoutRequest, PrepareCheckoutResult } from './agentCheckout.ts'
 import {
   categoryCandidates,
   createChatProvider,
@@ -604,20 +606,24 @@ export function createApp(options: AppOptions = {}) {
     return value
   }
   /**
-   * Creates the purchase reservation and, in the sandbox, its PayPal order.
+   * Creates the purchase reservation and, in the sandbox, its PayPal order. Both the checkout
+   * button and Claude's prepare_checkout go through here.
    */
   async function startCheckout(
     id: string,
     product: Product,
     options: {
       acknowledgeShortfall: boolean
+      preparedBy: 'agent' | 'user'
+      /** The plan the agent's assessment used; any change since makes it stale. */
+      assessed?: { profileVersion: number; today: string }
     },
   ) {
     const payLater = paypal ? await payIn4Eligibility(product.priceCents) : undefined
     let purchase = store.atomic(() => {
       const existing = active(id)
       if (existing) {
-        if (existing.productId !== product.id)
+        if (existing.productId !== product.id || options.preparedBy === 'agent')
           throw new HttpError(
             409,
             'You already have a checkout in progress. Finish or cancel it first.',
@@ -626,6 +632,16 @@ export function createApp(options: AppOptions = {}) {
         return existing
       }
       const assessment = assessmentFor(id, product.priceCents, product.name)
+      if (
+        options.assessed &&
+        (options.assessed.profileVersion !== assessment.profileVersion ||
+          options.assessed.today !== assessment.today)
+      )
+        throw new HttpError(
+          409,
+          'Your plan or the date changed. Check this purchase again before checkout.',
+          'ASSESSMENT_EXPIRED',
+        )
       assertAssessment(assessment, options.acknowledgeShortfall)
       const created: StoredPurchase = {
         id: randomUUID(),
@@ -639,6 +655,7 @@ export function createApp(options: AppOptions = {}) {
         profileVersion: assessment.profileVersion,
         assessmentDate: assessment.today,
         acknowledgedShortfall: options.acknowledgeShortfall,
+        preparedBy: options.preparedBy,
         ...(payLater ? { payLaterCapable: payLater !== 'unavailable' } : {}),
       }
       store.putPurchase(id, created)
@@ -647,6 +664,73 @@ export function createApp(options: AppOptions = {}) {
     if (purchase.mode === 'sandbox')
       purchase = await withPurchaseLock(purchase.id, () => ensureOrder(id, purchase))
     return purchase
+  }
+  /** Claude's gated prepare_checkout: the guard, then the same checkout path as the button. */
+  async function prepareCheckout(
+    id: string,
+    message: string,
+    contextItemName: string | undefined,
+    request: PrepareCheckoutRequest,
+  ): Promise<PrepareCheckoutResult> {
+    const data = store.get(id)
+    if (!data)
+      return { ok: false, code: 'ASSESSMENT_EXPIRED', message: 'This session has expired.' }
+    const product = PRODUCTS.find((p) => p.id === request.itemId)
+    const decision = decideAgentCheckout({
+      profile: data.profile,
+      purchases: livePurchases(id),
+      today: today(data.profile.timezone),
+      product,
+      request,
+      message,
+      contextItemName,
+    })
+    if (!decision.ok) return decision
+    if (!paypal)
+      return {
+        ok: false,
+        code: 'PAYPAL_UNAVAILABLE',
+        message: 'PayPal sandbox checkout is not connected, so Worth cannot prepare an order.',
+      }
+    let purchase: StoredPurchase
+    try {
+      purchase = await startCheckout(id, decision.product, {
+        acknowledgeShortfall: !decision.fits,
+        preparedBy: 'agent',
+        assessed: { profileVersion: decision.profileVersion, today: decision.today },
+      })
+    } catch (error) {
+      if (error instanceof HttpError) {
+        const code =
+          error.code === 'CHECKOUT_ACTIVE' || error.code === 'ASSESSMENT_EXPIRED'
+            ? error.code
+            : error.code === 'PLAN_INCOMPLETE'
+              ? 'PLAN_INCOMPLETE'
+              : error.code === 'SHORTFALL_ACKNOWLEDGEMENT_REQUIRED'
+                ? 'SHORTFALL_NOT_CONFIRMED'
+                : 'PAYPAL_UNAVAILABLE'
+        return { ok: false, code, message: error.message }
+      }
+      throw error
+    }
+    if (!purchase.orderId || !purchase.approvalUrl || purchase.status !== 'created')
+      return {
+        ok: false,
+        code: 'PAYPAL_UNAVAILABLE',
+        message: 'PayPal did not return an approval link. Open the checkout to continue.',
+      }
+    return {
+      ok: true,
+      checkout: {
+        purchaseId: purchase.id,
+        orderId: purchase.orderId,
+        approveUrl: purchase.approvalUrl,
+        itemName: purchase.name,
+        amountCents: purchase.amountCents,
+        option: request.option,
+        requiresProceedConfirm: !decision.fits,
+      },
+    }
   }
   let proxyHopsLogged = !config.production
   app.use((req, res, next) => {
@@ -1155,9 +1239,11 @@ export function createApp(options: AppOptions = {}) {
     res.json(state(id))
   })
   /** What Claude's tools may ask the server to do for this session, each behind its own guard. */
-  function chatActions(): ChatActions {
+  function chatActions(id: string, input: z.infer<typeof chatSchema>): ChatActions {
     return {
       payIn4Eligibility,
+      prepareCheckout: (request) =>
+        prepareCheckout(id, input.message, input.context?.itemName, request),
     }
   }
   app.post('/api/chat', async (req, res) => {
@@ -1202,7 +1288,7 @@ export function createApp(options: AppOptions = {}) {
       )
     chatBusy.add(id)
     try {
-      return res.json(await chat.reply(input, data, chatActions()))
+      return res.json(await chat.reply(input, data, chatActions(id, input)))
     } catch (error) {
       // Error class only: never the message text, financial data, or credentials.
       console.warn('Worth chat used local fallback:', error instanceof Error ? error.name : 'Error')
@@ -1226,6 +1312,7 @@ export function createApp(options: AppOptions = {}) {
     if (!product) throw new HttpError(404, 'Product not found.', 'NOT_FOUND')
     const purchase = await startCheckout(sessionId(res), product, {
       acknowledgeShortfall,
+      preparedBy: 'user',
     })
     res.json({
       purchase: publicPurchase(purchase),

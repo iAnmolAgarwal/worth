@@ -1,14 +1,18 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
-import { addDays, assessPurchase } from '../shared/finance.ts'
+import { addDays, assessPurchase, money } from '../shared/finance.ts'
+import { PRODUCTS } from '../shared/seed.ts'
 import type {
   Assessment,
   ChatIntent,
   ChatReply,
+  CheckoutHandoff,
   Interpretation,
   PayIn4Eligibility,
   Transaction,
 } from '../shared/types.ts'
+import { CHECKOUT_OPTIONS } from './agentCheckout.ts'
+import type { PrepareCheckoutRequest, PrepareCheckoutResult } from './agentCheckout.ts'
 import { readTiming } from './dates.ts'
 import {
   clarificationText,
@@ -55,9 +59,13 @@ export interface CategoryReply {
   suggestions: { transactionId: string; category: string }[]
   message: string
 }
-/** Server lookups Claude's tools may use for one session; without them (local mode, evals) none run. */
+/**
+ * Server actions Claude's tools may request for one session. Each runs behind its own server guard;
+ * without them (local mode, evals) Claude can only read.
+ */
 export interface ChatActions {
   payIn4Eligibility?(amountCents: number): Promise<PayIn4Eligibility>
+  prepareCheckout?(request: PrepareCheckoutRequest): Promise<PrepareCheckoutResult>
 }
 export interface ChatProvider {
   reply(input: ChatInput, data: ChatData, actions?: ChatActions): Promise<ChatReply>
@@ -128,6 +136,7 @@ interface Answer {
   suggestions?: string[]
   toolCalls?: string[]
   note?: string
+  checkout?: CheckoutHandoff
 }
 /** The facts available for an answer, built from engine values. */
 function catalogFor(answer: Answer, data: ChatData): FactCatalog {
@@ -185,6 +194,7 @@ function compose(answer: Answer, data: ChatData): ChatReply {
     ...(answer.clarify?.pending ? { pending: answer.clarify.pending } : {}),
     suggestions: answer.suggestions?.length ? answer.suggestions : DEFAULT_SUGGESTIONS,
     toolCalls: answer.toolCalls ?? [],
+    ...(answer.checkout ? { checkout: answer.checkout } : {}),
   }
 }
 function assess(data: ChatData, interpretation: Interpretation) {
@@ -257,7 +267,12 @@ const SYSTEM = `You are Worth, a cash-flow planning assistant in a PayPal sandbo
 Scope
 - You help with purchases, upcoming bills and subscriptions, recent spending, and how much room the plan has.
 - Anything else (creative writing, trivia, general knowledge, coding, other topics) is out of scope: call no tools and answer with intent "off_topic". The app shows a fixed redirect.
-- You cannot buy, pay, cancel, move money, or change the plan.
+- You cannot pay, capture a payment, cancel, move money, or change the plan.
+
+Preparing a checkout
+- When the person asks Worth to buy or check out one of the catalog items now, call prepare_checkout with the item and the option they chose. Never call it for a question such as whether they can afford something.
+- Worth's server decides whether an order can be prepared: it checks today's funds, a fresh assessment, the catalog price and that no other checkout is active. The person then approves the payment in PayPal and confirms it in Worth; you never take payment.
+- Set proceed_despite_shortfall only when the person explicitly says to go ahead even though the purchase dips below their cushion.
 
 Reading a purchase question
 - Call interpret_purchase for every question about buying or affording something, including follow-ups about the purchase being discussed. Report what the user said; the engine decides the answer.
@@ -439,6 +454,42 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
 ]
+const PREPARE_CHECKOUT_TOOL: Anthropic.Tool = {
+  name: 'prepare_checkout',
+  description:
+    "Prepare a PayPal sandbox order for a catalog item when the person asks Worth to buy it or check out now. The server sets the price from its catalog, checks today's funds, a fresh assessment and that no other checkout is active, and refuses otherwise. It never takes payment: the person approves in PayPal and confirms in Worth.",
+  strict: true,
+  input_schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['item_id', 'option', 'proceed_despite_shortfall'],
+    properties: {
+      item_id: {
+        type: 'string',
+        enum: PRODUCTS.map((product) => product.id),
+        description: `The catalog item: ${PRODUCTS.map((product) => `${product.id} (${product.name})`).join(', ')}.`,
+      },
+      option: {
+        type: 'string',
+        enum: [...CHECKOUT_OPTIONS],
+        description:
+          'buyToday: buy now. wait: buy on the wait date the plan suggested, once that day has come. spendLess: a cheaper catalog item within the amount that keeps the cushion.',
+      },
+      proceed_despite_shortfall: {
+        type: 'boolean',
+        description:
+          'True only when the person explicitly says to go ahead even though buying dips below their cushion.',
+      },
+    },
+  },
+}
+const prepareSchema = z
+  .object({
+    item_id: z.string().max(100),
+    option: z.enum(CHECKOUT_OPTIONS),
+    proceed_despite_shortfall: z.boolean(),
+  })
+  .strict()
 /** The person asked about Pay in 4 or paying later, so its availability may be shown. */
 const ASKS_PAY_IN_4 = /\bpay\s*(?:in\s*(?:4|four)|later)\b|\binstal+ments?\b|\bbnpl\b/i
 const FINAL_FORMAT = {
@@ -513,6 +564,10 @@ class Turn {
   read = new Set<string>()
   /** What Claude chose to show, kept per tool so the answer uses the choice made for it. */
   presentations = new Map<string, Presentation>()
+  /** The order prepared for approval, or the server's reason for not preparing one. */
+  checkout?: CheckoutHandoff
+  checkoutNote?: string
+  private checkoutRequested = false
   data: ChatData
   constructor(
     readonly input: ChatInput,
@@ -527,6 +582,7 @@ class Turn {
     if (this.attempts > MAX_TOOL_CALLS)
       return { content: 'Tool limit reached. Answer with what you have.', isError: true }
     const input = (raw ?? {}) as Record<string, unknown>
+    if (name === 'prepare_checkout') return this.prepare(input)
     const shown = presentationSchema.safeParse(input)
     if (!shown.success)
       return { content: 'points, lead_in and follow_ups did not match the schema.', isError: true }
@@ -569,6 +625,68 @@ class Turn {
     this.read.add(name)
     this.presentations.set(name, chosen)
     return { content: JSON.stringify(result) }
+  }
+
+  /** Asks the server to prepare an order. The server's guard, not Claude, decides. */
+  private async prepare(raw: Record<string, unknown>): Promise<ToolOutcome> {
+    if (!this.actions.prepareCheckout)
+      return {
+        content: 'Unknown tool prepare_checkout. Use only the listed read-only tools.',
+        isError: true,
+      }
+    const parsed = prepareSchema.safeParse(raw)
+    if (!parsed.success)
+      return {
+        content: 'item_id, option and proceed_despite_shortfall are required.',
+        isError: true,
+      }
+    if (this.checkoutRequested)
+      return {
+        content: JSON.stringify({ status: 'refused', reason: 'ALREADY_PREPARED' }),
+      }
+    this.checkoutRequested = true
+    const result = await this.actions.prepareCheckout({
+      itemId: parsed.data.item_id,
+      option: parsed.data.option,
+      proceedDespiteShortfall: parsed.data.proceed_despite_shortfall,
+    })
+    const product = PRODUCTS.find((p) => p.id === parsed.data.item_id)
+    // The answer shows the engine's assessment of the item, at its catalog price, today.
+    if (product && !this.assessment && !this.clarify) {
+      this.assessment = assessPurchase(this.data.profile, this.data.purchases, {
+        amountCents: product.priceCents,
+        itemName: product.name,
+        today: this.data.today,
+      })
+    }
+    if (!result.ok) {
+      this.checkoutNote = `Worth did not prepare an order. ${result.message}`
+      return {
+        content: JSON.stringify({
+          status: 'refused',
+          reason: result.code,
+          message_shown_by_app: result.message,
+        }),
+      }
+    }
+    const { checkout } = result
+    this.checkout = checkout
+    this.calls.push('prepare_checkout')
+    this.checkoutNote = [
+      `Worth prepared a PayPal sandbox order for the ${checkout.itemName} at ${money(checkout.amountCents)}.`,
+      checkout.requiresProceedConfirm
+        ? 'This purchase dips below your cushion, so confirm that you want to go ahead before you approve it in PayPal.'
+        : 'Approve it in PayPal, then confirm the payment in Worth.',
+      'Nothing is paid until you confirm.',
+    ].join(' ')
+    return {
+      content: JSON.stringify({
+        status: 'prepared',
+        requires_proceed_confirm: checkout.requiresProceedConfirm,
+        shown_by_app:
+          'The app shows the PayPal approval step. Payment happens only after the person approves in PayPal and confirms in Worth.',
+      }),
+    }
   }
 
   private async interpret(
@@ -714,6 +832,8 @@ function answerFor(turn: Turn, final: Final | undefined): Answer {
         kind: turn.kind ?? commitmentKind(input.message),
       }
   }
+  if (turn.checkout) answer.checkout = turn.checkout
+  if (turn.checkoutNote) answer.note = turn.checkoutNote
   // Claude's choice of facts and lead-in applies only with the tool that produced this
   // answer; with two tools in one round, each keeps its own choice.
   const source =
@@ -801,6 +921,7 @@ export function createChatProvider(
       const started = Date.now()
       const deadline = started + deadlineMs
       const turn = new Turn(input, data, actions)
+      const tools = actions.prepareCheckout ? [...TOOLS, PREPARE_CHECKOUT_TOOL] : TOOLS
       const messages: Anthropic.MessageParam[] = [
         ...history(input),
         {
@@ -850,7 +971,7 @@ export function createChatProvider(
               model,
               max_tokens: 3000,
               system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
-              tools: TOOLS,
+              tools,
               messages,
               output_config: { effort: 'low', format: FINAL_FORMAT },
               ...(closing ? { tool_choice: { type: 'none' as const } } : {}),
