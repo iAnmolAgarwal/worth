@@ -6,6 +6,11 @@ import type {
   ScheduledFlow,
 } from './types.ts'
 
+/** Every option is judged from today through this many days ahead, fixed before any search. */
+export const COMPARISON_WINDOW_DAYS = 60
+/** Wait candidates run from today through this many days ahead. */
+export const WAIT_SEARCH_DAYS = 30
+
 const DAY_MS = 86_400_000
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -293,6 +298,38 @@ function missingInputs(profile: FinancialProfile, purchases: Purchase[], today: 
   return [...new Set(missing.filter(Boolean))]
 }
 
+function cushionOf(profile: FinancialProfile): number {
+  return Number.isSafeInteger(profile.cushionCents) ? Math.max(0, profile.cushionCents) : 0
+}
+
+function lowestPoint(points: ForecastPoint[]): ForecastPoint {
+  return points.reduce((min, point) => (point.minimumCents < min.minimumCents ? point : min))
+}
+
+/**
+ * The earliest day from today through WAIT_SEARCH_DAYS on which buying in full keeps the cushion
+ * across the whole window. The window end never moves with the candidate.
+ */
+function earliestFittingDate(
+  profile: FinancialProfile,
+  purchases: Purchase[],
+  today: string,
+  amountCents: number,
+): string | null {
+  const cushion = cushionOf(profile)
+  for (let day = 0; day <= WAIT_SEARCH_DAYS; day++) {
+    const candidate = addDays(today, day)
+    const points = forecast(profile, purchases, {
+      today,
+      purchaseDate: candidate,
+      amountCents,
+      days: COMPARISON_WINDOW_DAYS,
+    })
+    if (points.every((point) => point.minimumCents >= cushion)) return candidate
+  }
+  return null
+}
+
 export function assessPurchase(
   profile: FinancialProfile,
   purchases: Purchase[],
@@ -310,25 +347,23 @@ export function assessPurchase(
     !validDate(today) ||
     !validDate(purchaseDate) ||
     purchaseDate < today ||
-    purchaseDate > addDays(today, 30)
+    purchaseDate > addDays(today, WAIT_SEARCH_DAYS)
   )
     throw new Error('Choose a purchase date within the next 30 days.')
   if (!Number.isSafeInteger(options.amountCents) || options.amountCents < 0)
     throw new Error('Enter a non-negative total purchase price in cents.')
-  const horizonDays = daysBetween(today, purchaseDate) + 30
+  // One window for every purchase date, so a later date is never judged over a longer horizon.
+  const windowEnd = addDays(today, COMPARISON_WINDOW_DAYS)
   const points = forecast(profile, purchases, {
     today,
     purchaseDate,
     amountCents: options.amountCents,
-    days: horizonDays,
+    days: COMPARISON_WINDOW_DAYS,
   })
-  const lowest = points.reduce(
-    (min, point) => (point.minimumCents < min.minimumCents ? point : min),
-    points[0]!,
-  )
+  const lowest = lowestPoint(points)
   const baselineLowestCents = Math.min(...points.map((point) => point.baselineMinimumCents))
   const stressLowestCents = Math.min(...points.map((point) => point.stressMinimumCents))
-  const cushion = Number.isSafeInteger(profile.cushionCents) ? Math.max(0, profile.cushionCents) : 0
+  const cushion = cushionOf(profile)
   const missingFields = missingInputs(profile, purchases, today)
   const outcome: Assessment['outcome'] = missingFields.length
     ? 'incomplete'
@@ -348,28 +383,18 @@ export function assessPurchase(
             .map((point) => point.baselineMinimumCents),
         ) - cushion,
       )
-  let earliestDate: string | null = null
-  if (!missingFields.length && options.findEarliest !== false) {
-    for (let day = 0; day <= 30; day++) {
-      const candidate = addDays(today, day)
-      const candidatePoints = forecast(profile, purchases, {
-        today,
-        purchaseDate: candidate,
-        amountCents: options.amountCents,
-        days: day + 30,
-      })
-      if (candidatePoints.every((point) => point.minimumCents >= cushion)) {
-        earliestDate = candidate
-        break
-      }
-    }
-  }
-  const drivers = getUpcomingFlows(profile, today, horizonDays).map(({ flow, date }) => ({
-    name: flow.name,
-    amountCents: flow.amountCents,
-    date,
-    kind: flow.kind,
-  }))
+  const earliestDate =
+    !missingFields.length && options.findEarliest !== false
+      ? earliestFittingDate(profile, purchases, today, options.amountCents)
+      : null
+  const drivers = getUpcomingFlows(profile, today, COMPARISON_WINDOW_DAYS).map(
+    ({ flow, date }) => ({
+      name: flow.name,
+      amountCents: flow.amountCents,
+      date,
+      kind: flow.kind,
+    }),
+  )
   const explanation =
     outcome === 'incomplete'
       ? 'Review the missing information before using this estimate to decide.'
@@ -382,7 +407,7 @@ export function assessPurchase(
     itemName: options.itemName?.trim() || 'Your purchase',
     purchaseDate,
     today,
-    horizonEnd: addDays(purchaseDate, 30),
+    horizonEnd: windowEnd,
     profileVersion: profile.version,
     cushionCents: cushion,
     lowestBalanceCents: lowest.minimumCents,
@@ -396,14 +421,18 @@ export function assessPurchase(
     missingFields,
     drivers,
     explanation,
-    assumptions: [
-      `Available funds are a snapshot for ${profile.snapshotDate}; past transactions are not deducted again.`,
-      `${money(profile.dailySpendCents)} of everyday spending is allocated each calendar day, including today; scheduled bills are separate.`,
-      'Bills, purchases, and everyday spending happen before income when only a date is known.',
-      'The full purchase total is reserved once. Your cushion is a threshold, not an expense.',
-      `The plan runs through ${addDays(purchaseDate, 30)}, 30 days after the proposed purchase. Confirmed recurring items repeat on their schedule.`,
-      'The stress scenario assumes 20% higher everyday spending; it is not a statistical confidence interval.',
-      'Estimates depend on the income, bills, and outside-PayPal commitments you confirmed.',
-    ],
+    assumptions: assumptions(profile, windowEnd),
   }
+}
+
+function assumptions(profile: FinancialProfile, windowEnd: string): string[] {
+  return [
+    `Available funds are a snapshot for ${profile.snapshotDate}; past transactions are not deducted again.`,
+    `${money(profile.dailySpendCents)} of everyday spending is allocated each calendar day, including today; scheduled bills are separate.`,
+    'Bills, purchases, and everyday spending happen before income when only a date is known.',
+    'The full purchase total is reserved once. Your cushion is a threshold, not an expense.',
+    `Every option is judged from today through ${windowEnd}, the same ${COMPARISON_WINDOW_DAYS} days whatever the purchase date. Confirmed recurring items repeat on their schedule.`,
+    'The stress scenario assumes 20% higher everyday spending; it is not a statistical confidence interval.',
+    'Estimates depend on the income, bills, and outside-PayPal commitments you confirmed.',
+  ]
 }
