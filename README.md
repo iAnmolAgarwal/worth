@@ -23,7 +23,7 @@ Open **http://localhost:5173**. For provider integration, create `.env` from `.e
 | `PAYPAL_WEBHOOK_ID` | Registered sandbox webhook ID; required for signature verification, optional for foreground checkout. |
 | `APP_ORIGIN` | Public browser origin. Falls back to `APP_URL`, then Render's `RENDER_EXTERNAL_URL`, then `http://localhost:$PORT`. Production refuses to start on localhost or plain HTTP. Locally, `localhost` and `127.0.0.1` both work. |
 | `PORT`, `HOST` | Defaults: `5173`; `HOST` is `0.0.0.0` in production and `127.0.0.1` otherwise. |
-| `TRUST_PROXY` | Reverse-proxy hops trusted for the client IP used by rate limits. Default `1` in production, `0` otherwise. |
+| `TRUST_PROXY` | Reverse-proxy hops trusted for the client IP used by rate limits. **Required in production** (the server refuses to start without it); `0` locally. Confirm the value from the hop count logged on the first hosted request. |
 | `CLAUDE_IP_HOURLY_LIMIT`, `CLAUDE_DAILY_LIMIT` | Claude requests per client IP per hour (20) and per server per day (200). Beyond either, answers use labelled local calculations. |
 | `SESSION_IP_HOURLY_LIMIT`, `MAX_SESSIONS`, `MAX_TRANSACTIONS` | New sessions per IP per hour (30), live sessions (5,000), and stored transactions per session (20,000). |
 | `MAX_HEAP_MB` | Heap limit for `npm start` (384). Set it in the shell or host environment; `.env` is read too late. |
@@ -64,7 +64,7 @@ npm run lint
 
 `check` runs lint, TypeScript, single-worker tests, and the production build. `npm start` serves that build for hosting. Production mode uses a `__Host-` secure cookie and HSTS, and it refuses to start unless the origin is a public HTTPS address; use `npm run dev` locally.
 
-**135 tests pass**, along with TypeScript, the production build, and lint. Coverage includes financial/import rules, server boundaries, frontend privacy/recovery, and the four-step editor. The editor was also checked on desktop and at 390 px mobile width.
+**The full test suite passes**, along with TypeScript, the production build, and lint. Coverage includes financial/import rules, server boundaries, frontend privacy/recovery, and the four-step editor. The editor was also checked on desktop and at 390 px mobile width.
 
 **Demonstrated with real providers:** Claude Sonnet 5.5 answered the camera question. A $349 headphones checkout used PayPal's approval redirect; a later $249 weekend checkout used the **SDK v6 popup**. Approval alone left the order uncaptured; Worth's separate confirmation completed it. Each purchase appeared once. Synthetic purchase capacity changed **$850.52 → $501.52 → $252.52**.
 
@@ -74,7 +74,7 @@ The production build was exercised with a synthetic CSV import, required recurri
 
 Each browser gets an isolated temporary session, expiring 24 hours after creation. Raw CSV files are not saved; normalized data is stored in local SQLite without application-level encryption. Reset removes session records and clears the conversation. Reset/import/session replacement also invalidates old conversation responses. There is no account recovery; browser-cookie loss loses session access.
 
-Edited or imported personal financial context requires AI-sharing consent, which can be toggled in the chat panel. Only the synthetic persona, before you save your own inputs or import, may use Claude without that opt-in; demo purchases do not change this, and they are archived when you import. With sharing on, Anthropic receives your messages, recent chat history (including figures), a forecast summary, income and bill names with amounts and dates, and minimized merchant labels. This is minimization, not guaranteed anonymization. Calculations work with sharing off. See [architecture](docs/ARCHITECTURE.md) for boundaries.
+Edited or imported personal financial context requires AI-sharing consent, which can be toggled in the chat panel. Only the synthetic persona, before you save your own inputs or import, may use Claude without that opt-in; demo purchases do not change this, and they are archived when you import. With sharing on, Anthropic receives your messages, recent chat history (including figures), the item, price and date you ask about, a forecast summary, 30-day spending totals by category, income and bill names with amounts and dates, and minimized merchant labels. This is minimization, not guaranteed anonymization. Calculations work with sharing off. See [architecture](docs/ARCHITECTURE.md) for boundaries.
 
 Worth is independently branded and **not embedded in PayPal**. Consumer history is **CSV-only**; automatic access to all personal PayPal activity is unverified. It supports USD and a demo merchant catalog, with no goods sold or shipped. Estimates depend on confirmed inputs, not a guarantee of future funds. Production payments, autonomous purchases, bank aggregation, and refund management are outside this prototype. The app remains **undeployed**; public hackathon source/video publication is pending. Source has been pushed to the [private repository](https://github.com/iAnmolAgarwal/worth); GitHub CI passes.
 
