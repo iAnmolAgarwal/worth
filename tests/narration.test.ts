@@ -30,6 +30,18 @@ describe('verdict template', () => {
   })
 })
 
+describe('date phrasing', () => {
+  it('reads "if you buy it tomorrow", not "on tomorrow"', () => {
+    const tomorrow = assess(119900, '2026-10-04')
+    expect(verdictFor(tomorrow)).toContain('if you buy it tomorrow.')
+    expect(verdictFor(tomorrow)).toContain('could spend tomorrow and keep')
+    expect(purchaseFacts(tomorrow, data).spend_less).toBe(
+      'Up to $440.01 would keep your cushion if you buy tomorrow.',
+    )
+    expect(verdictFor(assess(119900, '2026-10-16'))).toContain('if you buy it on Fri, Oct 16.')
+  })
+})
+
 describe('fact catalogs', () => {
   it('writes every purchase fact from engine values, with its role in the sentence', () => {
     expect(purchaseFacts(assess(119900), data)).toEqual({
@@ -89,6 +101,12 @@ describe('lead-ins and chips', () => {
     ['Should I use my cushion?', false],
     ['What about Friday?', false],
     ['What bills are coming up', false],
+    ['Is it safe to buy now?', false],
+    ['Why does it fit my plan?', false],
+    ['Can I afford it later?', false],
+    ['Should I go ahead?', false],
+    ['Could I spend fifty less?', false],
+    ['What about a few hundred less?', false],
   ])('accepts only plain follow-up questions: %s', (chip, allowed) => {
     expect(chipAllowed(chip)).toBe(allowed)
   })

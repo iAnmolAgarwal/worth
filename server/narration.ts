@@ -10,8 +10,11 @@ import { chatLabel } from './labels.ts'
 export type CommitmentKind = 'subscriptions' | 'bills' | 'all'
 
 const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
-const when = (date: string, today: string) =>
-  date === today ? 'today' : `on ${dateLabel(date, today)}`
+/** "today", "tomorrow" or "on Fri, Oct 16", to follow "buy it" or "buying". */
+const when = (date: string, today: string) => {
+  const label = dateLabel(date, today)
+  return label === 'today' || label === 'tomorrow' ? label : `on ${label}`
+}
 
 /** The single verdict sentence for an assessment. Claude never writes it. */
 export function verdictFor(a: Assessment, interpretation?: Interpretation) {
@@ -154,8 +157,6 @@ export type FactId =
 export type FactCatalog = Partial<Record<FactId, string>>
 
 const day = (date: string, today: string) => dateLabel(date, today)
-const shift = (date: string, today: string) =>
-  date === today ? 'today' : `on ${dateLabel(date, today)}`
 
 function lowPointFact(
   low: number,
@@ -208,8 +209,8 @@ export function purchaseFacts(a: Assessment, data: ChatData): FactCatalog {
         : `No day in the next 30 days keeps your cushion at ${money(a.amountCents)}.`
   facts.spend_less =
     a.maxAffordableCents > 0
-      ? `Up to ${money(a.maxAffordableCents)} would keep your cushion if you buy ${shift(a.purchaseDate, a.today)}.`
-      : `Your plan has no room for a purchase ${shift(a.purchaseDate, a.today)} without going below your cushion.`
+      ? `Up to ${money(a.maxAffordableCents)} would keep your cushion if you buy ${when(a.purchaseDate, a.today)}.`
+      : `Your plan has no room for a purchase ${when(a.purchaseDate, a.today)} without going below your cushion.`
   const before = a.drivers
     .filter((d) => d.kind !== 'income' && d.date >= a.today && d.date <= a.lowestDate)
     .slice(0, 3)
@@ -304,10 +305,22 @@ export function leadInText(lead: LeadIn, outcome: Assessment['outcome'] | undefi
 // ---- Follow-up chips ---------------------------------------------------------------
 
 // Chips are questions in the user's voice. Claude writes them before it sees any result,
-// so they may not contain figures, dates, or any mention of bills, credit or the cushion.
+// so they may not contain figures, dates, a verdict, or any mention of bills, credit or
+// the cushion.
+const CHIP_VERDICT =
+  /\b(?:fits?|fitting|safe(?:ly)?|affordable|afford\w*|go\s+ahead|yes|ok(?:ay)?\s+to\s+buy|good\s+to\s+(?:buy|go)|worth\s+it|no\s+problem)\b/i
+const CHIP_NUMBER =
+  /\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundreds?|thousands?|millions?|dozens?|half|quarter|double|twice)\b/i
 const CHIP_REJECT =
   /[\p{N}\p{Sc}%{}]|\b(?:skip\w*|delay\w*|defer\w*|postpon\w*|late|credit|loans?|borrow\w*|financ\w*|bnpl|pay\s+later|pay\s+in|instal+ments?|split\w*|cushion|emergency|savings?|overdraft|hundreds?|thousands?|dollars?|bucks?|grand|percent|january|february|march|april|june|july|august|september|october|november|december|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/iu
 export function chipAllowed(text: string) {
   const chip = text.replace(/\s+/g, ' ').trim()
-  return chip.length > 3 && chip.length <= 90 && chip.endsWith('?') && !CHIP_REJECT.test(chip)
+  return (
+    chip.length > 3 &&
+    chip.length <= 90 &&
+    chip.endsWith('?') &&
+    !CHIP_REJECT.test(chip) &&
+    !CHIP_VERDICT.test(chip) &&
+    !CHIP_NUMBER.test(chip)
+  )
 }
