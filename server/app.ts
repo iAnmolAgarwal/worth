@@ -87,12 +87,14 @@ const profileSchema = z
             amountCents: cents,
             nextDate: date,
             cadence: z.enum(['once', 'weekly', 'biweekly', 'monthly', 'yearly']),
-            kind: z.enum(['income', 'subscription', 'bill']),
+            kind: z.enum(['income', 'subscription', 'bill', 'installment']),
             category: z.string().max(80),
             confirmed: z.boolean(),
             active: z.boolean(),
             color: z.string().max(30).optional(),
             icon: z.string().max(40).optional(),
+            planId: identifier.optional(),
+            paidOn: date.optional(),
           })
           .strict(),
       )
@@ -576,6 +578,12 @@ export function createApp(options: AppOptions = {}) {
       )
     if (input.snapshotDate > today(input.timezone))
       throw new HttpError(400, 'The balance snapshot cannot be in the future.', 'INVALID_SNAPSHOT')
+    if (input.flows.some((flow) => flow.paidOn && flow.paidOn > input.snapshotDate))
+      throw new HttpError(
+        400,
+        'Only items due on or before your funds date can be marked as already paid.',
+        'INVALID_PAID_DATE',
+      )
     data.profile = {
       ...input,
       version: data.profile.version + 1,

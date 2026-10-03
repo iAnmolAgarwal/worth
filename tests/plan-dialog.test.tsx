@@ -130,6 +130,7 @@ describe('financial picture wizard', () => {
       'income',
       'bill',
       'subscription',
+      'installment',
     ])
     await user.selectOptions(repeats, 'yearly')
     await user.selectOptions(type, 'subscription')

@@ -1,7 +1,8 @@
 export type Currency = 'USD'
 export type Outcome = 'fits' | 'tight' | 'incomplete'
 export type Cadence = 'once' | 'weekly' | 'biweekly' | 'monthly' | 'yearly'
-export type FlowKind = 'income' | 'subscription' | 'bill'
+/** `installment` is one payment of an instalment plan already running, from PayPal or another provider. */
+export type FlowKind = 'income' | 'subscription' | 'bill' | 'installment'
 export interface ScheduledFlow {
   id: string
   name: string
@@ -14,6 +15,13 @@ export interface ScheduledFlow {
   active: boolean
   color?: string
   icon?: string
+  /** Groups the payments of one instalment plan. Payments without it count as their own plan. */
+  planId?: string
+  /**
+   * Date of an occurrence the user already paid. When it is on or before the funds snapshot, the
+   * snapshot already reflects it, so the forecast skips that occurrence.
+   */
+  paidOn?: string
 }
 export interface FinancialProfile {
   name: string

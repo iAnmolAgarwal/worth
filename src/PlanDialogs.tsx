@@ -699,6 +699,7 @@ export function PlanDialog({
                                 <option value="income">Expected income</option>
                                 <option value="bill">Bill or commitment</option>
                                 <option value="subscription">Subscription</option>
+                                <option value="installment">Instalment plan payment</option>
                               </select>
                             </Field>
                           </div>

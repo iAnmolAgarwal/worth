@@ -127,12 +127,19 @@ export function getUpcomingFlows(
       if (date >= today) result.push({ flow, date })
     }
   }
-  return result.sort(
-    (a, b) =>
-      a.date.localeCompare(b.date) ||
-      Number(a.flow.kind === 'income') - Number(b.flow.kind === 'income') ||
-      a.flow.id.localeCompare(b.flow.id),
-  )
+  return result
+    .filter(({ flow, date }) => !alreadyPaid(profile, flow, date))
+    .sort(
+      (a, b) =>
+        a.date.localeCompare(b.date) ||
+        Number(a.flow.kind === 'income') - Number(b.flow.kind === 'income') ||
+        a.flow.id.localeCompare(b.flow.id),
+    )
+}
+
+/** An occurrence the user marked paid is already in a funds snapshot taken on or after that day. */
+function alreadyPaid(profile: FinancialProfile, flow: ScheduledFlow, date: string): boolean {
+  return flow.paidOn === date && date <= profile.snapshotDate
 }
 
 function reservedPurchases(profile: FinancialProfile, purchases: Purchase[]): Purchase[] {
@@ -282,7 +289,12 @@ function missingInputs(profile: FinancialProfile, purchases: Purchase[], today: 
       flow.amountCents < 0
     )
       missing.push(`Correct the amount or date for ${flow.name}.`)
-    if (flow.cadence === 'once' && validDate(flow.nextDate) && flow.nextDate < today)
+    if (
+      flow.cadence === 'once' &&
+      validDate(flow.nextDate) &&
+      flow.nextDate < today &&
+      flow.paidOn !== flow.nextDate
+    )
       missing.push(`Confirm whether ${flow.name} has already happened.`)
   }
   for (const purchase of purchases.filter(
