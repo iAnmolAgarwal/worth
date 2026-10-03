@@ -1010,6 +1010,83 @@ describe('PayPal webhooks (PP-5, SB-9)', () => {
   })
 })
 
+describe('Pay in 4 eligibility from PayPal (case 29)', () => {
+  async function compare(agent: ReturnType<typeof request.agent>, productId: string) {
+    const result = await post(agent, '/api/compare', { productId })
+    expect(result.status).toBe(200)
+    return result.body.payIn4 as { available: boolean; eligibility: string; reason?: string }
+  }
+  it('confirms Pay in 4 only when PayPal offers Pay Later and the amount is in range', async () => {
+    const { gateway } = fakePayPal()
+    const { agent } = setup({ paypal: gateway })
+    await simpleProfile(agent)
+    expect(await compare(agent, 'camera')).toMatchObject({ available: true, eligibility: 'paypal' })
+    expect(gateway.eligibility).toHaveBeenCalledWith(119900)
+    // Same price band: answered from the cache for about ten minutes.
+    await compare(agent, 'camera')
+    expect(gateway.eligibility).toHaveBeenCalledTimes(1)
+    clock.value = new Date(clock.value.getTime() + 11 * 60_000)
+    await compare(agent, 'camera')
+    expect(gateway.eligibility).toHaveBeenCalledTimes(2)
+    const outOfRange = await post(agent, '/api/compare', { amountCents: 250000 })
+    expect(outOfRange.body.payIn4).toEqual({
+      available: false,
+      reason: 'Not available for this amount',
+      eligibility: 'unavailable',
+    })
+    expect(gateway.eligibility).toHaveBeenCalledTimes(2)
+  })
+  it('shows Pay in 4 as unavailable when PayPal does not offer Pay Later', async () => {
+    const { gateway } = fakePayPal()
+    gateway.eligibility = vi.fn(async () => ({ payLater: false }))
+    const { agent } = setup({ paypal: gateway })
+    await simpleProfile(agent)
+    expect(await compare(agent, 'headphones')).toEqual({
+      available: false,
+      reason: 'Not available for this amount',
+      eligibility: 'unavailable',
+    })
+  })
+  it('falls back to the amount range when the PayPal check fails, and retries soon', async () => {
+    const { gateway } = fakePayPal()
+    gateway.eligibility = vi.fn(async () => {
+      throw new PayPalError(0, 'TIMEOUT')
+    })
+    const { agent } = setup({ paypal: gateway })
+    await simpleProfile(agent)
+    expect(await compare(agent, 'headphones')).toMatchObject({
+      available: true,
+      eligibility: 'range-only',
+    })
+    clock.value = new Date(clock.value.getTime() + 2 * 60_000)
+    await compare(agent, 'headphones')
+    expect(gateway.eligibility).toHaveBeenCalledTimes(2)
+  })
+  it('uses the range alone without PayPal credentials', async () => {
+    const { agent } = setup()
+    await simpleProfile(agent)
+    expect(await compare(agent, 'headphones')).toMatchObject({ eligibility: 'range-only' })
+  })
+  it('raises “Confirm your plan” only after a capture PayPal could have offered Pay Later for', async () => {
+    const offered = fakePayPal()
+    const withPayLater = setup({ paypal: offered.gateway })
+    await simpleProfile(withPayLater.agent)
+    const a = await post(withPayLater.agent, '/api/checkout/create', { productId: 'headphones' })
+    const done = await post(withPayLater.agent, `/api/checkout/${a.body.purchase.id}/capture`)
+    expect(done.body.state.reviews).toEqual([
+      expect.objectContaining({ kind: 'confirmPlan', purchaseId: a.body.purchase.id }),
+    ])
+    const notOffered = fakePayPal()
+    notOffered.gateway.eligibility = vi.fn(async () => ({ payLater: false }))
+    const without = setup({ paypal: notOffered.gateway })
+    await simpleProfile(without.agent)
+    const b = await post(without.agent, '/api/checkout/create', { productId: 'headphones' })
+    const paid = await post(without.agent, `/api/checkout/${b.body.purchase.id}/capture`)
+    expect(paid.body.state.reviews).toEqual([])
+    expect(paid.body.purchase.paymentPlan).toEqual({ product: 'full' })
+  })
+})
+
 describe('local chat fallback', () => {
   it.each(['How much can I comfortably spend?', 'What can I spend?'])(
     'routes the budget question %s to current affordability overview',

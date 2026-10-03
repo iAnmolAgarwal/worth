@@ -18,6 +18,8 @@ export interface StoredPurchase extends Purchase {
   captureAttemptedAt?: string
   /** Captures attempted after a decline; each re-approval gets a fresh PayPal-Request-Id. */
   captureRetries?: number
+  /** Whether PayPal's checkout could offer Pay Later for this order, from the eligibility check. */
+  payLaterCapable?: boolean
 }
 export const ACTIVE = new Set(['created', 'pending', 'unknown'])
 const DAY = 24 * 60 * 60 * 1000
@@ -155,6 +157,7 @@ export function publicPurchase(purchase: StoredPurchase): Purchase {
     acknowledgedShortfall: _ack,
     captureAttemptedAt: _attempted,
     captureRetries: _retries,
+    payLaterCapable: _payLater,
     approveUrl: _stale,
     ...result
   } = purchase

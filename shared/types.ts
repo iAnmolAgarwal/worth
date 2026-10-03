@@ -269,7 +269,15 @@ export interface PayIn4Scenario extends OptionResult {
   instalments: InstalmentDetail[]
   stacking: StackingWarning | null
 }
-export type PayIn4Comparison = PayIn4Scenario | { available: false; reason: string }
+/**
+ * How Pay in 4 availability was decided. 'paypal': PayPal's eligibility check offered Pay Later and
+ * the amount is in range. 'range-only': the check could not run, so only the amount range decided.
+ * 'unavailable': out of range, or PayPal did not offer Pay Later.
+ */
+export type PayIn4Eligibility = 'paypal' | 'range-only' | 'unavailable'
+export type PayIn4Comparison =
+  | (PayIn4Scenario & { eligibility?: PayIn4Eligibility })
+  | { available: false; reason: string; eligibility?: PayIn4Eligibility }
 export type Recommendation = 'buyToday' | 'wait' | 'spendLess'
 export interface Comparison {
   itemName: string

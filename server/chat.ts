@@ -6,6 +6,7 @@ import type {
   ChatIntent,
   ChatReply,
   Interpretation,
+  PayIn4Eligibility,
   Transaction,
 } from '../shared/types.ts'
 import { readTiming } from './dates.ts'
@@ -54,8 +55,12 @@ export interface CategoryReply {
   suggestions: { transactionId: string; category: string }[]
   message: string
 }
+/** Server lookups Claude's tools may use for one session; without them (local mode, evals) none run. */
+export interface ChatActions {
+  payIn4Eligibility?(amountCents: number): Promise<PayIn4Eligibility>
+}
 export interface ChatProvider {
-  reply(input: ChatInput, data: ChatData): Promise<ChatReply>
+  reply(input: ChatInput, data: ChatData, actions?: ChatActions): Promise<ChatReply>
   categorize?(transactions: Transaction[]): Promise<CategoryReply>
 }
 export interface ChatOptions {
@@ -380,7 +385,7 @@ const TOOLS: Anthropic.Tool[] = [
         },
         ...presentation(
           PURCHASE_FACTS,
-          'low_point: the lowest projected balance against the cushion. cause: the bill that drives the low point. income: the next paycheck. wait: the earliest day that keeps the cushion. spend_less: the most that keeps the cushion on that day. stress: the low point if everyday spending runs higher. bills_before: bills due before the low point.',
+          'low_point: the lowest projected balance against the cushion. cause: the bill that drives the low point. income: the next paycheck. wait: the earliest day that keeps the cushion. spend_less: the most that keeps the cushion on that day. stress: the low point if everyday spending runs higher. bills_before: bills due before the low point. pay_in_4: whether PayPal Pay in 4 can be compared for this amount; only when the person asked about Pay in 4 or paying later.',
         ),
       },
     },
@@ -434,6 +439,8 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
 ]
+/** The person asked about Pay in 4 or paying later, so its availability may be shown. */
+const ASKS_PAY_IN_4 = /\bpay\s*(?:in\s*(?:4|four)|later)\b|\binstal+ments?\b|\bbnpl\b/i
 const FINAL_FORMAT = {
   type: 'json_schema' as const,
   schema: {
@@ -506,12 +513,16 @@ class Turn {
   read = new Set<string>()
   /** What Claude chose to show, kept per tool so the answer uses the choice made for it. */
   presentations = new Map<string, Presentation>()
+  data: ChatData
   constructor(
     readonly input: ChatInput,
-    readonly data: ChatData,
-  ) {}
+    data: ChatData,
+    readonly actions: ChatActions = {},
+  ) {
+    this.data = { ...data }
+  }
 
-  run(name: string, raw: unknown): ToolOutcome {
+  async run(name: string, raw: unknown): Promise<ToolOutcome> {
     this.attempts++
     if (this.attempts > MAX_TOOL_CALLS)
       return { content: 'Tool limit reached. Answer with what you have.', isError: true }
@@ -524,7 +535,7 @@ class Turn {
       lead: shown.data.lead_in,
       followUps: shown.data.follow_ups,
     }
-    if (name === 'interpret_purchase') return this.interpret(input, chosen)
+    if (name === 'interpret_purchase') return await this.interpret(input, chosen)
     if (name === 'list_commitments') {
       const kind = z.enum(['subscriptions', 'bills', 'all']).safeParse(input.kind)
       if (!kind.success)
@@ -560,7 +571,10 @@ class Turn {
     return { content: JSON.stringify(result) }
   }
 
-  private interpret(raw: Record<string, unknown>, chosen: Presentation): ToolOutcome {
+  private async interpret(
+    raw: Record<string, unknown>,
+    chosen: Presentation,
+  ): Promise<ToolOutcome> {
     const fields = Object.fromEntries(
       Object.entries(raw).filter(([key]) => !PRESENTATION_KEYS.includes(key)),
     )
@@ -584,6 +598,11 @@ class Turn {
     this.clarify = undefined
     this.interpretation = result.interpretation
     this.assessment = assess(this.data, result.interpretation)
+    // Pay in 4 availability joins the facts only when the person asked about it.
+    if (this.actions.payIn4Eligibility && ASKS_PAY_IN_4.test(this.input.message))
+      this.data.payIn4 = await this.actions
+        .payIn4Eligibility(this.assessment.amountCents)
+        .catch(() => 'range-only' as const)
     this.presentations.set('interpret_purchase', chosen)
     this.calls.push('interpret_purchase')
     const a = this.assessment
@@ -778,10 +797,10 @@ export function createChatProvider(
       }
     },
 
-    async reply(input, data) {
+    async reply(input, data, actions = {}) {
       const started = Date.now()
       const deadline = started + deadlineMs
-      const turn = new Turn(input, data)
+      const turn = new Turn(input, data, actions)
       const messages: Anthropic.MessageParam[] = [
         ...history(input),
         {
@@ -848,7 +867,9 @@ export function createChatProvider(
             if (!final) log({ event: 'chat_unusable_final', round, stop: response.stop_reason })
             break
           }
-          const outcomes = uses.map((use) => ({ use, outcome: turn.run(use.name, use.input) }))
+          const outcomes: { use: Anthropic.ToolUseBlock; outcome: ToolOutcome }[] = []
+          for (const use of uses)
+            outcomes.push({ use, outcome: await turn.run(use.name, use.input) })
           if (outcomes.every(({ outcome }) => !outcome.isError)) break
           messages.push({ role: 'assistant', content: response.content })
           messages.push({
@@ -866,7 +887,7 @@ export function createChatProvider(
         // Engine results already established still answer the question, without narration.
         if (!turn.calls.length && !turn.clarify) throw error
       }
-      return compose(answerFor(turn, final), data)
+      return compose(answerFor(turn, final), turn.data)
     },
   }
 }

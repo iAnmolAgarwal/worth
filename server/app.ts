@@ -25,6 +25,7 @@ import type {
   AppState,
   Assessment,
   FinancialProfile,
+  PayIn4Eligibility,
   Product,
   Purchase,
   Transaction,
@@ -46,7 +47,7 @@ import {
   fallbackCategories,
   fallbackReply,
 } from './chat.ts'
-import type { ChatProvider } from './chat.ts'
+import type { ChatActions, ChatProvider } from './chat.ts'
 import { allowedOrigins, loadConfig } from './config.ts'
 import type { AppConfig } from './config.ts'
 import { WindowLimiter } from './limits.ts'
@@ -202,6 +203,13 @@ const UNCERTAIN_CAPTURE =
   'Payment confirmation is uncertain. Your amount stays reserved; retry to check PayPal before any further action.'
 const REJECTED_CAPTURE =
   'PayPal did not accept this payment, and nothing was charged. Approve it again in PayPal, or cancel this checkout.'
+/** PayPal's Pay Later answer is cached per price band for about ten minutes. */
+const ELIGIBILITY_TTL_MS = 10 * 60_000
+const ELIGIBILITY_RETRY_MS = 60_000
+const ELIGIBILITY_BANDS = [10_000, 50_000, 100_000]
+function eligibilityBand(amountCents: number) {
+  return ELIGIBILITY_BANDS.filter((edge) => amountCents >= edge).length
+}
 /** Webhook deliveries accepted per sender IP per minute; each one costs a PayPal verification call. */
 const WEBHOOK_PER_MINUTE = 60
 const SPENDING_REVIEW = 'Review your everyday spending:'
@@ -250,6 +258,7 @@ export function createApp(options: AppOptions = {}) {
     amountCents: number,
   ) => recordRefund(store, sessionId, purchaseId, refundId, amountCents, now()).purchase
   const busy = new Set<string>()
+  const eligibilityCache = new Map<number, { value: PayIn4Eligibility; until: number }>()
   const webhookLimiter = new WindowLimiter(WEBHOOK_PER_MINUTE, 60_000)
   const chatBusy = new Set<string>()
   const requestLimiter = new WindowLimiter(config.requestsPerMinute, 60_000)
@@ -424,6 +433,10 @@ export function createApp(options: AppOptions = {}) {
         status: 'completed',
         captureId,
         completedAt,
+        // Only a checkout PayPal could have offered Pay Later for raises "Confirm your plan".
+        ...(current.mode === 'sandbox' && current.payLaterCapable === false && !current.paymentPlan
+          ? { paymentPlan: { product: 'full' as const } }
+          : {}),
       }
       delete completed.needsReapproval
       delete completed.lastError
@@ -569,6 +582,27 @@ export function createApp(options: AppOptions = {}) {
       )
     }
   }
+  /** Pay in 4 availability for one amount: the configured range, then PayPal's own check. */
+  async function payIn4Eligibility(amountCents: number): Promise<PayIn4Eligibility> {
+    if (!payIn4InRange(amountCents)) return 'unavailable'
+    if (!paypal) return 'range-only'
+    const band = eligibilityBand(amountCents)
+    const time = now().getTime()
+    const cached = eligibilityCache.get(band)
+    if (cached && cached.until > time) return cached.value
+    let value: PayIn4Eligibility
+    try {
+      value = (await paypal.eligibility(amountCents)).payLater ? 'paypal' : 'unavailable'
+    } catch {
+      value = 'range-only'
+    }
+    // A failed check is retried sooner than a confirmed answer.
+    eligibilityCache.set(band, {
+      value,
+      until: time + (value === 'range-only' ? ELIGIBILITY_RETRY_MS : ELIGIBILITY_TTL_MS),
+    })
+    return value
+  }
   /**
    * Creates the purchase reservation and, in the sandbox, its PayPal order.
    */
@@ -579,6 +613,7 @@ export function createApp(options: AppOptions = {}) {
       acknowledgeShortfall: boolean
     },
   ) {
+    const payLater = paypal ? await payIn4Eligibility(product.priceCents) : undefined
     let purchase = store.atomic(() => {
       const existing = active(id)
       if (existing) {
@@ -604,6 +639,7 @@ export function createApp(options: AppOptions = {}) {
         profileVersion: assessment.profileVersion,
         assessmentDate: assessment.today,
         acknowledgedShortfall: options.acknowledgeShortfall,
+        ...(payLater ? { payLaterCapable: payLater !== 'unavailable' } : {}),
       }
       store.putPurchase(id, created)
       return created
@@ -773,23 +809,23 @@ export function createApp(options: AppOptions = {}) {
       )
     res.json(assessPurchase(current.profile, current.purchases, { ...input, today: current.today }))
   })
-  app.post('/api/compare', (req, res) => {
+  app.post('/api/compare', async (req, res) => {
     const input = compareSchema.parse(req.body)
     const product = input.productId ? PRODUCTS.find((p) => p.id === input.productId) : undefined
     if (input.productId && !product) throw new HttpError(404, 'Product not found.', 'NOT_FOUND')
     if (product && input.amountCents !== undefined && input.amountCents !== product.priceCents)
       throw new HttpError(400, 'Use the catalog price for this product.', 'PRICE_MISMATCH')
     const amountCents = product?.priceCents ?? input.amountCents!
+    // PayPal's eligibility check runs first; the session is read afterwards so it is current.
+    const eligibility = await payIn4Eligibility(amountCents)
     const current = state(sessionId(res))
-    res.json(
-      compareOptions(current.profile, current.purchases, {
-        amountCents,
-        itemName: product?.name ?? input.itemName,
-        today: current.today,
-        // PayPal's own eligibility check arrives with the Pay Later button; until then, the range.
-        payIn4Eligible: payIn4InRange(amountCents),
-      }),
-    )
+    const comparison = compareOptions(current.profile, current.purchases, {
+      amountCents,
+      itemName: product?.name ?? input.itemName,
+      today: current.today,
+      payIn4Eligible: eligibility !== 'unavailable',
+    })
+    res.json({ ...comparison, payIn4: { ...comparison.payIn4, eligibility } })
   })
   /** Saves a purchase's new cash effect and moves the plan version, so older answers expire. */
   function savePurchase(id: string, purchase: StoredPurchase) {
@@ -1118,6 +1154,12 @@ export function createApp(options: AppOptions = {}) {
     store.save(id, data)
     res.json(state(id))
   })
+  /** What Claude's tools may ask the server to do for this session, each behind its own guard. */
+  function chatActions(): ChatActions {
+    return {
+      payIn4Eligibility,
+    }
+  }
   app.post('/api/chat', async (req, res) => {
     const input = chatSchema.parse(req.body)
     const current = state(sessionId(res))
@@ -1160,7 +1202,7 @@ export function createApp(options: AppOptions = {}) {
       )
     chatBusy.add(id)
     try {
-      return res.json(await chat.reply(input, data))
+      return res.json(await chat.reply(input, data, chatActions()))
     } catch (error) {
       // Error class only: never the message text, financial data, or credentials.
       console.warn('Worth chat used local fallback:', error instanceof Error ? error.name : 'Error')
