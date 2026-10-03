@@ -1602,7 +1602,7 @@ describe('stored transaction cap', () => {
 describe('production browser hardening', () => {
   it('sends HSTS and a __Host- session cookie that authenticates later requests', async () => {
     const origin = 'https://worth.example.com'
-    const { app } = setup({ config: { ...config, production: true, origin } })
+    const { app } = setup({ config: { ...config, production: true, trustProxy: 1, origin } })
     const first = await request(app).get('/api/state')
     expect(first.status).toBe(200)
     expect(first.headers['strict-transport-security']).toBe('max-age=31536000; includeSubDomains')

@@ -42,13 +42,16 @@ describe('deployment configuration', () => {
     store.close()
     expect(() => loadConfig({ APP_ORIGIN: 'not a url' })).toThrow(/not a valid URL/)
     expect(
-      loadConfig({ NODE_ENV: 'production', RENDER_EXTERNAL_URL: 'https://worth.onrender.com' })
-        .origin,
+      loadConfig({
+        NODE_ENV: 'production',
+        TRUST_PROXY: '1',
+        RENDER_EXTERNAL_URL: 'https://worth.onrender.com',
+      }).origin,
     ).toBe('https://worth.onrender.com')
   })
 
   it('binds every interface in production and loopback otherwise', () => {
-    const hosted = { APP_ORIGIN: 'https://worth.example.com' }
+    const hosted = { APP_ORIGIN: 'https://worth.example.com', TRUST_PROXY: '1' }
     expect(loadConfig({ ...hosted, NODE_ENV: 'production' }).host).toBe('0.0.0.0')
     expect(loadConfig({}).host).toBe('127.0.0.1')
     expect(loadConfig({ HOST: '::' }).host).toBe('::')
@@ -61,7 +64,9 @@ describe('deployment configuration', () => {
       'http://localhost:4000',
     ])
     expect([
-      ...allowedOrigins(loadConfig({ NODE_ENV: 'production', APP_ORIGIN: 'https://w.example' })),
+      ...allowedOrigins(
+        loadConfig({ NODE_ENV: 'production', TRUST_PROXY: '1', APP_ORIGIN: 'https://w.example' }),
+      ),
     ]).toEqual(['https://w.example'])
   })
 
@@ -109,6 +114,7 @@ describe('hosted PayPal return', () => {
     const store = new Store(':memory:')
     const config = loadConfig({
       NODE_ENV: 'production',
+      TRUST_PROXY: '1',
       RENDER_EXTERNAL_URL: origin,
       PAYPAL_CLIENT_ID: 'sandbox-id',
       PAYPAL_CLIENT_SECRET: 'sandbox-secret',
@@ -149,9 +155,10 @@ describe('window limiter', () => {
   })
   it('reads the trusted proxy hop count from TRUST_PROXY', () => {
     expect(loadConfig({}).trustProxy).toBe(0)
-    expect(loadConfig({ NODE_ENV: 'production', APP_ORIGIN: 'https://w.example' }).trustProxy).toBe(
-      1,
-    )
+    const hosted = { NODE_ENV: 'production', APP_ORIGIN: 'https://w.example' }
+    expect(() => loadConfig(hosted)).toThrow(/Set TRUST_PROXY/)
+    expect(loadConfig({ ...hosted, TRUST_PROXY: '1' }).trustProxy).toBe(1)
+    expect(loadConfig({ ...hosted, TRUST_PROXY: '0' }).trustProxy).toBe(0)
     expect(loadConfig({ TRUST_PROXY: '2' }).trustProxy).toBe(2)
     expect(() => loadConfig({ TRUST_PROXY: 'true' })).toThrow(/TRUST_PROXY/)
   })

@@ -100,6 +100,11 @@ export function loadConfig(env: Env = process.env, overrides: Partial<AppConfig>
     ...overrides,
   }
   config.origin = publicOrigin(config.origin, config.production)
+  // A wrong hop count makes every visitor share one rate-limit key, so production must state it.
+  if (config.production && overrides.trustProxy === undefined && !setting(env, 'TRUST_PROXY'))
+    throw new ConfigError(
+      'Set TRUST_PROXY to the number of reverse proxies in front of this server. Check the X-Forwarded-For hop count logged on the first request after deploying.',
+    )
   return config
 }
 

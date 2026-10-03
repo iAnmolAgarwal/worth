@@ -442,7 +442,16 @@ export function createApp(options: AppOptions = {}) {
       )
     }
   }
+  let proxyHopsLogged = !config.production
   app.use((req, res, next) => {
+    // Logs the forwarding chain length once so TRUST_PROXY can be checked after a deploy.
+    const forwarded = req.get('X-Forwarded-For')
+    if (!proxyHopsLogged && forwarded) {
+      proxyHopsLogged = true
+      console.info(
+        `X-Forwarded-For carries ${forwarded.split(',').length} address(es); TRUST_PROXY is ${config.trustProxy}.`,
+      )
+    }
     res.setHeader('X-Content-Type-Options', 'nosniff')
     res.setHeader('Referrer-Policy', 'same-origin')
     res.setHeader('X-Frame-Options', 'DENY')
