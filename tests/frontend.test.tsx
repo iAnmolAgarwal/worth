@@ -9,7 +9,7 @@ import { Ask } from '../src/Ask'
 import { Checkout, checkoutView } from '../src/Checkout'
 import { Decision } from '../src/Decision'
 import { ConfirmPlanDialog, RefundDialog } from '../src/Reviews'
-import { Settings } from '../src/Saved'
+import { Saved, Settings } from '../src/Saved'
 import { Home } from '../src/Home'
 import { api, ApiError } from '../src/api'
 import {
@@ -1198,5 +1198,77 @@ describe('blocking fixes', () => {
     expect(rows[0]).toContain('Payment 2 of 4')
     expect(rows.some((row) => row.includes('Payment 1 of 4'))).toBe(false)
     expect(screen.getByText('2 running')).toBeTruthy()
+  })
+})
+
+describe('iteration 2 fixes', () => {
+  const homeProps = {
+    onAsk: vi.fn(),
+    onOpenProduct: vi.fn(),
+    onEditPlan: vi.fn(),
+    onOpenCheckout: vi.fn(),
+    onConfirmPlan: vi.fn(),
+    onReviewRefund: vi.fn(),
+  }
+  it('names an unresolved foreign payment on Home and links to Activity, not the wizard', async () => {
+    const user = userEvent.setup()
+    const state = makeState('import')
+    state.profile.confirmed = true
+    const blocker = 'Resolve 1 foreign-currency payment (Lisbon bakery) in Activity.'
+    routeApi((_path, data) => ({
+      ...compare(state, data),
+      recommendation: null,
+      missingFields: [blocker],
+    }))
+    const onNavigate = vi.fn()
+    render(<Home {...homeProps} state={state} onNavigate={onNavigate} />)
+    await screen.findByRole('heading', { name: blocker })
+    expect(screen.queryByText(/Confirm today’s money/)).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Resolve in Activity' }))
+    expect(onNavigate).toHaveBeenCalledWith('activity')
+    expect(homeProps.onEditPlan).not.toHaveBeenCalled()
+  })
+
+  it('labels options above, at or below the cushion and never recommends nothing', async () => {
+    const state = makeState()
+    routeApi((_path, data) => compare(state, data))
+    render(
+      <Decision
+        backLabel="Back"
+        onBack={vi.fn()}
+        onBuy={vi.fn()}
+        onSave={vi.fn()}
+        onViewActivity={vi.fn()}
+        state={state}
+        request={{ productId: 'camera' }}
+      />,
+    )
+    const group = await screen.findByRole('radiogroup', { name: 'Your options' })
+    expect(within(group).getByText('Below cushion')).toBeTruthy()
+    expect(within(group).getByText('Above cushion')).toBeTruthy()
+    expect(within(group).getByText('At your limit')).toBeTruthy()
+    expect(within(group).queryByText('Fits')).toBeNull()
+  })
+
+  it('marks a bought item in Saved and drops it from Home’s Saved list', () => {
+    const state = makeState()
+    state.purchases = [purchase(state, { status: 'completed', completedAt: `${TODAY}T15:00:00Z` })]
+    routeApi((_path, data) => compare(state, data))
+    const { unmount } = render(
+      <Saved state={state} onOpen={vi.fn()} onUpdate={vi.fn()} onToast={vi.fn()} />,
+    )
+    expect(screen.getByText('Bought')).toBeTruthy()
+    unmount()
+    render(<Home {...homeProps} state={state} onNavigate={vi.fn()} />)
+    const rail = screen.getByRole('complementary', { name: 'Saved and your plan' })
+    expect(within(rail).queryByText('Studio headphones')).toBeNull()
+  })
+
+  it('shows nothing as sent to Anthropic while the assistant is off', () => {
+    const state = makeState('import')
+    render(<Ask {...askProps} state={state} />)
+    const rail = screen.getByRole('complementary', { name: 'Assistant and suggestions' })
+    expect(within(rail).getAllByText('Not sent').length).toBe(3)
+    expect(within(rail).getByText('Never')).toBeTruthy()
   })
 })
