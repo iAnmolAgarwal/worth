@@ -48,8 +48,12 @@ const FOREIGN_PREFIXES: [string, string][] = [
   ['₺', 'TRY'],
   ['₱', 'PHP'],
   ['฿', 'THB'],
+  ['NT$', 'TWD'],
+  ['zł', 'PLN'],
   ['Rs.', 'INR'],
   ['Rs', 'INR'],
+  ['kr', 'SEK'],
+  ['R', 'ZAR'],
 ]
 const CODES = [
   'EUR',
@@ -68,7 +72,15 @@ const CODES = [
   'KRW',
   'BRL',
 ]
+const NATIONALITY = String.raw`(?:swiss|mexican|canadian|australian|aussie|hong\s+kong|singapore(?:an)?|new\s+zealand|nz|taiwan(?:ese)?|japanese|chinese|indian|swedish|norwegian|danish|polish|south\s+african|brazilian|turkish|russian|philippine|thai|korean|uae|emirati|saudi|israeli|egyptian|nigerian|kenyan|argentine|argentinian|chilean|colombian|peruvian|jamaican|caribbean|euro(?:pean)?|british|uk)`
 const FOREIGN_WORDS: [RegExp, string][] = [
+  [
+    new RegExp(
+      String.raw`^${NATIONALITY}\s+(?:dollars?|bucks?|pesos?|francs?|krona|kronor|krone|kroner|rand|rupees?|yen|yuan|won|pounds?|reais|real)\b`,
+      'i',
+    ),
+    'OTHER',
+  ],
   [/^(?:euros?|eur)\b/i, 'EUR'],
   [/^(?:pounds?(?:\s+sterling)?|quid|gbp|sterling)\b/i, 'GBP'],
   [/^(?:yen|jpy)\b/i, 'JPY'],
@@ -82,7 +94,28 @@ const FOREIGN_WORDS: [RegExp, string][] = [
     'OTHER',
   ],
   [/^(?:cad|aud|nzd|hkd|sgd|brl|reais|reals?)\b/i, 'OTHER'],
+  [/^(?:kr|kroner|krone|krona|kronor|sek|nok|dkk)\b/i, 'SEK'],
+  [/^(?:zloty|złoty|zlotys|pln)\b/i, 'PLN'],
+  [/^(?:rand|zar)\b/i, 'ZAR'],
+  [
+    /^(?:dirhams?|aed|riyals?|sar|shekels?|ils|baht|thb|ringgit|myr|rupiah|idr|dong|vnd|lira|liras|try|naira|ngn|cedis?|shillings?|forint|huf|koruna|czk|lei|leu|ron|dinars?|taka|ntd|twd|soles?|bolivars?)\b/i,
+    'OTHER',
+  ],
+  [
+    /^(?:usdt|usdc|tether|btc|bitcoins?|eth|ether|ethereum|sats|satoshis?|crypto|tokens?|coins?)\b/i,
+    'CRYPTO',
+  ],
 ]
+// Upper-case codes after a number that are units, not currencies.
+const NOT_CURRENCY_CODES = new Set(
+  'USD GB TB MB KB GHZ MHZ MPH HDR RAM SSD HDD LED OLED LCD EST PST CST MST UTC GMT CET USB TV PC MAX PRO XL XXL LBS OZ PCS MPG KWH BTU DPI FPS'.split(
+    ' ',
+  ),
+)
+const CURRENCY_MARKERS = new RegExp(
+  String.raw`(?:[€£¥₹₩₽₺₱฿]|\b(?:CA|C|AU|A|NZ|HK|S|MX|R|NT)\$|\b(?:euros?|yen|rupees?|pesos?|francs?|zloty|złoty|rand|dirhams?|riyals?|shekels?|baht|ringgit|rupiah|lira|naira|shillings?|forint|dinars?|usdt|usdc|btc|bitcoins?|ethereum|crypto)\b|\b${NATIONALITY}\s+(?:dollars?|currency)\b|\b(?:EUR|GBP|JPY|INR|CAD|AUD|NZD|CHF|CNY|RMB|MXN|HKD|SGD|KRW|BRL|SEK|NOK|DKK|PLN|ZAR|AED|SAR|ILS|THB|TWD|TRY)\b)`,
+  'i',
+)
 
 const BUDGET_BEFORE =
   /\b(?:budget|have|has|had|got|left|spare|saved|savings|balance|earn(?:ed)?|make|made|income|paid|salary|limit|max(?:imum)?|up\s+to|under|less\s+than|below|within|no\s+more\s+than|at\s+most)\s*(?:is|of|was|are|=)?\s*(?:about|around|roughly|like|just|only)?\s*$/i
@@ -108,10 +141,19 @@ function toCents(whole: string, fraction: string | undefined, scale: string | un
   return Number.isSafeInteger(cents) && cents >= 0 && cents <= MAX_CENTS ? cents : null
 }
 
+// "between $800 and $900" or "from $800 to $900" is a price range, not two prices.
+const RANGE_BEFORE = /\b(?:between|from)\s*$|\b(?:between|from)\s+\S+\s+(?:and|to|-)\s*$/i
+const RANGE_AFTER = /^\s*(?:and|to|-|–)\s*(?:US)?\$?\s?\d/i
+
 function roleFor(text: string, start: number, end: number): MentionRole {
   const before = text.slice(Math.max(0, start - 40), start)
   const after = text.slice(end, end + 30)
   if (OTHER_BEFORE.test(before) || OTHER_AFTER.test(after)) return 'other'
+  if (
+    RANGE_BEFORE.test(before) ||
+    (/\b(?:between|from)\s*$/i.test(before) && RANGE_AFTER.test(after))
+  )
+    return 'budget'
   if (BUDGET_BEFORE.test(before) || BUDGET_AFTER.test(after)) return 'budget'
   return 'price'
 }
@@ -142,10 +184,17 @@ export function extractMoneyMentions(text: string): MoneyMention[] {
         [currency, code] = ['FOREIGN', marker === 'RMB' ? 'CNY' : marker]
       else currency = 'USD'
     }
+    // "1.199,00 €": read the currency after a decimal-comma tail too.
+    const tail = rest.replace(/^,\d+/, '')
     const suffix = rest.match(/^\s?(?:\$|usd\b|dollars?\b|bucks?\b)/i)
+    const code3 = tail.match(/^\s?([A-Z]{3,4})\b/)?.[1]
     const foreignSuffix =
-      FOREIGN_WORDS.find(([word]) => word.test(rest.trimStart())) ??
-      (rest.match(/^\s?[€£¥₹₩₽₺₱฿]/) ? ([/./, 'OTHER'] as [RegExp, string]) : undefined)
+      FOREIGN_WORDS.find(([word]) => word.test(tail.trimStart())) ??
+      (tail.match(/^\s?[€£¥₹₩₽₺₱฿]/) ? ([/./, 'OTHER'] as [RegExp, string]) : undefined) ??
+      (code3 && !NOT_CURRENCY_CODES.has(code3) && !/^USDT?$/.test(code3)
+        ? ([/./, code3] as [RegExp, string])
+        : undefined) ??
+      (code3 === 'USDT' ? ([/./, 'CRYPTO'] as [RegExp, string]) : undefined)
     if (foreignSuffix) {
       currency = 'FOREIGN'
       code ??= foreignSuffix[1]
@@ -167,8 +216,11 @@ export function extractMoneyMentions(text: string): MoneyMention[] {
       )
         continue
     }
-    // "11,99" or "1.199,00" use a decimal comma: never guess which part is cents.
-    const malformed = /^,\d/.test(text.slice(index + match[0].length))
+    // "11,99" or "1.199,00" use a decimal comma, and "$1 199" a space separator:
+    // never guess which part is the amount.
+    const malformed =
+      /^(?:,\d|\s\d)/.test(text.slice(index + match[0].length)) ||
+      /[-−]\s?$/.test(text.slice(0, index))
     mentions.push({
       raw: text.slice(index, end),
       index,
@@ -193,19 +245,25 @@ export function hasForeignAmount(mentions: MoneyMention[]) {
   return mentions.some((m) => m.currency === 'FOREIGN')
 }
 
+/** Amounts that cannot be read as US dollars: foreign, or malformed. A past or saved amount is excluded. */
+export function unclearAmounts(mentions: MoneyMention[]) {
+  return mentions.filter(
+    (m) => m.role !== 'other' && (m.currency === 'FOREIGN' || m.cents === null),
+  )
+}
+
+/** Whether the text names a currency other than US dollars anywhere, with or without an amount. */
+export function mentionsOtherCurrency(text: string) {
+  return CURRENCY_MARKERS.test(text)
+}
+
 /** Mentions that read as a USD price, as opposed to a budget, saving or past price. */
 export function priceMentions(mentions: MoneyMention[]) {
   return groundableAmounts(mentions).filter((m) => m.role === 'price')
 }
 
-const NUMBER_WORDS: Record<string, number> = {
-  a: 1,
-  an: 1,
-  one: 1,
-  single: 1,
+const COUNT_WORDS: Record<string, number> = {
   two: 2,
-  pair: 2,
-  couple: 2,
   three: 3,
   four: 4,
   five: 5,
@@ -216,15 +274,31 @@ const NUMBER_WORDS: Record<string, number> = {
   ten: 10,
   eleven: 11,
   twelve: 12,
-  dozen: 12,
 }
+const PER_UNIT =
+  /\b(?:each|apiece|a\s+piece|per\s+(?:item|piece|unit|one|ticket|person)|\/\s?ea\b|ea\.)/i
 
-/** Whether a quantity greater than one is stated in the text. */
-export function quantityStated(text: string, quantity: number) {
+/**
+ * Whether the user stated a quantity above one for this item and priced it per unit:
+ * the count must sit next to the item ("3 shirts", "two tickets") and the price must be
+ * marked as per item ("at $40 each"). Otherwise the stated price is the total.
+ */
+export function quantityStated(text: string, quantity: number, itemName = '') {
   if (quantity === 1) return true
-  const lower = text.toLowerCase()
-  if (new RegExp(String.raw`(?<![\d.,$])${quantity}(?![\d.,]|\s?k\b)`).test(lower)) return true
-  return Object.entries(NUMBER_WORDS).some(
-    ([word, value]) => value === quantity && new RegExp(String.raw`\b${word}\b`).test(lower),
-  )
+  if (!PER_UNIT.test(text)) return false
+  const stem = (itemName.toLowerCase().match(/[a-z]+/g) ?? [])
+    .filter((w) => w.length > 2)
+    .at(-1)
+    ?.replace(/(?:es|s)$/, '')
+  if (!stem) return false
+  const count = [
+    String(quantity),
+    ...Object.entries(COUNT_WORDS)
+      .filter(([, v]) => v === quantity)
+      .map(([w]) => w),
+  ].join('|')
+  return new RegExp(
+    String.raw`(?<![\d.,$])\b(?:${count})\s*(?:x\s*)?(?:[a-z-]+\s+){0,2}?${stem}|${stem}\w*\s*(?:x|×)\s*(?:${count})\b`,
+    'i',
+  ).test(text)
 }
