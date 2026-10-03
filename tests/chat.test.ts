@@ -398,6 +398,15 @@ describe('dates are resolved by Claude and checked by the server (C-12)', () => 
 describe('conversation context (C-14, AI-4, UX-1)', () => {
   const camera = { amountCents: 119900, itemName: 'camera', purchaseDate: TODAY }
 
+  it('reads "until my next paycheck" as the known payday, without asking', () => {
+    const local = fallbackReply(
+      ask('What if I wait until my next paycheck?', { context: camera }),
+      demo(),
+    )
+    expect(local.intent).not.toBe('clarify')
+    expect(local.assessment).toMatchObject({ purchaseDate: '2026-10-08', amountCents: 119900 })
+  })
+
   it('reuses the purchase being discussed for a follow-up about it', async () => {
     const { provider } = model([interpret([], { refers_to_previous_item: true }), final()])
     const reply = await provider.reply(

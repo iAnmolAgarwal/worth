@@ -248,7 +248,7 @@ const RULES: Rule[] = [
   },
   {
     pattern:
-      /\b(after|on|at|once|when)\s+(?:i\s+(?:get|am|'m)\s+paid|(?:i\s+)?get\s+paid|(?:my\s+)?(?:next\s+)?(?:payday|paycheck|pay\s*day|pay\s*check|salary))\b|\b(?:next\s+)?(?:payday|pay\s*day)\b/gi,
+      /\b(after|on|at|once|when|until|till|til|by)\s+(?:i\s+(?:get|am|'m)\s+paid|(?:i\s+)?get\s+paid|(?:my\s+)?(?:next\s+)?(?:payday|paycheck|pay\s*day|pay\s*check|salary))\b|\b(?:my\s+)?(?:next\s+)?(?:payday|pay\s*day|paycheck|pay\s*check)\b/gi,
     resolve: (m, _today, incomeDate) => {
       if (!incomeDate) return null
       return [/^(?:after|once|when)$/i.test(m[1] ?? '') ? addDays(incomeDate, 1) : incomeDate]
