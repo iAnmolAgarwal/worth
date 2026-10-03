@@ -15,3 +15,11 @@ export const fullDate = (date: string) => shortDate(date, { weekday: 'long', yea
 export const fromMoney = (input: string) => Math.round(Number(input.replace(/[$,]/g, '')) * 100)
 export const cx = (...classes: (string | false | undefined | null)[]) =>
   classes.filter(Boolean).join(' ')
+/** An amount in its own currency, such as €45.00 or ¥4,500, from hundredths of that currency. */
+export const currencyAmount = (hundredths: number, currency: string) => {
+  try {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(hundredths / 100)
+  } catch {
+    return `${currency} ${(hundredths / 100).toFixed(2)}`
+  }
+}

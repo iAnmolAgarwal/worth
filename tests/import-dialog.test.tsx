@@ -117,3 +117,83 @@ describe('import dialog', () => {
     expect(apiMock).toHaveBeenCalledWith('/import/preview', { csv: CSV })
   })
 })
+
+describe('import preview details', () => {
+  it('lists unresolved foreign payments, possible Pay in 4 plans and balance corrections', async () => {
+    const user = userEvent.setup()
+    apiMock.mockResolvedValue(
+      preview({
+        transactions: [shop],
+        unresolved: [
+          {
+            id: 'paypal:F1',
+            date: '2026-09-10',
+            name: 'Lisbon bakery',
+            type: 'Express Checkout Payment',
+            currency: 'EUR',
+            originalCents: -1200,
+          },
+        ],
+        instalmentPlans: [
+          {
+            id: 'pay-later:paypal:S1',
+            name: 'Test Store',
+            startDate: '2026-09-28',
+            purchaseCents: 119900,
+            paymentCents: 29975,
+            payments: [],
+            transactionIds: ['paypal:S1'],
+          },
+        ],
+        adjustments: [
+          {
+            ...shop,
+            id: 'paypal:A1',
+            name: 'General Account Correction',
+            amountCents: 500000,
+            kind: 'adjustment',
+          },
+        ],
+      }),
+    )
+    render(
+      <ImportDialog state={makeState()} onClose={vi.fn()} onUpdate={vi.fn()} onReview={vi.fn()} />,
+    )
+    await pasteAndPreview(user)
+    await screen.findByText('1 foreign-currency payment has no USD conversion')
+    expect(screen.getByText(/Lisbon bakery · Sep 10 · €12\.00/)).toBeTruthy()
+    expect(
+      screen.getByText(/Test Store · \$1,199\.00 purchase · payments of about \$299\.75/),
+    ).toBeTruthy()
+    expect(screen.getByText(/General Account Correction · Apr 3 · \$5,000\.00/)).toBeTruthy()
+    // Unresolved payments do not block the import itself.
+    await user.click(screen.getByRole('checkbox', { name: /I reviewed this preview/ }))
+    const importButton = screen.getByRole('button', { name: /Import & review my plan/ })
+    expect((importButton as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('can import a file whose only spending is an unresolved foreign payment', async () => {
+    const user = userEvent.setup()
+    apiMock.mockResolvedValue(
+      preview({
+        unresolved: [
+          {
+            id: 'paypal:F1',
+            date: '2026-09-10',
+            name: 'Lisbon bakery',
+            type: 'Express Checkout Payment',
+            currency: 'EUR',
+            originalCents: -1200,
+          },
+        ],
+      }),
+    )
+    render(
+      <ImportDialog state={makeState()} onClose={vi.fn()} onUpdate={vi.fn()} onReview={vi.fn()} />,
+    )
+    await pasteAndPreview(user)
+    await user.click(await screen.findByRole('checkbox', { name: /I reviewed this preview/ }))
+    const importButton = screen.getByRole('button', { name: /Import & review my plan/ })
+    expect((importButton as HTMLButtonElement).disabled).toBe(false)
+  })
+})

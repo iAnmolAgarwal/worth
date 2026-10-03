@@ -26,7 +26,7 @@ import { getUpcomingFlows, todayInTimezone } from '../shared/finance'
 import { CSV_IMPORT_LIMITS, CSV_SIZE_MESSAGE, utf8Bytes } from '../shared/limits'
 import { api } from './api'
 import { CLAUDE_SHARED_DATA } from './copy'
-import { money, shortDate } from './format'
+import { currencyAmount, money, shortDate } from './format'
 import { Button, Field, Footnote, Modal } from './ui'
 import './plan-dialog.css'
 
@@ -1217,6 +1217,59 @@ export function ImportDialog({
             {preview.recurring.length} possible recurring{' '}
             {preview.recurring.length === 1 ? 'item needs' : 'items need'} your review.
           </p>
+          {preview.unresolved.length > 0 && (
+            <div className="notice notice-warning">
+              <strong>
+                {preview.unresolved.length} foreign-currency{' '}
+                {preview.unresolved.length === 1 ? 'payment has' : 'payments have'} no USD
+                conversion
+              </strong>
+              <ul>
+                {preview.unresolved.slice(0, 8).map((payment) => (
+                  <li key={payment.id}>
+                    {payment.name} · {shortDate(payment.date)} ·{' '}
+                    {currencyAmount(Math.abs(payment.originalCents), payment.currency)}
+                  </li>
+                ))}
+              </ul>
+              <p>
+                After importing, give each one its USD cost under Activity or mark it as a one-off.
+                Until then, Worth won’t show a positive result.
+              </p>
+            </div>
+          )}
+          {preview.instalmentPlans.length > 0 && (
+            <div className="notice">
+              <strong>Possible Pay in 4 or Pay Later plans</strong>
+              <ul>
+                {preview.instalmentPlans.map((plan) => (
+                  <li key={plan.id}>
+                    {plan.name}
+                    {plan.purchaseCents !== null &&
+                      ` · ${money(plan.purchaseCents, true)} purchase`}{' '}
+                    · payments of about {money(plan.paymentCents, true)}
+                  </li>
+                ))}
+              </ul>
+              <p>
+                These are not counted as everyday spending. Next, add any payments still due to your
+                plan, or confirm the plan is paid off.
+              </p>
+            </div>
+          )}
+          {preview.adjustments.length > 0 && (
+            <div className="notice">
+              <strong>PayPal balance corrections, not counted</strong>
+              <ul>
+                {preview.adjustments.slice(0, 5).map((transaction) => (
+                  <li key={transaction.id}>
+                    {transaction.name} · {shortDate(transaction.date)} ·{' '}
+                    {money(transaction.amountCents, true)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {preview.errors.length > 0 && (
             <div className="notice notice-warning" role="alert">
               <strong>
@@ -1331,7 +1384,7 @@ export function ImportDialog({
             csv !== previewedCsv ||
             Boolean(busy) ||
             activeCheckout ||
-            (!preview.transactions.length && !preview.duplicates)
+            (!preview.transactions.length && !preview.duplicates && !preview.unresolved.length)
           }
         >
           Import & review my plan <ArrowRight size={16} />
