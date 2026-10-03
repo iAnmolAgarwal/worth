@@ -531,7 +531,7 @@ export function PlanDialog({
               )}
               <p className="plan-step-note">
                 {state.profile.source === 'demo'
-                  ? 'These are Alex’s sample figures. You can explore the plan or import your own activity.'
+                  ? 'These are Maya’s sample figures. You can explore the plan or import your own activity.'
                   : 'History suggests patterns. Confirm these numbers include your life outside PayPal.'}
               </p>
             </div>
@@ -699,6 +699,7 @@ export function PlanDialog({
                                 <option value="income">Expected income</option>
                                 <option value="bill">Bill or commitment</option>
                                 <option value="subscription">Subscription</option>
+                                <option value="installment">Instalment plan payment</option>
                               </select>
                             </Field>
                           </div>

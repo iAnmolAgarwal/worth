@@ -802,7 +802,9 @@ export function FlowRow({ flow, date }: { flow: ScheduledFlow; date: string }) {
             ? 'Subscription'
             : flow.kind === 'income'
               ? 'Expected income'
-              : 'Bill'}
+              : flow.kind === 'installment'
+                ? 'Instalment'
+                : 'Bill'}
         </small>
       </div>
       <b>

@@ -114,18 +114,30 @@ describe('deterministic purchase assessment', () => {
     expect(assess(p, 90000, { purchaseDate: addDays(TODAY, 6) }).outcome).toBe('fits')
   })
 
-  it('extends a delayed scenario until 30 days after purchase', () => {
+  it('judges buying today and every later date over the same fixed 60-day window (FL-5)', () => {
+    // $2,000 of funds, a $500 cushion and a $1,200 annual bill on day 31.
     const p = profile({
       balanceCents: 200000,
-      flows: [flow({ nextDate: addDays(TODAY, 35), amountCents: 120000 })],
+      flows: [flow({ cadence: 'yearly', nextDate: addDays(TODAY, 31), amountCents: 120000 })],
     })
     const now = assess(p, 60000)
+    expect(now.outcome).toBe('tight')
+    expect(now.lowestDate).toBe(addDays(TODAY, 31))
+    expect(now.lowestBalanceCents).toBe(20000)
+    expect(now.earliestDate).toBeNull()
+    expect(now.maxAffordableCents).toBe(30000)
     const later = assess(p, 60000, { purchaseDate: addDays(TODAY, 30) })
-    expect(now.outcome).toBe('fits')
+    for (const result of [now, later]) {
+      expect(result.horizonEnd).toBe(addDays(TODAY, 60))
+      expect(result.points).toHaveLength(61)
+    }
     expect(later.outcome).toBe('tight')
-    expect(later.horizonEnd).toBe(addDays(TODAY, 60))
-    expect(later.points).toHaveLength(61)
-    expect(later.lowestDate).toBe(addDays(TODAY, 35))
+    // A bill after the window is outside every option.
+    const outside = profile({
+      balanceCents: 200000,
+      flows: [flow({ nextDate: addDays(TODAY, 61), amountCents: 120000 })],
+    })
+    expect(assess(outside, 60000).outcome).toBe('fits')
   })
 
   it('does not suggest waiting when a future bill breaks every candidate window', () => {
@@ -147,11 +159,11 @@ describe('deterministic purchase assessment', () => {
   })
 
   it('shows a stress shortfall alongside a base-case fit', () => {
-    const p = profile({ balanceCents: 100000, dailySpendCents: 1000, cushionCents: 50000 })
+    const p = profile({ balanceCents: 130000, dailySpendCents: 1000, cushionCents: 50000 })
     const result = assess(p, 15000)
     expect(result.outcome).toBe('fits')
     expect(result.lowestBalanceCents).toBe(54000)
-    expect(result.stressLowestCents).toBe(47800)
+    expect(result.stressLowestCents).toBe(41800)
     expect(result.explanation).toContain('20% higher')
   })
 
@@ -300,7 +312,7 @@ describe('calendar behavior and demo', () => {
     const camera = PRODUCTS.find((item) => item.id === 'camera')!.priceCents
     expect(
       assessPurchase(moved.profile, [], { amountCents: camera, today: yesterday }).earliestDate,
-    ).toBe(addDays(yesterday, 13))
+    ).toBe(addDays(yesterday, 20))
     const edited = { ...demo, profile: { ...demo.profile, userEdited: true } }
     expect(rebaseDemoState(edited, yesterday, 'Pacific/Honolulu')).toBeUndefined()
     const legacy = { ...demo, profile: { ...demo.profile, userEdited: undefined } }
@@ -321,6 +333,19 @@ describe('calendar behavior and demo', () => {
     ).toBe('fits')
     const camera = assess(demo.profile, PRODUCTS.find((item) => item.id === 'camera')!.priceCents)
     expect(camera.outcome).toBe('tight')
-    expect(camera.earliestDate).toBe(addDays(TODAY, 13))
+    expect(camera.earliestDate).toBe(addDays(TODAY, 20))
+    // The existing plan's first payment is history; the other three are scheduled.
+    expect(demo.transactions.filter((t) => t.name === 'Laptop · Pay in 4')).toHaveLength(1)
+    expect(demo.profile.flows.filter((f) => f.kind === 'installment')).toHaveLength(3)
+    // Past paychecks inside the 90-day history arrive every two weeks, ending nine days ago.
+    const paychecks = demo.transactions
+      .filter((t) => t.kind === 'income')
+      .map((t) => t.date)
+      .sort()
+    expect(paychecks.at(-1)).toBe(addDays(TODAY, -9))
+    expect(paychecks).toHaveLength(6)
+    expect(paychecks.slice(1).every((date, index) => date === addDays(paychecks[index]!, 14))).toBe(
+      true,
+    )
   })
 })

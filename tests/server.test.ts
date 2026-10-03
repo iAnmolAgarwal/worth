@@ -105,7 +105,7 @@ describe('HTTP sessions, profiles, and calculations', () => {
     const initial = await state(agent)
     const response = await patch(agent, { profile: { ...initial.profile, name: 'Personal' } })
     expect(response.status).toBe(200)
-    expect((await state(request.agent(app))).profile.name).toBe('Alex')
+    expect((await state(request.agent(app))).profile.name).toBe('Maya')
     expect((await agent.post('/api/reset').send({})).status).toBe(403)
     expect((await post(agent, '/api/reset').set('Origin', 'https://attacker.example')).status).toBe(
       403,
@@ -954,8 +954,8 @@ describe('AI financial grounding', () => {
     },
   )
   it.each([
-    ['on payday', '2026-10-15'],
-    ['after my next paycheck', '2026-10-16'],
+    ['on payday', '2026-10-08'],
+    ['after my next paycheck', '2026-10-09'],
   ])('uses the confirmed income date for %s', async (timing, expectedDate) => {
     const { agent } = setup()
     const data = await state(agent)
@@ -1023,7 +1023,7 @@ describe('AI financial grounding', () => {
       data,
     )
     expect(result.assessment?.purchaseDate).toBe('2026-10-03')
-    expect(result.assessment?.earliestDate).toBe('2026-10-16')
+    expect(result.assessment?.earliestDate).toBe('2026-10-23')
     expect(result.message).toContain('earliest date')
   })
   it('rejects a model-invented price and asks for the missing price even if the model declares approval', async () => {

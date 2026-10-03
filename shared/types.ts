@@ -1,7 +1,8 @@
 export type Currency = 'USD'
 export type Outcome = 'fits' | 'tight' | 'incomplete'
 export type Cadence = 'once' | 'weekly' | 'biweekly' | 'monthly' | 'yearly'
-export type FlowKind = 'income' | 'subscription' | 'bill'
+/** `installment` is one payment of an instalment plan already running, from PayPal or another provider. */
+export type FlowKind = 'income' | 'subscription' | 'bill' | 'installment'
 export interface ScheduledFlow {
   id: string
   name: string
@@ -14,6 +15,13 @@ export interface ScheduledFlow {
   active: boolean
   color?: string
   icon?: string
+  /** Groups the payments of one instalment plan. Payments without it count as their own plan. */
+  planId?: string
+  /**
+   * Date of an occurrence the user already paid. When it is on or before the funds snapshot, the
+   * snapshot already reflects it, so the forecast skips that occurrence.
+   */
+  paidOn?: string
 }
 export interface FinancialProfile {
   name: string
@@ -62,6 +70,36 @@ export interface Product {
   merchant: string
   tag?: string
 }
+export interface PlanInstalment {
+  date: string
+  amountCents: number
+}
+/**
+ * How a completed purchase is repaid. No plan means a single full-price debit. Pay in 4 replaces
+ * that debit only once the user confirms the amounts and dates PayPal gave them.
+ */
+export type PaymentPlan =
+  | { product: 'full'; confirmedAt?: string }
+  | { product: 'payIn4'; status: 'unconfirmed' }
+  | {
+      product: 'payIn4'
+      status: 'confirmed'
+      instalments: PlanInstalment[]
+      confirmedAt: string
+    }
+export interface PurchaseRefund {
+  /** PayPal refund ID; recording the same refund again changes nothing. */
+  id: string
+  /** What the merchant refunded. It changes nothing until the user confirms the effect. */
+  amountCents: number
+  status: 'review' | 'confirmed'
+  createdAt: string
+  /** Money that actually came back to available funds. Store credit and gift cards count as zero. */
+  returnedCents?: number
+  /** Pay in 4 only: the payments still due after the refund, replacing the earlier schedule. */
+  remainingInstalments?: PlanInstalment[]
+  confirmedAt?: string
+}
 export interface Purchase {
   id: string
   productId: string
@@ -78,7 +116,28 @@ export interface Purchase {
   assessmentDate: string
   /** Made as the synthetic persona and set aside when the user switched to imported data. */
   archived?: boolean
+  paymentPlan?: PaymentPlan
+  refunds?: PurchaseRefund[]
 }
+/** Something the user must confirm before Worth changes how a purchase affects their plan. */
+export type PurchaseReview =
+  | {
+      kind: 'confirmPlan'
+      purchaseId: string
+      name: string
+      amountCents: number
+      title: string
+      message: string
+    }
+  | {
+      kind: 'refund'
+      purchaseId: string
+      refundId: string
+      name: string
+      refundedCents: number
+      title: string
+      message: string
+    }
 export interface ForecastEvent {
   id: string
   name: string
@@ -117,12 +176,108 @@ export interface Assessment {
   explanation: string
   assumptions: string[]
 }
+/** The fixed range every option is judged over, set before any search. */
+export interface ComparisonWindow {
+  start: string
+  end: string
+  days: number
+}
+/** The largest outflow between the last income and the low point. */
+export interface LowPointCause {
+  name: string
+  amountCents: number
+  date: string
+  kind: ForecastEvent['kind']
+}
+export interface OptionResult {
+  outcome: Outcome
+  /** Total price of the option, in cents. */
+  amountCents: number
+  /** The day the purchase is made; for Pay in 4, the first payment. */
+  purchaseDate: string
+  lowestBalanceCents: number
+  lowestDate: string
+  lowPointCause: LowPointCause | null
+  stressLowestCents: number
+  headroomCents: number
+  points: ForecastPoint[]
+}
+export type WaitOption = { date: null } | ({ date: string } & OptionResult)
+export interface SpendLessOption extends OptionResult {
+  /** The highest all-in price that keeps the cushion when bought today. */
+  maxPriceCents: number
+}
+export interface NearbyBill {
+  name: string
+  date: string
+  amountCents: number
+  kind: FlowKind | 'purchase'
+  /** Positive when the bill falls after the instalment. */
+  daysFromInstalment: number
+}
+export interface InstalmentDetail {
+  number: number
+  date: string
+  amountCents: number
+  /** Within 3 days; bills and other plans' payments are named before subscriptions. */
+  nearestBill: NearbyBill | null
+  /** Lowest projected balance from this payment until the next one (the last runs to the window end). */
+  balanceCents: number
+  lowestDate: string
+  belowCushion: boolean
+}
+export interface ActivePlanPayment {
+  planId: string
+  name: string
+  date: string
+  amountCents: number
+  /** True for the illustrative payments of the plan being compared. */
+  proposed: boolean
+}
+export interface StackingWarning {
+  /** Instalment plans already running with payments inside the window. */
+  activePlans: number
+  /** What those plans still take inside the window. */
+  totalCents: number
+  /** Existing and proposed payments in date order. */
+  calendar: ActivePlanPayment[]
+  message: string
+}
+export interface PayIn4Scenario extends OptionResult {
+  available: true
+  illustrative: true
+  notice: string
+  label: string
+  instalments: InstalmentDetail[]
+  stacking: StackingWarning | null
+}
+export type PayIn4Comparison = PayIn4Scenario | { available: false; reason: string }
+export type Recommendation = 'buyToday' | 'wait' | 'spendLess'
+export interface Comparison {
+  itemName: string
+  amountCents: number
+  today: string
+  window: ComparisonWindow
+  profileVersion: number
+  cushionCents: number
+  missingFields: string[]
+  buyToday: OptionResult
+  wait: WaitOption
+  spendLess: SpendLessOption
+  /** A comparison the user opens deliberately. It is never recommended or ranked. */
+  payIn4: PayIn4Comparison
+  /** Null while information is missing. Pay in 4 is never a recommendation. */
+  recommendation: Recommendation | null
+  assumptions: string[]
+}
 export interface AppState {
   /** Public session fingerprint for clearing browser-only context; never an authentication token. */
   sessionKey?: string
   profile: FinancialProfile
   transactions: Transaction[]
   purchases: Purchase[]
+  /** Persistent prompts: plans to confirm and refunds to review. */
+  reviews: PurchaseReview[]
   wishlist: string[]
   products: Product[]
   today: string
