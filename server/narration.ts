@@ -145,6 +145,7 @@ export const PURCHASE_FACTS = [
   'spend_less',
   'stress',
   'bills_before',
+  'pay_in_4',
 ] as const
 export const PLAN_FACTS = ['room_today', 'low_point', 'cause', 'income'] as const
 export const COMMITMENT_FACTS = ['total', 'next', 'largest', 'other_total'] as const
@@ -216,6 +217,12 @@ export function purchaseFacts(a: Assessment, data: ChatData): FactCatalog {
     .slice(0, 3)
   if (before.length)
     facts.bills_before = `Due before your low point: ${before.map((d) => `${chatLabel(d.name)} ${money(d.amountCents)} (${shortLabel(d.date)})`).join(', ')}.`
+  // Only when the user asked: a comparison to open, never a way to make the purchase fit.
+  if (data.payIn4)
+    facts.pay_in_4 =
+      data.payIn4 === 'unavailable'
+        ? `PayPal Pay in 4 is not available for ${money(a.amountCents)}.`
+        : `You can compare PayPal Pay in 4 for ${money(a.amountCents)} in the comparison view. It is shown for comparison only; PayPal decides availability and terms at checkout.`
   return facts
 }
 

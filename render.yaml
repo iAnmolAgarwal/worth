@@ -1,0 +1,50 @@
+# Render Blueprint for the hosted Worth demo (PayPal sandbox only).
+# One paid instance with a persistent disk: SQLite lives on the disk, so the service must stay a
+# single instance, and a disk rules out zero-downtime deploys (no deploys during judging).
+services:
+  - type: web
+    name: worth
+    runtime: node
+    plan: starter
+    region: oregon
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: false
+    disk:
+      name: worth-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: DATABASE_PATH
+        value: /var/data/worth.sqlite
+      # Reverse proxies in front of the app. Confirm it after the first deploy from the logged
+      # line "X-Forwarded-For carries N address(es)" and adjust if Render adds more hops.
+      - key: TRUST_PROXY
+        value: '1'
+      # APP_ORIGIN falls back to RENDER_EXTERNAL_URL; set it when a custom domain is added.
+      - key: APP_ORIGIN
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ANTHROPIC_MODEL
+        value: claude-sonnet-5-5
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      # Register https://<host>/api/paypal/webhook in the PayPal sandbox app, then paste its ID.
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      # Off by default. Set it to 'true' deliberately, and only while recording or showing the
+      # sandbox decline demo (capture with PayPal-Mock-Response: INSTRUMENT_DECLINED).
+      - key: PAYPAL_NEGATIVE_TESTING
+        value: 'false'
+      - key: CLAUDE_IP_HOURLY_LIMIT
+        value: '20'
+      - key: CLAUDE_DAILY_LIMIT
+        value: '200'

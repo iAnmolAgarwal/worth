@@ -758,3 +758,36 @@ describe('request shape and reliability (C-14)', () => {
     expect(reply.points?.map((p) => p.id)).toEqual(['wait'])
   })
 })
+
+describe('Pay in 4 availability in the facts (case 29)', () => {
+  const camera = interpret([item('camera', 119900)], { points: ['pay_in_4', 'low_point'] })
+  it('adds PayPal’s answer only when the person asks about Pay in 4', async () => {
+    const payIn4Eligibility = vi.fn(async () => 'paypal' as const)
+    const asked = model([camera])
+    const reply = await asked.provider.reply(
+      ask('Can I get the $1,199 camera with Pay in 4?'),
+      simple(),
+      { payIn4Eligibility },
+    )
+    expect(payIn4Eligibility).toHaveBeenCalledWith(119900)
+    expect(reply.points?.[0]).toEqual({
+      id: 'pay_in_4',
+      text: 'You can compare PayPal Pay in 4 for $1,199 in the comparison view. It is shown for comparison only; PayPal decides availability and terms at checkout.',
+    })
+    const plain = model([
+      interpret([item('camera', 119900)], { points: ['pay_in_4', 'low_point'] }),
+    ])
+    const other = await plain.provider.reply(ask('Can I afford a $1,199 camera?'), simple(), {
+      payIn4Eligibility,
+    })
+    expect(payIn4Eligibility).toHaveBeenCalledTimes(1)
+    expect(other.points?.map((p) => p.id)).toEqual(['low_point'])
+  })
+  it('says when PayPal does not offer it', async () => {
+    const { provider } = model([camera])
+    const reply = await provider.reply(ask('Is Pay in 4 offered on a $1,199 camera?'), simple(), {
+      payIn4Eligibility: async () => 'unavailable',
+    })
+    expect(reply.points?.[0]?.text).toBe('PayPal Pay in 4 is not available for $1,199.')
+  })
+})

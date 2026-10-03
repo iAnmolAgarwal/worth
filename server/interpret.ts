@@ -8,6 +8,7 @@ import type {
   Purchase,
   PurchaseContext,
   Transaction,
+  PayIn4Eligibility,
 } from '../shared/types.ts'
 import { dateLabel, groundedPhrase, inWindow, readTiming, validIsoDate } from './dates.ts'
 import type { TimingRead } from './dates.ts'
@@ -32,6 +33,11 @@ export interface ChatData {
   purchases: Purchase[]
   transactions: Transaction[]
   today: string
+  /**
+   * Pay in 4 availability for the purchase being assessed, set only when the user asked about
+   * Pay in 4 or paying later. It adds one comparison fact; Pay in 4 is never recommended.
+   */
+  payIn4?: PayIn4Eligibility
 }
 
 export type ClarifyReason =

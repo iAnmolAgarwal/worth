@@ -127,6 +127,22 @@ export interface Purchase {
   archived?: boolean
   paymentPlan?: PaymentPlan
   refunds?: PurchaseRefund[]
+  /** The PayPal approval or payer-action link, present only while approval is needed. */
+  approveUrl?: string
+  /**
+   * True after PayPal declined the capture (INSTRUMENT_DECLINED or PAYER_ACTION_REQUIRED). The
+   * buyer chooses another way to pay in PayPal, then confirms again.
+   */
+  needsReapproval?: boolean
+  /** The last problem with this checkout, written for the user; never raw PayPal output. */
+  lastError?: { code: string; message: string }
+  /**
+   * True for an order Claude prepared although it dips below the cushion. The UI shows a confirm
+   * step, and capture requires `{ acknowledgeShortfall: true }` from the user.
+   */
+  proceedConfirmRequired?: boolean
+  /** 'agent' when Claude's prepare_checkout created the order; absent on older purchases. */
+  preparedBy?: 'agent' | 'user'
 }
 /** Something the user must confirm before Worth changes how a purchase affects their plan. */
 export type PurchaseReview =
@@ -260,7 +276,15 @@ export interface PayIn4Scenario extends OptionResult {
   instalments: InstalmentDetail[]
   stacking: StackingWarning | null
 }
-export type PayIn4Comparison = PayIn4Scenario | { available: false; reason: string }
+/**
+ * How Pay in 4 availability was decided. 'paypal': PayPal's eligibility check offered Pay Later and
+ * the amount is in range. 'range-only': the check could not run, so only the amount range decided.
+ * 'unavailable': out of range, or PayPal did not offer Pay Later.
+ */
+export type PayIn4Eligibility = 'paypal' | 'range-only' | 'unavailable'
+export type PayIn4Comparison =
+  | (PayIn4Scenario & { eligibility?: PayIn4Eligibility })
+  | { available: false; reason: string; eligibility?: PayIn4Eligibility }
 export type Recommendation = 'buyToday' | 'wait' | 'spendLess'
 export interface Comparison {
   itemName: string
@@ -349,6 +373,19 @@ export interface ChatReply {
   suggestions: string[]
   /** Tools that ran successfully for this answer. */
   toolCalls: string[]
+  /** A PayPal order Claude prepared for the user to approve. Capture stays a separate user action. */
+  checkout?: CheckoutHandoff
+}
+/** What the UI needs to hand a prepared order to PayPal for approval. */
+export interface CheckoutHandoff {
+  purchaseId: string
+  orderId: string
+  approveUrl: string
+  itemName: string
+  amountCents: number
+  option: 'buyToday' | 'wait' | 'spendLess'
+  /** True when the user chose to go ahead despite a shortfall; the UI confirms that first. */
+  requiresProceedConfirm: boolean
 }
 /**
  * A completed payment in another currency with no matching USD conversion in the export. Until it

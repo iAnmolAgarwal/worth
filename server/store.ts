@@ -16,6 +16,10 @@ export interface StoredPurchase extends Purchase {
   merchantId?: string
   acknowledgedShortfall: boolean
   captureAttemptedAt?: string
+  /** Captures attempted after a decline; each re-approval gets a fresh PayPal-Request-Id. */
+  captureRetries?: number
+  /** Whether PayPal's checkout could offer Pay Later for this order, from the eligibility check. */
+  payLaterCapable?: boolean
 }
 export const ACTIVE = new Set(['created', 'pending', 'unknown'])
 const DAY = 24 * 60 * 60 * 1000
@@ -103,6 +107,14 @@ export class Store {
       ? { purchase: JSON.parse(row.data) as StoredPurchase, sessionId: row.session_id }
       : undefined
   }
+  byCapture(captureId: string): { purchase: StoredPurchase; sessionId: string } | undefined {
+    const row = this.db
+      .prepare('SELECT session_id, data FROM purchases WHERE capture_id=?')
+      .get(captureId) as { session_id: string; data: string } | undefined
+    return row
+      ? { purchase: JSON.parse(row.data) as StoredPurchase, sessionId: row.session_id }
+      : undefined
+  }
   putPurchase(sessionId: string, purchase: StoredPurchase) {
     this.db
       .prepare(
@@ -137,13 +149,19 @@ export class Store {
   }
 }
 
+/** The purchase as the browser sees it. The approval link appears only while approval is needed. */
 export function publicPurchase(purchase: StoredPurchase): Purchase {
   const {
-    approvalUrl: _url,
+    approvalUrl,
     merchantId: _merchant,
     acknowledgedShortfall: _ack,
     captureAttemptedAt: _attempted,
+    captureRetries: _retries,
+    payLaterCapable: _payLater,
+    approveUrl: _stale,
     ...result
   } = purchase
-  return result
+  return purchase.status === 'created' && approvalUrl
+    ? { ...result, approveUrl: approvalUrl }
+    : result
 }
