@@ -4,3 +4,4 @@ dist/
 .data/
 artifacts/
 package-lock.json
+eval/fixtures/
