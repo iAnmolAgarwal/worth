@@ -1,7 +1,7 @@
 import * as RadixDialog from '@radix-ui/react-dialog'
 import { CircleAlert, LoaderCircle, Pencil, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { useId, type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { useEffect, useId, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { cx } from './format'
 
 export function Wordmark({ onClick }: { onClick?: () => void }) {
@@ -104,6 +104,7 @@ export function Toggle({
   onChange,
   label,
   disabled,
+  busy,
   id,
   describedBy,
 }: {
@@ -111,6 +112,8 @@ export function Toggle({
   onChange: (next: boolean) => void
   label: string
   disabled?: boolean
+  /** Saving: the switch keeps focus and ignores clicks instead of being disabled. */
+  busy?: boolean
   id?: string
   describedBy?: string
 }) {
@@ -123,8 +126,10 @@ export function Toggle({
       aria-checked={checked}
       aria-label={label}
       aria-describedby={describedBy}
+      aria-busy={busy || undefined}
+      aria-disabled={busy || undefined}
       disabled={disabled}
-      onClick={() => onChange(!checked)}
+      onClick={() => !busy && onChange(!checked)}
     />
   )
 }
@@ -289,6 +294,23 @@ export function Dialog({
   dismissible?: boolean
 }) {
   const describedBy = useId()
+  // The element that opened the dialog. Dialogs here mount on open and unmount on close, so focus
+  // is returned explicitly (UX-12); when the trigger is gone, the page's main region takes it.
+  const [trigger] = useState(() =>
+    typeof document === 'undefined' ? null : (document.activeElement as HTMLElement | null),
+  )
+  useEffect(
+    () => () => {
+      const target =
+        trigger && trigger !== document.body && trigger.isConnected
+          ? trigger
+          : document.getElementById('main')
+      setTimeout(() => {
+        if (!document.querySelector('[role=dialog]')) target?.focus({ preventScroll: true })
+      }, 0)
+    },
+    [trigger],
+  )
   return (
     <RadixDialog.Root open onOpenChange={(open) => !open && dismissible && onClose()}>
       <RadixDialog.Portal>

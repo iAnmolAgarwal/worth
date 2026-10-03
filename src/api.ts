@@ -20,16 +20,22 @@ function viewerTimezone(): string | undefined {
 }
 export async function api<T>(path: string, data?: unknown, method?: string): Promise<T> {
   const timezone = viewerTimezone()
-  const response = await fetch(`/api${path}`, {
-    method: method ?? (data === undefined ? 'GET' : 'POST'),
-    credentials: 'same-origin',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Worth-Client': 'web',
-      ...(timezone ? { 'X-Worth-Timezone': timezone } : {}),
-    },
-    ...(data !== undefined ? { body: JSON.stringify(data) } : {}),
-  })
+  let response: Response
+  try {
+    response = await fetch(`/api${path}`, {
+      method: method ?? (data === undefined ? 'GET' : 'POST'),
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Worth-Client': 'web',
+        ...(timezone ? { 'X-Worth-Timezone': timezone } : {}),
+      },
+      ...(data !== undefined ? { body: JSON.stringify(data) } : {}),
+    })
+  } catch {
+    // A network failure, not a server answer: say so plainly instead of "Failed to fetch".
+    throw new ApiError('Couldn’t reach Worth. Check your connection and try again.', 0, 'NETWORK')
+  }
   const result = await response
     .json()
     .catch(() => ({ error: 'The server could not complete this request.' }))
