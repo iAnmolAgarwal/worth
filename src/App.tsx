@@ -530,7 +530,7 @@ export default function App() {
           />
         )}
       </main>
-      <nav className="tabbar" aria-label="Main">
+      <nav className="tabbar" aria-label="Tab bar">
         {NAV.filter((item) => item.tab).map((item) => (
           <a
             key={item.screen}

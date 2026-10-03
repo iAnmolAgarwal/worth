@@ -121,6 +121,7 @@ export function Checkout({
   const [shortfall, setShortfall] = useState(false)
   const heading = useRef<HTMLHeadingElement>(null)
   const view = checkoutView(purchase, approved)
+  const hasPurchase = Boolean(purchase)
   const sandbox = state.config.paypal === 'sandbox'
   const eligibility = useEligibility(sandbox ? instance : undefined, product.priceCents)
   const sdkReady = Boolean(instance) && eligibility.paypal === 'eligible'
@@ -143,7 +144,7 @@ export function Checkout({
     }
   }, [product, state.today, state.profile.version])
   useEffect(() => {
-    if (!purchase) return
+    if (!hasPurchase) return
     let cancelled = false
     api<Comparison>('/compare', { amountCents: 0, itemName: 'Room to spend' })
       .then((result) => !cancelled && setRoom(result))
@@ -151,7 +152,7 @@ export function Checkout({
     return () => {
       cancelled = true
     }
-  }, [Boolean(purchase), view, state.profile.version])
+  }, [hasPurchase, view, state.profile.version])
   // Move focus to the heading on every status change (brief §5.4).
   useEffect(() => {
     heading.current?.focus()
