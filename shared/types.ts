@@ -32,6 +32,11 @@ export interface FinancialProfile {
   flows: ScheduledFlow[]
   reflectedPurchaseIds: string[]
   aiConsent: boolean
+  /**
+   * Set by the server once the user saves their own financial inputs or imports history.
+   * Purchases and other server updates never set it. Absent on older records, which count as edited.
+   */
+  userEdited?: boolean
 }
 export interface Transaction {
   id: string
@@ -71,6 +76,8 @@ export interface Purchase {
   captureId?: string
   profileVersion: number
   assessmentDate: string
+  /** Made as the synthetic persona and set aside when the user switched to imported data. */
+  archived?: boolean
 }
 export interface ForecastEvent {
   id: string

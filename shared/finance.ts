@@ -25,6 +25,20 @@ export function todayInTimezone(timezone = 'America/New_York'): string {
   return `${parts.find((p) => p.type === 'year')!.value}-${parts.find((p) => p.type === 'month')!.value}-${parts.find((p) => p.type === 'day')!.value}`
 }
 
+/**
+ * Returns the time zone name unchanged when the runtime supports it, or undefined. The name is not
+ * canonicalized, because ICU maps current names such as Asia/Kolkata to legacy ones.
+ */
+export function normalizeTimezone(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value || value.length > 80) return undefined
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value })
+    return value
+  } catch {
+    return undefined
+  }
+}
+
 export function addDays(date: string, days: number): string {
   if (!validDate(date) || !Number.isInteger(days))
     throw new Error('Use a valid calendar date and a whole number of days.')
@@ -41,7 +55,7 @@ export function money(cents: number): string {
   }).format(cents / 100)
 }
 
-function daysBetween(from: string, to: string): number {
+export function daysBetween(from: string, to: string): number {
   return Math.round(
     (new Date(`${to}T12:00:00Z`).valueOf() - new Date(`${from}T12:00:00Z`).valueOf()) / DAY_MS,
   )
@@ -122,7 +136,8 @@ function reservedPurchases(profile: FinancialProfile, purchases: Purchase[]): Pu
   return [...purchases]
     .sort((a, b) => Number(b.status === 'completed') - Number(a.status === 'completed'))
     .filter((purchase) => {
-      if (purchase.status === 'failed' || purchase.status === 'cancelled') return false
+      if (purchase.archived || purchase.status === 'failed' || purchase.status === 'cancelled')
+        return false
       const identities = [
         `id:${purchase.id}`,
         ...(purchase.orderId ? [`order:${purchase.orderId}`] : []),
@@ -266,7 +281,7 @@ function missingInputs(profile: FinancialProfile, purchases: Purchase[], today: 
       missing.push(`Confirm whether ${flow.name} has already happened.`)
   }
   for (const purchase of purchases.filter(
-    (item) => !['failed', 'cancelled'].includes(item.status),
+    (item) => !item.archived && !['failed', 'cancelled'].includes(item.status),
   )) {
     if (
       !Number.isSafeInteger(purchase.amountCents) ||

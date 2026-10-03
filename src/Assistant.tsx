@@ -14,6 +14,7 @@ import {
 import type { AppState, Assessment, ChatMessage, ChatReply, Product } from '../shared/types'
 import { addDays } from '../shared/finance'
 import { api, ApiError } from './api'
+import { CLAUDE_SHARED_DATA } from './copy'
 import { cx, fromMoney, money, shortDate } from './format'
 import { Button, Field, Tag } from './ui'
 import { ForecastChart } from './ForecastChart'
@@ -25,6 +26,7 @@ export function Assistant({
   onPlan,
   onProduct,
   onSessionChange,
+  onUpdate,
   visible,
 }: {
   state: AppState
@@ -32,6 +34,7 @@ export function Assistant({
   onPlan: () => void
   onProduct: (p: Product) => void
   onSessionChange?: () => void
+  onUpdate?: (state: AppState) => void
   visible: boolean
 }) {
   const [entries, setEntries] = useState<Entry[]>([])
@@ -39,6 +42,8 @@ export function Assistant({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [custom, setCustom] = useState(false)
+  const [consentBusy, setConsentBusy] = useState(false)
+  const [consentError, setConsentError] = useState('')
   const [item, setItem] = useState('My next good thing')
   const [amount, setAmount] = useState('')
   const [date, setDate] = useState(state.today)
@@ -59,6 +64,17 @@ export function Assistant({
   useEffect(() => {
     contextRef.current = context
   }, [context])
+  async function changeConsent(aiConsent: boolean) {
+    setConsentBusy(true)
+    setConsentError('')
+    try {
+      onUpdate?.(await api<AppState>('/consent', { aiConsent }))
+    } catch (e) {
+      setConsentError((e as Error).message)
+    } finally {
+      setConsentBusy(false)
+    }
+  }
   const send = useCallback(
     async (text: string, explicitContext?: typeof context) => {
       if (inFlight.current || !text.trim()) return
@@ -410,13 +426,31 @@ export function Assistant({
             <Button variant="secondary" onClick={onPlan}>
               Edit financial picture <ArrowUpRight size={14} />
             </Button>
-            <p className="context-footnote">
-              {state.profile.source === 'demo' && state.profile.version === 1
-                ? 'Synthetic history. Your questions are sent to Claude when connected.'
-                : state.profile.aiConsent
-                  ? 'AI sharing is on. Only minimized context is sent to Claude.'
-                  : 'AI sharing is off. Your answers use local calculations.'}
-            </p>
+            {state.profile.source === 'demo' && state.profile.userEdited === false ? (
+              <p className="context-footnote">
+                Synthetic persona. When Claude is connected, it receives {CLAUDE_SHARED_DATA}.
+              </p>
+            ) : (
+              <label className="check-row context-consent">
+                <input
+                  type="checkbox"
+                  checked={state.profile.aiConsent}
+                  disabled={consentBusy}
+                  onChange={(event) => void changeConsent(event.target.checked)}
+                />
+                <span>
+                  <strong>Share with Claude</strong>
+                  <small>
+                    Sends {CLAUDE_SHARED_DATA} to Anthropic. Off: answers use local calculations.
+                  </small>
+                </span>
+              </label>
+            )}
+            {consentError && (
+              <p className="error-text" role="alert">
+                {consentError}
+              </p>
+            )}
           </div>
           <button className="mini-product" onClick={() => onProduct(state.products[1]!)}>
             <img src={state.products[1]?.image} alt="Everyday camera" />

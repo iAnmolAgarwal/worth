@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "NODE_OPTIONS=--max-old-space-size=1536 tsx server/index.ts",
     "build": "tsc -b && vite build",
-    "start": "NODE_ENV=production NODE_OPTIONS=--max-old-space-size=1024 tsx server/index.ts",
+    "start": "NODE_ENV=production NODE_OPTIONS=--max-old-space-size=${MAX_HEAP_MB:-384} tsx server/index.ts",
     "typecheck": "tsc -b",
     "test": "vitest run --maxWorkers=1",
     "test:watch": "vitest --maxWorkers=1",
@@ -29,6 +29,7 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "recharts": "^3.3.0",
+    "tsx": "^4.20.6",
     "zod": "^4.1.12"
   },
   "devDependencies": {
@@ -47,12 +48,11 @@
     "oxlint": "^1.81.0",
     "prettier": "^3.9.9",
     "supertest": "^7.1.4",
-    "tsx": "^4.20.6",
     "typescript": "~6.0.2",
     "vite": "^8.3.0",
     "vitest": "^5.0.3"
   },
   "engines": {
-    "node": ">=24.0.0"
+    "node": "24.x"
   }
 }

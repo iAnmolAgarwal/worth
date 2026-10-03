@@ -3,10 +3,16 @@ import type { ErrorRequestHandler, Request, Response } from 'express'
 import cookieParser from 'cookie-parser'
 import { createHash, randomUUID } from 'node:crypto'
 import { z } from 'zod'
-import { assessPurchase, addDays } from '../shared/finance.ts'
-import { createDemoState, PRODUCTS } from '../shared/seed.ts'
+import { assessPurchase, addDays, normalizeTimezone } from '../shared/finance.ts'
+import { createDemoState, DEMO_TIMEZONE, PRODUCTS, rebaseDemoState } from '../shared/seed.ts'
 import { parsePayPalCsv } from '../shared/csv.ts'
-import type { AppState, Assessment, FinancialProfile, Purchase } from '../shared/types.ts'
+import type {
+  AppState,
+  Assessment,
+  FinancialProfile,
+  Purchase,
+  Transaction,
+} from '../shared/types.ts'
 import { ACTIVE, Store, publicPurchase } from './store.ts'
 import type { SessionData, StoredPurchase } from './store.ts'
 import { createPayPalGateway, PayPalError, validateOrder } from './paypal.ts'
@@ -18,16 +24,11 @@ import {
   fallbackReply,
 } from './chat.ts'
 import type { ChatProvider } from './chat.ts'
+import { allowedOrigins, loadConfig } from './config.ts'
+import type { AppConfig } from './config.ts'
+import { WindowLimiter } from './limits.ts'
 
-export interface AppConfig {
-  origin: string
-  production: boolean
-  paypalClientId?: string
-  paypalSecret?: string
-  paypalWebhookId?: string
-  anthropicKey?: string
-  anthropicModel: string
-}
+export type { AppConfig } from './config.ts'
 export interface AppOptions {
   store?: Store
   config?: Partial<AppConfig>
@@ -66,14 +67,7 @@ const profileSchema = z
     timezone: z
       .string()
       .max(80)
-      .refine((value) => {
-        try {
-          new Intl.DateTimeFormat('en', { timeZone: value })
-          return true
-        } catch {
-          return false
-        }
-      }, 'Invalid timezone'),
+      .refine((value) => normalizeTimezone(value) !== undefined, 'Invalid timezone'),
     snapshotDate: date,
     confirmedAt: z.string().max(40),
     version: z.number().int().min(0),
@@ -83,6 +77,7 @@ const profileSchema = z
     missingFields: z.array(z.string().max(300)).max(30),
     reflectedPurchaseIds: z.array(identifier).max(1000),
     aiConsent: z.boolean(),
+    userEdited: z.boolean().optional(),
     flows: z
       .array(
         z
@@ -129,25 +124,20 @@ const chatSchema = z
   .strict()
 const csvSchema = z.object({ csv: z.string().min(1).max(1_000_000) }).strict()
 const DAY = 86400000
+const CLAUDE_LIMIT_REASON = {
+  ip: 'You have reached this demo’s Claude limit for the hour',
+  daily: 'This demo’s Claude allowance for today is used up',
+}
 
-// Only the untouched, labelled sample persona can use external AI without opt-in.
-// Profile versions are advanced by the server for edits, imports, and captures.
+// Only the labelled sample persona, before the user saves their own financial inputs or imports
+// history, can use external AI without opt-in. Purchases and other server updates do not count.
 function mayUseExternalAi(profile: FinancialProfile) {
-  return profile.aiConsent || (profile.source === 'demo' && profile.version === 1)
+  return profile.aiConsent || (profile.source === 'demo' && profile.userEdited === false)
 }
 
 export function createApp(options: AppOptions = {}) {
-  const config: AppConfig = {
-    origin: process.env.APP_ORIGIN ?? 'http://localhost:5173',
-    production: process.env.NODE_ENV === 'production',
-    paypalClientId: process.env.PAYPAL_CLIENT_ID,
-    paypalSecret: process.env.PAYPAL_CLIENT_SECRET,
-    paypalWebhookId: process.env.PAYPAL_WEBHOOK_ID,
-    anthropicKey: process.env.ANTHROPIC_API_KEY,
-    anthropicModel: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5',
-    ...options.config,
-  }
-  config.origin = new URL(config.origin).origin
+  const config: AppConfig = loadConfig(process.env, options.config)
+  const origins = allowedOrigins(config)
   const store = options.store ?? new Store(process.env.DATABASE_PATH ?? '.data/worth.sqlite')
   const now = options.now ?? (() => new Date())
   const paypal =
@@ -167,11 +157,25 @@ export function createApp(options: AppOptions = {}) {
       : undefined)
   const app = express()
   app.disable('x-powered-by')
+  // Behind a proxy, req.ip must be the client address the proxy appended, not the proxy itself.
+  if (config.trustProxy) app.set('trust proxy', config.trustProxy)
   app.locals.store = store
   app.locals.cleanup = () => store.cleanup(now().getTime())
   const busy = new Set<string>()
   const chatBusy = new Set<string>()
-  const rates = new Map<string, { count: number; until: number }>()
+  const requestLimiter = new WindowLimiter(config.requestsPerMinute, 60_000)
+  const sessionLimiter = new WindowLimiter(config.sessionIpHourlyLimit, 60 * 60_000)
+  const claudePerIp = new WindowLimiter(config.claudeIpHourlyLimit, 60 * 60_000)
+  const claudeDaily = new WindowLimiter(config.claudeDailyLimit, DAY, 1)
+  /** Spends one Claude request from the client's hourly and the server's daily allowance. */
+  function claudeLimit(req: Request): keyof typeof CLAUDE_LIMIT_REASON | undefined {
+    const time = now().getTime()
+    if (!claudePerIp.take(req.ip ?? 'local', time)) return 'ip'
+    if (!claudeDaily.take('all', time)) return 'daily'
+    return undefined
+  }
+  // The __Host- prefix makes browsers require Secure, Path=/ and no Domain for the session cookie.
+  const cookieName = config.production ? '__Host-worth_session' : 'worth_session'
   function today(timezone = 'UTC') {
     const parts = new Intl.DateTimeFormat('en-CA', {
       timeZone: timezone,
@@ -180,6 +184,18 @@ export function createApp(options: AppOptions = {}) {
       day: '2-digit',
     }).formatToParts(now())
     return `${parts.find((p) => p.type === 'year')!.value}-${parts.find((p) => p.type === 'month')!.value}-${parts.find((p) => p.type === 'day')!.value}`
+  }
+  /** The browser's IANA time zone, sent on every API call; anything unsupported is ignored. */
+  function viewerTimezone(req: Request) {
+    return normalizeTimezone(req.get('X-Worth-Timezone'))
+  }
+  /** Keeps an untouched synthetic persona dated today for the viewer, so it never goes stale. */
+  function followViewerDay(id: string, viewer: string | undefined) {
+    const data = store.get(id)
+    if (!data) return
+    const timezone = viewer ?? data.profile.timezone
+    const rebased = rebaseDemoState(data, today(timezone), timezone)
+    if (rebased) store.save(id, rebased)
   }
   function sessionId(res: Response): string {
     return res.locals.sessionId as string
@@ -201,7 +217,7 @@ export function createApp(options: AppOptions = {}) {
     return {
       ...data,
       sessionKey: createHash('sha256').update(id).digest('hex').slice(0, 20),
-      purchases: store.purchases(id).map(publicPurchase),
+      purchases: livePurchases(id).map(publicPurchase),
       products: PRODUCTS,
       today: today(data.profile.timezone),
       config: {
@@ -212,13 +228,28 @@ export function createApp(options: AppOptions = {}) {
       },
     }
   }
-  function startSession(res: Response) {
-    const seed = createDemoState(today('America/New_York'))
+  function startSession(req: Request, res: Response, replacing = false) {
+    const time = now().getTime()
+    // A replacement (reset) deletes the previous session, so it cannot grow storage.
+    if (!replacing && store.count(time) >= config.maxSessions)
+      throw new HttpError(
+        503,
+        'Worth is at capacity right now. Please try again later.',
+        'AT_CAPACITY',
+      )
+    if (!replacing && !sessionLimiter.take(req.ip ?? 'local', time))
+      throw new HttpError(
+        429,
+        'Too many new sessions from this network. Please try again later.',
+        'SESSION_RATE_LIMITED',
+      )
+    const timezone = viewerTimezone(req) ?? DEMO_TIMEZONE
+    const seed = createDemoState(today(timezone), timezone)
     const id = store.create(
       { profile: seed.profile, transactions: seed.transactions, wishlist: seed.wishlist },
-      now().getTime(),
+      time,
     )
-    res.cookie('worth_session', id, {
+    res.cookie(cookieName, id, {
       httpOnly: true,
       sameSite: 'lax',
       secure: config.production,
@@ -227,6 +258,16 @@ export function createApp(options: AppOptions = {}) {
     })
     res.locals.sessionId = id
     return id
+  }
+  /** Purchases that belong to the current plan; archived persona purchases are kept only for PayPal. */
+  function livePurchases(id: string) {
+    return store.purchases(id).filter((p) => !p.archived)
+  }
+  /** History kept on import. Purchases made as the synthetic persona never carry into a user's plan. */
+  function retainedHistory(data: SessionData) {
+    return data.transactions.filter(
+      (t) => t.source === 'import' || (t.source === 'purchase' && data.profile.source === 'import'),
+    )
   }
   function active(id: string) {
     return store.purchases(id).find((p) => ACTIVE.has(p.status))
@@ -248,7 +289,7 @@ export function createApp(options: AppOptions = {}) {
     const profile = store.get(id)!.profile
     return assessPurchase(
       profile,
-      store.purchases(id).filter((p) => p.id !== excludeId),
+      livePurchases(id).filter((p) => p.id !== excludeId),
       {
         amountCents,
         itemName,
@@ -401,10 +442,23 @@ export function createApp(options: AppOptions = {}) {
       )
     }
   }
+  let proxyHopsLogged = !config.production
   app.use((req, res, next) => {
+    // Logs the forwarding chain length once so TRUST_PROXY can be checked after a deploy.
+    const forwarded = req.get('X-Forwarded-For')
+    if (!proxyHopsLogged && forwarded) {
+      proxyHopsLogged = true
+      console.info(
+        `X-Forwarded-For carries ${forwarded.split(',').length} address(es); TRUST_PROXY is ${config.trustProxy}.`,
+      )
+    }
     res.setHeader('X-Content-Type-Options', 'nosniff')
     res.setHeader('Referrer-Policy', 'same-origin')
     res.setHeader('X-Frame-Options', 'DENY')
+    // Framing only. Script and connection rules wait until the PayPal SDK is tested live.
+    res.setHeader('Content-Security-Policy', "frame-ancestors 'none'")
+    if (config.production)
+      res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
     if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store')
     next()
   })
@@ -432,7 +486,11 @@ export function createApp(options: AppOptions = {}) {
     if (!match) return res.json({ received: true, ignored: true })
     await withPurchaseLock(match.purchase.id, async () => {
       const current = reconcile(match.sessionId, match.purchase, await paypal.get(orderId))
-      if (/REFUNDED|REVERSED|DENIED/.test(event.event_type) && current.status === 'completed') {
+      if (
+        /REFUNDED|REVERSED|DENIED/.test(event.event_type) &&
+        current.status === 'completed' &&
+        !current.archived
+      ) {
         const data = store.get(match.sessionId)!
         const message =
           'A PayPal payment changed after capture. Confirm your current balance before relying on this plan.'
@@ -448,10 +506,9 @@ export function createApp(options: AppOptions = {}) {
   app.use('/api', (req, res, next) => {
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
       const origin = req.get('origin')
-      const expected = config.origin
       if (
         req.get('X-Worth-Client') !== 'web' ||
-        (origin && origin !== expected) ||
+        (origin && !origins.has(origin)) ||
         req.get('sec-fetch-site') === 'cross-site'
       )
         return next(
@@ -465,23 +522,20 @@ export function createApp(options: AppOptions = {}) {
         return next(new HttpError(415, 'Send a JSON request.', 'INVALID_CONTENT_TYPE'))
     }
     const time = now().getTime()
-    if (rates.size > 5000)
-      for (const [key, value] of rates) if (value.until < time) rates.delete(key)
-    const key = req.ip ?? 'local'
-    let rate = rates.get(key)
-    if (!rate || rate.until < time) {
-      rate = { count: 0, until: time + 60000 }
-      rates.set(key, rate)
-    }
-    if (++rate.count > 180)
+    if (!requestLimiter.take(req.ip ?? 'local', time))
       return next(
         new HttpError(429, 'Please wait a moment before making more requests.', 'RATE_LIMITED'),
       )
-    store.cleanup(time)
-    const cookie = req.cookies.worth_session as unknown
-    if (typeof cookie === 'string' && /^[A-Za-z0-9_-]{43}$/.test(cookie) && store.get(cookie))
+    // Expired rows are removed by the periodic cleanup timer, never by a per-request table scan.
+    const cookie = req.cookies[cookieName] as unknown
+    if (
+      typeof cookie === 'string' &&
+      /^[A-Za-z0-9_-]{43}$/.test(cookie) &&
+      store.isLive(cookie, time)
+    ) {
       res.locals.sessionId = cookie
-    else startSession(res)
+      followViewerDay(cookie, viewerTimezone(req))
+    } else startSession(req, res)
     next()
   })
   app.get('/api/state', (_req, res) => res.json(state(sessionId(res))))
@@ -513,7 +567,7 @@ export function createApp(options: AppOptions = {}) {
       )
     if (new Set(input.flows.map((f) => f.id)).size !== input.flows.length)
       throw new HttpError(400, 'Each scheduled item needs a unique identity.', 'DUPLICATE_FLOW')
-    const completed = store.purchases(id).filter((p) => p.status === 'completed')
+    const completed = livePurchases(id).filter((p) => p.status === 'completed')
     if (input.reflectedPurchaseIds.some((ref) => !completed.some((p) => p.id === ref)))
       throw new HttpError(
         400,
@@ -528,14 +582,26 @@ export function createApp(options: AppOptions = {}) {
       source: data.profile.source,
       coverageDays: data.profile.coverageDays,
       confirmedAt: input.confirmed ? now().toISOString() : '',
+      userEdited: true,
     }
     store.save(id, data)
     res.json(state(id))
   })
-  app.post('/api/reset', (_req, res) => {
-    noActive(sessionId(res))
-    store.delete(sessionId(res))
-    res.json(state(startSession(res)))
+  app.post('/api/reset', (req, res) => {
+    const previous = sessionId(res)
+    noActive(previous)
+    const id = startSession(req, res, true)
+    store.delete(previous)
+    res.json(state(id))
+  })
+  app.post('/api/consent', (req, res) => {
+    const { aiConsent } = z.object({ aiConsent: z.boolean() }).strict().parse(req.body)
+    const id = sessionId(res)
+    const data = dataFor(res)
+    // Consent changes no financial input, so it keeps the plan version and any active checkout.
+    data.profile.aiConsent = aiConsent
+    store.save(id, data)
+    res.json(state(id))
   })
   app.post('/api/wishlist', (req, res) => {
     const { productId } = z.object({ productId: identifier }).strict().parse(req.body)
@@ -548,24 +614,29 @@ export function createApp(options: AppOptions = {}) {
     store.save(sessionId(res), data)
     res.json(state(sessionId(res)))
   })
+  function mergeTransactions(existing: Transaction[], incoming: Transaction[]) {
+    return [...new Map([...existing, ...incoming].map((t) => [t.id, t])).values()]
+  }
+  function transactionLimitMessage(total: number) {
+    return `This import would keep ${total.toLocaleString('en-US')} transactions, but a session holds at most ${config.maxTransactions.toLocaleString('en-US')}. Import a shorter date range.`
+  }
   app.post('/api/import/preview', (req, res) => {
     const { csv } = csvSchema.parse(req.body)
-    res.json(
-      parsePayPalCsv(
-        csv,
-        dataFor(res).transactions.filter((t) => t.source !== 'demo'),
-      ),
-    )
+    const data = dataFor(res)
+    const existing = retainedHistory(data)
+    const preview = parsePayPalCsv(csv, existing, { today: today(data.profile.timezone) })
+    const total = mergeTransactions(existing, preview.transactions).length
+    if (total > config.maxTransactions)
+      preview.errors.unshift({ row: 1, message: transactionLimitMessage(total) })
+    res.json(preview)
   })
   app.post('/api/import/commit', (req, res) => {
     const { csv } = csvSchema.parse(req.body)
     const id = sessionId(res)
     noActive(id)
     const data = dataFor(res)
-    const preview = parsePayPalCsv(
-      csv,
-      data.transactions.filter((t) => t.source !== 'demo'),
-    )
+    const retained = retainedHistory(data)
+    const preview = parsePayPalCsv(csv, retained, { today: today(data.profile.timezone) })
     if (preview.errors.length)
       throw new HttpError(
         400,
@@ -574,7 +645,11 @@ export function createApp(options: AppOptions = {}) {
       )
     if (!preview.transactions.length && !preview.duplicates)
       throw new HttpError(400, 'No supported transactions found.', 'EMPTY_IMPORT')
-    if (data.profile.source === 'demo') {
+    const merged = mergeTransactions(retained, preview.transactions)
+    if (merged.length > config.maxTransactions)
+      throw new HttpError(400, transactionLimitMessage(merged.length), 'TOO_MANY_TRANSACTIONS')
+    const switching = data.profile.source === 'demo'
+    if (switching) {
       data.profile = {
         ...data.profile,
         name: 'Your plan',
@@ -591,12 +666,7 @@ export function createApp(options: AppOptions = {}) {
         ...preview.recurring.filter((f) => !existingNames.has(f.name.toLowerCase())),
       )
     }
-    const preserved = data.transactions.filter((t) => t.source !== 'demo')
-    data.transactions = [
-      ...new Map(
-        [...preserved, ...preview.transactions].map((transaction) => [transaction.id, transaction]),
-      ).values(),
-    ].sort((a, b) => b.date.localeCompare(a.date))
+    data.transactions = merged.sort((a, b) => b.date.localeCompare(a.date))
     const dates = data.transactions
       .filter((t) => t.source === 'import')
       .map((t) => t.date)
@@ -607,10 +677,17 @@ export function createApp(options: AppOptions = {}) {
     data.profile.confirmed = false
     data.profile.confirmedAt = ''
     data.profile.version += 1
+    data.profile.userEdited = true
     data.profile.missingFields = [
       'Confirm current available funds, income, upcoming bills, and everyday spending after import.',
     ]
-    store.save(id, data)
+    store.atomic(() => {
+      // Purchases made as the persona never reduce the user's own plan or appear in their activity.
+      if (switching)
+        for (const purchase of store.purchases(id))
+          if (!purchase.archived) store.putPurchase(id, { ...purchase, archived: true })
+      store.save(id, data)
+    })
     res.json(state(id))
   })
   app.post('/api/transactions/categories', async (req, res) => {
@@ -631,6 +708,14 @@ export function createApp(options: AppOptions = {}) {
         429,
         'Your assistant is still answering. Please wait a moment.',
         'CHAT_BUSY',
+      )
+    const limited = claudeLimit(req)
+    if (limited)
+      return res.json(
+        fallbackCategories(
+          rows,
+          `${CLAUDE_LIMIT_REASON[limited]}. These are your current categories, not AI proposals. You can correct them individually.`,
+        ),
       )
     chatBusy.add(id)
     try {
@@ -700,6 +785,15 @@ export function createApp(options: AppOptions = {}) {
         429,
         'Your assistant is still answering. Please wait a moment.',
         'CHAT_BUSY',
+      )
+    const limited = claudeLimit(req)
+    if (limited)
+      return res.json(
+        fallbackReply(
+          input,
+          data,
+          `${CLAUDE_LIMIT_REASON[limited]}, so this answer uses local calculations, not an AI response.`,
+        ),
       )
     chatBusy.add(id)
     try {

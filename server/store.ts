@@ -25,6 +25,7 @@ export class Store {
     this.db = new DatabaseSync(path)
     this.db.exec(`PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA secure_delete=ON;
       CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, data TEXT NOT NULL, expires INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS sessions_expires ON sessions(expires);
       CREATE TABLE IF NOT EXISTS purchases (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
         status TEXT NOT NULL, order_id TEXT UNIQUE, capture_id TEXT UNIQUE, data TEXT NOT NULL);
       CREATE UNIQUE INDEX IF NOT EXISTS one_active_checkout ON purchases(session_id) WHERE status IN ('created','pending','unknown');
@@ -45,6 +46,23 @@ export class Store {
       .prepare('INSERT INTO sessions VALUES (?, ?, ?)')
       .run(id, JSON.stringify(data), now + DAY)
     return id
+  }
+  /** Live sessions, counted through the expiry index. */
+  count(now = Date.now()) {
+    return (
+      this.db.prepare('SELECT COUNT(*) AS count FROM sessions WHERE expires > ?').get(now) as {
+        count: number
+      }
+    ).count
+  }
+  /** Checks one session by primary key and deletes it if it has expired. */
+  isLive(id: string, now = Date.now()) {
+    const row = this.db.prepare('SELECT expires FROM sessions WHERE id=?').get(id) as
+      { expires: number } | undefined
+    if (!row) return false
+    if (row.expires > now) return true
+    this.delete(id)
+    return false
   }
   get(id: string): SessionData | undefined {
     const row = this.db.prepare('SELECT data FROM sessions WHERE id=?').get(id) as

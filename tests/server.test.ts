@@ -6,6 +6,7 @@ import type { StoredPurchase } from '../server/store.ts'
 import type { PayPalGateway, PayPalOrder } from '../server/paypal.ts'
 import type { AppState } from '../shared/types.ts'
 import { createChatProvider, fallbackReply } from '../server/chat.ts'
+import { addDays } from '../shared/finance.ts'
 
 const stores: Store[] = []
 const config = {
@@ -327,6 +328,78 @@ describe('HTTP sessions, profiles, and calculations', () => {
     expect((await post(agent, '/api/transactions/categories')).body.mode).toBe('anthropic')
     expect(reply).toHaveBeenCalledTimes(2)
     expect(categorize).toHaveBeenCalledTimes(2)
+  })
+  it('keeps Claude for the synthetic persona after a purchase, and ignores a client-claimed untouched flag', async () => {
+    const reply = vi.fn(async () => ({
+      message: 'external',
+      mode: 'anthropic' as const,
+      intent: 'overview' as const,
+      suggestions: [],
+      toolCalls: [],
+    }))
+    const { agent, store } = setup({ chat: { reply } })
+    const ask = async () =>
+      (await post(agent, '/api/chat', { message: 'How is the sample plan?', history: [] })).body
+        .mode
+    const created = await post(agent, '/api/checkout/create', { productId: 'headphones' })
+    const captured = await post(agent, `/api/checkout/${created.body.purchase.id}/capture`)
+    expect(captured.body.state.profile.version).toBe(2)
+    expect(captured.body.state.profile.userEdited).toBe(false)
+    expect(await ask()).toBe('anthropic')
+    // A category correction on synthetic history adds no personal financial data.
+    const row = captured.body.state.transactions.find(
+      (t: { source: string }) => t.source === 'demo',
+    )
+    await agent
+      .patch(`/api/transactions/${encodeURIComponent(row.id)}`)
+      .set('X-Worth-Client', 'web')
+      .send({ category: 'Travel' })
+    expect(await ask()).toBe('anthropic')
+    const current = await state(agent)
+    const edited = await patch(agent, { profile: { ...current.profile, userEdited: false } })
+    expect(edited.body.profile.userEdited).toBe(true)
+    expect(await ask()).toBe('demo')
+    // Records written before the flag existed are treated as user data.
+    const id = [...(store.db.prepare('SELECT id FROM sessions').all() as { id: string }[])][0]!.id
+    const legacy = store.get(id)!
+    legacy.profile = { ...legacy.profile, userEdited: undefined, aiConsent: false }
+    store.save(id, legacy)
+    expect(await ask()).toBe('demo')
+    expect(reply).toHaveBeenCalledTimes(2)
+  })
+  it('toggles AI consent alone without editing the plan or an active checkout', async () => {
+    const reply = vi.fn(async () => ({
+      message: 'external',
+      mode: 'anthropic' as const,
+      intent: 'overview' as const,
+      suggestions: [],
+      toolCalls: [],
+    }))
+    const { agent } = setup({ chat: { reply } })
+    const imported = await post(agent, '/api/import/commit', {
+      csv: 'Date,Name,Net,Currency,Type,Status\n10/01/2026,Coffee,-5.00,USD,Payment,Completed',
+    })
+    expect(imported.body.profile.userEdited).toBe(true)
+    const ask = async () =>
+      (await post(agent, '/api/chat', { message: 'What did I spend?', history: [] })).body.mode
+    expect(await ask()).toBe('demo')
+    await simpleProfile(agent, { confirmed: true, missingFields: [] })
+    const created = await post(agent, '/api/checkout/create', { productId: 'headphones' })
+    expect(created.status).toBe(200)
+    const before = await state(agent)
+    expect((await agent.post('/api/consent').send({ aiConsent: true })).status).toBe(403)
+    expect((await post(agent, '/api/consent', { aiConsent: true, version: 1 })).status).toBe(400)
+    const on = await post(agent, '/api/consent', { aiConsent: true })
+    expect(on.status).toBe(200)
+    expect(on.body.profile).toEqual({ ...before.profile, aiConsent: true })
+    expect(await ask()).toBe('anthropic')
+    const captured = await post(agent, `/api/checkout/${created.body.purchase.id}/capture`)
+    expect(captured.body.purchase.status).toBe('completed')
+    expect((await post(agent, '/api/consent', { aiConsent: false })).body.profile.aiConsent).toBe(
+      false,
+    )
+    expect(await ask()).toBe('demo')
+    expect(reply).toHaveBeenCalledTimes(1)
   })
   it('returns labelled deterministic assessment when AI is unavailable', async () => {
     const { agent } = setup()
@@ -1135,5 +1208,449 @@ describe('AI financial grounding', () => {
     expect(result.message).toContain('$900')
     expect(result.assessment?.amountCents).toBe(90000)
     expect(result.message).toContain('$1,100')
+  })
+})
+
+describe('hosted abuse limits', () => {
+  it('rate-limits by the client IP appended by the trusted proxy, not by spoofable entries', async () => {
+    const { app } = setup({ config: { ...config, trustProxy: 1, requestsPerMinute: 3 } })
+    const visitor = request.agent(app)
+    const get = (forwardedFor: string, agent = visitor) =>
+      agent.get('/api/state').set('X-Forwarded-For', forwardedFor)
+    for (let i = 0; i < 3; i++) expect((await get('203.0.113.7')).status).toBe(200)
+    expect((await get('203.0.113.7')).status).toBe(429)
+    expect((await get('198.51.100.20', request.agent(app))).status).toBe(200)
+    // Only the hop appended by the proxy is trusted, so a forged left-hand entry changes nothing.
+    expect((await get('192.0.2.1, 203.0.113.7')).status).toBe(429)
+    clock.value = new Date(clock.value.getTime() + 60_000)
+    expect((await get('203.0.113.7')).status).toBe(200)
+  })
+  it('ignores X-Forwarded-For when no proxy is trusted', async () => {
+    const { app } = setup({ config: { ...config, trustProxy: 0, requestsPerMinute: 3 } })
+    const visitor = request.agent(app)
+    for (let i = 0; i < 3; i++)
+      expect(
+        (await visitor.get('/api/state').set('X-Forwarded-For', `203.0.113.${i}`)).status,
+      ).toBe(200)
+    expect(
+      (await request.agent(app).get('/api/state').set('X-Forwarded-For', '198.51.100.20')).status,
+    ).toBe(429)
+  })
+})
+
+describe('demo purchases stay out of imported finances', () => {
+  it('archives persona purchases on import so they leave the forecast, activity, and AI context', async () => {
+    const reply = vi.fn(async (_input: unknown, _data: { purchases: unknown[] }) => ({
+      message: 'external',
+      mode: 'anthropic' as const,
+      intent: 'overview' as const,
+      suggestions: [],
+      toolCalls: [],
+    }))
+    const { gateway } = fakePayPal()
+    const { app, agent } = setup({ chat: { reply }, paypal: gateway })
+    await state(agent)
+    const created = await post(agent, '/api/checkout/create', { productId: 'headphones' })
+    const captured = await post(agent, `/api/checkout/${created.body.purchase.id}/capture`)
+    expect(captured.body.purchase.status).toBe('completed')
+    expect(
+      captured.body.state.transactions.some((t: { source: string }) => t.source === 'purchase'),
+    ).toBe(true)
+    const csv =
+      'Date,Name,Net,Currency,Type,Status,Transaction ID\n09/20/2026,Coffee,-5.00,USD,Payment,Completed,C1\n10/01/2026,Coffee,-5.00,USD,Payment,Completed,C2'
+    expect((await post(agent, '/api/import/preview', { csv })).body.duplicates).toBe(0)
+    const imported = await post(agent, '/api/import/commit', { csv })
+    expect(imported.status).toBe(200)
+    expect(imported.body.purchases).toEqual([])
+    expect(imported.body.transactions.map((t: { source: string }) => t.source)).toEqual([
+      'import',
+      'import',
+    ])
+    // The user enters their real funds; the persona's purchase was never paid from them.
+    const real = {
+      ...imported.body.profile,
+      balanceCents: 200000,
+      cushionCents: 50000,
+      confirmed: true,
+      missingFields: [],
+    }
+    const forged = await patch(agent, {
+      profile: { ...real, reflectedPurchaseIds: [created.body.purchase.id] },
+    })
+    expect(forged.status).toBe(400)
+    expect(forged.body.code).toBe('INVALID_SNAPSHOT')
+    const saved = await patch(agent, { profile: real })
+    expect(saved.status).toBe(200)
+    const daily = saved.body.profile.dailySpendCents as number
+    const assessed = await post(agent, '/api/assess', { amountCents: 0 })
+    expect(assessed.body.outcome).toBe('fits')
+    expect(assessed.body.points[0].events.map((e: { name: string }) => e.name)).toEqual([
+      'Everyday spending',
+    ])
+    expect(assessed.body.points[0].baselineCents).toBe(200000 - daily)
+    await post(agent, '/api/consent', { aiConsent: true })
+    await post(agent, '/api/chat', { message: 'What is coming up?', history: [] })
+    expect(reply.mock.calls[0]![1].purchases).toEqual([])
+    // A late refund for the archived sandbox payment does not unsettle the user's plan.
+    await request(app)
+      .post('/api/paypal/webhook')
+      .send({
+        id: 'REFUND-ARCHIVED',
+        event_type: 'PAYMENT.CAPTURE.REFUNDED',
+        resource: { supplementary_data: { related_ids: { order_id: created.body.orderId } } },
+      })
+    expect((await state(agent)).profile.confirmed).toBe(true)
+    // Purchases made with the user's own plan still count.
+    const own = await post(agent, '/api/checkout/create', { productId: 'chair' })
+    expect(own.status).toBe(200)
+    const after = await post(agent, '/api/assess', { amountCents: 0 })
+    expect(after.body.points[0].events[0]).toMatchObject({ amountCents: -44900, kind: 'purchase' })
+  })
+})
+
+describe('demo dates follow the viewer', () => {
+  const localDate = (timeZone: string, at: Date) =>
+    new Intl.DateTimeFormat('en-CA', { timeZone }).format(at)
+  // UTC−10 through UTC+14, including half- and quarter-hour offsets.
+  const zones = [
+    'Pacific/Honolulu',
+    'America/Anchorage',
+    'America/Los_Angeles',
+    'America/Chicago',
+    'America/New_York',
+    'America/Sao_Paulo',
+    'UTC',
+    'Europe/London',
+    'Europe/Berlin',
+    'Europe/Moscow',
+    'Asia/Dubai',
+    'Asia/Kolkata',
+    'Asia/Kathmandu',
+    'Asia/Shanghai',
+    'Asia/Tokyo',
+    'Australia/Adelaide',
+    'Pacific/Auckland',
+    'Pacific/Tongatapu',
+    'Pacific/Kiritimati',
+  ]
+  it('keeps the untouched persona complete and buyable at every hour from UTC−10 to UTC+14', async () => {
+    const { app } = setup({
+      config: { ...config, sessionIpHourlyLimit: 10_000, requestsPerMinute: 10_000 },
+    })
+    const start = new Date('2026-10-03T00:20:00Z').getTime()
+    clock.value = new Date(start)
+    const viewers = zones.map((zone) => ({ zone, agent: request.agent(app) }))
+    const check = async (agent: ReturnType<typeof request.agent>, zone: string) => {
+      const send = <T extends { set: (k: string, v: string) => T }>(test: T) =>
+        test.set('X-Worth-Timezone', zone).set('X-Worth-Client', 'web')
+      const expected = localDate(zone, clock.value)
+      const assessed = await send(agent.post('/api/assess')).send({ amountCents: 34900 })
+      expect([zone, clock.value.toISOString(), assessed.body.today, assessed.body.outcome]).toEqual(
+        [zone, clock.value.toISOString(), expected, 'fits'],
+      )
+      const created = await send(agent.post('/api/checkout/create')).send({
+        productId: 'headphones',
+      })
+      expect([zone, clock.value.toISOString(), created.status]).toEqual([
+        zone,
+        clock.value.toISOString(),
+        200,
+      ])
+      const cancelled = await send(
+        agent.post(`/api/checkout/${created.body.purchase.id}/cancel`),
+      ).send({})
+      expect(cancelled.status).toBe(200)
+      expect(cancelled.body.profile).toMatchObject({ timezone: zone, snapshotDate: expected })
+    }
+    for (let hour = 0; hour < 24; hour++) {
+      clock.value = new Date(start + hour * 60 * 60_000)
+      for (const { zone, agent } of viewers) await check(agent, zone)
+      // A session created at this hour is valid immediately as well.
+      await check(request.agent(app), zones[hour % zones.length]!)
+    }
+  })
+  it('rolls the persona past New York midnight even without a time zone header', async () => {
+    const { agent } = setup()
+    clock.value = new Date('2026-10-04T03:30:00Z')
+    expect((await post(agent, '/api/assess', { amountCents: 34900 })).body.outcome).toBe('fits')
+    const before = await state(agent)
+    // 00:30 in New York, inside the same 24-hour session.
+    clock.value = new Date('2026-10-04T04:30:00Z')
+    const after = await post(agent, '/api/assess', { amountCents: 34900 })
+    expect(after.body).toMatchObject({ outcome: 'fits', today: '2026-10-04' })
+    expect((await post(agent, '/api/checkout/create', { productId: 'headphones' })).status).toBe(
+      200,
+    )
+    const rolled = await state(agent)
+    expect(rolled.profile.snapshotDate).toBe('2026-10-04')
+    expect(rolled.profile.flows.map((f) => f.nextDate)).toEqual(
+      before.profile.flows.map((f) => addDays(f.nextDate, 1)),
+    )
+    const synthetic = (s: AppState) => s.transactions.filter((t) => t.source === 'demo')
+    expect(synthetic(rolled).map((t) => t.date)).toEqual(
+      synthetic(before).map((t) => addDays(t.date, 1)),
+    )
+    // An editor opened before the rollover cannot save the stale dates.
+    expect((await patch(agent, { profile: before.profile })).status).toBe(409)
+  })
+  it('ignores an unsupported time zone header and leaves edited plans on their own dates', async () => {
+    const { agent } = setup()
+    const invalid = await agent.get('/api/state').set('X-Worth-Timezone', 'Mars/Olympus_Mons')
+    expect(invalid.body.profile.timezone).toBe('America/New_York')
+    await simpleProfile(agent)
+    clock.value = new Date('2026-10-04T05:00:00Z')
+    const next = await agent.get('/api/state').set('X-Worth-Timezone', 'Asia/Tokyo')
+    expect(next.body.profile).toMatchObject({
+      timezone: 'America/New_York',
+      snapshotDate: '2026-10-03',
+    })
+    expect((await post(agent, '/api/assess', { amountCents: 100 })).body.outcome).toBe('incomplete')
+  })
+  it('imports with the user’s time zone, stores it, and keeps it editable', async () => {
+    const { app } = setup()
+    // 01:30 on Oct 4 in India; still Oct 3 in New York.
+    clock.value = new Date('2026-10-03T20:00:00Z')
+    const csv =
+      'Date,Time,TimeZone,Name,Type,Status,Currency,Net,Transaction ID\n2026-10-04,01:05:00,IST,Coffee,Express Checkout Payment,Completed,USD,-4.00,TZ1'
+    const viewer = (zone: string) => {
+      const agent = request.agent(app)
+      const send = (path: string, body: object) =>
+        post(agent, path, body).set('X-Worth-Timezone', zone)
+      return { agent, send }
+    }
+    const india = viewer('Asia/Kolkata')
+    const imported = await india.send('/api/import/commit', { csv })
+    expect(imported.status).toBe(200)
+    expect(imported.body.today).toBe('2026-10-04')
+    expect(imported.body.profile).toMatchObject({ timezone: 'Asia/Kolkata', userEdited: true })
+    const newYork = viewer('America/New_York')
+    const preview = await newYork.send('/api/import/preview', { csv })
+    expect(preview.body.errors[0].message).toContain('Future-dated')
+    expect((await newYork.send('/api/import/commit', { csv })).status).toBe(400)
+    const edited = await india.agent
+      .patch('/api/profile')
+      .set('X-Worth-Client', 'web')
+      .set('X-Worth-Timezone', 'Asia/Kolkata')
+      .send({
+        profile: {
+          ...imported.body.profile,
+          timezone: 'Europe/London',
+          snapshotDate: '2026-10-03',
+        },
+      })
+    expect(edited.status).toBe(200)
+    const later = await india.agent.get('/api/state').set('X-Worth-Timezone', 'Asia/Kolkata')
+    expect(later.body.profile.timezone).toBe('Europe/London')
+    expect(later.body.today).toBe('2026-10-03')
+  })
+})
+
+describe('session storage bounds', () => {
+  it('indexes expiry and leaves expired-row cleanup to the timer', async () => {
+    const { app, store, agent } = setup()
+    const plan = store.db
+      .prepare('EXPLAIN QUERY PLAN DELETE FROM sessions WHERE expires <= ?')
+      .all(0) as { detail: string }[]
+    expect(plan.map((row) => row.detail).join(' ')).toContain('sessions_expires')
+    const cleanup = vi.spyOn(store, 'cleanup')
+    await state(agent)
+    await state(request.agent(app))
+    await post(agent, '/api/wishlist', { productId: 'chair' })
+    expect(cleanup).not.toHaveBeenCalled()
+    clock.value = new Date('2026-10-04T12:00:01Z')
+    expect(store.count(clock.value.getTime())).toBe(0)
+    expect(app.locals.cleanup()).toBe(2)
+    expect(cleanup).toHaveBeenCalledOnce()
+  })
+  it('limits new sessions per client IP without affecting existing sessions', async () => {
+    const { app } = setup({ config: { ...config, trustProxy: 1, sessionIpHourlyLimit: 2 } })
+    const visitor = (ip: string) => request.agent(app).get('/api/state').set('X-Forwarded-For', ip)
+    const existing = request.agent(app)
+    expect((await existing.get('/api/state').set('X-Forwarded-For', '203.0.113.7')).status).toBe(
+      200,
+    )
+    expect((await visitor('203.0.113.7')).status).toBe(200)
+    const limited = await visitor('203.0.113.7')
+    expect(limited.status).toBe(429)
+    expect(limited.body.code).toBe('SESSION_RATE_LIMITED')
+    expect(limited.headers['set-cookie']).toBeUndefined()
+    expect((await existing.get('/api/state').set('X-Forwarded-For', '203.0.113.7')).status).toBe(
+      200,
+    )
+    expect((await post(existing, '/api/reset').set('X-Forwarded-For', '203.0.113.7')).status).toBe(
+      200,
+    )
+    expect((await visitor('198.51.100.20')).status).toBe(200)
+    clock.value = new Date(clock.value.getTime() + 60 * 60_000)
+    expect((await visitor('203.0.113.7')).status).toBe(200)
+  })
+  it('refuses new sessions beyond the live-session cap and counts only unexpired ones', async () => {
+    const { app, store } = setup({ config: { ...config, maxSessions: 2 } })
+    expect((await request(app).get('/api/state')).status).toBe(200)
+    expect((await request(app).get('/api/state')).status).toBe(200)
+    const full = await request(app).get('/api/state')
+    expect(full.status).toBe(503)
+    expect(full.body.code).toBe('AT_CAPACITY')
+    expect(store.count(clock.value.getTime())).toBe(2)
+    clock.value = new Date('2026-10-04T12:00:01Z')
+    expect((await request(app).get('/api/state')).status).toBe(200)
+  })
+})
+
+describe('Claude request budgets', () => {
+  function countingChat() {
+    let inFlight = 0
+    let peak = 0
+    const reply = vi.fn(async () => {
+      peak = Math.max(peak, ++inFlight)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      inFlight--
+      return {
+        message: 'external',
+        mode: 'anthropic' as const,
+        intent: 'overview' as const,
+        suggestions: [],
+        toolCalls: [],
+      }
+    })
+    const categorize = vi.fn(async () => ({
+      mode: 'anthropic' as const,
+      suggestions: [],
+      message: 'external proposals',
+    }))
+    return { chat: { reply, categorize }, peak: () => peak }
+  }
+  it('holds 40 parallel anonymous chat requests to the per-IP budget with labelled local answers', async () => {
+    const { chat, peak } = countingChat()
+    const { app } = setup({
+      chat,
+      config: { ...config, claudeIpHourlyLimit: 5, sessionIpHourlyLimit: 100 },
+    })
+    const replies = await Promise.all(
+      Array.from({ length: 40 }, () =>
+        post(request.agent(app), '/api/chat', { message: 'How is the sample plan?', history: [] }),
+      ),
+    )
+    expect(replies.every((r) => r.status === 200)).toBe(true)
+    expect(chat.reply).toHaveBeenCalledTimes(5)
+    expect(peak()).toBeLessThanOrEqual(5)
+    const local = replies.filter((r) => r.body.mode === 'demo')
+    expect(local).toHaveLength(35)
+    for (const r of local) {
+      expect(r.body.intro).toContain('Claude limit for the hour')
+      expect(r.body.message).toContain('not an AI response')
+    }
+    clock.value = new Date(clock.value.getTime() + 60 * 60_000)
+    const later = await post(request.agent(app), '/api/chat', { message: 'Hello?', history: [] })
+    expect(later.body.mode).toBe('anthropic')
+  })
+  it('enforces a server-wide daily budget across client IPs, including category proposals', async () => {
+    const { chat } = countingChat()
+    const { app } = setup({
+      chat,
+      config: { ...config, trustProxy: 1, claudeIpHourlyLimit: 100, claudeDailyLimit: 3 },
+    })
+    const ask = (ip: string) =>
+      post(request.agent(app), '/api/chat', { message: 'Hi', history: [] }).set(
+        'X-Forwarded-For',
+        ip,
+      )
+    const modes = []
+    for (const ip of ['203.0.113.1', '203.0.113.2', '203.0.113.3', '203.0.113.4'])
+      modes.push((await ask(ip)).body.mode)
+    expect(modes).toEqual(['anthropic', 'anthropic', 'anthropic', 'demo'])
+    const categories = await post(request.agent(app), '/api/transactions/categories').set(
+      'X-Forwarded-For',
+      '203.0.113.5',
+    )
+    expect(categories.body.mode).toBe('demo')
+    expect(categories.body.message).toContain('allowance for today is used up')
+    expect(chat.categorize).not.toHaveBeenCalled()
+    const exhausted = await ask('203.0.113.6')
+    expect(exhausted.body.intro).toContain('allowance for today is used up')
+    expect(chat.reply).toHaveBeenCalledTimes(3)
+    clock.value = new Date(clock.value.getTime() + 24 * 60 * 60_000)
+    expect((await ask('203.0.113.7')).body.mode).toBe('anthropic')
+  })
+  it('does not spend the Claude allowance on requests rejected while an answer is in flight', async () => {
+    const { chat } = countingChat()
+    const { agent } = setup({ chat, config: { ...config, claudeIpHourlyLimit: 2 } })
+    await agent.get('/api/state')
+    const burst = await Promise.all(
+      Array.from({ length: 3 }, () => post(agent, '/api/chat', { message: 'Hi', history: [] })),
+    )
+    expect(burst.filter((r) => r.status === 200 && r.body.mode === 'anthropic')).toHaveLength(1)
+    expect(burst.filter((r) => r.status === 429 && r.body.code === 'CHAT_BUSY')).toHaveLength(2)
+    const next = await post(agent, '/api/chat', { message: 'Hi again', history: [] })
+    expect(next.body.mode).toBe('anthropic')
+    expect(chat.reply).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('stored transaction cap', () => {
+  it('rejects imports that would exceed the per-session transaction cap with a clear message', async () => {
+    const { agent } = setup({ config: { ...config, maxTransactions: 3 } })
+    const rows = (ids: string[]) =>
+      'Date,Name,Net,Currency,Type,Status,Transaction ID\n' +
+      ids.map((id) => `10/01/2026,Coffee ${id},-5.00,USD,Payment,Completed,${id}`).join('\n')
+    expect((await post(agent, '/api/import/commit', { csv: rows(['A', 'B']) })).status).toBe(200)
+    // Re-importing known rows does not count twice.
+    expect((await post(agent, '/api/import/commit', { csv: rows(['A', 'B', 'C']) })).status).toBe(
+      200,
+    )
+    const preview = await post(agent, '/api/import/preview', { csv: rows(['D', 'E']) })
+    expect(preview.body.errors[0]).toEqual({
+      row: 1,
+      message:
+        'This import would keep 5 transactions, but a session holds at most 3. Import a shorter date range.',
+    })
+    const rejected = await post(agent, '/api/import/commit', { csv: rows(['D', 'E']) })
+    expect(rejected.status).toBe(400)
+    expect(rejected.body.code).toBe('TOO_MANY_TRANSACTIONS')
+    expect(rejected.body.error).toContain('at most 3')
+    expect((await state(agent)).transactions).toHaveLength(3)
+  })
+})
+
+describe('production browser hardening', () => {
+  it('sends HSTS and a __Host- session cookie that authenticates later requests', async () => {
+    const origin = 'https://worth.example.com'
+    const { app } = setup({ config: { ...config, production: true, trustProxy: 1, origin } })
+    const first = await request(app).get('/api/state')
+    expect(first.status).toBe(200)
+    expect(first.headers['strict-transport-security']).toBe('max-age=31536000; includeSubDomains')
+    expect(first.headers['x-content-type-options']).toBe('nosniff')
+    expect(first.headers['referrer-policy']).toBe('same-origin')
+    expect(first.headers['content-security-policy']).toBe("frame-ancestors 'none'")
+    const cookie = first.headers['set-cookie'][0] as string
+    expect(cookie).toMatch(/^__Host-worth_session=[A-Za-z0-9_-]{43};/)
+    expect(cookie).toContain('Path=/')
+    expect(cookie).toContain('Secure')
+    expect(cookie).toContain('HttpOnly')
+    expect(cookie).toContain('SameSite=Lax')
+    expect(cookie).not.toMatch(/Domain=/i)
+    const pair = cookie.split(';')[0]!
+    const write = await request(app)
+      .post('/api/wishlist')
+      .set('Cookie', pair)
+      .set('X-Worth-Client', 'web')
+      .set('Origin', origin)
+      .send({ productId: 'chair' })
+    expect(write.status).toBe(200)
+    expect(write.body.sessionKey).toBe(first.body.sessionKey)
+    expect(write.headers['set-cookie']).toBeUndefined()
+    // The development cookie name is not accepted in production.
+    const legacy = await request(app)
+      .get('/api/state')
+      .set('Cookie', pair.replace('__Host-worth_session', 'worth_session'))
+    expect(legacy.body.sessionKey).not.toBe(first.body.sessionKey)
+  })
+  it('keeps local development on plain HTTP without HSTS', async () => {
+    const { app } = setup()
+    const response = await request(app).get('/api/state')
+    expect(response.headers['strict-transport-security']).toBeUndefined()
+    expect(response.headers['content-security-policy']).toBe("frame-ancestors 'none'")
+    expect(response.headers['set-cookie'][0]).toMatch(/^worth_session=/)
+    expect(response.headers['set-cookie'][0]).not.toContain('Secure')
   })
 })

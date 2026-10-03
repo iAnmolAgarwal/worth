@@ -219,7 +219,11 @@ function recurringSuggestions(
   return { flows: flows.sort((a, b) => a.nextDate.localeCompare(b.nextDate)), ids }
 }
 
-export function parsePayPalCsv(text: string, existing: Transaction[] = []): ImportPreview {
+export function parsePayPalCsv(
+  text: string,
+  existing: Transaction[] = [],
+  options: { today?: string } = {},
+): ImportPreview {
   const result: ImportPreview = {
     transactions: [],
     errors: [],
@@ -278,7 +282,8 @@ export function parsePayPalCsv(text: string, existing: Transaction[] = []): Impo
   )
   const occurrences = new Map<string, number>()
   let noIds = 0
-  const today = todayInTimezone('America/New_York')
+  // The caller passes today in the user's time zone; New York is only the standalone default.
+  const today = options.today ?? todayInTimezone('America/New_York')
   for (let index = 0; index < parsed.data.length; index++) {
     const row = parsed.data[index]!
     const rowNumber = index + 2

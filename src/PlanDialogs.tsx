@@ -23,6 +23,7 @@ import type {
 } from '../shared/types'
 import { getUpcomingFlows, todayInTimezone } from '../shared/finance'
 import { api } from './api'
+import { CLAUDE_SHARED_DATA } from './copy'
 import { money, shortDate } from './format'
 import { Button, Field, Footnote, Modal } from './ui'
 import './plan-dialog.css'
@@ -634,7 +635,9 @@ export function PlanDialog({
                                   updateFlow(flow.id, { name: event.target.value })
                                 }
                                 placeholder={
-                                  step === 1 ? 'e.g. Monthly paycheck' : 'e.g. Rent or Spotify'
+                                  step === 1
+                                    ? 'e.g. Monthly paycheck'
+                                    : 'e.g. Rent or music streaming'
                                 }
                               />
                             </Field>
@@ -861,8 +864,7 @@ export function PlanDialog({
                 <span>
                   <strong>Use my financial context with Claude</strong>
                   <small>
-                    Send relevant summaries and chat messages to Anthropic for explanations.
-                    Calculations work with this off.
+                    Sends {CLAUDE_SHARED_DATA} to Anthropic. Calculations work with this off.
                   </small>
                 </span>
               </label>

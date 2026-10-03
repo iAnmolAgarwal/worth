@@ -19,7 +19,7 @@ describe('PayPal CSV normalization', () => {
   it('uses net, preserves integer cents, and separates spending, transfers, refunds and salary', () => {
     const result = parsePayPalCsv(
       csv(
-        '09/01/2026,12:00:00,Whole Foods Market,Express Checkout Payment,Completed,USD,-40.25,0,-40.25,spend-1,',
+        '09/01/2026,12:00:00,Grocery market,Express Checkout Payment,Completed,USD,-40.25,0,-40.25,spend-1,',
         '09/02/2026,12:00:00,Transfer from checking,Bank Deposit to PP Account,Completed,USD,500.00,0,500.00,transfer-1,',
         '09/03/2026,12:00:00,Acme payroll,Payment Received,Completed,USD,4200.00,-2.00,4198.00,pay-1,',
         '09/04/2026,12:00:00,Store,Refund,Completed,USD,40.25,0,40.25,refund-1,spend-1',
@@ -218,8 +218,8 @@ describe('identity and recurring spending', () => {
   it('deducts only the refunded portion when estimating spending', () => {
     const result = parsePayPalCsv(
       csv(
-        '09/01/2026,12:00:00,Whole Foods,Payment Sent,Completed,USD,-100.00,0,-100.00,a,',
-        '09/02/2026,12:00:00,Whole Foods,Refund,Completed,USD,25.00,0,25.00,b,a',
+        '09/01/2026,12:00:00,Grocery market,Payment Sent,Completed,USD,-100.00,0,-100.00,a,',
+        '09/02/2026,12:00:00,Grocery market,Refund,Completed,USD,25.00,0,25.00,b,a',
       ),
     )
     expect(result.suggestedDailySpendCents).toBe(3750)
@@ -255,10 +255,10 @@ describe('identity and recurring spending', () => {
         `${month}/01/2026,12:00:00,Apartment rent,Payment Sent,Completed,USD,-1750.00,0,-1750.00,rent-${month},`,
       )
       rows.push(
-        `${month}/01/2026,12:00:00,Spotify,Subscription Payment,Completed,USD,-11.99,0,-11.99,spotify-${month},`,
+        `${month}/01/2026,12:00:00,Music streaming,Subscription Payment,Completed,USD,-11.99,0,-11.99,music-${month},`,
       )
       rows.push(
-        `${month}/01/2026,12:00:00,Whole Foods Market,Payment Sent,Completed,USD,-30.00,0,-30.00,food-${month},`,
+        `${month}/01/2026,12:00:00,Grocery market,Payment Sent,Completed,USD,-30.00,0,-30.00,food-${month},`,
       )
       rows.push(
         `${month}/01/2026,12:00:00,Acme payroll,Payment Received,Completed,USD,4200.00,0,4200.00,pay-${month},`,
@@ -281,9 +281,21 @@ describe('identity and recurring spending', () => {
 
   it('does not turn irregular merchant purchases into fixed obligations', () => {
     const result = parsePayPalCsv(
-      'Date,Name,Currency,Amount\n2026-07-01,Spotify,USD,-11.99\n2026-07-12,Spotify,USD,-11.99\n2026-09-01,Spotify,USD,-11.99',
+      'Date,Name,Currency,Amount\n2026-07-01,Music subscription,USD,-11.99\n2026-07-12,Music subscription,USD,-11.99\n2026-09-01,Music subscription,USD,-11.99',
     )
     expect(result.recurring).toEqual([])
+  })
+
+  it('judges future-dated rows against the caller’s today rather than New York', () => {
+    // 01:30 on Oct 4 in India is still Oct 3 in New York.
+    const text =
+      'Date,Time,TimeZone,Name,Type,Status,Currency,Net,Transaction ID\n2026-10-04,01:05:00,IST,Coffee,Express Checkout Payment,Completed,USD,-4.00,TZ1'
+    const india = parsePayPalCsv(text, [], { today: '2026-10-04' })
+    expect(india.errors).toEqual([])
+    expect(india.transactions.map((t) => t.date)).toEqual(['2026-10-04'])
+    expect(parsePayPalCsv(text, [], { today: '2026-10-03' }).errors[0]!.message).toContain(
+      'Future-dated',
+    )
   })
 
   it('returns useful diagnostics for empty and malformed files', () => {
