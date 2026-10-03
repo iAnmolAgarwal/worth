@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import request from 'supertest'
 import { createApp } from '../server/app.ts'
@@ -7,8 +8,12 @@ import type { PayPalGateway, PayPalOrder } from '../server/paypal.ts'
 import type { AppState } from '../shared/types.ts'
 import { createChatProvider, fallbackReply } from '../server/chat.ts'
 import { addDays } from '../shared/finance.ts'
+import { CSV_IMPORT_LIMITS, utf8Bytes } from '../shared/limits.ts'
 
 const stores: Store[] = []
+function fixture(name: string): string {
+  return readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8')
+}
 const config = {
   production: false,
   origin: 'http://localhost:5173',
@@ -170,12 +175,30 @@ describe('HTTP sessions, profiles, and calculations', () => {
     )
     expect((await patch(agent, { profile: initial.profile })).status).toBe(409)
   })
+  it('keeps a recurrence anchor on saved flows and rejects an invalid one', async () => {
+    const { agent } = setup()
+    const initial = await state(agent)
+    const rent = {
+      ...initial.profile.flows[0]!,
+      cadence: 'monthly',
+      nextDate: '2026-10-31',
+      anchorDay: 'last',
+    }
+    for (const anchorDay of [0, 32, 1.5, 'first'])
+      expect(
+        (await patch(agent, { profile: { ...initial.profile, flows: [{ ...rent, anchorDay }] } }))
+          .status,
+      ).toBe(400)
+    const saved = await patch(agent, { profile: { ...initial.profile, flows: [rent] } })
+    expect(saved.status).toBe(200)
+    expect(saved.body.profile.flows[0]).toMatchObject({ anchorDay: 'last' })
+  })
   it('expires normalized personal data and deletes prior records on reset', async () => {
     const { agent, store } = setup()
     await state(agent)
     const csv =
       'Date,Name,Net,Currency,Type,Status,Transaction ID\n10/01/2026,Coffee,-5.00,USD,Payment,Completed,ABC123'
-    expect((await post(agent, '/api/import/commit', { csv })).status).toBe(200)
+    expect((await post(agent, '/api/import/commit', { csv, dateOrder: 'MM/DD' })).status).toBe(200)
     expect((await state(agent)).profile.source).toBe('import')
     clock.value = new Date('2026-10-04T12:00:01Z')
     expect((await state(agent)).profile.source).toBe('demo')
@@ -191,16 +214,19 @@ describe('HTTP sessions, profiles, and calculations', () => {
     const { agent } = setup()
     const csv =
       'Date,Name,Net,Currency,Type,Status,Transaction ID\n10/01/2026,Coffee,-5.00,USD,Payment,Completed,ABC123'
-    const first = await post(agent, '/api/import/commit', { csv })
+    const first = await post(agent, '/api/import/commit', { csv, dateOrder: 'MM/DD' })
     expect(first.status).toBe(200)
     expect(first.body.profile.balanceCents).toBe(0)
     expect(first.body.profile.flows).toEqual([])
     expect(first.body.profile.confirmed).toBe(false)
-    expect((await post(agent, '/api/import/commit', { csv })).body.transactions).toHaveLength(1)
+    expect(
+      (await post(agent, '/api/import/commit', { csv, dateOrder: 'MM/DD' })).body.transactions,
+    ).toHaveLength(1)
     expect(
       (
         await post(agent, '/api/import/commit', {
-          csv: csv + '\n10/02/2026,Bad,-3.00,EUR,Payment,Completed,ABC124',
+          csv: csv + '\n10/02/2026,Bad,-3.0x,USD,Payment,Completed,ABC124',
+          dateOrder: 'MM/DD',
         })
       ).status,
     ).toBe(400)
@@ -217,6 +243,7 @@ describe('HTTP sessions, profiles, and calculations', () => {
     const { agent } = setup({ chat: { reply } })
     await post(agent, '/api/import/commit', {
       csv: 'Date,Name,Net,Currency,Type,Status\n10/01/2026,Coffee,-5.00,USD,Payment,Completed',
+      dateOrder: 'MM/DD',
     })
     const response = await post(agent, '/api/chat', { message: 'What did I spend?', history: [] })
     expect(response.body.mode).toBe('demo')
@@ -239,6 +266,7 @@ describe('HTTP sessions, profiles, and calculations', () => {
     const { agent } = setup({ chat: { reply } })
     await post(agent, '/api/import/commit', {
       csv: 'Date,Name,Net,Currency,Type,Status\n10/01/2026,Coffee,-5.00,USD,Payment,Completed',
+      dateOrder: 'MM/DD',
     })
     const personal = await state(agent)
     await patch(agent, { profile: { ...personal.profile, aiConsent: true } })
@@ -378,6 +406,7 @@ describe('HTTP sessions, profiles, and calculations', () => {
     const { agent } = setup({ chat: { reply } })
     const imported = await post(agent, '/api/import/commit', {
       csv: 'Date,Name,Net,Currency,Type,Status\n10/01/2026,Coffee,-5.00,USD,Payment,Completed',
+      dateOrder: 'MM/DD',
     })
     expect(imported.body.profile.userEdited).toBe(true)
     const ask = async () =>
@@ -753,7 +782,7 @@ describe('reviewable transaction category proposals', () => {
     const { agent } = setup({ chat })
     const csv =
       'Date,Name,Net,Currency,Type,Status,Transaction ID\n10/01/2026,Coffee,-5.00,USD,Payment,Completed,PRIVATE123'
-    await post(agent, '/api/import/commit', { csv })
+    await post(agent, '/api/import/commit', { csv, dateOrder: 'MM/DD' })
     expect((await post(agent, '/api/transactions/categories')).body.mode).toBe('demo')
     expect(categorize).not.toHaveBeenCalled()
     const current = await state(agent)
@@ -766,7 +795,7 @@ describe('reviewable transaction category proposals', () => {
     const { app, agent } = setup()
     const csv =
       'Date,Name,Net,Currency,Type,Status,Transaction ID\n10/01/2026,Coffee,-5.00,USD,Payment,Completed,PRIVATE123'
-    await post(agent, '/api/import/commit', { csv })
+    await post(agent, '/api/import/commit', { csv, dateOrder: 'MM/DD' })
     const before = await state(agent)
     const transaction = before.transactions[0]!
     const other = request.agent(app)
@@ -1443,6 +1472,28 @@ describe('demo dates follow the viewer', () => {
     expect(later.body.profile.timezone).toBe('Europe/London')
     expect(later.body.today).toBe('2026-10-03')
   })
+  it('dates recurring suggestions from the plan’s own today', async () => {
+    const { app } = setup()
+    // 01:30 on Oct 4 in India; still Oct 3 in New York.
+    clock.value = new Date('2026-10-03T20:00:00Z')
+    const csv = [
+      'Date,Name,Type,Status,Currency,Net,Transaction ID',
+      '2026-08-03,Music streaming subscription,Subscription Payment,Completed,USD,-10.99,M1',
+      '2026-09-03,Music streaming subscription,Subscription Payment,Completed,USD,-10.99,M2',
+    ].join('\n')
+    const nextDate = async (zone: string) => {
+      const agent = request.agent(app)
+      const imported = await post(agent, '/api/import/commit', { csv }).set(
+        'X-Worth-Timezone',
+        zone,
+      )
+      expect(imported.status).toBe(200)
+      return imported.body.profile.flows[0].nextDate as string
+    }
+    // Oct 3 is still to come in New York but has passed in India.
+    expect(await nextDate('America/New_York')).toBe('2026-10-03')
+    expect(await nextDate('Asia/Kolkata')).toBe('2026-11-03')
+  })
 })
 
 describe('session storage bounds', () => {
@@ -1587,24 +1638,448 @@ describe('Claude request budgets', () => {
   })
 })
 
+describe('real PayPal exports', () => {
+  it('imports the actual sandbox personal export without counting its account correction', async () => {
+    const { agent } = setup()
+    const csv = fixture('paypal-personal-sandbox.csv')
+    const preview = await post(agent, '/api/import/preview', { csv })
+    expect(preview.body.errors).toEqual([])
+    expect(preview.body.adjustments).toHaveLength(1)
+    const imported = await post(agent, '/api/import/commit', { csv })
+    expect(imported.status).toBe(200)
+    expect(imported.body.profile).toMatchObject({ source: 'import', dailySpendCents: 0, flows: [] })
+    expect(imported.body.transactions).toMatchObject([
+      { name: 'General Account Correction', amountCents: 500000, kind: 'adjustment' },
+    ])
+    const empty = await post(agent, '/api/import/commit', {
+      csv: fixture('paypal-personal-sandbox-empty.csv'),
+    })
+    expect(empty.body.code).toBe('EMPTY_IMPORT')
+  })
+})
+
+describe('acceptance case 24: a realistic personal export', () => {
+  it('imports, holds back a positive result until foreign spending is resolved, and keeps rent on month end', async () => {
+    const { agent } = setup()
+    const imported = await post(agent, '/api/import/commit', {
+      csv: fixture('paypal-personal-expanded.csv'),
+    })
+    expect(imported.status).toBe(200)
+    const profile = imported.body.profile as AppState['profile']
+    expect(profile.missingFields).toEqual([
+      'Confirm current available funds, income, upcoming bills, and everyday spending after import.',
+      'Your import shows a Pay in 4 or Pay Later plan (Test Store). Add any payments still due to your upcoming bills, or confirm it is paid off.',
+      'Resolve 1 foreign-currency payment from your import in Activity: enter what it cost in USD, or mark it as a one-off.',
+    ])
+    expect(profile.flows.find((flow) => flow.name === 'Maple Court Apartments rent')).toMatchObject(
+      {
+        nextDate: '2026-10-31',
+        anchorDay: 'last',
+        confirmed: false,
+      },
+    )
+    // The user confirms today's funds and every suggestion.
+    const confirm = (current: AppState['profile'], dailySpendCents: number) =>
+      patch(agent, {
+        profile: {
+          ...current,
+          balanceCents: 400000,
+          cushionCents: 50000,
+          dailySpendCents,
+          snapshotDate: '2026-10-03',
+          confirmed: true,
+          missingFields: [],
+          flows: current.flows.map((flow) => ({ ...flow, confirmed: true })),
+        },
+      })
+    const confirmed = await confirm(profile, profile.dailySpendCents)
+    expect(confirmed.status).toBe(200)
+    const held = await post(agent, '/api/assess', { amountCents: 10000 })
+    expect(held.body.outcome).toBe('incomplete')
+    expect(held.body.missingFields).toEqual([
+      'Resolve 1 foreign-currency payment from your import in Activity: enter what it cost in USD, or mark it as a one-off.',
+    ])
+    // Rent paid on Jul 31, Aug 31 and Sep 30 is next due on Oct 31, then Nov 30.
+    expect(
+      (held.body.drivers as { name: string; date: string }[])
+        .filter((driver) => driver.name === 'Maple Court Apartments rent')
+        .map((driver) => driver.date),
+    ).toEqual(['2026-10-31', '2026-11-30'])
+
+    const resolved = await post(
+      agent,
+      `/api/import/unresolved/${encodeURIComponent('paypal:PX0000016')}`,
+      { amountCents: 5340 },
+    )
+    expect(resolved.status).toBe(200)
+    const suggested = Math.round((20711 + 5340) / 63)
+    expect(resolved.body.profile.missingFields).toEqual([
+      `Review your everyday spending: with London theatre box office included, your imported history suggests $${(suggested / 100).toFixed(2)} a day, more than your $${(profile.dailySpendCents / 100).toFixed(2)} estimate.`,
+    ])
+    expect((await confirm(resolved.body.profile, suggested)).status).toBe(200)
+    const fits = await post(agent, '/api/assess', { amountCents: 10000 })
+    expect(fits.body).toMatchObject({ outcome: 'fits', missingFields: [] })
+  })
+})
+
+describe('foreign-currency imports', () => {
+  it('imports a business export with a matched conversion, memo rows and holds', async () => {
+    const { agent } = setup()
+    const imported = await post(agent, '/api/import/commit', {
+      csv: fixture('paypal-business-fx-memo.csv'),
+    })
+    expect(imported.status).toBe(200)
+    const transactions = imported.body.transactions as AppState['transactions']
+    expect(transactions.filter((t) => t.name === 'Ceramics studio Berlin')).toMatchObject([
+      { amountCents: -5012, currency: 'USD', kind: 'expense' },
+    ])
+    // Holds, memo rows and both conversion legs are not separate records.
+    const ids = transactions.map((t) => t.id)
+    for (const left of ['9UH00001AA', '9UR00001AA', 'AOB00001AA', 'CNF00001AA', '7CV00001AA'])
+      expect(ids).not.toContain(`paypal:${left}`)
+    expect(ids).not.toContain('paypal:7CV00002AA')
+    expect(imported.body.profile).toMatchObject({
+      coverageDays: 61,
+      dailySpendCents: Math.round(11352 / 61),
+    })
+  })
+})
+
+describe('unresolved foreign-currency payments', () => {
+  const csv = [
+    'Date,Time,Name,Type,Status,Currency,Net,Transaction ID',
+    '2026-09-10,09:00:00,Lisbon bakery,Express Checkout Payment,Completed,EUR,-12.00,F1',
+    '2026-09-11,09:00:00,London theatre,Express Checkout Payment,Completed,GBP,-40.00,F2',
+    '2026-09-14,09:00:00,Coffee,Express Checkout Payment,Completed,USD,-4.00,U1',
+  ].join('\n')
+  const resolve = (agent: ReturnType<typeof request.agent>, id: string, body: object) =>
+    post(agent, `/api/import/unresolved/${encodeURIComponent(id)}`, body)
+  const assess = async (agent: ReturnType<typeof request.agent>) =>
+    (await post(agent, '/api/assess', { amountCents: 100 })).body as {
+      outcome: string
+      missingFields: string[]
+    }
+
+  it('withholds every positive result until each payment is resolved', async () => {
+    const { agent } = setup()
+    const preview = await post(agent, '/api/import/preview', { csv })
+    expect(preview.body.unresolved.map((p: { id: string }) => p.id)).toEqual([
+      'paypal:F1',
+      'paypal:F2',
+    ])
+    const imported = await post(agent, '/api/import/commit', { csv })
+    expect(imported.status).toBe(200)
+    expect(imported.body.foreignPayments).toHaveLength(2)
+    expect(imported.body.transactions.map((t: { id: string }) => t.id)).toEqual(['paypal:U1'])
+    // Confirming the plan does not clear the foreign-currency entry.
+    const saved = await simpleProfile(agent, { confirmed: true, missingFields: [] })
+    expect(saved.profile.missingFields).toEqual([
+      'Resolve 2 foreign-currency payments from your import in Activity: enter what each one cost in USD, or mark each one as a one-off.',
+    ])
+    expect(await assess(agent)).toMatchObject({ outcome: 'incomplete' })
+    const checkout = await post(agent, '/api/checkout/create', { productId: 'headphones' })
+    expect(checkout.body.code).toBe('PLAN_INCOMPLETE')
+
+    const converted = await resolve(agent, 'paypal:F1', { amountCents: 1337 })
+    expect(converted.status).toBe(200)
+    expect(converted.body.profile.version).toBe(saved.profile.version + 1)
+    // History now runs from the bakery on Sep 10 to the coffee on Sep 14.
+    expect(converted.body.profile.coverageDays).toBe(5)
+    expect(converted.body.transactions.find((t: { id: string }) => t.id === 'paypal:F1')).toEqual(
+      expect.objectContaining({ amountCents: -1337, currency: 'USD', kind: 'expense' }),
+    )
+    expect(converted.body.profile.missingFields).toEqual([
+      'Review your everyday spending: with Lisbon bakery included, your imported history suggests $3.47 a day, more than your $0 estimate.',
+      'Resolve 1 foreign-currency payment from your import in Activity: enter what it cost in USD, or mark it as a one-off.',
+    ])
+    expect((await resolve(agent, 'paypal:F1', { oneOff: true })).body.code).toBe('ALREADY_RESOLVED')
+    const oneOff = await resolve(agent, 'paypal:F2', { oneOff: true })
+    expect(oneOff.status).toBe(200)
+    expect(oneOff.body.foreignPayments.map((p: { resolution: unknown }) => p.resolution)).toEqual([
+      { kind: 'usd', amountCents: 1337 },
+      { kind: 'oneOff' },
+    ])
+    expect(oneOff.body.transactions.some((t: { id: string }) => t.id === 'paypal:F2')).toBe(false)
+    // The spending review is the last thing standing; saving the plan clears it.
+    expect((await assess(agent)).missingFields).toEqual([
+      expect.stringContaining('Review your everyday spending'),
+    ])
+    await simpleProfile(agent, { confirmed: true, missingFields: [], dailySpendCents: 347 })
+    expect(await assess(agent)).toMatchObject({ outcome: 'fits', missingFields: [] })
+
+    // Importing the same file again raises nothing that was already answered.
+    const again = await post(agent, '/api/import/preview', { csv })
+    expect(again.body).toMatchObject({ unresolved: [], duplicates: 3 })
+  })
+
+  it('validates resolutions and refuses unknown payments', async () => {
+    const { agent } = setup()
+    await post(agent, '/api/import/commit', { csv })
+    for (const body of [{}, { amountCents: 0 }, { amountCents: 12.5 }, { oneOff: false }])
+      expect((await resolve(agent, 'paypal:F1', body)).status).toBe(400)
+    expect((await resolve(agent, 'paypal:F1', { amountCents: 100, oneOff: true })).status).toBe(400)
+    expect((await resolve(agent, 'paypal:NOPE', { oneOff: true })).status).toBe(404)
+    expect((await state(agent)).profile.missingFields).toContain(
+      'Resolve 2 foreign-currency payments from your import in Activity: enter what each one cost in USD, or mark each one as a one-off.',
+    )
+  })
+
+  it('keeps a single spending-review entry however many payments are resolved', async () => {
+    const { agent } = setup()
+    await post(agent, '/api/import/commit', {
+      csv: [
+        'Date,Time,Name,Type,Status,Currency,Net,Transaction ID',
+        '2026-09-14,09:00:00,Coffee,Express Checkout Payment,Completed,USD,-4.00,U1',
+        '2026-09-10,10:00:00,Shop one,Express Checkout Payment,Completed,EUR,-10.00,E1',
+        '2026-09-11,11:00:00,Shop two,Express Checkout Payment,Completed,EUR,-10.00,E2',
+      ].join('\n'),
+    })
+    await simpleProfile(agent, { confirmed: true, missingFields: [] })
+    for (const id of ['paypal:E1', 'paypal:E2']) await resolve(agent, id, { amountCents: 1100 })
+    const fields = (await state(agent)).profile.missingFields
+    expect(
+      fields.filter((field) => field.startsWith('Review your everyday spending')),
+    ).toHaveLength(1)
+    expect(fields.at(-1)).toContain('with Shop two included')
+  })
+  it('keeps answered payments when a later import adds new ones', async () => {
+    const { agent } = setup()
+    await post(agent, '/api/import/commit', { csv })
+    await resolve(agent, 'paypal:F1', { oneOff: true })
+    const more = await post(agent, '/api/import/commit', {
+      csv: `${csv}\n2026-09-20,09:00:00,Tokyo stationery,Express Checkout Payment,Completed,JPY,"-4,500.00",F3`,
+    })
+    expect(more.status).toBe(200)
+    expect(
+      more.body.foreignPayments.map((p: { id: string; resolution?: unknown }) => [
+        p.id,
+        p.resolution ?? null,
+      ]),
+    ).toEqual([
+      ['paypal:F1', { kind: 'oneOff' }],
+      ['paypal:F2', null],
+      ['paypal:F3', null],
+    ])
+    expect(more.body.profile.missingFields).toContain(
+      'Resolve 2 foreign-currency payments from your import in Activity: enter what each one cost in USD, or mark each one as a one-off.',
+    )
+  })
+})
+
+describe('foreign payments across imports', () => {
+  const H =
+    '"Date","Time","TimeZone","Name","Type","Status","Currency","Amount","Fees","Total","Exchange Rate","Receipt ID","Balance","Transaction ID","Item Title"'
+  const row = (
+    time: string,
+    name: string,
+    type: string,
+    currency: string,
+    total: string,
+    id: string,
+    status = 'Completed',
+  ) =>
+    `"09/15/2026","${time}","EDT","${name}","${type}","${status}","${currency}","${total}","0.00","${total}","","","0.00","${id}",""`
+  const grocery =
+    '"09/20/2026","09:00:00","EDT","Corner grocery","Express Checkout Payment","Completed","USD","-10.00","0.00","-10.00","","","0.00","U1",""'
+  const payment = (status = 'Completed') =>
+    row('12:30:05', 'Lisbon bakery', 'Express Checkout Payment', 'EUR', '-18.50', 'P1', status)
+  const legs = [
+    row('12:30:05', '', 'General Currency Conversion', 'EUR', '18.50', 'C1'),
+    row('12:30:05', '', 'General Currency Conversion', 'USD', '-20.61', 'C2'),
+  ]
+  const fileA = [H, grocery, payment()].join('\n')
+  const fileB = [H, grocery, payment(), ...legs].join('\n')
+  const resolve = (agent: ReturnType<typeof request.agent>, body: object) =>
+    post(agent, `/api/import/unresolved/${encodeURIComponent('paypal:P1')}`, body)
+  const spending = (transactions: AppState['transactions']) =>
+    transactions
+      .filter((t) => t.kind === 'expense' && t.status === 'completed')
+      .reduce((sum, t) => sum - t.amountCents, 0)
+
+  it('marks an unresolved payment matched once a later export pairs it', async () => {
+    const { agent } = setup()
+    await post(agent, '/api/import/commit', { csv: fileA })
+    const later = await post(agent, '/api/import/commit', { csv: fileB })
+    expect(later.body.foreignPayments[0].resolution).toEqual({ kind: 'matched' })
+    expect(later.body.profile.missingFields.join(' ')).not.toContain('foreign-currency')
+    expect(spending(later.body.transactions)).toBe(1000 + 2061)
+    expect((await resolve(agent, { amountCents: 2061 })).body.code).toBe('ALREADY_RESOLVED')
+    expect(spending((await state(agent)).transactions)).toBe(1000 + 2061)
+  })
+
+  it('refuses to resolve a payment that is already in history', async () => {
+    const { agent, store } = setup()
+    await post(agent, '/api/import/commit', { csv: fileB })
+    const { id } = store.db.prepare('SELECT id FROM sessions').get() as { id: string }
+    const data = store.get(id)!
+    data.foreignPayments = [
+      {
+        id: 'paypal:P1',
+        date: '2026-09-15',
+        name: 'Lisbon bakery',
+        type: 'Express Checkout Payment',
+        currency: 'EUR',
+        originalCents: -1850,
+      },
+    ]
+    store.save(id, data)
+    const refused = await resolve(agent, { amountCents: 2061 })
+    expect(refused.status).toBe(409)
+    expect(refused.body.code).toBe('ALREADY_IN_HISTORY')
+  })
+
+  it('counts a payment once when it was pending at the first import', async () => {
+    const { agent } = setup()
+    const first = await post(agent, '/api/import/commit', {
+      csv: [H, grocery, payment('Pending'), ...legs].join('\n'),
+    })
+    expect(spending(first.body.transactions)).toBe(1000)
+    const second = await post(agent, '/api/import/commit', { csv: fileB })
+    expect(spending(second.body.transactions)).toBe(1000 + 2061)
+  })
+
+  it('lets a later conversion replace an entered USD cost instead of failing', async () => {
+    const { agent } = setup()
+    await post(agent, '/api/import/commit', { csv: fileA })
+    await resolve(agent, { amountCents: 2000 })
+    const later = await post(agent, '/api/import/commit', { csv: fileB })
+    expect(later.status).toBe(200)
+    expect(later.body.transactions.find((t: { id: string }) => t.id === 'paypal:P1')).toMatchObject(
+      {
+        amountCents: -2061,
+      },
+    )
+    expect(later.body.foreignPayments[0].resolution).toEqual({ kind: 'matched' })
+    expect(spending(later.body.transactions)).toBe(1000 + 2061)
+  })
+})
+
+describe('Pay in 4 rows in an import', () => {
+  it('proposes the plan for review instead of counting it as spending', async () => {
+    const { agent } = setup()
+    const csv = [
+      '"Date","Time","TimeZone","Name","Type","Status","Currency","Amount","Fees","Total","Exchange Rate","Receipt ID","Balance","Transaction ID","Item Title"',
+      '"09/28/2026","14:02:11","EDT","Test Store","Pay in 4","Completed","USD","-1,199.00","0.00","-1,199.00","","","","S1",""',
+      '"09/28/2026","14:02:11","EDT","Pay in 4","Authorization","Pending","USD","-299.75","0.00","-299.75","","","","S2",""',
+    ].join('\n')
+    const preview = await post(agent, '/api/import/preview', { csv })
+    expect(preview.body.instalmentPlans).toMatchObject([
+      { name: 'Test Store', purchaseCents: 119900, paymentCents: 29975 },
+    ])
+    const imported = await post(agent, '/api/import/commit', { csv })
+    expect(imported.status).toBe(200)
+    expect(imported.body.profile.dailySpendCents).toBe(0)
+    expect(imported.body.profile.missingFields).toContain(
+      'Your import shows a Pay in 4 or Pay Later plan (Test Store). Add any payments still due to your upcoming bills, or confirm it is paid off.',
+    )
+    // Importing the same file again keeps the plan in the review.
+    const again = await post(agent, '/api/import/commit', { csv })
+    expect(again.body.profile.missingFields).toContain(
+      'Your import shows a Pay in 4 or Pay Later plan (Test Store). Add any payments still due to your upcoming bills, or confirm it is paid off.',
+    )
+  })
+})
+
+describe('import date order', () => {
+  it('refuses to import an ambiguous file until the user chooses the date order', async () => {
+    const { agent } = setup()
+    const csv = fixture('paypal-ambiguous-dates.csv')
+    const preview = await post(agent, '/api/import/preview', { csv })
+    expect(preview.body).toMatchObject({ needsDateOrder: true, dateOrder: null, transactions: [] })
+    const refused = await post(agent, '/api/import/commit', { csv })
+    expect(refused.status).toBe(400)
+    expect(refused.body.code).toBe('DATE_ORDER_REQUIRED')
+    expect((await state(agent)).profile.source).toBe('demo')
+    expect((await post(agent, '/api/import/commit', { csv, dateOrder: 'D/M' })).status).toBe(400)
+    const imported = await post(agent, '/api/import/commit', { csv, dateOrder: 'DD/MM' })
+    expect(imported.status).toBe(200)
+    expect(imported.body.transactions.map((t: { date: string }) => t.date).slice(-2)).toEqual([
+      '2026-09-01',
+      '2026-08-05',
+    ])
+    expect(imported.body.profile).toMatchObject({ coverageDays: 36, dailySpendCents: 1170 })
+    expect(imported.body.profile.flows).toMatchObject([
+      { name: 'Video streaming subscription', nextDate: '2026-10-05', confirmed: false },
+    ])
+  })
+  it('imports a UK export without asking because its dates decide the order', async () => {
+    const { agent } = setup()
+    const csv = fixture('paypal-uk-ddmm.csv')
+    expect((await post(agent, '/api/import/preview', { csv })).body).toMatchObject({
+      needsDateOrder: false,
+      dateOrder: 'DD/MM',
+      errors: [],
+    })
+    const imported = await post(agent, '/api/import/commit', { csv })
+    expect(imported.status).toBe(200)
+    expect(imported.body.profile.flows.map((f: { nextDate: string }) => f.nextDate)).toEqual([
+      '2026-10-05',
+      '2026-10-31',
+    ])
+  })
+})
+
+describe('import size limit', () => {
+  it('accepts a fully quoted export just under 1 MB and rejects one just over it', async () => {
+    const { agent } = setup()
+    const header =
+      '"Date","Time","TimeZone","Name","Type","Status","Currency","Amount","Fees","Total","Exchange Rate","Receipt ID","Balance","Transaction ID","Item Title"'
+    // Quotes inside a field double in CSV and double again as JSON, so the request body is about
+    // twice the size of the file.
+    const title = `"${'""'.repeat(420)}"`
+    const rows = (count: number) =>
+      [
+        header,
+        ...Array.from(
+          { length: count },
+          (_, index) =>
+            `"09/30/2026","12:00:00","EDT","Coffee","Express Checkout Payment","Completed","USD","-5.00","0.00","-5.00","","","0.00","Q${index}",${title}`,
+        ),
+      ].join('\r\n')
+    const under = rows(1_000)
+    expect(utf8Bytes(under)).toBeLessThan(CSV_IMPORT_LIMITS.maxBytes)
+    expect(JSON.stringify({ csv: under }).length).toBeGreaterThan(1_200 * 1024)
+    const preview = await post(agent, '/api/import/preview', { csv: under })
+    expect(preview.status).toBe(200)
+    expect(preview.body.errors).toEqual([])
+    expect(preview.body.transactions).toHaveLength(1_000)
+    const over = rows(1_100)
+    expect(utf8Bytes(over)).toBeGreaterThan(CSV_IMPORT_LIMITS.maxBytes)
+    const rejected = await post(agent, '/api/import/commit', { csv: over })
+    expect(rejected.status).toBe(400)
+    expect(rejected.body.error).toBe('Use a CSV smaller than 1 MB.')
+    expect((await state(agent)).profile.source).toBe('demo')
+  })
+})
+
 describe('stored transaction cap', () => {
   it('rejects imports that would exceed the per-session transaction cap with a clear message', async () => {
     const { agent } = setup({ config: { ...config, maxTransactions: 3 } })
     const rows = (ids: string[]) =>
       'Date,Name,Net,Currency,Type,Status,Transaction ID\n' +
       ids.map((id) => `10/01/2026,Coffee ${id},-5.00,USD,Payment,Completed,${id}`).join('\n')
-    expect((await post(agent, '/api/import/commit', { csv: rows(['A', 'B']) })).status).toBe(200)
+    expect(
+      (await post(agent, '/api/import/commit', { csv: rows(['A', 'B']), dateOrder: 'MM/DD' }))
+        .status,
+    ).toBe(200)
     // Re-importing known rows does not count twice.
-    expect((await post(agent, '/api/import/commit', { csv: rows(['A', 'B', 'C']) })).status).toBe(
-      200,
-    )
-    const preview = await post(agent, '/api/import/preview', { csv: rows(['D', 'E']) })
+    expect(
+      (await post(agent, '/api/import/commit', { csv: rows(['A', 'B', 'C']), dateOrder: 'MM/DD' }))
+        .status,
+    ).toBe(200)
+    const preview = await post(agent, '/api/import/preview', {
+      csv: rows(['D', 'E']),
+      dateOrder: 'MM/DD',
+    })
     expect(preview.body.errors[0]).toEqual({
       row: 1,
       message:
         'This import would keep 5 transactions, but a session holds at most 3. Import a shorter date range.',
     })
-    const rejected = await post(agent, '/api/import/commit', { csv: rows(['D', 'E']) })
+    const rejected = await post(agent, '/api/import/commit', {
+      csv: rows(['D', 'E']),
+      dateOrder: 'MM/DD',
+    })
     expect(rejected.status).toBe(400)
     expect(rejected.body.code).toBe('TOO_MANY_TRANSACTIONS')
     expect(rejected.body.error).toContain('at most 3')

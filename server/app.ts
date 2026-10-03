@@ -7,12 +7,20 @@ import {
   assessPurchase,
   addDays,
   compareOptions,
+  money,
   normalizeTimezone,
   payIn4InRange,
   purchaseReviews,
 } from '../shared/finance.ts'
 import { createDemoState, DEMO_TIMEZONE, PRODUCTS, rebaseDemoState } from '../shared/seed.ts'
-import { parsePayPalCsv } from '../shared/csv.ts'
+import {
+  analyzeHistory,
+  foreignPaymentTransaction,
+  instalmentPlanReview,
+  parsePayPalCsv,
+  withForeignPaymentGate,
+} from '../shared/csv.ts'
+import { CSV_IMPORT_LIMITS, CSV_SIZE_MESSAGE, utf8Bytes } from '../shared/limits.ts'
 import type {
   AppState,
   Assessment,
@@ -94,6 +102,7 @@ const profileSchema = z
             name: z.string().trim().min(1).max(100),
             amountCents: cents,
             nextDate: date,
+            anchorDay: z.union([z.number().int().min(1).max(31), z.literal('last')]).optional(),
             cadence: z.enum(['once', 'weekly', 'biweekly', 'monthly', 'yearly']),
             kind: z.enum(['income', 'subscription', 'bill', 'installment']),
             category: z.string().max(80),
@@ -151,8 +160,28 @@ const chatSchema = z
       .optional(),
   })
   .strict()
-const csvSchema = z.object({ csv: z.string().min(1).max(1_000_000) }).strict()
+const csvSchema = z
+  .object({
+    csv: z
+      .string()
+      .min(1)
+      .refine((value) => utf8Bytes(value) <= CSV_IMPORT_LIMITS.maxBytes, CSV_SIZE_MESSAGE),
+    /** Needed only when every date in the file could be read either way. */
+    dateOrder: z.enum(['MM/DD', 'DD/MM']).optional(),
+  })
+  .strict()
+/** A foreign-currency payment is resolved by what it cost in USD, or as a one-off to leave out. */
+const resolutionSchema = z.union([
+  z.object({ amountCents: cents.min(1) }).strict(),
+  z.object({ oneOff: z.literal(true) }).strict(),
+])
+/**
+ * JSON escapes every quote and line break in a CSV, so a fully quoted export can double in size on
+ * the way in. The import routes accept twice the CSV limit; the CSV itself is held to the limit.
+ */
+const IMPORT_BODY_LIMIT = 2 * CSV_IMPORT_LIMITS.maxBytes + 64 * 1024
 const DAY = 86400000
+const SPENDING_REVIEW = 'Review your everyday spending:'
 const CLAUDE_LIMIT_REASON = {
   ip: 'You have reached this demo’s Claude limit for the hour',
   daily: 'This demo’s Claude allowance for today is used up',
@@ -500,6 +529,7 @@ export function createApp(options: AppOptions = {}) {
     if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store')
     next()
   })
+  app.use('/api/import', express.json({ limit: IMPORT_BODY_LIMIT }))
   app.use(express.json({ limit: '1200kb' }))
   app.use(cookieParser())
   app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'worth' }))
@@ -677,6 +707,8 @@ export function createApp(options: AppOptions = {}) {
       coverageDays: data.profile.coverageDays,
       confirmedAt: input.confirmed ? now().toISOString() : '',
       userEdited: true,
+      // Saving the plan never clears unresolved foreign-currency payments; resolving them does.
+      missingFields: withForeignPaymentGate(input.missingFields, data.foreignPayments),
     }
     store.save(id, data)
     res.json(state(id))
@@ -715,29 +747,43 @@ export function createApp(options: AppOptions = {}) {
     return `This import would keep ${total.toLocaleString('en-US')} transactions, but a session holds at most ${config.maxTransactions.toLocaleString('en-US')}. Import a shorter date range.`
   }
   app.post('/api/import/preview', (req, res) => {
-    const { csv } = csvSchema.parse(req.body)
+    const { csv, dateOrder } = csvSchema.parse(req.body)
     const data = dataFor(res)
     const existing = retainedHistory(data)
-    const preview = parsePayPalCsv(csv, existing, { today: today(data.profile.timezone) })
+    const preview = parsePayPalCsv(csv, existing, {
+      today: today(data.profile.timezone),
+      dateOrder,
+      foreignPayments: data.foreignPayments,
+    })
     const total = mergeTransactions(existing, preview.transactions).length
     if (total > config.maxTransactions)
       preview.errors.unshift({ row: 1, message: transactionLimitMessage(total) })
     res.json(preview)
   })
   app.post('/api/import/commit', (req, res) => {
-    const { csv } = csvSchema.parse(req.body)
+    const { csv, dateOrder } = csvSchema.parse(req.body)
     const id = sessionId(res)
     noActive(id)
     const data = dataFor(res)
     const retained = retainedHistory(data)
-    const preview = parsePayPalCsv(csv, retained, { today: today(data.profile.timezone) })
+    const preview = parsePayPalCsv(csv, retained, {
+      today: today(data.profile.timezone),
+      dateOrder,
+      foreignPayments: data.foreignPayments,
+    })
+    if (preview.needsDateOrder)
+      throw new HttpError(
+        400,
+        'Choose whether this file’s dates are month/day or day/month, then import it again. No history was changed.',
+        'DATE_ORDER_REQUIRED',
+      )
     if (preview.errors.length)
       throw new HttpError(
         400,
         'Correct the flagged rows before importing. No history was changed.',
         'IMPORT_ERRORS',
       )
-    if (!preview.transactions.length && !preview.duplicates)
+    if (!preview.transactions.length && !preview.duplicates && !preview.unresolved.length)
       throw new HttpError(400, 'No supported transactions found.', 'EMPTY_IMPORT')
     const merged = mergeTransactions(retained, preview.transactions)
     if (merged.length > config.maxTransactions)
@@ -772,9 +818,25 @@ export function createApp(options: AppOptions = {}) {
     data.profile.confirmedAt = ''
     data.profile.version += 1
     data.profile.userEdited = true
-    data.profile.missingFields = [
-      'Confirm current available funds, income, upcoming bills, and everyday spending after import.',
+    const known = switching ? [] : (data.foreignPayments ?? [])
+    const inHistory = new Set(merged.map((t) => t.id))
+    data.foreignPayments = [
+      // A payment this export pairs with its USD conversion is answered by PayPal's own figure.
+      ...known.map((payment) =>
+        preview.converted.includes(payment.id) || (!payment.resolution && inHistory.has(payment.id))
+          ? { ...payment, resolution: { kind: 'matched' as const } }
+          : payment,
+      ),
+      ...preview.unresolved.filter((payment) => !known.some((item) => item.id === payment.id)),
     ]
+    const plans = instalmentPlanReview(preview.instalmentPlans)
+    data.profile.missingFields = withForeignPaymentGate(
+      [
+        'Confirm current available funds, income, upcoming bills, and everyday spending after import.',
+        ...(plans ? [plans] : []),
+      ],
+      data.foreignPayments,
+    )
     store.atomic(() => {
       // Purchases made as the persona never reduce the user's own plan or appear in their activity.
       if (switching)
@@ -782,6 +844,61 @@ export function createApp(options: AppOptions = {}) {
           if (!purchase.archived) store.putPurchase(id, { ...purchase, archived: true })
       store.save(id, data)
     })
+    res.json(state(id))
+  })
+  app.post('/api/import/unresolved/:paymentId', (req, res) => {
+    const input = resolutionSchema.parse(req.body)
+    const id = sessionId(res)
+    noActive(id)
+    const data = dataFor(res)
+    const payment = data.foreignPayments?.find((item) => item.id === String(req.params.paymentId))
+    if (!payment) throw new HttpError(404, 'Foreign-currency payment not found.', 'NOT_FOUND')
+    if (payment.resolution)
+      throw new HttpError(409, 'This payment is already resolved.', 'ALREADY_RESOLVED')
+    if (data.transactions.some((t) => t.id === payment.id))
+      throw new HttpError(
+        409,
+        'This payment is already in your history with its USD cost.',
+        'ALREADY_IN_HISTORY',
+      )
+    if ('oneOff' in input) payment.resolution = { kind: 'oneOff' }
+    else {
+      if (data.transactions.length >= config.maxTransactions)
+        throw new HttpError(
+          400,
+          transactionLimitMessage(data.transactions.length + 1),
+          'TOO_MANY_TRANSACTIONS',
+        )
+      payment.resolution = { kind: 'usd', amountCents: input.amountCents }
+      // Its USD cost joins the history, so the history-based suggestions can be checked again.
+      data.transactions = [
+        ...data.transactions,
+        foreignPaymentTransaction(payment, input.amountCents),
+      ].sort((a, b) => b.date.localeCompare(a.date))
+      const analysis = analyzeHistory(data.transactions, today(data.profile.timezone))
+      data.profile.coverageDays = analysis.coverageDays
+      const names = new Set(data.profile.flows.map((flow) => flow.name.toLowerCase()))
+      data.profile.flows.push(
+        ...analysis.recurring.filter(
+          (flow) =>
+            flow.name.toLowerCase() === payment.name.toLowerCase() &&
+            !names.has(flow.name.toLowerCase()),
+        ),
+      )
+      data.profile.missingFields = data.profile.missingFields.filter(
+        (field) => !field.startsWith(SPENDING_REVIEW),
+      )
+      if (analysis.suggestedDailySpendCents > data.profile.dailySpendCents)
+        data.profile.missingFields.push(
+          `${SPENDING_REVIEW} with ${payment.name.slice(0, 60)} included, your imported history suggests ${money(analysis.suggestedDailySpendCents)} a day, more than your ${money(data.profile.dailySpendCents)} estimate.`,
+        )
+    }
+    data.profile.missingFields = withForeignPaymentGate(
+      data.profile.missingFields,
+      data.foreignPayments,
+    )
+    data.profile.version += 1
+    store.save(id, data)
     res.json(state(id))
   })
   app.post('/api/transactions/categories', async (req, res) => {
@@ -1080,7 +1197,7 @@ export function createApp(options: AppOptions = {}) {
     if (error?.type === 'entity.too.large')
       return void res
         .status(413)
-        .json({ error: 'This file is too large. Use a CSV under 1 MB.', code: 'TOO_LARGE' })
+        .json({ error: `This file is too large. ${CSV_SIZE_MESSAGE}`, code: 'TOO_LARGE' })
     console.error('Worth request failed:', error instanceof Error ? error.name : 'UnknownError')
     res
       .status(500)

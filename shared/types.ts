@@ -8,6 +8,11 @@ export interface ScheduledFlow {
   name: string
   amountCents: number
   nextDate: string
+  /**
+   * Day of the month that monthly and yearly items fall on: 1–31 (clamped to shorter months) or
+   * 'last' for the last day of each month. Without it, the day of `nextDate` is used.
+   */
+  anchorDay?: number | 'last'
   cadence: Cadence
   kind: FlowKind
   category: string
@@ -53,7 +58,11 @@ export interface Transaction {
   amountCents: number
   currency: string
   category: string
-  kind: 'expense' | 'income' | 'transfer' | 'refund' | 'unknown'
+  /**
+   * `adjustment` is a PayPal balance correction: listed, but neither income nor spending.
+   * `installment` is a Pay in 4 or Pay Later row, proposed as a plan rather than counted.
+   */
+  kind: 'expense' | 'income' | 'transfer' | 'refund' | 'unknown' | 'adjustment' | 'installment'
   status: 'completed' | 'pending' | 'excluded'
   source: 'demo' | 'import' | 'purchase'
   color?: string
@@ -281,6 +290,8 @@ export interface AppState {
   wishlist: string[]
   products: Product[]
   today: string
+  /** Imported foreign-currency payments; unresolved ones withhold any positive result. */
+  foreignPayments?: ForeignPayment[]
   config: {
     ai: 'anthropic' | 'demo'
     paypal: 'sandbox' | 'demo'
@@ -302,6 +313,42 @@ export interface ChatReply {
   suggestions: string[]
   toolCalls: string[]
 }
+/**
+ * A completed payment in another currency with no matching USD conversion in the export. Until it
+ * is resolved, no assessment can be positive.
+ */
+export interface ForeignPayment {
+  /** The identity it would have as a transaction, such as `paypal:<Transaction ID>`. */
+  id: string
+  date: string
+  name: string
+  type: string
+  currency: string
+  /** Hundredths of the payment's own currency, as exported; negative for money out. */
+  originalCents: number
+  /**
+   * How it was resolved: the user's answer (what it cost in USD, or a one-off left out of the
+   * history), or `matched` once a later export paired it with its USD conversion.
+   */
+  resolution?: { kind: 'usd'; amountCents: number } | { kind: 'oneOff' } | { kind: 'matched' }
+}
+/** A Pay in 4 or Pay Later plan found in an import, proposed to the user for confirmation. */
+export interface InstalmentPlanProposal {
+  id: string
+  /** The merchant, or the row's own label when the purchase is not in the file. */
+  name: string
+  /** The purchase date, or the first payment seen. */
+  startDate: string
+  /** The full price, when the purchase row is in the file. */
+  purchaseCents: number | null
+  /** One payment: PayPal's usual split of the price (remainder on the first), or as seen. */
+  paymentCents: number
+  /** Payment rows found in the file, pending or completed. PayPal sets the real schedule. */
+  payments: { date: string; amountCents: number; status: Transaction['status'] }[]
+  transactionIds: string[]
+}
+/** The order of day and month in a CSV's slash dates. */
+export type DateOrder = 'MM/DD' | 'DD/MM'
 export interface ImportPreview {
   transactions: Transaction[]
   errors: { row: number; message: string }[]
@@ -312,4 +359,24 @@ export interface ImportPreview {
   suggestedDailySpendCents: number
   recurring: ScheduledFlow[]
   warnings: string[]
+  /** Balance corrections from this file, such as "General Account Correction". Never counted. */
+  adjustments: Transaction[]
+  /**
+   * Rows not imported: memo rows and authorization holds never moved money, and rows in other
+   * currencies are counted only through a matched USD conversion.
+   */
+  leftOut: { memo: number; holds: number; otherCurrency: number }
+  /** The order used for slash dates; null when the file has none that could read differently. */
+  dateOrder: DateOrder | null
+  /**
+   * Every slash date could be read either way. Nothing was imported; preview again with an
+   * explicit `dateOrder`. The commit refuses such a file without one.
+   */
+  needsDateOrder: boolean
+  /** Foreign-currency spending without a matching USD conversion, to be resolved after import. */
+  unresolved: ForeignPayment[]
+  /** Foreign payments whose USD cost this file supplies through a matched conversion. */
+  converted: string[]
+  /** Possible existing Pay in 4 or Pay Later plans. Their rows are never ordinary spending. */
+  instalmentPlans: InstalmentPlanProposal[]
 }

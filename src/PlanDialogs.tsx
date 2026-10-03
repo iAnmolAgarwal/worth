@@ -16,15 +16,17 @@ import {
 import type {
   AppState,
   Cadence,
+  DateOrder,
   FinancialProfile,
   FlowKind,
   ImportPreview,
   ScheduledFlow,
 } from '../shared/types'
 import { getUpcomingFlows, todayInTimezone } from '../shared/finance'
+import { CSV_IMPORT_LIMITS, CSV_SIZE_MESSAGE, utf8Bytes } from '../shared/limits'
 import { api } from './api'
 import { CLAUDE_SHARED_DATA } from './copy'
-import { money, shortDate } from './format'
+import { currencyAmount, money, shortDate } from './format'
 import { Button, Field, Footnote, Modal } from './ui'
 import './plan-dialog.css'
 
@@ -981,6 +983,8 @@ export function ImportDialog({
   const [preview, setPreview] = useState<ImportPreview | null>(null)
   const [previewedCsv, setPreviewedCsv] = useState('')
   const [acknowledged, setAcknowledged] = useState(false)
+  // Asked only when every date in the file could be read either way.
+  const [dateOrder, setDateOrder] = useState<DateOrder>()
   const [busy, setBusy] = useState<'read' | 'preview' | 'commit' | null>(null)
   const [error, setError] = useState('')
   const activeCheckout = state.purchases.some((purchase) => activeStatuses.has(purchase.status))
@@ -989,6 +993,7 @@ export function ImportDialog({
     setPreview(null)
     setPreviewedCsv('')
     setAcknowledged(false)
+    setDateOrder(undefined)
     setError('')
   }
 
@@ -998,7 +1003,7 @@ export function ImportDialog({
     setError('')
     setPreview(null)
     setAcknowledged(false)
-    if (file.size > 1_000_000) {
+    if (file.size > CSV_IMPORT_LIMITS.maxBytes) {
       setError('Choose a CSV smaller than 1 MB. A recent 90-day export is a good starting point.')
       event.target.value = ''
       return
@@ -1015,21 +1020,33 @@ export function ImportDialog({
     }
   }
 
-  const getPreview = async (event: FormEvent<HTMLFormElement>) => {
+  const getPreview = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    void runPreview(dateOrder)
+  }
+
+  const chooseDateOrder = (order: DateOrder) => {
+    setDateOrder(order)
+    void runPreview(order)
+  }
+
+  const runPreview = async (order: DateOrder | undefined) => {
     setError('')
     setAcknowledged(false)
     if (!csv.trim()) {
       setError('Choose a CSV or paste your PayPal activity export first.')
       return
     }
-    if (new TextEncoder().encode(csv).byteLength > 1_000_000) {
-      setError('Use a CSV smaller than 1 MB.')
+    if (utf8Bytes(csv) > CSV_IMPORT_LIMITS.maxBytes) {
+      setError(CSV_SIZE_MESSAGE)
       return
     }
     setBusy('preview')
     try {
-      const result = await api<ImportPreview>('/import/preview', { csv })
+      const result = await api<ImportPreview>('/import/preview', {
+        csv,
+        ...(order ? { dateOrder: order } : {}),
+      })
       setPreview(result)
       setPreviewedCsv(csv)
     } catch (failure) {
@@ -1040,11 +1057,21 @@ export function ImportDialog({
   }
 
   const commit = async () => {
-    if (!preview || preview.errors.length || csv !== previewedCsv || !acknowledged) return
+    if (
+      !preview ||
+      preview.errors.length ||
+      preview.needsDateOrder ||
+      csv !== previewedCsv ||
+      !acknowledged
+    )
+      return
     setError('')
     setBusy('commit')
     try {
-      const updated = await api<AppState>('/import/commit', { csv })
+      const updated = await api<AppState>('/import/commit', {
+        csv,
+        ...(dateOrder ? { dateOrder } : {}),
+      })
       onUpdate(updated)
       onClose()
       onReview()
@@ -1103,7 +1130,7 @@ export function ImportDialog({
                 className="input"
                 rows={6}
                 value={csv}
-                maxLength={1_000_000}
+                maxLength={CSV_IMPORT_LIMITS.maxBytes}
                 onChange={(event) => {
                   setFilename('')
                   changeCsv(event.target.value)
@@ -1137,6 +1164,34 @@ export function ImportDialog({
           aria-live="polite"
         >
           <h3 id="import-preview-heading">Here’s what we found</h3>
+          {(preview.needsDateOrder || dateOrder) && (
+            <fieldset className="import-date-order" disabled={Boolean(busy)}>
+              <legend>How does this file write dates?</legend>
+              <p className="muted">
+                Every date here could be read two ways. Choose the order your PayPal account uses.
+              </p>
+              {(
+                [
+                  ['MM/DD', 'Month first, as in the US', '03/04/2026 is March 4'],
+                  ['DD/MM', 'Day first, as in the UK', '03/04/2026 is 3 April'],
+                ] as const
+              ).map(([order, label, example]) => (
+                <label className="check-row" key={order}>
+                  <input
+                    type="radio"
+                    name="import-date-order"
+                    value={order}
+                    checked={dateOrder === order}
+                    onChange={() => chooseDateOrder(order)}
+                  />
+                  <span>
+                    <strong>{label}</strong>
+                    <small>{example}</small>
+                  </span>
+                </label>
+              ))}
+            </fieldset>
+          )}
           <div className="form-grid import-stats">
             <div className="notice">
               <strong>{preview.totalRows}</strong>
@@ -1162,6 +1217,59 @@ export function ImportDialog({
             {preview.recurring.length} possible recurring{' '}
             {preview.recurring.length === 1 ? 'item needs' : 'items need'} your review.
           </p>
+          {preview.unresolved.length > 0 && (
+            <div className="notice notice-warning">
+              <strong>
+                {preview.unresolved.length} foreign-currency{' '}
+                {preview.unresolved.length === 1 ? 'payment has' : 'payments have'} no USD
+                conversion
+              </strong>
+              <ul>
+                {preview.unresolved.slice(0, 8).map((payment) => (
+                  <li key={payment.id}>
+                    {payment.name} · {shortDate(payment.date)} ·{' '}
+                    {currencyAmount(Math.abs(payment.originalCents), payment.currency)}
+                  </li>
+                ))}
+              </ul>
+              <p>
+                After importing, give each one its USD cost under Activity or mark it as a one-off.
+                Until then, Worth won’t show a positive result.
+              </p>
+            </div>
+          )}
+          {preview.instalmentPlans.length > 0 && (
+            <div className="notice">
+              <strong>Possible Pay in 4 or Pay Later plans</strong>
+              <ul>
+                {preview.instalmentPlans.map((plan) => (
+                  <li key={plan.id}>
+                    {plan.name}
+                    {plan.purchaseCents !== null &&
+                      ` · ${money(plan.purchaseCents, true)} purchase`}{' '}
+                    · payments of about {money(plan.paymentCents, true)}
+                  </li>
+                ))}
+              </ul>
+              <p>
+                These are not counted as everyday spending. Next, add any payments still due to your
+                plan, or confirm the plan is paid off.
+              </p>
+            </div>
+          )}
+          {preview.adjustments.length > 0 && (
+            <div className="notice">
+              <strong>PayPal balance corrections, not counted</strong>
+              <ul>
+                {preview.adjustments.slice(0, 5).map((transaction) => (
+                  <li key={transaction.id}>
+                    {transaction.name} · {shortDate(transaction.date)} ·{' '}
+                    {money(transaction.amountCents, true)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {preview.errors.length > 0 && (
             <div className="notice notice-warning" role="alert">
               <strong>
@@ -1232,7 +1340,7 @@ export function ImportDialog({
               </table>
             </div>
           )}
-          {preview.errors.length === 0 && (
+          {preview.errors.length === 0 && !preview.needsDateOrder && (
             <label className="check-row">
               <input
                 type="checkbox"
@@ -1271,11 +1379,12 @@ export function ImportDialog({
           disabled={
             !preview ||
             preview.errors.length > 0 ||
+            preview.needsDateOrder ||
             !acknowledged ||
             csv !== previewedCsv ||
             Boolean(busy) ||
             activeCheckout ||
-            (!preview.transactions.length && !preview.duplicates)
+            (!preview.transactions.length && !preview.duplicates && !preview.unresolved.length)
           }
         >
           Import & review my plan <ArrowRight size={16} />

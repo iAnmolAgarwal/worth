@@ -231,6 +231,13 @@ describe('conversation isolation across financial sessions', () => {
       suggestedDailySpendCents: 3500,
       recurring: [],
       warnings: [],
+      adjustments: [],
+      leftOut: { memo: 0, holds: 0, otherCurrency: 0 },
+      dateOrder: null,
+      needsDateOrder: false,
+      unresolved: [],
+      converted: [],
+      instalmentPlans: [],
     }
     routeApi((path, data) => {
       if (path === '/state') return demo

@@ -15,6 +15,7 @@ import { addDays } from '../shared/finance'
 import { api } from './api'
 import { money, shortDate } from './format'
 import { Button, EmptyState, Field, Footnote, IconButton, Modal, Tag } from './ui'
+import { ForeignPayments } from './ForeignPayments'
 
 interface CategoryResult {
   mode: 'anthropic' | 'demo'
@@ -133,6 +134,7 @@ export function Activity({
           </small>
         </div>
       </div>
+      <ForeignPayments state={state} onUpdate={onUpdate} />
       <section className="panel activity-panel">
         <div className="activity-toolbar">
           <div className="search-field">
@@ -249,13 +251,17 @@ export function Activity({
                             <small>
                               {t.kind === 'transfer'
                                 ? 'Account transfer'
-                                : t.source === 'purchase'
-                                  ? 'App purchase'
-                                  : t.kind === 'refund'
-                                    ? 'Refund'
-                                    : t.source === 'demo'
-                                      ? 'Demo history'
-                                      : 'PayPal import'}
+                                : t.kind === 'adjustment'
+                                  ? 'PayPal balance correction'
+                                  : t.kind === 'installment'
+                                    ? 'Pay in 4 or Pay Later'
+                                    : t.source === 'purchase'
+                                      ? 'App purchase'
+                                      : t.kind === 'refund'
+                                        ? 'Refund'
+                                        : t.source === 'demo'
+                                          ? 'Demo history'
+                                          : 'PayPal import'}
                             </small>
                           </span>
                         </span>

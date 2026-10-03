@@ -35,7 +35,7 @@ Without Anthropic, Worth labels replies as local calculations. Without PayPal cr
 
 ## Try the flow
 
-1. Explore Alex's labelled synthetic plan, or import an English-language USD PayPal CSV.
+1. Explore Alex's labelled synthetic plan, or import an English-language PayPal activity CSV.
 2. Review funds, everyday spending, upcoming income/bills/subscriptions, and the cushion. Include obligations outside PayPal. Imported recurring items need confirmation.
 3. Ask **“Can I afford a $1,199 camera today?”** Compare the low point, waiting, and a lower total price. Missing or stale inputs require review before a positive result.
 4. Assess the **$349 Studio headphones**, review buying today, confirm current funds, and continue to PayPal sandbox.
@@ -45,7 +45,15 @@ The financial-picture editor has four short steps: **Funds → Income → Bills 
 
 ### Imports and calculations
 
-Use a CSV under **1 MB**, at most 10,000 rows, with recognized Date, Currency, and Net/Amount/Gross headers. `Net` takes precedence. “Today” follows the plan's time zone: the synthetic persona uses your browser's, and an import keeps it (editable under Name & time zone). Dates support `YYYY-MM-DD` and US `MM/DD/YYYY`; unsupported currencies and malformed rows block import. The preview shows coverage, duplicates, exclusions, and recurring suggestions. Category suggestions are reviewed before application; a category edit does not silently change the confirmed daily estimate.
+Use a PayPal activity CSV under **1 MB**, at most 10,000 rows. Both the personal export (Amount, Fees, Total) and the business “Download activity” export (Gross, Fee, Net, Balance Impact, Reference Txn ID) work; the amount comes from Net, then Total, then Amount, then Gross. “Today” follows the plan's time zone: the synthetic persona uses your browser's, and an import keeps it (editable under Name & time zone). Malformed rows block import. The preview shows coverage, duplicates, exclusions, and recurring suggestions, and:
+
+- **Dates** may be `YYYY-MM-DD`, `MM/DD/YYYY` or `DD/MM/YYYY`. Any day above 12 settles the order for the file; when every date could be read either way, the preview asks, and nothing is imported until you answer.
+- **Other currencies:** Worth plans in USD. A foreign-currency payment counts once, through the USD conversion that paid for it. Other non-USD rows are left out with a warning. A foreign purchase without a conversion withholds every positive result until you enter its USD cost or mark it as a one-off in Activity.
+- **Row types:** only funding and withdrawal rows are transfers; a Direct Deposit paycheck is income. Memo rows and authorization holds are left out, pending rows are never counted, and PayPal balance corrections are listed but not counted.
+- **Pay in 4 / Pay Later** rows are proposed as an existing plan to confirm, never counted as everyday spending.
+- **Recurring suggestions** keep their day of the month, including the last day (rent on Jul 31, Aug 31 and Sep 30 is next due Oct 31).
+
+Category suggestions are reviewed before application; a category edit does not silently change the confirmed daily estimate.
 
 Historical transactions help estimate patterns. They are never deducted again from today's funds snapshot. The engine uses integer USD cents, expenses before same-day income, and the lowest balance throughout the forecast. Waiting extends the horizon to 30 days after the purchase. The 20% spending stress case is a stated assumption, not a statistical confidence interval.
 

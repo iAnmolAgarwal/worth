@@ -292,6 +292,43 @@ describe('calendar behavior and demo', () => {
     ])
   })
 
+  it('follows an explicit last-day or numeric anchor instead of the clamped next date', () => {
+    const dates = (overrides: Partial<ScheduledFlow>, from: string, days: number) =>
+      getUpcomingFlows(profile({ flows: [flow(overrides)] }), from, days).map((item) => item.date)
+    const monthly = { cadence: 'monthly' as const, nextDate: '2026-09-30' }
+    expect(dates({ ...monthly, anchorDay: 'last' }, '2026-10-03', 150)).toEqual([
+      '2026-10-31',
+      '2026-11-30',
+      '2026-12-31',
+      '2027-01-31',
+      '2027-02-28',
+    ])
+    // Without an anchor the 30th is kept, which is why month-end bills used to drift.
+    expect(dates(monthly, '2026-10-03', 31)).toEqual(['2026-10-30'])
+    // A numeric anchor is clamped to shorter months and restored afterwards.
+    expect(
+      dates({ cadence: 'monthly', nextDate: '2027-02-28', anchorDay: 31 }, '2027-02-28', 62),
+    ).toEqual(['2027-02-28', '2027-03-31', '2027-04-30'])
+    expect(
+      dates({ cadence: 'monthly', nextDate: '2027-02-28', anchorDay: 30 }, '2027-03-01', 31),
+    ).toEqual(['2027-03-30'])
+    expect(
+      dates({ cadence: 'yearly', nextDate: '2027-02-28', anchorDay: 'last' }, '2027-03-01', 366),
+    ).toEqual(['2028-02-29'])
+  })
+
+  it('lets an edited next date win over an anchor that no longer matches it', () => {
+    const edited = (anchorDay: ScheduledFlow['anchorDay']) =>
+      getUpcomingFlows(
+        profile({ flows: [flow({ cadence: 'monthly', nextDate: '2026-10-15', anchorDay })] }),
+        '2026-10-03',
+        45,
+      ).map((item) => item.date)
+    expect(edited('last')).toEqual(['2026-10-15', '2026-11-15'])
+    expect(edited(31)).toEqual(['2026-10-15', '2026-11-15'])
+    expect(edited(0)).toEqual(['2026-10-15', '2026-11-15'])
+  })
+
   it('handles DST calendar arithmetic without a local-time date shift', () => {
     expect(addDays('2026-03-08', 1)).toBe('2026-03-09')
     expect(addDays('2026-11-01', 1)).toBe('2026-11-02')

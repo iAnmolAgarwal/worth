@@ -29,7 +29,8 @@ In development, `server/index.ts` mounts Vite middleware in the same Express pro
 | --- | --- |
 | `shared/types.ts` | Profile, transaction, assessment, forecast, purchase, and API response contracts. |
 | `shared/finance.ts` | Date recurrence, commitments, integer-cent forecasts, missing-data precedence, outcomes, and earliest-date search. |
-| `shared/csv.ts` | English-header alias detection, validation, transaction identity, classification, recurring suggestions, and daily-spending estimate. |
+| `shared/csv.ts` | PayPal personal and business export headers, per-file date order, currency-conversion pairing, unresolved foreign payments, transfer/memo/hold rules, Pay in 4 proposals, transaction identity, classification, anchored recurring suggestions, and daily-spending estimate. |
+| `shared/limits.ts` | The one CSV size and row limit read by the browser, the server and the parser. |
 | `shared/seed.ts` | Relative-date synthetic persona and server-owned demo product catalog. |
 | `server/app.ts` | Session setup, schema validation, routes, ownership checks, financial/profile rules, payment reservation, and reconciliation. |
 | `server/store.ts` | SQLite tables, atomic operations, uniqueness constraints, session expiry, and deletion. |
@@ -38,7 +39,8 @@ In development, `server/index.ts` mounts Vite middleware in the same Express pro
 | `server/index.ts` | Server startup, client serving, periodic expiry cleanup, and shutdown. |
 | `src/api.ts` | Same-origin JSON requests and application client header. |
 | `src/paypalSdk.ts` | Bounded SDK v6 loading, per-client initialization, and one-time payment session interface. |
-| `src/PlanDialogs.tsx` | Financial-picture review, explicit confirmation/AI choice, and CSV import preview. |
+| `src/PlanDialogs.tsx` | Financial-picture review, explicit confirmation/AI choice, and CSV import preview, including the date-order question. |
+| `src/ForeignPayments.tsx` | Activity panel for resolving imported foreign-currency payments. |
 | `src/ForecastChart.tsx`, `src/CashFlowPlot.tsx` | Lazy-loaded forecast visualization; the chart payload is separate from the initial application bundle. |
 
 ## Financial calculation
@@ -63,6 +65,14 @@ Purchase dates range from today through 30 days ahead. Each candidate is assesse
 Missing confirmation, a funds snapshot that is not for today, unconfirmed active flows, invalid amounts, or unresolved profile fields force `incomplete`. The forecast remains inspectable, but it cannot support a positive result.
 
 The financial-picture editor separates Funds, Income, Bills & subscriptions, and Review. It validates each step, preserves drafts through Back navigation, and only writes on final Save. Review includes completed-purchase inclusion and explicit AI consent. Name/timezone are an optional disclosure; recurring items use compact rows with one editor at a time. The assistant can show a short `intro` above its structured assessment, avoiding a second copy of the same numerical explanation.
+
+## CSV import
+
+`POST /api/import/preview` and `POST /api/import/commit` take `{ csv, dateOrder? }`. The parser validates every row, leaves out memo rows and authorization holds, and pairs each USD currency-conversion leg with the foreign-currency payment it paid for (by Reference Txn ID, or, in personal exports, which have no reference, among rows within two seconds of each other; with several conversions at once, each payment pairs through the foreign-currency leg of its own amount). A paired payment, pending or completed, is recorded once at its USD cost under its own transaction ID, and never added when its USD leg is already in history. A payment left beside an unpaired USD leg is covered by that leg. The preview adds `dateOrder`, `needsDateOrder`, `leftOut`, `adjustments`, `unresolved`, `converted` and `instalmentPlans` to the counts above.
+
+- When every slash date reads both ways, the preview returns `needsDateOrder: true` without importing anything, and the commit answers `400 DATE_ORDER_REQUIRED` until `dateOrder` is `MM/DD` or `DD/MM`.
+- Completed foreign spending with no conversion is stored with the session as an unresolved payment. While any remain, the profile carries a missing-information entry that saving the plan cannot remove, so every assessment is `incomplete`. `POST /api/import/unresolved/:paymentId` resolves one with `{ amountCents }` (its USD cost, added to the imported history) or `{ oneOff: true }`; if the added cost raises the history-based daily estimate above the plan's, the user is asked to review it. A later export that pairs the payment marks it `matched` and its USD leg replaces any entered cost; resolving a payment already in history returns `409 ALREADY_IN_HISTORY`.
+- Recurring suggestions carry `anchorDay` (1–31 or `last`), which `occurrence()` follows for monthly and yearly items while it agrees with `nextDate`.
 
 ## AI boundary
 

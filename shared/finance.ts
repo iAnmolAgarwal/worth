@@ -96,19 +96,51 @@ export function daysBetween(from: string, to: string): number {
   )
 }
 
-// Always anchor monthly/yearly dates to the original day. Jan 31 -> Feb 28 -> Mar 31.
-function occurrence(flow: ScheduledFlow, offset: number): string {
+/** Days in a month, where `month` runs from 1 to 12. */
+function daysInMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0, 12)).getUTCDate()
+}
+
+/**
+ * The anchor that monthly and yearly occurrences follow. An explicit anchor applies only while it
+ * agrees with the next date; once the user edits that date, the date they chose wins.
+ */
+function recurrenceAnchor(flow: ScheduledFlow, year: number, month: number, day: number) {
+  const lastDay = daysInMonth(year, month)
+  const anchor = flow.anchorDay
+  if (anchor === 'last') return day === lastDay ? 'last' : day
+  if (
+    typeof anchor === 'number' &&
+    Number.isInteger(anchor) &&
+    anchor >= 1 &&
+    anchor <= 31 &&
+    Math.min(anchor, lastDay) === day
+  )
+    return anchor
+  return day
+}
+
+/**
+ * The date `offset` occurrences after the flow's next date. Monthly and yearly items keep their
+ * anchor: Jan 31 -> Feb 28 -> Mar 31, and an item anchored to the last day moves from Sep 30 to
+ * Oct 31. Days past the end of a shorter month are clamped to its last day.
+ */
+export function occurrence(flow: ScheduledFlow, offset: number): string {
   if (flow.cadence === 'weekly') return addDays(flow.nextDate, offset * 7)
   if (flow.cadence === 'biweekly') return addDays(flow.nextDate, offset * 14)
   if (flow.cadence === 'once') return flow.nextDate
   const [year, month, day] = flow.nextDate.split('-').map(Number)
+  const anchor = recurrenceAnchor(flow, year, month, day)
   const months = offset * (flow.cadence === 'yearly' ? 12 : 1)
   const monthStart = new Date(Date.UTC(year, month - 1 + months, 1, 12))
-  const lastDay = new Date(
-    Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 0, 12),
-  ).getUTCDate()
+  const lastDay = daysInMonth(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1)
   return new Date(
-    Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth(), Math.min(day, lastDay), 12),
+    Date.UTC(
+      monthStart.getUTCFullYear(),
+      monthStart.getUTCMonth(),
+      anchor === 'last' ? lastDay : Math.min(anchor, lastDay),
+      12,
+    ),
   )
     .toISOString()
     .slice(0, 10)
