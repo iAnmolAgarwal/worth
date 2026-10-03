@@ -40,12 +40,13 @@ export interface Explanation {
   readAs?: string
 }
 
+/** One state set everywhere: above the cushion, exactly at it, or below it. Words, never colour alone. */
 export function optionStatus(option: OptionResult): { tone: Tone; text: string } {
-  return option.outcome === 'fits'
-    ? { tone: 'ok', text: 'Fits' }
-    : option.outcome === 'tight'
-      ? { tone: 'bad', text: 'Dips below cushion' }
-      : { tone: 'info', text: 'More info needed' }
+  if (option.outcome === 'incomplete') return { tone: 'info', text: 'More info needed' }
+  if (option.outcome === 'tight') return { tone: 'bad', text: 'Below cushion' }
+  return option.headroomCents === 0
+    ? { tone: 'warn', text: 'At your limit' }
+    : { tone: 'ok', text: 'Above cushion' }
 }
 
 /** The option keys the comparison can show, in order, with the wait card disabled without a date. */
@@ -157,7 +158,10 @@ function OptionCard({
       </div>
     )
   }
-  const status = optionStatus(option)
+  const status =
+    k === 'spendLess' && c.spendLess.maxPriceCents <= 0
+      ? ({ tone: 'info', text: 'Nothing fits' } as const)
+      : optionStatus(option)
   const below = option.lowestBalanceCents < c.cushionCents
   const fragile = fits(option) && option.stressLowestCents < c.cushionCents
   const why =
@@ -186,7 +190,9 @@ function OptionCard({
         <Pill tone={status.tone}>{status.text}</Pill>
       </span>
       <span className="kv">
-        <span className="k">{k === 'spendLess' ? 'Up to, today' : 'Lowest balance'}</span>
+        <span className="k">
+          {k === 'spendLess' ? 'Most you can spend today' : 'Lowest balance'}
+        </span>
         <span className={cx('v num', k !== 'spendLess' && below && 'bad')}>
           {k === 'spendLess' ? money(c.spendLess.maxPriceCents) : signed(option.lowestBalanceCents)}
         </span>

@@ -9,11 +9,17 @@ import {
   TriangleAlert,
 } from 'lucide-react'
 import { addDays } from '../shared/finance'
-import type { ChatMessage, Interpretation, Product, PurchaseContext } from '../shared/types'
+import type {
+  ChatMessage,
+  Interpretation,
+  OptionResult,
+  Product,
+  PurchaseContext,
+} from '../shared/types'
 import { api, ApiError } from './api'
 import type { AgentCheckout, AppState, ChatReply, Comparison } from './contract'
 import { CLAUDE_USES } from './copy'
-import { breachLine, type DecisionRequest, type Explanation } from './Decision'
+import { breachLine, optionStatus, type DecisionRequest, type Explanation } from './Decision'
 import { claudeOn, envLabel, fits, missingFix, useComparison } from './engine'
 import { capitalize, cx, fromMoney, money } from './format'
 import { Alert, Button, Field, Pill, ReadAsChip, Toggle } from './ui'
@@ -75,6 +81,11 @@ function paragraphs(reply: ChatReply) {
   return reply.message.split('\n\n').filter((paragraph) => paragraph !== chosen)
 }
 
+const status = (option: OptionResult) => {
+  const { tone, text } = optionStatus(option)
+  return [tone, text] as const
+}
+
 function OptionRows({ c }: { c: Comparison }) {
   const rows = [
     {
@@ -83,7 +94,7 @@ function OptionRows({ c }: { c: Comparison }) {
       sub: fits(c.buyToday)
         ? `${money(c.buyToday.headroomCents)} above cushion at lowest`
         : (breachLine(c.buyToday, c.cushionCents, true) ?? 'Below your cushion'),
-      pill: fits(c.buyToday) ? (['ok', 'Fits'] as const) : (['bad', 'Dips below'] as const),
+      pill: status(c.buyToday),
     },
     fits(c.buyToday)
       ? {
@@ -97,7 +108,7 @@ function OptionRows({ c }: { c: Comparison }) {
             key: 'wait',
             title: `Wait until ${new Date(`${c.wait.date}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
             sub: `${money(c.wait.headroomCents)} above cushion at lowest${c.wait.stressLowestCents < c.cushionCents ? ' · tight' : ''}`,
-            pill: ['ok', 'Fits'] as const,
+            pill: status(c.wait),
           }
         : {
             key: 'wait',
@@ -112,7 +123,8 @@ function OptionRows({ c }: { c: Comparison }) {
         c.spendLess.maxPriceCents > 0
           ? `Up to ${money(c.spendLess.maxPriceCents)} today`
           : 'Nothing fits today',
-      pill: c.spendLess.maxPriceCents > 0 ? (['ok', 'Fits'] as const) : (['info', 'None'] as const),
+      pill:
+        c.spendLess.maxPriceCents > 0 ? status(c.spendLess) : (['info', 'Nothing fits'] as const),
     },
   ]
   return (
@@ -122,7 +134,9 @@ function OptionRows({ c }: { c: Comparison }) {
           <div className="body">
             <div className="t">
               {row.title}
-              {c.recommendation === row.key && <span className="tag-rec">Recommended</span>}
+              {c.recommendation === row.key && row.pill[0] !== 'info' && (
+                <span className="tag-rec">Recommended</span>
+              )}
             </div>
             <div className="s">
               <span className="soft">{row.sub}</span>

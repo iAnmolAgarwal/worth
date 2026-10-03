@@ -2467,3 +2467,28 @@ textarea.input {
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+/* Activity's search row fits any width: the pill shrinks, the round buttons stay whole. */
+.search-row .composer {
+  min-width: 0;
+}
+.search-row .composer input {
+  text-overflow: ellipsis;
+}
+@media (max-width: 767px) {
+  .search-row {
+    gap: 6px;
+  }
+  .search-row .composer {
+    padding: 0 var(--s-3);
+    height: 48px;
+  }
+  .search-row .round-btn {
+    width: 44px;
+    height: 44px;
+  }
+}
+/* Nothing may scroll sideways at phone widths. */
+#root {
+  max-width: 100vw;
+}
