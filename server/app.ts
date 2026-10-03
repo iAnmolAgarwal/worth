@@ -3,8 +3,8 @@ import type { ErrorRequestHandler, Request, Response } from 'express'
 import cookieParser from 'cookie-parser'
 import { createHash, randomUUID } from 'node:crypto'
 import { z } from 'zod'
-import { assessPurchase, addDays } from '../shared/finance.ts'
-import { createDemoState, PRODUCTS } from '../shared/seed.ts'
+import { assessPurchase, addDays, normalizeTimezone } from '../shared/finance.ts'
+import { createDemoState, DEMO_TIMEZONE, PRODUCTS, rebaseDemoState } from '../shared/seed.ts'
 import { parsePayPalCsv } from '../shared/csv.ts'
 import type {
   AppState,
@@ -67,14 +67,7 @@ const profileSchema = z
     timezone: z
       .string()
       .max(80)
-      .refine((value) => {
-        try {
-          new Intl.DateTimeFormat('en', { timeZone: value })
-          return true
-        } catch {
-          return false
-        }
-      }, 'Invalid timezone'),
+      .refine((value) => normalizeTimezone(value) !== undefined, 'Invalid timezone'),
     snapshotDate: date,
     confirmedAt: z.string().max(40),
     version: z.number().int().min(0),
@@ -192,6 +185,18 @@ export function createApp(options: AppOptions = {}) {
     }).formatToParts(now())
     return `${parts.find((p) => p.type === 'year')!.value}-${parts.find((p) => p.type === 'month')!.value}-${parts.find((p) => p.type === 'day')!.value}`
   }
+  /** The browser's IANA time zone, sent on every API call; anything unsupported is ignored. */
+  function viewerTimezone(req: Request) {
+    return normalizeTimezone(req.get('X-Worth-Timezone'))
+  }
+  /** Keeps an untouched synthetic persona dated today for the viewer, so it never goes stale. */
+  function followViewerDay(id: string, viewer: string | undefined) {
+    const data = store.get(id)
+    if (!data) return
+    const timezone = viewer ?? data.profile.timezone
+    const rebased = rebaseDemoState(data, today(timezone), timezone)
+    if (rebased) store.save(id, rebased)
+  }
   function sessionId(res: Response): string {
     return res.locals.sessionId as string
   }
@@ -238,7 +243,8 @@ export function createApp(options: AppOptions = {}) {
         'Too many new sessions from this network. Please try again later.',
         'SESSION_RATE_LIMITED',
       )
-    const seed = createDemoState(today('America/New_York'))
+    const timezone = viewerTimezone(req) ?? DEMO_TIMEZONE
+    const seed = createDemoState(today(timezone), timezone)
     const id = store.create(
       { profile: seed.profile, transactions: seed.transactions, wishlist: seed.wishlist },
       time,
@@ -503,9 +509,10 @@ export function createApp(options: AppOptions = {}) {
       typeof cookie === 'string' &&
       /^[A-Za-z0-9_-]{43}$/.test(cookie) &&
       store.isLive(cookie, time)
-    )
+    ) {
       res.locals.sessionId = cookie
-    else startSession(req, res)
+      followViewerDay(cookie, viewerTimezone(req))
+    } else startSession(req, res)
     next()
   })
   app.get('/api/state', (_req, res) => res.json(state(sessionId(res))))
@@ -592,8 +599,9 @@ export function createApp(options: AppOptions = {}) {
   }
   app.post('/api/import/preview', (req, res) => {
     const { csv } = csvSchema.parse(req.body)
-    const existing = dataFor(res).transactions.filter((t) => t.source !== 'demo')
-    const preview = parsePayPalCsv(csv, existing)
+    const data = dataFor(res)
+    const existing = data.transactions.filter((t) => t.source !== 'demo')
+    const preview = parsePayPalCsv(csv, existing, { today: today(data.profile.timezone) })
     const total = mergeTransactions(existing, preview.transactions).length
     if (total > config.maxTransactions)
       preview.errors.unshift({ row: 1, message: transactionLimitMessage(total) })
@@ -607,6 +615,7 @@ export function createApp(options: AppOptions = {}) {
     const preview = parsePayPalCsv(
       csv,
       data.transactions.filter((t) => t.source !== 'demo'),
+      { today: today(data.profile.timezone) },
     )
     if (preview.errors.length)
       throw new HttpError(

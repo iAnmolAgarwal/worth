@@ -286,6 +286,18 @@ describe('identity and recurring spending', () => {
     expect(result.recurring).toEqual([])
   })
 
+  it('judges future-dated rows against the caller’s today rather than New York', () => {
+    // 01:30 on Oct 4 in India is still Oct 3 in New York.
+    const text =
+      'Date,Time,TimeZone,Name,Type,Status,Currency,Net,Transaction ID\n2026-10-04,01:05:00,IST,Coffee,Express Checkout Payment,Completed,USD,-4.00,TZ1'
+    const india = parsePayPalCsv(text, [], { today: '2026-10-04' })
+    expect(india.errors).toEqual([])
+    expect(india.transactions.map((t) => t.date)).toEqual(['2026-10-04'])
+    expect(parsePayPalCsv(text, [], { today: '2026-10-03' }).errors[0]!.message).toContain(
+      'Future-dated',
+    )
+  })
+
   it('returns useful diagnostics for empty and malformed files', () => {
     expect(parsePayPalCsv('').errors[0]!.message).toContain('empty')
     expect(

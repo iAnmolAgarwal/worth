@@ -6,7 +6,7 @@ import {
   getUpcomingFlows,
   todayInTimezone,
 } from '../shared/finance.ts'
-import { createDemoState, PRODUCTS } from '../shared/seed.ts'
+import { createDemoState, PRODUCTS, rebaseDemoState } from '../shared/seed.ts'
 import type { FinancialProfile, Purchase, ScheduledFlow } from '../shared/types.ts'
 
 const TODAY = '2026-10-03'
@@ -277,6 +277,29 @@ describe('calendar behavior and demo', () => {
     expect(addDays('2026-03-08', 1)).toBe('2026-03-09')
     expect(addDays('2026-11-01', 1)).toBe('2026-11-02')
     expect(todayInTimezone('Asia/Kolkata')).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+  })
+
+  it('rebases only an untouched synthetic persona, keeping every date relative to today', () => {
+    const demo = createDemoState(TODAY, 'Pacific/Kiritimati')
+    expect(demo.profile).toMatchObject({ timezone: 'Pacific/Kiritimati', userEdited: false })
+    expect(rebaseDemoState(demo, TODAY, 'Pacific/Kiritimati')).toBeUndefined()
+    const yesterday = addDays(TODAY, -1)
+    const moved = rebaseDemoState(demo, yesterday, 'Pacific/Honolulu')!
+    expect(moved).toEqual({
+      ...createDemoState(yesterday, 'Pacific/Honolulu'),
+      profile: { ...createDemoState(yesterday, 'Pacific/Honolulu').profile, version: 2 },
+      transactions: demo.transactions.map((t) => ({ ...t, date: addDays(t.date, -1) })),
+    })
+    const camera = PRODUCTS.find((item) => item.id === 'camera')!.priceCents
+    expect(
+      assessPurchase(moved.profile, [], { amountCents: camera, today: yesterday }).earliestDate,
+    ).toBe(addDays(yesterday, 13))
+    const edited = { ...demo, profile: { ...demo.profile, userEdited: true } }
+    expect(rebaseDemoState(edited, yesterday, 'Pacific/Honolulu')).toBeUndefined()
+    const legacy = { ...demo, profile: { ...demo.profile, userEdited: undefined } }
+    expect(rebaseDemoState(legacy, yesterday, 'Pacific/Honolulu')).toBeUndefined()
+    const imported = { ...demo, profile: { ...demo.profile, source: 'import' as const } }
+    expect(rebaseDemoState(imported, yesterday, 'Pacific/Honolulu')).toBeUndefined()
   })
 
   it('provides reproducible 90-day history and the intended purchase story', () => {

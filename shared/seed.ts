@@ -1,5 +1,8 @@
 import type { FinancialProfile, Product, Purchase, Transaction } from './types.ts'
-import { addDays, todayInTimezone } from './finance.ts'
+import { addDays, daysBetween, todayInTimezone } from './finance.ts'
+
+/** Time zone for the synthetic persona when the viewer's own zone is unknown. */
+export const DEMO_TIMEZONE = 'America/New_York'
 
 export const PRODUCTS: Product[] = [
   {
@@ -47,19 +50,23 @@ export const PRODUCTS: Product[] = [
   },
 ]
 
-export function createDemoState(today = todayInTimezone('America/New_York')): {
+export function createDemoState(
+  today?: string,
+  timezone = DEMO_TIMEZONE,
+): {
   profile: FinancialProfile
   transactions: Transaction[]
   purchases: Purchase[]
   wishlist: string[]
 } {
+  today ??= todayInTimezone(timezone)
   const profile: FinancialProfile = {
     name: 'Alex',
     balanceCents: 420000,
     cushionCents: 100000,
     dailySpendCents: 3900,
     currency: 'USD',
-    timezone: 'America/New_York',
+    timezone,
     snapshotDate: today,
     confirmedAt: `${today}T12:00:00.000Z`,
     version: 1,
@@ -276,5 +283,37 @@ export function createDemoState(today = todayInTimezone('America/New_York')): {
     ),
     purchases: [],
     wishlist: ['headphones', 'camera'],
+  }
+}
+
+/**
+ * Moves an untouched synthetic persona to the viewer's day: the funds snapshot becomes today, and
+ * scheduled items and synthetic history shift by the same number of days. Completed purchases keep
+ * their real dates. Returns undefined when nothing changes or the plan holds the user's own data.
+ */
+export function rebaseDemoState<
+  T extends { profile: FinancialProfile; transactions: Transaction[] },
+>(data: T, today: string, timezone: string): T | undefined {
+  const { profile } = data
+  if (profile.source !== 'demo' || profile.userEdited !== false) return undefined
+  if (profile.snapshotDate === today && profile.timezone === timezone) return undefined
+  const delta = daysBetween(profile.snapshotDate, today)
+  const shift = (date: string) => (delta ? addDays(date, delta) : date)
+  return {
+    ...data,
+    profile: {
+      ...profile,
+      timezone,
+      snapshotDate: today,
+      confirmedAt: `${today}T12:00:00.000Z`,
+      // The plan changed under any open editor, so stale saves are rejected.
+      version: profile.version + 1,
+      flows: profile.flows.map((flow) => ({ ...flow, nextDate: shift(flow.nextDate) })),
+    },
+    transactions: data.transactions.map((transaction) =>
+      transaction.source === 'demo'
+        ? { ...transaction, date: shift(transaction.date) }
+        : transaction,
+    ),
   }
 }

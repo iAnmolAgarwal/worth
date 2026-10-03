@@ -10,11 +10,24 @@ export class ApiError extends Error {
     this.details = details
   }
 }
+/** The browser's IANA time zone; the server uses it to date the synthetic plan and new imports. */
+function viewerTimezone(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined
+  } catch {
+    return undefined
+  }
+}
 export async function api<T>(path: string, data?: unknown, method?: string): Promise<T> {
+  const timezone = viewerTimezone()
   const response = await fetch(`/api${path}`, {
     method: method ?? (data === undefined ? 'GET' : 'POST'),
     credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json', 'X-Worth-Client': 'web' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Worth-Client': 'web',
+      ...(timezone ? { 'X-Worth-Timezone': timezone } : {}),
+    },
     ...(data !== undefined ? { body: JSON.stringify(data) } : {}),
   })
   const result = await response

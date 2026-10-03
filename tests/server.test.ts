@@ -6,6 +6,7 @@ import type { StoredPurchase } from '../server/store.ts'
 import type { PayPalGateway, PayPalOrder } from '../server/paypal.ts'
 import type { AppState } from '../shared/types.ts'
 import { createChatProvider, fallbackReply } from '../server/chat.ts'
+import { addDays } from '../shared/finance.ts'
 
 const stores: Store[] = []
 const config = {
@@ -1234,6 +1235,143 @@ describe('hosted abuse limits', () => {
     expect(
       (await request.agent(app).get('/api/state').set('X-Forwarded-For', '198.51.100.20')).status,
     ).toBe(429)
+  })
+})
+
+describe('demo dates follow the viewer', () => {
+  const localDate = (timeZone: string, at: Date) =>
+    new Intl.DateTimeFormat('en-CA', { timeZone }).format(at)
+  // UTC−10 through UTC+14, including half- and quarter-hour offsets.
+  const zones = [
+    'Pacific/Honolulu',
+    'America/Anchorage',
+    'America/Los_Angeles',
+    'America/Chicago',
+    'America/New_York',
+    'America/Sao_Paulo',
+    'UTC',
+    'Europe/London',
+    'Europe/Berlin',
+    'Europe/Moscow',
+    'Asia/Dubai',
+    'Asia/Kolkata',
+    'Asia/Kathmandu',
+    'Asia/Shanghai',
+    'Asia/Tokyo',
+    'Australia/Adelaide',
+    'Pacific/Auckland',
+    'Pacific/Tongatapu',
+    'Pacific/Kiritimati',
+  ]
+  it('keeps the untouched persona complete and buyable at every hour from UTC−10 to UTC+14', async () => {
+    const { app } = setup({
+      config: { ...config, sessionIpHourlyLimit: 10_000, requestsPerMinute: 10_000 },
+    })
+    const start = new Date('2026-10-03T00:20:00Z').getTime()
+    clock.value = new Date(start)
+    const viewers = zones.map((zone) => ({ zone, agent: request.agent(app) }))
+    const check = async (agent: ReturnType<typeof request.agent>, zone: string) => {
+      const send = <T extends { set: (k: string, v: string) => T }>(test: T) =>
+        test.set('X-Worth-Timezone', zone).set('X-Worth-Client', 'web')
+      const expected = localDate(zone, clock.value)
+      const assessed = await send(agent.post('/api/assess')).send({ amountCents: 34900 })
+      expect([zone, clock.value.toISOString(), assessed.body.today, assessed.body.outcome]).toEqual(
+        [zone, clock.value.toISOString(), expected, 'fits'],
+      )
+      const created = await send(agent.post('/api/checkout/create')).send({
+        productId: 'headphones',
+      })
+      expect([zone, clock.value.toISOString(), created.status]).toEqual([
+        zone,
+        clock.value.toISOString(),
+        200,
+      ])
+      const cancelled = await send(
+        agent.post(`/api/checkout/${created.body.purchase.id}/cancel`),
+      ).send({})
+      expect(cancelled.status).toBe(200)
+      expect(cancelled.body.profile).toMatchObject({ timezone: zone, snapshotDate: expected })
+    }
+    for (let hour = 0; hour < 24; hour++) {
+      clock.value = new Date(start + hour * 60 * 60_000)
+      for (const { zone, agent } of viewers) await check(agent, zone)
+      // A session created at this hour is valid immediately as well.
+      await check(request.agent(app), zones[hour % zones.length]!)
+    }
+  })
+  it('rolls the persona past New York midnight even without a time zone header', async () => {
+    const { agent } = setup()
+    clock.value = new Date('2026-10-04T03:30:00Z')
+    expect((await post(agent, '/api/assess', { amountCents: 34900 })).body.outcome).toBe('fits')
+    const before = await state(agent)
+    // 00:30 in New York, inside the same 24-hour session.
+    clock.value = new Date('2026-10-04T04:30:00Z')
+    const after = await post(agent, '/api/assess', { amountCents: 34900 })
+    expect(after.body).toMatchObject({ outcome: 'fits', today: '2026-10-04' })
+    expect((await post(agent, '/api/checkout/create', { productId: 'headphones' })).status).toBe(
+      200,
+    )
+    const rolled = await state(agent)
+    expect(rolled.profile.snapshotDate).toBe('2026-10-04')
+    expect(rolled.profile.flows.map((f) => f.nextDate)).toEqual(
+      before.profile.flows.map((f) => addDays(f.nextDate, 1)),
+    )
+    const synthetic = (s: AppState) => s.transactions.filter((t) => t.source === 'demo')
+    expect(synthetic(rolled).map((t) => t.date)).toEqual(
+      synthetic(before).map((t) => addDays(t.date, 1)),
+    )
+    // An editor opened before the rollover cannot save the stale dates.
+    expect((await patch(agent, { profile: before.profile })).status).toBe(409)
+  })
+  it('ignores an unsupported time zone header and leaves edited plans on their own dates', async () => {
+    const { agent } = setup()
+    const invalid = await agent.get('/api/state').set('X-Worth-Timezone', 'Mars/Olympus_Mons')
+    expect(invalid.body.profile.timezone).toBe('America/New_York')
+    await simpleProfile(agent)
+    clock.value = new Date('2026-10-04T05:00:00Z')
+    const next = await agent.get('/api/state').set('X-Worth-Timezone', 'Asia/Tokyo')
+    expect(next.body.profile).toMatchObject({
+      timezone: 'America/New_York',
+      snapshotDate: '2026-10-03',
+    })
+    expect((await post(agent, '/api/assess', { amountCents: 100 })).body.outcome).toBe('incomplete')
+  })
+  it('imports with the user’s time zone, stores it, and keeps it editable', async () => {
+    const { app } = setup()
+    // 01:30 on Oct 4 in India; still Oct 3 in New York.
+    clock.value = new Date('2026-10-03T20:00:00Z')
+    const csv =
+      'Date,Time,TimeZone,Name,Type,Status,Currency,Net,Transaction ID\n2026-10-04,01:05:00,IST,Coffee,Express Checkout Payment,Completed,USD,-4.00,TZ1'
+    const viewer = (zone: string) => {
+      const agent = request.agent(app)
+      const send = (path: string, body: object) =>
+        post(agent, path, body).set('X-Worth-Timezone', zone)
+      return { agent, send }
+    }
+    const india = viewer('Asia/Kolkata')
+    const imported = await india.send('/api/import/commit', { csv })
+    expect(imported.status).toBe(200)
+    expect(imported.body.today).toBe('2026-10-04')
+    expect(imported.body.profile).toMatchObject({ timezone: 'Asia/Kolkata', userEdited: true })
+    const newYork = viewer('America/New_York')
+    const preview = await newYork.send('/api/import/preview', { csv })
+    expect(preview.body.errors[0].message).toContain('Future-dated')
+    expect((await newYork.send('/api/import/commit', { csv })).status).toBe(400)
+    const edited = await india.agent
+      .patch('/api/profile')
+      .set('X-Worth-Client', 'web')
+      .set('X-Worth-Timezone', 'Asia/Kolkata')
+      .send({
+        profile: {
+          ...imported.body.profile,
+          timezone: 'Europe/London',
+          snapshotDate: '2026-10-03',
+        },
+      })
+    expect(edited.status).toBe(200)
+    const later = await india.agent.get('/api/state').set('X-Worth-Timezone', 'Asia/Kolkata')
+    expect(later.body.profile.timezone).toBe('Europe/London')
+    expect(later.body.today).toBe('2026-10-03')
   })
 })
 
