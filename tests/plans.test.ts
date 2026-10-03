@@ -156,7 +156,7 @@ describe('purchase cash effect (acceptance 28)', () => {
     )
   })
 
-  it('treats payments dated before the funds snapshot as already reflected', () => {
+  it('drops payments dated on or before the snapshot only once the funds include the purchase', () => {
     const started = purchase({
       assessmentDate: addDays(TODAY, -16),
       paymentPlan: confirmed([
@@ -166,11 +166,31 @@ describe('purchase cash effect (acceptance 28)', () => {
         { date: addDays(TODAY, 32), amountCents: 29975 },
       ]),
     })
+    // Not yet in the funds: the earlier payment counts today, as the full debit would.
     expect(purchaseEvents(profile(), [started])).toEqual([
+      [TODAY, 29975],
       [TODAY, 29975],
       [addDays(TODAY, 16), 29975],
       [addDays(TODAY, 32), 29975],
     ])
+    expect(purchaseEvents(profile({ reflectedPurchaseIds: [started.id] }), [started])).toEqual([
+      [addDays(TODAY, 16), 29975],
+      [addDays(TODAY, 32), 29975],
+    ])
+  })
+
+  it('keeps counting the whole price when a day passes before the funds are refreshed', () => {
+    const plan = purchase({ paymentPlan: confirmed() })
+    const tomorrow = addDays(TODAY, 1)
+    // The snapshot is still the one taken before the purchase, so it reflects no payment.
+    const events = forecast(profile(), [plan], { today: tomorrow, days: 60 }).flatMap((point) =>
+      point.events.filter((event) => event.kind === 'purchase').map((event) => -event.amountCents),
+    )
+    expect(events.reduce((total, cents) => total + cents, 0)).toBe(119900)
+    const full = forecast(profile(), [purchase()], { today: tomorrow, days: 0 })[0]!
+    const planned = forecast(profile(), [plan], { today: tomorrow, days: 0 })[0]!
+    expect(planned.baselineCents).toBe(200000 - 29975)
+    expect(full.baselineCents).toBe(200000 - 119900)
   })
 })
 
@@ -206,6 +226,24 @@ describe('refund review (engine side of acceptance 23)', () => {
     expect(purchaseEvents(profile({ reflectedPurchaseIds: [partial.id] }), [partial])).toEqual(
       remaining.map((item) => [item.date, item.amountCents]),
     )
+  })
+
+  it('uses entered remaining payments exactly and never nets returned money against them', () => {
+    const remaining = [
+      { date: addDays(TODAY, 14), amountCents: 29975 },
+      { date: addDays(TODAY, 28), amountCents: 29975 },
+      { date: addDays(TODAY, 42), amountCents: 20000 },
+    ]
+    const partial = plan([
+      { ...refund, status: 'confirmed', returnedCents: 14900, remainingInstalments: remaining },
+    ])
+    const expected = remaining.map((item) => [item.date, item.amountCents])
+    expect(purchaseEvents(profile(), [partial])).toEqual(expected)
+    // After a funds refresh that already holds the returned money, nothing is counted twice.
+    const tomorrow = addDays(TODAY, 1)
+    const refreshed = profile({ snapshotDate: tomorrow, reflectedPurchaseIds: [partial.id] })
+    const room = assessPurchase(refreshed, [partial], { amountCents: 0, today: tomorrow })
+    expect(room.maxAffordableCents).toBe(200000 - 79950 - 50000)
   })
 
   it('leaves the payments due after a store-credit refund', () => {

@@ -213,11 +213,30 @@ function validInstalments(items: PlanInstalment[] | undefined): PlanInstalment[]
 }
 
 /**
+ * The payments still due on a purchase's confirmed Pay in 4 plan: the remaining payments entered
+ * with the latest confirmed refund, or else the confirmed schedule. Undefined without such a plan.
+ */
+export function confirmedSchedule(purchase: Purchase): PlanInstalment[] | undefined {
+  const plan = purchase.paymentPlan
+  if (purchase.status !== 'completed' || plan?.product !== 'payIn4' || plan.status !== 'confirmed')
+    return undefined
+  const instalments = validInstalments(plan.instalments)
+  if (!instalments) return undefined
+  const remaining = (purchase.refunds ?? []).findLast(
+    (refund) => refund.status === 'confirmed' && refund.remainingInstalments,
+  )
+  return remaining ? validInstalments(remaining.remainingInstalments) : instalments
+}
+
+/**
  * The single cash effect of each purchase. A checkout in progress, or a completed purchase without
  * a confirmed plan, is one full-price debit today unless the funds snapshot already reflects it. A
- * confirmed Pay in 4 plan replaces that debit with its payments; payments dated before the
- * snapshot are already reflected. Confirmed refund money reduces what is still to be paid, in date
- * order, but never adds funds: a fresh funds snapshot picks that up.
+ * confirmed Pay in 4 plan replaces that debit with its payments, using the remaining payments
+ * exactly as the user entered them after a refund. Until the snapshot reflects the purchase, a
+ * payment dated before today still counts, today, like the full debit would; once it does,
+ * payments dated on or before the snapshot are already in it. Money a confirmed refund returned
+ * only reduces an unreflected full-price debit and never adds funds: a fresh funds snapshot picks
+ * it up.
  */
 function purchaseOutflows(
   profile: FinancialProfile,
@@ -228,60 +247,47 @@ function purchaseOutflows(
   for (const purchase of livePurchases(purchases)) {
     const completed = purchase.status === 'completed'
     const reflected = completed && profile.reflectedPurchaseIds.includes(purchase.id)
-    const refunds = completed
-      ? (purchase.refunds ?? []).filter((refund) => refund.status === 'confirmed')
-      : []
-    const plan = completed ? purchase.paymentPlan : undefined
-    const confirmedPlan =
-      plan?.product === 'payIn4' && plan.status === 'confirmed'
-        ? validInstalments(plan.instalments)
-        : undefined
-    let outflows: PurchaseOutflow[]
-    if (confirmedPlan) {
-      const remaining = refunds.findLast((refund) => refund.remainingInstalments)
-      const schedule = validInstalments(remaining?.remainingInstalments) ?? confirmedPlan
-      outflows = schedule
-        .map((item, index) => ({
-          id: `plan:${purchase.id}:${index + 1}`,
-          purchaseId: purchase.id,
-          name: `${purchase.name} · Pay in 4 payment ${index + 1} of ${schedule.length}`,
-          date: item.date,
-          amountCents: item.amountCents,
-          planned: true,
-        }))
-        .filter(
-          (item) =>
-            item.date >= today &&
-            (item.date > profile.snapshotDate ||
-              (item.date === profile.snapshotDate && !reflected)),
-        )
-    } else
-      outflows = reflected
-        ? []
-        : [
-            {
-              id: `reserved:${purchase.id}`,
-              purchaseId: purchase.id,
-              name: `${purchase.name} · ${completed ? 'paid' : 'reserved'}`,
-              date: today,
-              amountCents: purchase.amountCents,
-              planned: false,
-            },
-          ]
-    let returned = refunds.reduce(
-      (total, refund) =>
-        total +
-        (Number.isSafeInteger(refund.returnedCents) && refund.returnedCents! > 0
-          ? refund.returnedCents!
-          : 0),
-      0,
-    )
-    for (const outflow of outflows) {
-      const offset = Math.min(returned, outflow.amountCents)
-      outflow.amountCents -= offset
-      returned -= offset
+    const schedule = confirmedSchedule(purchase)
+    if (schedule) {
+      result.push(
+        ...schedule
+          .map((item, index) => ({
+            id: `plan:${purchase.id}:${index + 1}`,
+            purchaseId: purchase.id,
+            name: `${purchase.name} · Pay in 4 payment ${index + 1} of ${schedule.length}`,
+            date: item.date < today ? today : item.date,
+            amountCents: item.amountCents,
+            planned: true,
+            due: item.date,
+          }))
+          .filter((item) => !reflected || item.due > profile.snapshotDate)
+          .map(({ due: _due, ...item }) => item),
+      )
+      continue
     }
-    result.push(...outflows.filter((outflow) => outflow.amountCents > 0))
+    if (reflected) continue
+    const returned = completed
+      ? (purchase.refunds ?? []).reduce(
+          (total, refund) =>
+            total +
+            (refund.status === 'confirmed' &&
+            Number.isSafeInteger(refund.returnedCents) &&
+            refund.returnedCents! > 0
+              ? refund.returnedCents!
+              : 0),
+          0,
+        )
+      : 0
+    const amountCents = Math.max(0, purchase.amountCents - returned)
+    if (amountCents > 0)
+      result.push({
+        id: `reserved:${purchase.id}`,
+        purchaseId: purchase.id,
+        name: `${purchase.name} · ${completed ? 'paid' : 'reserved'}`,
+        date: today,
+        amountCents,
+        planned: false,
+      })
   }
   return result
 }

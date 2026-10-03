@@ -344,7 +344,8 @@ describe('existing instalment plans (acceptance 17)', () => {
     const p = profile({ balanceCents: 400000, flows: [...existing('a'), ...existing('b')] })
     const stacking = payIn4(compare(p, 119900, [plan])).stacking!
     expect(stacking.activePlans).toBe(3)
-    expect(stacking.totalCents).toBe(96000 + 30000)
+    // The funds don't include the purchase yet, so its earlier payment still counts today.
+    expect(stacking.totalCents).toBe(96000 + 40000)
   })
 
   it('shows no stacking warning without active plans', () => {
