@@ -116,7 +116,7 @@ async function sendMessage(user: User, text: string) {
 }
 async function openAsk(user: User) {
   const nav = await screen.findByRole('navigation', { name: 'Main' }, { timeout: 3000 })
-  await user.click(within(nav).getAllByRole('link', { name: 'Ask' })[0]!)
+  await user.click(within(nav).getAllByRole('link', { name: 'Ask Worth' })[0]!)
   await waitFor(() => expect(window.location.hash).toBe('#ask'))
 }
 function purchase(state: AppState, patch: Partial<Purchase> = {}): Purchase {
@@ -230,7 +230,7 @@ describe('conversation isolation across sessions', () => {
     await screen.findByText('A fresh sample answer.')
     expect(requests[2]!.history).toEqual([])
     expect(requests[2]!.context).toBeUndefined()
-    expect(screen.getByText('Claude used your plan')).toBeTruthy()
+    expect(screen.getByText('Worth’s assistant used your plan')).toBeTruthy()
   })
 
   it('replaces the sample conversation on import before the plan review and a new chat', async () => {
@@ -354,10 +354,12 @@ describe('Claude consent in chat', () => {
     routeApi(() => saved.promise)
     const onUpdate = vi.fn()
     render(<Ask {...askProps} state={state} onUpdate={onUpdate} />)
-    const toggle = screen.getAllByRole('switch', { name: 'Use Claude for explanations' })[0]!
+    const toggle = screen.getAllByRole('switch', {
+      name: 'Use the assistant (powered by Claude)',
+    })[0]!
     expect(toggle.getAttribute('aria-checked')).toBe('true')
     expect((toggle as HTMLButtonElement).disabled).toBe(false)
-    expect(screen.getAllByText(/^On: Claude explains answers/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/^On: the assistant explains answers/).length).toBeGreaterThan(0)
     await user.click(toggle)
     expect(document.activeElement).toBe(toggle)
     expect(toggle.getAttribute('aria-disabled')).toBe('true')
@@ -380,9 +382,13 @@ describe('Claude consent in chat', () => {
         onImport={vi.fn()}
       />,
     )
-    expect(screen.getByText(`When Claude answers, it receives ${shared}.`)).toBeTruthy()
+    expect(
+      screen.getByText(`When the assistant is on, these go to Anthropic (Claude): ${shared}.`),
+    ).toBeTruthy()
     expect(screen.getByText('Shortened labels')).toBeTruthy()
-    expect(screen.getByText('Sample data · Claude on · PayPal simulated')).toBeTruthy()
+    expect(
+      screen.getByText('Sample data · Assistant: powered by Claude · PayPal checkout: simulated'),
+    ).toBeTruthy()
   })
   it('toggles consent alone for personal data and reports the new state', async () => {
     const user = userEvent.setup()
@@ -395,7 +401,9 @@ describe('Claude consent in chat', () => {
     })
     const onUpdate = vi.fn()
     render(<Ask {...askProps} state={state} onUpdate={onUpdate} />)
-    const toggle = screen.getAllByRole('switch', { name: 'Use Claude for explanations' })[0]!
+    const toggle = screen.getAllByRole('switch', {
+      name: 'Use the assistant (powered by Claude)',
+    })[0]!
     expect(toggle.getAttribute('aria-checked')).toBe('false')
     await user.click(toggle)
     await waitFor(() => expect(onUpdate).toHaveBeenCalledExactlyOnceWith(updated))
@@ -446,17 +454,17 @@ describe('Ask answers', () => {
     await screen.findByText('Camera at $1,199 would dip below your cushion if you buy it today.')
     const chip = screen.getByRole('group', { name: 'How Worth read your question' })
     expect(chip.textContent).toContain('Read as')
-    expect(chip.textContent).toContain('Camera · $1,199.00 · today')
+    expect(chip.textContent).toContain('Everyday camera · $1,199.00 · today')
     const options = await screen.findByRole('list', { name: 'Your options' })
     expect(within(options).getAllByRole('listitem')).toHaveLength(3)
     expect(within(options).getByText('Recommended')).toBeTruthy()
     expect(options.textContent).not.toMatch(/Pay in 4/)
-    const picked = screen.getByRole('region', { name: 'Points picked by Claude' })
-    expect(picked.textContent).toContain('Picked by Claude for your question')
+    const picked = screen.getByRole('region', { name: 'Picked for your question' })
+    expect(picked.textContent).toContain('Picked for your question')
     expect(within(picked).getByText(/Apartment rent/)).toBeTruthy()
     expect(screen.queryByText('full text')).toBeNull()
     expect(
-      screen.getByText('Claude read your question and checked it against your plan'),
+      screen.getByText('Worth’s assistant read your question and checked it against your plan'),
     ).toBeTruthy()
     await user.click(screen.getByRole('button', { name: /See the comparison/ }))
     expect(onOpenDecision).toHaveBeenCalledWith(
@@ -489,7 +497,7 @@ describe('Ask answers', () => {
     })
     render(<Ask {...askProps} state={state} />)
     await sendMessage(user, 'Can I afford a $1,199 camera?')
-    await screen.findByText('Worth’s own calculation · Claude off')
+    await screen.findByText('Worth’s own calculation · assistant off')
     await user.click(screen.getByRole('button', { name: 'Check again' }))
     await waitFor(() => expect(requests).toHaveLength(2))
     expect(requests[1]!.context).toMatchObject({ purchaseDate: '2026-10-04' })
@@ -523,7 +531,7 @@ describe('Ask answers', () => {
     await user.click(within(confirm).getByRole('button', { name: 'Yes, continue' }))
     await user.click(screen.getByRole('button', { name: 'Open checkout' }))
     expect(onOpenCheckout).toHaveBeenCalledWith('agent-order', expect.stringContaining('ORDER'))
-    expect(screen.getByText('Claude prepared a PayPal checkout')).toBeTruthy()
+    expect(screen.getByText('Worth’s assistant prepared a PayPal checkout')).toBeTruthy()
   })
 
   it('discards private history when the server rejects a chat across a session change', async () => {
@@ -828,7 +836,7 @@ describe('checkout status', () => {
       throw new Error(`Unexpected API request: ${path}`)
     })
     render(<Checkout {...checkoutProps(current)} purchaseId="reservation" returnedApproved />)
-    expect(screen.getByText(/Prepared by Claude/)).toBeTruthy()
+    expect(screen.getByText(/Prepared by Worth’s assistant/)).toBeTruthy()
     await user.click(await screen.findByRole('button', { name: 'Pay $349.00' }))
     expect(bodies).toEqual([])
     expect(await screen.findByText(/Buy anyway\?/)).toBeTruthy()
@@ -1182,7 +1190,13 @@ describe('blocking fixes', () => {
         onReviewRefund={vi.fn()}
       />,
     )
-    expect(screen.getAllByText('Studio headphones · Pay in 4').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getAllByText('Studio headphones · Pay in 4').length).toBeGreaterThanOrEqual(1)
+    // Payment 1 was charged at checkout on the purchase day, so Coming up starts at payment 2.
+    const rows = screen
+      .getAllByText('Studio headphones · Pay in 4')
+      .map((title) => title.closest('.row')?.textContent ?? '')
+    expect(rows[0]).toContain('Payment 2 of 4')
+    expect(rows.some((row) => row.includes('Payment 1 of 4'))).toBe(false)
     expect(screen.getByText('2 running')).toBeTruthy()
   })
 })

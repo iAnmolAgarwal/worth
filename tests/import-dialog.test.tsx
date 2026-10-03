@@ -161,8 +161,8 @@ describe('import preview details', () => {
       <ImportDialog state={makeState()} onClose={vi.fn()} onUpdate={vi.fn()} onReview={vi.fn()} />,
     )
     await pasteAndPreview(user)
-    await screen.findByText('1 foreign-currency payment has no USD conversion')
-    expect(screen.getByText(/Lisbon bakery · Sep 10 · €12\.00/)).toBeTruthy()
+    await screen.findByText('Needs attention (3)')
+    expect(screen.getByText(/Lisbon bakery · Sep 10 · €12\.00 has no USD cost yet/)).toBeTruthy()
     expect(
       screen.getByText(/Test Store · \$1,199\.00 purchase · payments of about \$299\.75/),
     ).toBeTruthy()

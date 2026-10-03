@@ -246,7 +246,7 @@ describe('plan setup wizard', () => {
     await reachReview(user)
     expect(screen.getByText(/\+\$4,200\.00/)).toBeTruthy()
     expect(screen.getByText(/\$1,461\.99/)).toBeTruthy()
-    const consent = screen.getByRole('switch', { name: 'Use Claude for explanations' })
+    const consent = screen.getByRole('switch', { name: 'Use the assistant (powered by Claude)' })
     expect(consent.getAttribute('aria-checked')).toBe('false')
     expect(checked(/Already included headphones/)).toBe(true)
     expect(checked(/Recent camera/)).toBe(false)
@@ -295,7 +295,7 @@ describe('plan setup wizard', () => {
     await continueStep(user)
     expect(
       screen
-        .getByRole('switch', { name: 'Use Claude for explanations' })
+        .getByRole('switch', { name: 'Use the assistant (powered by Claude)' })
         .getAttribute('aria-checked'),
     ).toBe('true')
     await user.click(screen.getByRole('checkbox', { name: /My money and bills are as of today/ }))
