@@ -278,7 +278,18 @@ function ChartTile({
         cushionCents={c.cushionCents}
         purchase={{ date: option.purchaseDate, amountCents: option.amountCents }}
         payIn4={payIn4}
-        label={`Projected balance ${title.toLowerCase().replace(/^if/, 'if')}. Lowest point ${signed(option.lowestBalanceCents)} on ${fullDate(option.lowestDate)}, which ${above ? 'stays above' : 'is below'} your ${money(c.cushionCents)} cushion.`}
+        highlight={{
+          billDate:
+            cause && cause.kind !== 'spending' && cause.kind !== 'purchase'
+              ? cause.date
+              : undefined,
+          paydayDate: option.points.find(
+            (point) =>
+              point.date >= option.lowestDate &&
+              point.events.some((event) => event.kind === 'income'),
+          )?.date,
+        }}
+        label={`Projected balance ${title.replace(/^If/, 'if')}. Lowest point ${signed(option.lowestBalanceCents)} on ${fullDate(option.lowestDate)}, which ${above ? 'stays above' : 'is below'} your ${money(c.cushionCents)} cushion.`}
       />
       <p className="meta" style={{ marginTop: 12, color: 'var(--c-text-strong)' }}>
         Lowest <b className="num">{signed(option.lowestBalanceCents)}</b> on{' '}

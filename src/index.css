@@ -2647,3 +2647,76 @@ textarea.input {
   font-variant-numeric: tabular-nums;
   padding-top: 1px;
 }
+
+/* Timing strip: paydays (green triangles) and big bills (navy squares) under the plot.
+   Shapes carry the meaning; the two events behind the answer are labelled inline. */
+.strip {
+  position: relative;
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  height: 44px;
+  border-top: 1px solid var(--c-divider);
+}
+.strip .mark {
+  position: absolute;
+  top: 6px;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  cursor: default;
+  border-radius: 2px;
+}
+.strip .mark::before {
+  content: '';
+  position: absolute;
+  inset: -8px;
+}
+.strip .mark.bill {
+  background: var(--c-navy);
+}
+.strip .mark.payday {
+  background: transparent;
+  width: 0;
+  height: 0;
+  margin-left: -7px;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-bottom: 12px solid var(--c-success);
+  border-radius: 0;
+}
+.strip .mark:focus-visible {
+  outline: 3px solid var(--c-focus);
+  outline-offset: 4px;
+}
+.strip .mark-label {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  font-weight: var(--fw-bold);
+  color: var(--c-text-strong);
+}
+.strip .mark.payday .mark-label {
+  top: 16px;
+}
+.strip .mark:hover::after,
+.strip .mark:focus-visible::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  background: var(--c-text-strong);
+  color: #fff;
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  font-weight: var(--fw-semibold);
+  padding: 4px 8px;
+  border-radius: var(--r-xs);
+  z-index: 5;
+}

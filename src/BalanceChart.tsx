@@ -10,7 +10,7 @@ import {
   YAxis,
 } from 'recharts'
 import type { ForecastPoint, InstalmentDetail } from '../shared/types'
-import { shortDate, signed } from './format'
+import { dayLabel, shortDate, signed } from './format'
 
 const TEXT_2 = '#545D68'
 const STRONG = '#001435'
@@ -49,24 +49,6 @@ function halo(text: string, place: 'left' | 'right' | 'top-left') {
   return HaloLabel
 }
 
-/** Payday: a small upward mark on the axis. Big bill: a small square. Shapes carry the meaning. */
-function PaydayMark({ cx = 0, cy = 0 }: { cx?: number; cy?: number }) {
-  return <path d={`M${cx} ${cy - 9} l5 8 h-10 z`} fill="#0C6E11" stroke="#fff" strokeWidth={1.5} />
-}
-function BillMark({ cx = 0, cy = 0 }: { cx?: number; cy?: number }) {
-  return (
-    <rect
-      x={cx - 4}
-      y={cy - 9}
-      width={8}
-      height={8}
-      rx={1.5}
-      fill="#003087"
-      stroke="#fff"
-      strokeWidth={1.5}
-    />
-  )
-}
 /** Bills large enough to mark on the timing strip. */
 export const BIG_BILL_CENTS = 10_000
 
@@ -101,12 +83,15 @@ export function BalanceChart({
   purchase,
   label,
   payIn4,
+  highlight,
 }: {
   points: ForecastPoint[]
   cushionCents: number
   purchase?: { date: string; amountCents: number }
   label: string
   payIn4?: { points: ForecastPoint[]; instalments: InstalmentDetail[] }
+  /** The bill and payday that drive the answer get inline labels on the timing strip. */
+  highlight?: { billDate?: string; paydayDate?: string }
 }) {
   const byDate = new Map(payIn4?.points.map((point) => [point.date, point.minimumCents]))
   const data = points.map((point) => ({
@@ -130,127 +115,167 @@ export function BalanceChart({
         -event.amountCents >= BIG_BILL_CENTS,
     ),
   )
+  const last = Math.max(1, points.length - 1)
+  const marks = [
+    ...bills.map((point) => {
+      const bill = point.events
+        .filter((event) => event.kind === 'bill' || event.kind === 'installment')
+        .sort((x, y) => x.amountCents - y.amountCents)[0]!
+      return {
+        date: point.date,
+        kind: 'bill' as const,
+        name: bill.name,
+        amount: signed(bill.amountCents),
+        labelled: point.date === highlight?.billDate,
+      }
+    }),
+    ...paydays.map((point) => {
+      const pay = point.events.find((event) => event.kind === 'income')!
+      return {
+        date: point.date,
+        kind: 'payday' as const,
+        name: 'Payday',
+        amount: signed(pay.amountCents, true),
+        labelled: point.date === highlight?.paydayDate,
+      }
+    }),
+  ].map((mark) => ({ ...mark, at: points.findIndex((point) => point.date === mark.date) / last }))
   const xTicks = data.filter((_, index) => index % 14 === 0).map((point) => point.date)
+  const strip = marks.length
+    ? ` Paydays: ${paydays.map((point) => dayLabel(point.date)).join(', ') || 'none'}. Big bills: ${
+        marks
+          .filter((mark) => mark.kind === 'bill')
+          .map((mark) => `${mark.name} ${dayLabel(mark.date)}`)
+          .join(', ') || 'none'
+      }.`
+    : ''
   return (
-    <div className="chart" role="img" aria-label={label}>
-      <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart
-          data={data}
-          margin={{ top: 20, right: 12, bottom: 0, left: 0 }}
-          accessibilityLayer={false}
-        >
-          <ReferenceArea
-            y1={lo}
-            y2={cushionCents}
-            fill="rgba(213,1,2,.06)"
-            stroke="none"
-            ifOverflow="hidden"
-          />
-          {ticks.map((value) => (
-            <ReferenceLine key={value} y={value} stroke={value === 0 ? '#CFD3D8' : '#EEF0F3'} />
-          ))}
-          <XAxis
-            dataKey="date"
-            ticks={xTicks}
-            tickFormatter={(date: string) => shortDate(date)}
-            tick={{ fontSize: 12, fill: TEXT_2 }}
-            tickLine={false}
-            axisLine={false}
-            interval={0}
-            tickMargin={8}
-          />
-          <YAxis
-            domain={[lo, hi]}
-            ticks={ticks}
-            tickFormatter={tick}
-            tick={{ fontSize: 12, fill: TEXT_2 }}
-            tickLine={false}
-            axisLine={false}
-            width={48}
-            allowDataOverflow
-          />
-          <Area
-            type="linear"
-            dataKey="balance"
-            stroke="#0070E0"
-            strokeWidth={2}
-            fill="rgba(0,112,224,.08)"
-            baseValue={lo}
-            isAnimationActive={false}
-            dot={false}
-            activeDot={false}
-          />
-          {payIn4 && (
-            <Line
+    <>
+      <div className="chart" role="img" aria-label={label + strip}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart
+            data={data}
+            margin={{ top: 20, right: 12, bottom: 0, left: 0 }}
+            accessibilityLayer={false}
+          >
+            <ReferenceArea
+              y1={lo}
+              y2={cushionCents}
+              fill="rgba(213,1,2,.06)"
+              stroke="none"
+              ifOverflow="hidden"
+            />
+            {ticks.map((value) => (
+              <ReferenceLine key={value} y={value} stroke={value === 0 ? '#CFD3D8' : '#EEF0F3'} />
+            ))}
+            <XAxis
+              dataKey="date"
+              ticks={xTicks}
+              tickFormatter={(date: string) => shortDate(date)}
+              tick={{ fontSize: 12, fill: TEXT_2 }}
+              tickLine={false}
+              axisLine={false}
+              interval={0}
+              tickMargin={8}
+            />
+            <YAxis
+              domain={[lo, hi]}
+              ticks={ticks}
+              tickFormatter={tick}
+              tick={{ fontSize: 12, fill: TEXT_2 }}
+              tickLine={false}
+              axisLine={false}
+              width={48}
+              allowDataOverflow
+            />
+            <Area
               type="linear"
-              dataKey="p4"
-              stroke="#003087"
-              strokeWidth={2.5}
-              strokeDasharray="0.1 5"
-              strokeLinecap="round"
+              dataKey="balance"
+              stroke="#0070E0"
+              strokeWidth={2}
+              fill="rgba(0,112,224,.08)"
+              baseValue={lo}
+              isAnimationActive={false}
               dot={false}
               activeDot={false}
-              isAnimationActive={false}
             />
-          )}
-          <ReferenceLine y={cushionCents} stroke={TEXT_2} strokeWidth={1.5} strokeDasharray="4 4" />
-          {purchase && purchase.amountCents > 0 && (
+            {payIn4 && (
+              <Line
+                type="linear"
+                dataKey="p4"
+                stroke="#003087"
+                strokeWidth={2.5}
+                strokeDasharray="0.1 5"
+                strokeLinecap="round"
+                dot={false}
+                activeDot={false}
+                isAnimationActive={false}
+              />
+            )}
             <ReferenceLine
-              x={purchase.date}
+              y={cushionCents}
+              stroke={TEXT_2}
+              strokeWidth={1.5}
+              strokeDasharray="4 4"
+            />
+            {purchase && purchase.amountCents > 0 && (
+              <ReferenceLine
+                x={purchase.date}
+                stroke={STRONG}
+                strokeDasharray="2 3"
+                label={halo(
+                  `Buy ${shortDate(purchase.date)} · ${signed(-purchase.amountCents).replace(/\.00$/, '')}`,
+                  'top-left',
+                )}
+              />
+            )}
+            {payIn4?.instalments.map((instalment) => (
+              <ReferenceDot
+                key={instalment.number}
+                x={instalment.date}
+                y={byDate.get(instalment.date) ?? instalment.balanceCents}
+                r={4}
+                fill={instalment.belowCushion ? '#D50102' : '#003087'}
+                stroke="#fff"
+                strokeWidth={1.5}
+              />
+            ))}
+            <ReferenceDot
+              x={low.date}
+              y={low.balance}
+              r={5}
+              fill="#fff"
               stroke={STRONG}
-              strokeDasharray="2 3"
+              strokeWidth={2}
               label={halo(
-                `Buy ${shortDate(purchase.date)} · ${signed(-purchase.amountCents).replace(/\.00$/, '')}`,
-                'top-left',
+                `Lowest ${signed(low.balance)}`,
+                // Beside its marker, on the side with room.
+                lowIndex > data.length * 0.7 ? 'left' : 'right',
               )}
             />
-          )}
-          {payIn4?.instalments.map((instalment) => (
-            <ReferenceDot
-              key={instalment.number}
-              x={instalment.date}
-              y={byDate.get(instalment.date) ?? instalment.balanceCents}
-              r={4}
-              fill={instalment.belowCushion ? '#D50102' : '#003087'}
-              stroke="#fff"
-              strokeWidth={1.5}
-            />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+      {marks.length > 0 && (
+        <ol className="strip" aria-label="Paydays and big bills">
+          {marks.map((mark) => (
+            <li
+              key={`${mark.kind}-${mark.date}`}
+              className={`mark ${mark.kind}${mark.labelled ? ' labelled' : ''}`}
+              style={{ left: `calc(48px + (100% - 60px) * ${mark.at.toFixed(4)})` }}
+              tabIndex={0}
+              data-tip={`${mark.name} · ${dayLabel(mark.date)} · ${mark.amount}`}
+              aria-label={`${mark.name}, ${dayLabel(mark.date)}, ${mark.amount}`}
+            >
+              {mark.labelled && (
+                <span className="mark-label" aria-hidden="true">
+                  {mark.name} · {dayLabel(mark.date)}
+                </span>
+              )}
+            </li>
           ))}
-          {bills.map((point) => (
-            <ReferenceDot
-              key={`bill-${point.date}`}
-              x={point.date}
-              y={lo}
-              r={0}
-              shape={<BillMark />}
-              ifOverflow="visible"
-            />
-          ))}
-          {paydays.map((point) => (
-            <ReferenceDot
-              key={`pay-${point.date}`}
-              x={point.date}
-              y={lo}
-              r={0}
-              shape={<PaydayMark />}
-              ifOverflow="visible"
-            />
-          ))}
-          <ReferenceDot
-            x={low.date}
-            y={low.balance}
-            r={5}
-            fill="#fff"
-            stroke={STRONG}
-            strokeWidth={2}
-            label={halo(
-              `Lowest ${signed(low.balance)}`,
-              // Beside its marker, on the side with room.
-              lowIndex > data.length * 0.7 ? 'left' : 'right',
-            )}
-          />
-        </ComposedChart>
-      </ResponsiveContainer>
-    </div>
+        </ol>
+      )}
+    </>
   )
 }
