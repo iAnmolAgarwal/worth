@@ -578,7 +578,7 @@ describe('decision view', () => {
     const group = await screen.findByRole('radiogroup', { name: 'Your options' })
     const radios = within(group).getAllByRole('radio')
     expect(radios.map((r) => r.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false'])
-    expect(screen.getByText(/Wait until/, { selector: 'b' })).toBeTruthy()
+    expect(screen.getByRole('heading', { level: 1, name: /^Wait until/ })).toBeTruthy()
     expect(screen.getAllByRole('img', { name: /^Projected balance/ })).toHaveLength(1)
     fireEvent.keyDown(radios[1]!, { key: 'ArrowRight' })
     expect(radios[2]!.getAttribute('aria-checked')).toBe('true')
@@ -1270,5 +1270,47 @@ describe('iteration 2 fixes', () => {
     const rail = screen.getByRole('complementary', { name: 'Assistant and suggestions' })
     expect(within(rail).getAllByText('Not sent').length).toBe(3)
     expect(within(rail).getByText('Never')).toBeTruthy()
+  })
+})
+
+describe('iteration 4 fixes', () => {
+  it('closes the Sandbox demo details on Escape and returns focus to the chip', async () => {
+    const user = userEvent.setup()
+    const state = makeState()
+    routeApi((path, data) => (path === '/state' ? state : compare(state, data)))
+    render(<App />)
+    const chip = await screen.findByRole('button', { name: 'Sandbox demo' })
+    await user.click(chip)
+    expect(chip.getAttribute('aria-expanded')).toBe('true')
+    await user.keyboard('{Escape}')
+    expect(chip.getAttribute('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(chip)
+  })
+
+  it('leads the decision with the verdict and makes the timing strip one tab stop', async () => {
+    const user = userEvent.setup()
+    const state = makeState()
+    routeApi((_path, data) => compare(state, data))
+    render(
+      <Decision
+        backLabel="Back"
+        onBack={vi.fn()}
+        onBuy={vi.fn()}
+        onSave={vi.fn()}
+        onViewActivity={vi.fn()}
+        state={state}
+        request={{ productId: 'camera' }}
+      />,
+    )
+    expect(
+      await screen.findByRole('heading', { level: 1, name: /^Wait until \w{3}, \w{3} \d+$/ }),
+    ).toBeTruthy()
+    const strip = screen.getByRole('list', { name: /Paydays and big bills/ })
+    const marks = within(strip).getAllByRole('listitem')
+    expect(marks.filter((mark) => mark.tabIndex === 0)).toHaveLength(1)
+    marks[0]!.focus()
+    await user.keyboard('{ArrowRight}')
+    expect(document.activeElement).toBe(marks[1])
+    expect(marks[1]!.tabIndex).toBe(0)
   })
 })
