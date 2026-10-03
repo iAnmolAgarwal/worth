@@ -88,8 +88,15 @@ export function PlanWizard({
   const activeCheckout = state.purchases.some(isActive)
   const locked = busy || activeCheckout
   const current = STEPS[step]!
-  const snapshotDate = () =>
-    timezone.trim() === state.profile.timezone ? state.today : todayInTimezone(timezone.trim())
+  const snapshotDate = () => {
+    if (timezone.trim() === state.profile.timezone) return state.today
+    try {
+      return todayInTimezone(timezone.trim())
+    } catch {
+      // A half-typed zone is reported on Continue; until then, today stays as it was.
+      return state.today
+    }
+  }
   const stepFlows = flows.filter((flow) =>
     step === 1
       ? flow.kind === 'income' || (flow.id === editingId && flow.kind !== 'installment')
