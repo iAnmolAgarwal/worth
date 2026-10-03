@@ -123,6 +123,16 @@ export function ImportDialog({
     }
   }
 
+  // Each issue once: foreign-currency and Pay Later rows already have their own sections above.
+  const reviewItems = [
+    ...new Set(
+      (preview?.warnings ?? []).filter(
+        (warning) =>
+          !(preview?.unresolved.length && /currenc|USD conversion/i.test(warning)) &&
+          !(preview?.instalmentPlans.length && /pay later|pay in 4|instal/i.test(warning)),
+      ),
+    ),
+  ]
   return (
     <Dialog
       title="Import PayPal activity"
@@ -174,22 +184,26 @@ export function ImportDialog({
             <b>A PayPal activity export, in USD.</b> Use an English-language CSV with Date,
             Currency, and Net, Amount or Gross. Up to 1 MB; about 90 days of history works well.
           </Alert>
-          <Field
-            label="Choose your CSV"
-            hint={
-              filename
-                ? `Selected: ${filename}`
-                : 'Download an activity report from your PayPal account.'
-            }
-          >
-            <input
-              className="input"
-              type="file"
-              accept=".csv,text/csv"
-              onChange={(event) => void chooseFile(event)}
-              disabled={Boolean(busy)}
-            />
-          </Field>
+          <div className="field">
+            <span id="csv-label">Your PayPal activity CSV</span>
+            <div className="file-pick">
+              <label className={`btn btn-secondary${busy ? ' is-disabled' : ''}`}>
+                <FileUp className="ico" aria-hidden="true" />
+                Choose a CSV file
+                <input
+                  className="sr"
+                  type="file"
+                  accept=".csv,text/csv"
+                  aria-labelledby="csv-label"
+                  onChange={(event) => void chooseFile(event)}
+                  disabled={Boolean(busy)}
+                />
+              </label>
+              <span className="meta">
+                {filename || 'Download an activity report from your PayPal account.'}
+              </span>
+            </div>
+          </div>
           <details>
             <summary>Or paste the CSV contents</summary>
             <Field label="PayPal CSV contents">
@@ -367,20 +381,17 @@ export function ImportDialog({
               </div>
             </div>
           )}
-          {preview.warnings.length > 0 && (
+          {reviewItems.length > 0 && (
             <div className="alert warn">
               <div className="alert-body">
                 <strong>A few things to review</strong>
                 <ul>
-                  {preview.warnings.slice(0, 12).map((warning, index) => (
-                    <li key={index}>{warning}</li>
+                  {reviewItems.slice(0, 3).map((warning) => (
+                    <li key={warning}>{warning}</li>
                   ))}
                 </ul>
-                {preview.warnings.length > 12 && (
-                  <p>
-                    {preview.warnings.length - 12} more row warnings. Review your export before
-                    continuing.
-                  </p>
+                {reviewItems.length > 3 && (
+                  <p>And {reviewItems.length - 3} more. Check your export before continuing.</p>
                 )}
               </div>
             </div>
