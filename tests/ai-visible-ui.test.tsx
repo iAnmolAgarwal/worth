@@ -187,6 +187,8 @@ describe('Ask Worth shows its work', () => {
       'Most of the pressure is Apartment rent on Fri, Oct 16, even after Biweekly paycheck.',
     )
     expect(sentence.previousElementSibling?.className).toBe('verdict')
+    // Claude's own words are marked where they appear (judge F5).
+    expect(sentence.textContent).toContain('Claude’s note · Worth’s numbers')
     const toggle = screen.getByRole('button', { name: 'How Ask Worth read this' })
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
     await user.click(toggle)

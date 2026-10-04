@@ -7,7 +7,7 @@ import { readTiming } from '../server/dates.ts'
 import { namesOtherItem } from '../server/interpret.ts'
 import { checkSentence, purchasePlaceholders, templateSentence } from '../server/narration.ts'
 import { nearPhrase, planLabel } from '../shared/collision.ts'
-import { assessPurchase, planCollisions } from '../shared/finance.ts'
+import { assessPurchase, payIn4Scenario, planCollisions } from '../shared/finance.ts'
 import { createDemoState } from '../shared/seed.ts'
 import type { ChatReply } from '../shared/types.ts'
 
@@ -22,6 +22,7 @@ function demo(): ChatData {
   return { profile: seed.profile, purchases: [], transactions: seed.transactions, today: TODAY }
 }
 const camera = { amountCents: 119900, itemName: 'camera', purchaseDate: TODAY }
+const camera0 = camera
 // A right-to-left override, a bell, a zero-width space and a C1 next-line control.
 const [RLO, BEL, ZWSP, NEL] = [0x202e, 0x07, 0x200b, 0x85].map((c) => String.fromCharCode(c))
 
@@ -170,6 +171,64 @@ describe('Pay in 4 in chat (judge #2)', () => {
     const reply = fallbackReply(ask('Can I get a $2,500 TV with Pay in 4?'), demo())
     expect(reply.payIn4).toMatchObject({ asked: true, eligibility: 'unavailable', payments: [] })
     expect(reply.message).toContain('PayPal Pay in 4 is not available for $2,500.')
+  })
+
+  it('starts the schedule on a later purchase date, with its own collisions (judge F1)', () => {
+    const reply = fallbackReply(
+      ask('What if I buy it on Oct 23 with Pay in 4 instead?', {
+        context: { amountCents: 119900, itemName: 'Everyday camera', purchaseDate: TODAY },
+      }),
+      demo(),
+    )
+    expect(reply.assessment?.purchaseDate).toBe('2026-10-23')
+    expect(reply.payIn4!.payments.map((p) => p.date)).toEqual([
+      '2026-10-23',
+      '2026-11-06',
+      '2026-11-20',
+      '2026-12-04',
+    ])
+    // No collision or dip from before the purchase: rent on Oct 16 is never named.
+    for (const payment of reply.payIn4!.payments) {
+      expect(payment.nearestBill!.date >= '2026-10-20').toBe(true)
+      expect(payment.belowCushion).toBe(false)
+    }
+    expect(reply.payIn4!.label).toBe('Instalment scenario stays above your cushion')
+    expect(reply.message).toContain('about every 2 weeks starting on Fri, Oct 23')
+    expect(reply.message).not.toMatch(/apartment rent|Oct 21/)
+  })
+
+  it('gives the engine a start date while the window stays from today', () => {
+    const seed = createDemoState(TODAY)
+    const later = payIn4Scenario(seed.profile, [], {
+      amountCents: 119900,
+      today: TODAY,
+      start: '2026-10-23',
+    })
+    const now = payIn4Scenario(seed.profile, [], { amountCents: 119900, today: TODAY })
+    if (!later.available || !now.available) throw new Error('Expected both scenarios')
+    expect(later.instalments[0]!.date).toBe('2026-10-23')
+    expect(later.instalments[3]!.date).toBe('2026-12-04')
+    expect(later.points[0]!.date).toBe(TODAY)
+    expect(now.instalments[0]!.date).toBe(TODAY)
+    expect(now.instalments[1]!.belowCushion).toBe(true)
+  })
+
+  it('names the item, not “work”, in “How would Pay in 4 work for …” (judge F8)', () => {
+    const reply = fallbackReply(ask('How would Pay in 4 work for a $10.03 phone case?'), demo())
+    expect(reply.assessment?.itemName).toMatch(/phone case/i)
+    expect(reply.payIn4?.payments.map((p) => p.amountCents)).toEqual([253, 250, 250, 250])
+  })
+
+  it('drops fact reasons outside the fixed set', async () => {
+    const { provider } = model([
+      interpret({
+        points: ['low_point', 'cause'],
+        point_reasons: 'trust_me_its_fine, <img src=x>, ANSWERS_QUESTION',
+      }),
+      note(null),
+    ])
+    const reply = await provider.reply(ask('Can I afford it?', { context: camera }), demo())
+    expect(reply.trace!.facts).toEqual([{ id: 'low_point' }, { id: 'cause' }])
   })
 
   it('never reads “pay later” as timing', () => {
@@ -357,7 +416,7 @@ describe('one Claude sentence with engine placeholders only (C-13)', () => {
   })
 
   it.each([
-    ['a free number', 'Rent of $1,450 lands before payday.', 'free_number'],
+    ['a free number', 'Rent of $1,450 lands before payday.', 'not_plain'],
     ['a free date', 'Rent lands on Friday, before {income_name}.', 'free_date'],
     ['an unknown placeholder', 'Your {savings} cover it.', 'unknown_placeholder'],
     ['a claim the engine did not make', 'The {item} fits easily.', 'contradicts_result'],
@@ -375,7 +434,7 @@ describe('one Claude sentence with engine placeholders only (C-13)', () => {
       '{cause_bill} on {cause_day} lands before {income_name} can cover it.',
       'contradicts_result',
     ],
-    ['a figure next to Pay in 4', 'Pay in 4 splits it into 4 parts.', 'free_number'],
+    ['a figure next to Pay in 4', 'Pay in 4 splits it into 4 parts.', 'not_plain'],
     ['no sentence', null, 'no_sentence'],
   ])('shows the template instead of %s', async (_, sentence, reason) => {
     const { provider } = purchase(sentence)
@@ -425,8 +484,8 @@ describe('one Claude sentence with engine placeholders only (C-13)', () => {
         'Pay in 4 keeps the {price} total, so the low point is still {p4_low_point}.',
         values,
         'tight',
-      ),
-    ).toEqual({ ok: false, reason: 'contradicts_result' })
+      ).ok,
+    ).toBe(false)
     const own = checkSentence(
       'With Pay in 4 your lowest point would be {p4_low_point} around {p4_low_day}; {p4_collision}.',
       values,
@@ -475,5 +534,172 @@ describe('one Claude sentence with engine placeholders only (C-13)', () => {
   it('has no sentence for an off-topic answer and none in local mode', () => {
     expect(fallbackReply(ask('Write me a poem'), demo()).explanation).toBeUndefined()
     expect(fallbackReply(ask('Can I afford a $1,199 camera?'), demo()).explanation).toBeUndefined()
+  })
+})
+
+// Judge F3: sentences the first check accepted. Each must now fall back to the template; the table
+// only grows. Camera: $1,199 today, tight, asked about Pay in 4. Book: $20 today, fits.
+describe('the sentence check rejects what the judge found (F3)', () => {
+  const data = demo()
+  const assess = (amountCents: number, itemName: string) =>
+    assessPurchase(data.profile, [], { amountCents, itemName, today: TODAY })
+  const camera = purchasePlaceholders(assess(119900, 'camera'), { ...data, payIn4: 'paypal' })
+  const cameraPlain = purchasePlaceholders(assess(119900, 'camera'), data)
+  const book = purchasePlaceholders(assess(2000, 'book'), data)
+  const cases: [string, string, typeof camera, 'tight' | 'fits'][] = [
+    // Pay in 4 recommendations
+    ['recommends', 'Pay in 4 is the smarter way to buy {item}.', camera, 'tight'],
+    ['recommends, unasked', 'Pay in 4 is the smarter way to buy {item}.', cameraPlain, 'tight'],
+    [
+      'recommends',
+      'Pay in 4 is your best bet for {item}, with {p4_payment} each time.',
+      camera,
+      'tight',
+    ],
+    [
+      'credits Pay in 4',
+      'Splitting {item} with Pay in 4 keeps your balance at {p4_low_point}.',
+      camera,
+      'tight',
+    ],
+    [
+      'credits Pay in 4',
+      'Paying with Pay in 4 instead lifts your low point to {p4_low_point}.',
+      camera,
+      'tight',
+    ],
+    [
+      'credits Pay in 4',
+      'With Pay in 4, {item} works out because your low is {p4_low_point}.',
+      camera,
+      'tight',
+    ],
+    // False Pay in 4 facts
+    ['interest', 'Pay in 4 charges interest on {p4_payment}.', camera, 'tight'],
+    [
+      'cheaper',
+      'Pay in 4 is cheaper than paying {price} now, and {p4_collision}.',
+      camera,
+      'tight',
+    ],
+    ['identical', 'With Pay in 4 your low point is identical, {p4_low_point}.', camera, 'tight'],
+    ['matches', 'Your Pay in 4 low point matches {p4_low_point} too.', camera, 'tight'],
+    // Contradicts a tight result
+    ['tight: fine', '{item} works out fine on {buy_day} with {low_point} left.', camera, 'tight'],
+    ['tight: good shape', 'You are in good shape to buy {item} on {buy_day}.', camera, 'tight'],
+    ['tight: no issue', 'There is no issue buying {item} today.', camera, 'tight'],
+    ['tight: covered', 'Your {cushion} cushion is covered even after {item}.', camera, 'tight'],
+    ['tight: gap over', 'You remain {gap} over your cushion even at {low_point}.', camera, 'tight'],
+    // Contradicts a fitting result
+    ['fits: does not fit', '{item} does not fit because of {cause_bill}.', book, 'fits'],
+    [
+      'fits: under',
+      'Your balance falls under your {cushion} cushion at {low_point}.',
+      book,
+      'fits',
+    ],
+    ['fits: overdrawn', 'You would be overdrawn by {low_day}.', book, 'fits'],
+    ['fits: won’t hold', 'Your balance won’t hold your {cushion} cushion.', book, 'fits'],
+    // Free dates
+    [
+      'ordinal date',
+      '{cause_bill} lands on the sixteenth, before your low point.',
+      camera,
+      'tight',
+    ],
+    ['a few days', '{cause_bill} is due in a few days.', camera, 'tight'],
+    ['a couple of days', '{cause_bill} is due in a couple of days.', camera, 'tight'],
+    ['shortly', '{cause_bill} is due shortly.', camera, 'tight'],
+    ['a holiday', 'Around Halloween your balance reaches {low_point}.', camera, 'tight'],
+    ['pay in 4 days', 'You could pay in 4 days once {income_name} lands.', camera, 'tight'],
+    // Free numbers and currency
+    ['pct', '{cause_bill} takes a big pct of your balance.', camera, 'tight'],
+    ['USD', 'Your balance of {low_point} is in USD.', camera, 'tight'],
+    ['roman numeral', '{cause_bill} is due on day XVI.', camera, 'tight'],
+    ['several', 'Several bills land before {low_day}.', camera, 'tight'],
+    ['zero-width split', 'Thr\u200Bee bills land before {low_day}.', camera, 'tight'],
+    ['homoglyph', 'Thr\u0435e bills land before {low_day}.', camera, 'tight'],
+    // Advice
+    ['wiser', 'It would be wiser to hold off on {item}.', camera, 'tight'],
+    ['suggest', 'I suggest waiting on the {item}.', camera, 'tight'],
+    ['dip into', 'Dip into your {cushion} cushion for {item}.', camera, 'tight'],
+    ['use your cushion', 'Use your {cushion} cushion to cover {item}.', camera, 'tight'],
+    ['pay later, unasked', 'Pay later lets you keep {cushion} in place.', cameraPlain, 'tight'],
+    // Values in the wrong place
+    [
+      'cushion is the low point',
+      'Your cushion is {low_point} after buying {item}.',
+      camera,
+      'tight',
+    ],
+    ['income on the low day', '{income_name} arrives on {low_day}.', camera, 'tight'],
+    ['price as the limit', 'The most you can spend is {price}.', camera, 'tight'],
+    // Not one sentence
+    [
+      'two semicolons',
+      '{cause_bill} is due {cause_day}; your low is {low_point}; nothing else matters here.',
+      camera,
+      'tight',
+    ],
+    ['a line break', '{cause_bill} is due {cause_day}\nyour low is {low_point}.', camera, 'tight'],
+  ]
+  it.each(cases)('rejects %s: %s', (_, sentence, values, outcome) => {
+    expect(checkSentence(sentence, values, outcome).ok).toBe(false)
+  })
+  // Already rejected before F3; kept so the table only grows.
+  it.each([
+    ['{cause_bill} is due in two weeks.'],
+    ['You keep three hundred above {cushion}.'],
+    ['{cause_bill} lands next Friday.'],
+  ])('still rejects %s', (sentence) => {
+    expect(checkSentence(sentence, camera, 'tight').ok).toBe(false)
+  })
+
+  // Sentences Claude wrote in the live eval that are sound; they must keep passing.
+  it.each([
+    [
+      'Pay in 4 is not cheaper, since the {price} total stays the same with no interest; it only spreads payments of {p4_payment}, and {p4_collision}.',
+      camera,
+      'tight',
+    ],
+    ['Pay in 4 keeps the same {price} total with no interest; {p4_collision}.', camera, 'tight'],
+    [
+      'With Pay in 4 your lowest point would be {p4_low_point} around {p4_low_day}; {p4_collision}.',
+      camera,
+      'tight',
+    ],
+    [
+      'Buying the {item} for {price} {buy_day} pushes your balance to {low_point} on {low_day}, mostly because {cause_bill} of {cause_amount} is due on {cause_day}, leaving you {gap} under your {cushion} cushion.',
+      camera,
+      'tight',
+    ],
+    [
+      'Even after {cause_bill} of {cause_amount} on {cause_day}, your balance bottoms out at {low_point} on {low_day}, {gap} above your {cushion} cushion.',
+      book,
+      'fits',
+    ],
+    ['Waiting until {wait_day} lets {income_name} land first.', camera, 'tight'],
+    [
+      'Pay in 4 keeps the same {price} total, so it isn’t cheaper; {cause_bill} of {cause_amount} on {cause_day} is what pulls the balance down.',
+      camera,
+      'tight',
+    ],
+    [
+      'Because the {item} costs so little, your balance stays above {cushion}, and the low point of {low_point} on {low_day} comes from {cause_bill} on {cause_day}, not from this purchase.',
+      book,
+      'fits',
+    ],
+  ] as const)('accepts %s', (sentence, values, outcome) => {
+    expect(checkSentence(sentence, values, outcome).ok).toBe(true)
+  })
+
+  it('rejects a Pay in 4 recommendation end to end, under a plain question', async () => {
+    const { provider } = model([
+      interpret({ points: ['low_point'] }),
+      note('Pay in 4 is the smarter way to buy {item}.'),
+    ])
+    const reply = await provider.reply(ask('Can I afford it?', { context: camera0 }), demo())
+    expect(reply.trace!.sentence).toMatchObject({ source: 'template', rejected: 'advice' })
+    expect(reply.explanation).not.toMatch(/Pay in 4|smarter/)
   })
 })

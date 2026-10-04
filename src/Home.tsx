@@ -532,7 +532,6 @@ export function Home({
                 </div>
               </section>
             ))}
-            <CollisionInsight state={state} onShowPlan={() => onNavigate('plan')} />
             <section className="tile" aria-labelledby="ask-title">
               <div className="sec-head">
                 <h2 className="h-section" id="ask-title">
@@ -553,6 +552,8 @@ export function Home({
                 ))}
               </div>
             </section>
+            {/* Under the starters, so the camera starter stays above the fold at 390 (round-2 #10). */}
+            <CollisionInsight state={state} onShowPlan={() => onNavigate('plan')} />
             <ComingUp state={state} onShowAll={() => onNavigate('plan')} />
           </div>
           <aside className="rail" aria-label="Saved and your plan">

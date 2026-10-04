@@ -1052,11 +1052,23 @@ const SENTENCE_FORMAT = {
 }
 const sentenceSchema = z.object({ note: z.string().max(600).nullable() })
 /** The request for Claude's sentence, listing the only names it may use for engine values. */
-function sentenceRequest(values: Placeholders) {
+function sentenceRequest(values: Placeholders, shown: string[] = []) {
   const list = Object.entries(values)
     .map(([name, value]) => `{${name}} = ${JSON.stringify(value.value)}: ${value.about}`)
     .join('\n')
-  return `Tools are now closed. Reply with JSON {"note": ...}. In note, write one sentence of at most 30 words that tells the person why the engine's result is what it is, for the question they asked. Name any amount, date, count or name only with these placeholders, written exactly with their braces:\n${list}\nNever write a digit, amount, date, weekday, month, relative day or number word yourself. Keep every before or after true to the dates listed. Do not restate the verdict. Do not suggest skipping or delaying a bill, credit, a loan, Pay in 4 or using the cushion. Use null when no sentence would help.`
+  // The dated values in time order, so "before" and "after" in the sentence come out right.
+  const dated = Object.entries(values)
+    .filter(([name, value]) => value.date && /_day$/.test(name))
+    .sort(([, a], [, b]) => a.date!.localeCompare(b.date!))
+    .map(([name, value]) => `{${name}} (${value.value})`)
+  const order =
+    dated.length > 1
+      ? `\nIn time order: ${dated.join(', then ')}. Keep every before and after true to this order; "the next paycheck" means {income_name} on {income_day}.`
+      : ''
+  const seen = shown.length
+    ? `\nThe person already sees these facts: ${shown.map((text) => JSON.stringify(text)).join(' ')}\nDo not repeat them. Connect them instead: what causes the result, or what would change it.`
+    : ''
+  return `Tools are now closed. Reply with JSON {"note": ...}. In note, write one sentence of at most 30 words that tells the person why the engine's result is what it is, for the question they asked. Name any amount, date, count or name only with these placeholders, written exactly with their braces:\n${list}\nNever write a digit, amount, date, weekday, month, relative day or number word yourself. Keep every before or after true to the dates listed. Do not restate the verdict. Do not suggest skipping or delaying a bill, credit, a loan, Pay in 4 or using the cushion. Use null when no sentence would help.${order}${seen}`
 }
 const TOOLS_CLOSED =
   'Tools are now closed for this answer. Reply with the final JSON only, using the tool results you already have.'
@@ -1303,7 +1315,9 @@ class Turn {
     this.read.add('find_alternatives')
     this.guards.push({
       id: 'search_limit',
-      label: 'The search price limit is what keeps your cushion today, never a figure from Claude',
+      label: this.alternatives.result
+        ? `Searched under ${money(this.alternatives.result.maxPriceCents)}, within the ${money(this.alternatives.roomCents)} that keeps your cushion today; the limit is never Claude’s`
+        : `Search limit: the ${money(this.alternatives.roomCents)} that keeps your cushion today, never a figure from Claude`,
       passed: true,
     })
     const found = this.alternatives.result?.items.length ?? 0
@@ -1547,7 +1561,16 @@ export function createChatProvider(
             { role: 'assistant', content: answered.content },
             {
               role: 'user',
-              content: [...answered.results, { type: 'text', text: sentenceRequest(values) }],
+              content: [
+                ...answered.results,
+                {
+                  type: 'text',
+                  text: sentenceRequest(
+                    values,
+                    pointsFor(answer, data).points?.map((p) => p.text),
+                  ),
+                },
+              ],
             },
           ],
           output_config: { effort: 'low', format: SENTENCE_FORMAT },

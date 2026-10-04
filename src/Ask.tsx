@@ -128,6 +128,26 @@ function paragraphs(reply: ChatReply) {
     .filter((paragraph) => paragraph !== chosen && paragraph !== reply.explanation)
 }
 
+/**
+ * The one sentence under the answer. Claude's own words are marked where they appear (judge F5);
+ * the engine's template sentence carries no mark.
+ */
+function Explanation({ reply }: { reply: ChatReply }) {
+  if (!reply.explanation) return null
+  const claude = reply.trace?.sentence?.source === 'claude'
+  return (
+    <p className="explain">
+      {claude && (
+        <span className="claude-note">
+          <Sparkles className="ico" aria-hidden="true" />
+          Claude’s note · Worth’s numbers
+        </span>
+      )}
+      {minus(reply.explanation)}
+    </p>
+  )
+}
+
 /** The comparison an assessed answer opens: the store item, or the amount and name as read. */
 function requestFor(reply: ChatReply, state: AppState): DecisionRequest {
   const assessment = reply.assessment!
@@ -266,7 +286,7 @@ function VerdictTile({
       aria-label="Purchase assessment"
     >
       <p className="verdict">{minus(reply.verdict ?? paragraphs(reply)[0] ?? '')}</p>
-      {reply.explanation && <p className="explain">{minus(reply.explanation)}</p>}
+      <Explanation reply={reply} />
       {stale && (
         <div style={{ marginTop: 12 }}>
           <Alert tone="warn" icon={CircleAlert}>
@@ -1044,7 +1064,7 @@ function Answer({
           {paragraphs(reply).map((text, index) => (
             <p key={index}>{text}</p>
           ))}
-          {reply.explanation && <p className="explain">{minus(reply.explanation)}</p>}
+          <Explanation reply={reply} />
         </>
       )}
       {assessment && reply.payIn4?.asked && (

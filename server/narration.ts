@@ -236,7 +236,7 @@ export function purchaseFacts(a: Assessment, data: ChatData): FactCatalog {
         : `You can compare PayPal Pay in 4 for ${money(a.amountCents)} in the comparison view. It is shown for comparison only; PayPal decides availability and terms at checkout.`
   const scenario = data.payIn4 && data.payIn4 !== 'unavailable' ? payIn4For(a, data) : undefined
   if (scenario?.available) {
-    facts.pay_in_4_schedule = payIn4ScheduleText(scenario)
+    facts.pay_in_4_schedule = payIn4ScheduleText(scenario, a.today)
     facts.pay_in_4_stacking = scenario.stacking
       ? scenario.stacking.message
       : 'You have no other instalment plans with payments in this window.'
@@ -249,12 +249,13 @@ export function purchaseFacts(a: Assessment, data: ChatData): FactCatalog {
 // The engine's own scenario, as the comparison computes it. Every sentence is neutral: Pay in 4
 // is never recommended, and every collision is "about", because PayPal sets the exact dates.
 
-/** The engine's Pay in 4 scenario for an assessed amount, starting today. */
+/** The engine's Pay in 4 scenario for an assessed amount, starting on its purchase date. */
 export function payIn4For(a: Assessment, data: ChatData): PayIn4Comparison {
   return payIn4Scenario(
     data.profile,
     withoutOwnHold(data.purchases, { itemName: a.itemName, amountCents: a.amountCents }),
-    { amountCents: a.amountCents, itemName: a.itemName, today: a.today },
+    // The first payment is on the purchase date, so a later day gets its own schedule.
+    { amountCents: a.amountCents, itemName: a.itemName, today: a.today, start: a.purchaseDate },
   )
 }
 type Scenario = Extract<PayIn4Comparison, { available: true }>
@@ -278,10 +279,11 @@ function labelled(scenario: Scenario) {
     nearestBill: p.nearestBill && { ...p.nearestBill, name: chatLabel(p.nearestBill.name) },
   }))
 }
-function payIn4ScheduleText(scenario: Scenario) {
+function payIn4ScheduleText(scenario: Scenario, today: string) {
   const collisions = collisionsText(scenario)
+  const start = scenario.instalments[0]!.date
   return [
-    `PayPal Pay in 4 would be ${paymentsText(scenario)}, ${PAY_IN_4_SPACING} starting today. The total stays ${money(scenario.amountCents)} and PayPal charges no interest.`,
+    `PayPal Pay in 4 would be ${paymentsText(scenario)}, ${PAY_IN_4_SPACING} starting ${start === today ? 'today' : `on ${dateLabel(start, today)}`}. The total stays ${money(scenario.amountCents)} and PayPal charges no interest.`,
     collisions.length
       ? `${capitalize(collisions.join('; '))}.`
       : 'No payment would land within 3 days of a bill.',
@@ -294,8 +296,7 @@ function payIn4ScheduleText(scenario: Scenario) {
  * for a purchase PayPal's range covers. Out of range, an answer that asked shows it is unavailable.
  */
 export function payIn4Chat(a: Assessment, data: ChatData, asked: boolean): PayIn4Chat | undefined {
-  // The schedule starts today; the neutral row stays off a question about a later day.
-  if (a.outcome === 'incomplete' || (!asked && a.purchaseDate !== a.today)) return undefined
+  if (a.outcome === 'incomplete') return undefined
   const eligibility = asked ? (data.payIn4 ?? 'range-only') : 'range-only'
   if (!payIn4InRange(a.amountCents) || eligibility === 'unavailable')
     return asked
@@ -723,72 +724,148 @@ export type SentenceRejection =
   | 'no_sentence'
   | 'length'
   | 'not_one_sentence'
+  | 'not_plain'
   | 'unknown_placeholder'
+  | 'wrong_value'
   | 'free_number'
   | 'free_date'
   | 'advice'
+  | 'pay_in_4'
   | 'contradicts_result'
 const PLACEHOLDER = /\{([a-z0-9_]+)\}/g
+/** PayPal's product name, which holds a digit; the time unit after "pay in 4 days" still counts. */
+const PAY_IN_4_NAME = /\bpay\s+in\s+4\b/gi
 const NUMBER_WORD =
-  /\b(?:zero|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundreds?|thousands?|millions?|dozens?|half|quarter|double|twice|triple|percent|dollars?|bucks|grand|cents?)\b/i
+  /\b(?:zero|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundreds?|thousands?|millions?|billions?|dozens?|half|halves|quarters?|double|twice|triple|percent|pct|dollars?|bucks|grand|cents?|usd|eur\w*|gbp|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|\w+teenth|\w+tieth|few|couple|several|numerous|handful)\b/i
 const DATE_WORD =
-  /\b(?:today|tonight|tomorrow|yesterday|weekend|weeks?|months?|years?|fortnight|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:rs(?:day)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\b/i
+  /\b(?:today|tonight|tomorrow|yesterday|weekends?|weekdays?|weeks?|months?|years?|fortnight|days?|nights?|hours?|mornings?|afternoons?|evenings?|noon|midnight|soon|shortly|later|earlier|lately|recently|ago|momentarily|holidays?|halloween|christmas|xmas|thanksgiving|easter|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:rs(?:day)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\b/i
+/** Advice and judgement: Worth states the engine's result and never recommends or rates options. */
 const ADVICE =
-  /\b(?:skip\w*|delay\w*|defer\w*|postpon\w*|late|miss(?:ing)?|borrow\w*|loans?|credit|financ\w*|overdraft|recommend\w*|should)\b|\b(?:use|using|try|consider|choose|pick|go\s+with|opt\s+for|switch\s+to|split)\b[^.]{0,40}\b(?:pay\s+in\s+4|pay\s+later|instal+ments?|bnpl)\b/i
+  /\b(?:skip\w*|delay\w*|defer\w*|postpon\w*|late|miss(?:ing)?|borrow\w*|loans?|credit|financ\w*|overdraft|recommend\w*|suggest\w*|advis\w*|should|ought|smart\w*|wise\w*|better|best|ideal\w*|easier|easy|safer|prefer\w*|worth\s+it|go\s+with|opt\s+for|works?\s+out|lifts?|lifting|helps?|helping|softens?|good|great|fine|nice|ok(?:ay)?|no\s+(?:issue|problem|worries|concern)s?|covered|doable|manageable|dip\w*\s+into|tap\w*\s+into|use\s+(?:your|the)\s+cushion)\b|\b(?:use|using|try|consider|choose|pick|switch\s+to|split\w*)\b[^.]{0,40}\b(?:pay\s+in\s+4|pay\s+later|instal+ments?|bnpl)\b/i
+/** A sentence about Pay in 4 or paying later. */
+const PAY_IN_4_MENTION =
+  /\bpay\s+in\s+4\b|\bpay(?:ing)?\s+later\b|\bsplit\w*|\bspread\w*|\binstal+ments?\b|\bbnpl\b|\bpaypal\b/i
 const POSITIVE =
-  /\b(?:fits?|fitting|afford\w*|safe(?:ly)?|comfortabl\w*|no\s+problem|go\s+ahead|easily|plenty|stays?\s+above|keeps?\s+your\s+cushion)\b/i
+  /\b(?:fits?|fitting|afford\w*|safe(?:ly)?|comfortabl\w*|go\s+ahead|easily|plenty|stays?\s+above|keeps?\s+your\s+cushion|in\s+good\s+shape|remains?\s+(?:above|over))\b/i
 const NEGATIVE =
-  /\b(?:dips?|dipping|below|short(?:fall)?|can['’]?t|cannot|not\s+enough|too\s+much|tight|risky|breaks?)\b/i
+  /\b(?:dips?|dipping|below|under|short(?:fall)?|overdrawn|negative|too\s+much|too\s+little|tight|risky|breaks?)\b|\b(?:not|never|cannot|can['’]?t|won['’]?t|\w+n['’]t)\b(?:\s+[A-Za-z']+){0,2}\s+(?:fit|afford|enough|keep|hold|cover|stay|make|leave)\w*/i
 
 /**
- * Checks Claude's sentence and fills in the engine's values. Only placeholders offered for this
- * answer count; no digit, currency, date or number word may appear outside them; it may not give
- * advice about bills, credit or Pay in 4, or contradict the engine's outcome.
+ * Checks Claude's sentence and fills in the engine's values (scope C-13). The sentence must be one
+ * plain sentence: ASCII words and punctuation around placeholders this answer offers, so every
+ * figure, date and name is the engine's. On top of that structure it may not give advice, rate Pay
+ * in 4 or the options, use a value in the wrong place, or contradict the engine's outcome.
  */
 export function checkSentence(
   raw: string | null | undefined,
   values: Placeholders,
   outcome?: Assessment['outcome'],
 ): { ok: true; text: string } | { ok: false; reason: SentenceRejection } {
-  const sentence = (raw ?? '').replace(/\s+/g, ' ').trim()
-  if (!sentence) return { ok: false, reason: 'no_sentence' }
-  if (sentence.length < 12 || sentence.length > 240) return { ok: false, reason: 'length' }
+  const reject = (reason: SentenceRejection) => ({ ok: false as const, reason })
+  if (!raw?.trim()) return reject('no_sentence')
+  if (/[\r\n]/.test(raw.trim())) return reject('not_one_sentence')
+  const sentence = raw
+    .normalize('NFKC')
+    .replace(/[ \t]+/g, ' ')
+    .trim()
+  if (sentence.length < 12 || sentence.length > 240) return reject('length')
   const names = [...sentence.matchAll(PLACEHOLDER)].map((m) => m[1]!)
   if (names.some((name) => !(name in values)) || /[{}]/.test(sentence.replace(PLACEHOLDER, '')))
-    return { ok: false, reason: 'unknown_placeholder' }
+    return reject('unknown_placeholder')
   const prose = sentence.replace(PLACEHOLDER, ' ')
+  // Structure first: plain ASCII words and a few punctuation marks, nothing else.
+  const plain = prose.replace(PAY_IN_4_NAME, 'PayPal')
+  if (/[^A-Za-z ,;:'’\-–—().!]/.test(plain)) return reject('not_plain')
+  if (/\b[A-Z]{2,}\b/.test(plain.replace(/\bPayPal\b/g, ''))) return reject('free_number')
   if (!/[.!]$/.test(sentence) || /[.!?]\s+\S/.test(prose.slice(0, -1)))
-    return { ok: false, reason: 'not_one_sentence' }
-  if (ADVICE.test(prose)) return { ok: false, reason: 'advice' }
-  // "Pay in 4" is PayPal's product name, not a figure.
-  const words = prose.replace(/\bPay\s+in\s+4\b/gi, 'PayPal')
-  if (/[\p{N}\p{Sc}%#]/u.test(words) || NUMBER_WORD.test(words))
-    return { ok: false, reason: 'free_number' }
+    return reject('not_one_sentence')
+  if ((prose.match(/[;:]/g) ?? []).length > 1) return reject('not_one_sentence')
+  if (ADVICE.test(prose)) return reject('advice')
+  if (NUMBER_WORD.test(plain)) return reject('free_number')
   // "Today" is the engine's own day when the answer is about today (room to spend, a purchase
   // today); about a later day it would be a free date.
   const aboutToday = values.buy_day ? values.buy_day.value === 'today' : true
-  const dated = aboutToday ? words.replace(/\b(?:today|right\s+now|now)\b/gi, ' ') : words
-  if (DATE_WORD.test(dated)) return { ok: false, reason: 'free_date' }
-  if (misordered(sentence, values)) return { ok: false, reason: 'contradicts_result' }
-  // A sentence about Pay in 4 may not borrow the full-price low point for the instalments.
-  if (
-    /\{p4_|pay\s+in\s+4|split|instal+ments?/i.test(sentence) &&
-    /\{(?:low_point|low_day|gap|stress_low)\}/.test(sentence)
-  )
-    return { ok: false, reason: 'contradicts_result' }
-  // The instalment low point differs from the full-price one: never "still" or "the same".
-  if (
-    /\b(?:still|unchanged|same|again)\s+(?:[a-z']+\s+){0,2}\{p4_low_(?:point|day)\}/i.test(sentence)
-  )
-    return { ok: false, reason: 'contradicts_result' }
+  const dated = aboutToday ? plain.replace(/\b(?:today|right\s+now|now)\b/gi, ' ') : plain
+  if (DATE_WORD.test(dated)) return reject('free_date')
+  const payIn4 = payIn4Problem(sentence, values)
+  if (payIn4) return reject(payIn4)
+  if (wrongValue(sentence, values)) return reject('wrong_value')
+  if (misordered(sentence, values)) return reject('contradicts_result')
   // A tight result may still say what would fit: waiting, or spending less.
   const conditional = /\{(?:wait_day|max_spend)\}/.test(sentence)
   if (
     (outcome === 'tight' && POSITIVE.test(prose) && !conditional) ||
     (outcome === 'fits' && NEGATIVE.test(prose))
   )
-    return { ok: false, reason: 'contradicts_result' }
+    return reject('contradicts_result')
   return { ok: true, text: fill(sentence, values) }
+}
+/**
+ * Pay in 4 may be named only when the person asked about it (the answer then offers p4
+ * placeholders), only next to one of those engine values, only as "no interest" and "not
+ * cheaper", and its low point only as "the lowest balance would be …", never as unchanged.
+ */
+function payIn4Problem(sentence: string, values: Placeholders): SentenceRejection | undefined {
+  const asked = Object.keys(values).some((name) => name.startsWith('p4_'))
+  const usesValue = /\{p4_[a-z_]+\}/.test(sentence)
+  if (!PAY_IN_4_MENTION.test(sentence) && !usesValue) return undefined
+  // Unasked, Pay in 4 is never named; asked, it may be named in the neutral terms below.
+  if (!asked) return 'pay_in_4'
+  if (
+    /\binterest\b/i.test(sentence) &&
+    !/\b(?:no|without)\s+interest\b|\binterest[-\s]free\b/i.test(sentence)
+  )
+    return 'pay_in_4'
+  if (
+    /\bcheaper\b/i.test(sentence) &&
+    !/\b(?:not|no|isn['’]t|never)\s+(?:any\s+)?cheaper\b/i.test(sentence)
+  )
+    return 'pay_in_4'
+  // The full-price low point belongs to paying in full, never to the instalments.
+  if (/\{(?:low_point|low_day|gap|stress_low)\}/.test(sentence)) return 'contradicts_result'
+  if (/\{p4_low_point\}/.test(sentence)) {
+    if (
+      !/\b(?:lowest\s+(?:balance|point)|low\s+point)(?:\s+with\s+pay\s+in\s+4)?\s+(?:would\s+be|is|of)\s+\{p4_low_point\}/i.test(
+        sentence,
+      )
+    )
+      return 'pay_in_4'
+    if (
+      /\b(?:still|unchanged|identical|match\w*|equal\w*|too|also|again|same\s+as)\b/i.test(sentence)
+    )
+      return 'contradicts_result'
+  }
+  return undefined
+}
+/** A value placed where it doesn't belong: a day for another event, a price as a limit, a gap's direction. */
+function wrongValue(sentence: string, values: Placeholders) {
+  // "{income_name} arrives on {low_day}": a day must belong to the value it is attached to.
+  for (const m of sentence.matchAll(
+    /\{([a-z0-9_]+)\}((?:\s+[A-Za-z']+){0,4}?)\s+(?:on|by|around)\s+\{([a-z0-9_]+_day)\}/g,
+  )) {
+    const owner = values[m[1]!]?.date
+    const day = values[m[3]!]?.date
+    if (owner && day && owner !== day) return true
+  }
+  // "Your cushion is {low_point}" or "the {low_point} cushion".
+  if (/\bcushion\s+(?:is|of|at|sits\s+at|stands\s+at|would\s+be)\s+\{(?!cushion\})/i.test(sentence))
+    return true
+  if (/\{(?!cushion\})[a-z0-9_]+\}\s+cushion\b/i.test(sentence)) return true
+  // "The most you can spend is {price}": only the engine's limits are limits.
+  for (const m of sentence.matchAll(
+    /\b(?:the\s+most|at\s+most|up\s+to|limit|maximum|max)\b(?:\s+[A-Za-z']+){0,5}\s+\{([a-z0-9_]+)\}/gi,
+  ))
+    if (!['max_spend', 'room_today'].includes(m[1]!)) return true
+  // "{gap} over your cushion" when the low point is below it, and the reverse.
+  const gap = values.gap?.about ?? ''
+  if (
+    /below/.test(gap) &&
+    /\{gap\}\s+(?:over|above|more\s+than|to\s+spare|ahead|extra)/i.test(sentence)
+  )
+    return true
+  if (/above/.test(gap) && /\{gap\}\s+(?:under|below|short|less\s+than)/i.test(sentence))
+    return true
+  return false
 }
 /**
  * Whether "before" or "after" in the sentence puts two dated values in the wrong order, as in

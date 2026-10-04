@@ -63,7 +63,11 @@ export function PayIn4Strip({
               <div>
                 <div className="amt num">{money(item.amountCents)}</div>
                 <div className="when">
-                  {item.date === today ? 'Today' : `About ${dayLabel(item.date)}`}
+                  {item.date === today
+                    ? 'Today'
+                    : item.number === 1
+                      ? dayLabel(item.date)
+                      : `About ${dayLabel(item.date)}`}
                 </div>
               </div>
             </div>
@@ -164,6 +168,9 @@ const REJECTED: Record<string, string> = {
   free_date: 'it wrote a date itself',
   advice: 'it gave advice Worth doesn’t give',
   contradicts_result: 'it disagreed with the engine’s result',
+  not_plain: 'it used characters other than plain words around Worth’s values',
+  wrong_value: 'it put one of Worth’s values in the wrong place',
+  pay_in_4: 'it described Pay in 4 in a way Worth doesn’t allow',
 }
 
 function readSource(read: NonNullable<AnswerTrace['read']>) {

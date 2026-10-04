@@ -538,6 +538,8 @@ export function localItemName(message: string) {
   const text = message
     .replace(/[’]/g, "'")
     .replace(/\b(?:a\s+)?(?:pair|set|couple|bunch|box|pack|bundle)\s+of\s+/gi, '')
+    // "Pay in 4" names a way to pay; its 4 is never a count ("Pay in 4 work for …").
+    .replace(/\bpay\s+in\s+(?:4|four)\b/gi, ' ')
   const take = (fragment: string | undefined) => {
     if (!fragment) return undefined
     const kept: string[] = []
