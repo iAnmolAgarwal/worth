@@ -398,6 +398,38 @@ describe('dates are resolved by Claude and checked by the server (C-12)', () => 
 describe('conversation context (C-14, AI-4, UX-1)', () => {
   const camera = { amountCents: 119900, itemName: 'camera', purchaseDate: TODAY }
 
+  it('resolves "until my next paycheck" even when the model asks which date', async () => {
+    const { provider } = model([final('clarify')])
+    const reply = await provider.reply(
+      ask('What if I wait until my next paycheck?', { context: camera }),
+      demo(),
+    )
+    expect(reply.mode).toBe('anthropic')
+    expect(reply.intent).toBe('affordability')
+    expect(reply.assessment).toMatchObject({ purchaseDate: '2026-10-08', amountCents: 119900 })
+  })
+
+  it('resolves the payday phrase over a model clarification from interpret_purchase', async () => {
+    const { provider } = model([
+      interpret([], { refers_to_previous_item: true, date_phrase: null, date: null }),
+      final('clarify'),
+    ])
+    const reply = await provider.reply(
+      ask('What if I wait until my next paycheck?', { context: camera }),
+      demo(),
+    )
+    expect(reply.assessment).toMatchObject({ purchaseDate: '2026-10-08' })
+  })
+
+  it('reads "until my next paycheck" as the known payday, without asking', () => {
+    const local = fallbackReply(
+      ask('What if I wait until my next paycheck?', { context: camera }),
+      demo(),
+    )
+    expect(local.intent).not.toBe('clarify')
+    expect(local.assessment).toMatchObject({ purchaseDate: '2026-10-08', amountCents: 119900 })
+  })
+
   it('reuses the purchase being discussed for a follow-up about it', async () => {
     const { provider } = model([interpret([], { refers_to_previous_item: true }), final()])
     const reply = await provider.reply(

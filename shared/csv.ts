@@ -1063,7 +1063,7 @@ export function parsePayPalCsv(
   const unresolved = result.unresolved.length
   if (unresolved)
     result.warnings.push(
-      `${unresolved} foreign-currency ${unresolved === 1 ? 'payment has' : 'payments have'} no matching USD conversion. Worth will not show a positive result until you enter what each one cost in USD or mark it as a one-off.`,
+      `${unresolved} foreign-currency ${unresolved === 1 ? 'payment has' : 'payments have'} no matching USD conversion. Worth won’t show room to spend until you enter what each one cost in USD or mark it as a one-off.`,
     )
   const { memo, holds, otherCurrency } = result.leftOut
   if (otherCurrency)
@@ -1076,7 +1076,7 @@ export function parsePayPalCsv(
     )
   if (holds)
     result.warnings.push(
-      `${holds} authorization ${holds === 1 ? 'hold or release was' : 'holds or releases were'} left out. A payment counts once it completes.`,
+      `${holds} temporary ${holds === 1 ? 'charge was' : 'charges were'} left out, such as a hotel or ride hold. A payment counts once it completes.`,
     )
   if (result.adjustments.length)
     result.warnings.push(
@@ -1087,7 +1087,7 @@ export function parsePayPalCsv(
       'Likely recurring items are suggestions, not confirmed commitments. Their historical amounts are excluded from the everyday spending estimate; confirm each item or adjust that estimate.',
     )
   result.warnings.push(
-    'Transfers and refunds do not count as salary or everyday spending. Historical transactions never change your current available-funds snapshot.',
+    'Transfers and refunds do not count as salary or everyday spending. Past transactions never change the money available you confirm.',
   )
   result.transactions.sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id))
   result.adjustments.sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id))

@@ -33,6 +33,9 @@ describe('timing in the user’s words', () => {
     ['next Friday', ['2026-10-09', '2026-10-16']],
     ['on payday', ['2026-10-15']],
     ['after my next paycheck', ['2026-10-16']],
+    ['wait until my next paycheck', ['2026-10-15']],
+    ['till payday', ['2026-10-15']],
+    ['what if I buy it on my next paycheck', ['2026-10-15']],
   ])('resolves %s', (text, dates) => {
     const timing = read(`Can I buy it ${text}?`)
     expect(timing.candidates).toEqual(dates)

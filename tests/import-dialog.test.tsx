@@ -2,7 +2,7 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ImportDialog } from '../src/PlanDialogs'
+import { ImportDialog } from '../src/Import'
 import { api } from '../src/api'
 import { createDemoState, PRODUCTS } from '../shared/seed'
 import type { AppState, ImportPreview, Transaction } from '../shared/types'
@@ -91,7 +91,7 @@ describe('import dialog', () => {
     await pasteAndPreview(user)
     await screen.findByRole('group', { name: 'How does this file write dates?' })
     expect(screen.queryByRole('checkbox', { name: /I reviewed this preview/ })).toBeNull()
-    const importButton = screen.getByRole('button', { name: /Import & review my plan/ })
+    const importButton = screen.getByRole('button', { name: /Import and review my plan/ })
     expect((importButton as HTMLButtonElement).disabled).toBe(true)
 
     await user.click(screen.getByRole('radio', { name: /Day first/ }))
@@ -101,7 +101,7 @@ describe('import dialog', () => {
     expect((screen.getByRole('radio', { name: /Day first/ }) as HTMLInputElement).checked).toBe(
       true,
     )
-    await user.click(screen.getByRole('button', { name: /Import & review my plan/ }))
+    await user.click(screen.getByRole('button', { name: /Import and review my plan/ }))
     expect(apiMock).toHaveBeenLastCalledWith('/import/commit', { csv: CSV, dateOrder: 'DD/MM' })
     expect(onReview).toHaveBeenCalledTimes(1)
   })
@@ -161,15 +161,15 @@ describe('import preview details', () => {
       <ImportDialog state={makeState()} onClose={vi.fn()} onUpdate={vi.fn()} onReview={vi.fn()} />,
     )
     await pasteAndPreview(user)
-    await screen.findByText('1 foreign-currency payment has no USD conversion')
-    expect(screen.getByText(/Lisbon bakery · Sep 10 · €12\.00/)).toBeTruthy()
+    await screen.findByText('Needs attention (3)')
+    expect(screen.getByText(/Lisbon bakery · Sep 10 · €12\.00 has no USD cost yet/)).toBeTruthy()
     expect(
       screen.getByText(/Test Store · \$1,199\.00 purchase · payments of about \$299\.75/),
     ).toBeTruthy()
-    expect(screen.getByText(/General Account Correction · Apr 3 · \$5,000\.00/)).toBeTruthy()
+    expect(screen.getByText(/General Account Correction · Apr 3 · \+\$5,000\.00/)).toBeTruthy()
     // Unresolved payments do not block the import itself.
     await user.click(screen.getByRole('checkbox', { name: /I reviewed this preview/ }))
-    const importButton = screen.getByRole('button', { name: /Import & review my plan/ })
+    const importButton = screen.getByRole('button', { name: /Import and review my plan/ })
     expect((importButton as HTMLButtonElement).disabled).toBe(false)
   })
 
@@ -194,7 +194,7 @@ describe('import preview details', () => {
     )
     await pasteAndPreview(user)
     await user.click(await screen.findByRole('checkbox', { name: /I reviewed this preview/ }))
-    const importButton = screen.getByRole('button', { name: /Import & review my plan/ })
+    const importButton = screen.getByRole('button', { name: /Import and review my plan/ })
     expect((importButton as HTMLButtonElement).disabled).toBe(false)
   })
 })

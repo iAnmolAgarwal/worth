@@ -42,12 +42,17 @@ function validDate(value: string): boolean {
 }
 
 export function todayInTimezone(timezone = 'America/New_York'): string {
+  return dateInTimezone(new Date(), timezone)
+}
+
+/** The calendar day an instant falls on in a time zone, such as a capture's local date. */
+export function dateInTimezone(instant: Date | string, timezone = 'America/New_York'): string {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: timezone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).formatToParts(new Date())
+  }).formatToParts(typeof instant === 'string' ? new Date(instant) : instant)
   return `${parts.find((p) => p.type === 'year')!.value}-${parts.find((p) => p.type === 'month')!.value}-${parts.find((p) => p.type === 'day')!.value}`
 }
 
@@ -696,6 +701,30 @@ function evaluate(
 
 function fullPurchase(date: string, amountCents: number, itemName: string): ScenarioOutflow[] {
   return [{ id: `proposed:${date}`, name: itemName, date, amountCents }]
+}
+
+const HOLD_STATUSES = new Set<Purchase['status']>(['created', 'pending', 'unknown'])
+const nameWords = (name = '') => new Set(name.toLowerCase().match(/[a-z]{4,}/g) ?? [])
+/**
+ * Purchases to count when assessing an item, without that item's own checkout hold. A hold for
+ * the item already reduces the plan; counting it again would judge the item against itself.
+ * The hold is matched by product, or by price and a shared word in the name.
+ */
+export function withoutOwnHold(
+  purchases: Purchase[],
+  item: { productId?: string; itemName?: string; amountCents: number },
+): Purchase[] {
+  const words = nameWords(item.itemName)
+  return purchases.filter(
+    (purchase) =>
+      !(
+        HOLD_STATUSES.has(purchase.status) &&
+        (item.productId
+          ? purchase.productId === item.productId
+          : purchase.amountCents === item.amountCents &&
+            [...nameWords(purchase.name)].some((word) => words.has(word)))
+      ),
+  )
 }
 
 /**

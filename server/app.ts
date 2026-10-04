@@ -7,10 +7,12 @@ import {
   assessPurchase,
   addDays,
   compareOptions,
+  dateInTimezone,
   money,
   normalizeTimezone,
   payIn4InRange,
   purchaseReviews,
+  withoutOwnHold,
 } from '../shared/finance.ts'
 import { createDemoState, DEMO_TIMEZONE, PRODUCTS, rebaseDemoState } from '../shared/seed.ts'
 import {
@@ -108,6 +110,7 @@ const profileSchema = z
     reflectedPurchaseIds: z.array(identifier).max(1000),
     aiConsent: z.boolean(),
     userEdited: z.boolean().optional(),
+    aiChoiceMade: z.boolean().optional(),
     flows: z
       .array(
         z
@@ -224,7 +227,10 @@ const CLAUDE_LIMIT_REASON = {
 // Only the labelled sample persona, before the user saves their own financial inputs or imports
 // history, can use external AI without opt-in. Purchases and other server updates do not count.
 function mayUseExternalAi(profile: FinancialProfile) {
-  return profile.aiConsent || (profile.source === 'demo' && profile.userEdited === false)
+  return (
+    profile.aiConsent ||
+    (profile.source === 'demo' && profile.userEdited === false && !profile.aiChoiceMade)
+  )
 }
 
 export function createApp(options: AppOptions = {}) {
@@ -455,7 +461,8 @@ export function createApp(options: AppOptions = {}) {
       ) {
         data.transactions.unshift({
           id: `purchase-${current.id}`,
-          date: completedAt.slice(0, 10),
+          // The user's own calendar day, not the UTC date of the timestamp.
+          date: dateInTimezone(completedAt, data.profile.timezone),
           name: current.name,
           amountCents: -current.amountCents,
           currency: 'USD',
@@ -905,7 +912,12 @@ export function createApp(options: AppOptions = {}) {
         'Choose a purchase date from today through 30 days ahead.',
         'INVALID_DATE',
       )
-    res.json(assessPurchase(current.profile, current.purchases, { ...input, today: current.today }))
+    res.json(
+      assessPurchase(current.profile, withoutOwnHold(current.purchases, input), {
+        ...input,
+        today: current.today,
+      }),
+    )
   })
   app.post('/api/compare', async (req, res) => {
     const input = compareSchema.parse(req.body)
@@ -917,12 +929,20 @@ export function createApp(options: AppOptions = {}) {
     // PayPal's eligibility check runs first; the session is read afterwards so it is current.
     const eligibility = await payIn4Eligibility(amountCents)
     const current = state(sessionId(res))
-    const comparison = compareOptions(current.profile, current.purchases, {
-      amountCents,
-      itemName: product?.name ?? input.itemName,
-      today: current.today,
-      payIn4Eligible: eligibility !== 'unavailable',
-    })
+    const comparison = compareOptions(
+      current.profile,
+      withoutOwnHold(current.purchases, {
+        productId: product?.id,
+        itemName: product?.name ?? input.itemName,
+        amountCents,
+      }),
+      {
+        amountCents,
+        itemName: product?.name ?? input.itemName,
+        today: current.today,
+        payIn4Eligible: eligibility !== 'unavailable',
+      },
+    )
     res.json({ ...comparison, payIn4: { ...comparison.payIn4, eligibility } })
   })
   /** Saves a purchase's new cash effect and moves the plan version, so older answers expire. */
@@ -1012,6 +1032,8 @@ export function createApp(options: AppOptions = {}) {
     const data = dataFor(res)
     // Consent changes no financial input, so it keeps the plan version and any active checkout.
     data.profile.aiConsent = aiConsent
+    // An explicit choice, so the sample profile's default no longer applies.
+    data.profile.aiChoiceMade = true
     store.save(id, data)
     res.json(state(id))
   })

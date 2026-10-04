@@ -134,7 +134,7 @@ describe('PayPal CSV normalization', () => {
     expect(result.suggestedDailySpendCents).toBe(Math.round(2340 / 8))
     const warnings = result.warnings.join(' ')
     expect(warnings).toContain('2 memo rows were left out')
-    expect(warnings).toContain('2 authorization holds or releases were left out')
+    expect(warnings).toContain('2 temporary charges were left out')
     expect(warnings).toContain('1 pending payments are excluded')
   })
 

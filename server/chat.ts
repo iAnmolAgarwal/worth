@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
-import { addDays, assessPurchase, money } from '../shared/finance.ts'
+import { addDays, assessPurchase, money, withoutOwnHold } from '../shared/finance.ts'
 import { PRODUCTS } from '../shared/seed.ts'
 import type {
   Assessment,
@@ -198,9 +198,14 @@ function compose(answer: Answer, data: ChatData): ChatReply {
   }
 }
 function assess(data: ChatData, interpretation: Interpretation) {
-  return assessPurchase(data.profile, data.purchases, {
+  const itemName = itemLabel(interpretation.items)
+  const purchases = withoutOwnHold(data.purchases, {
+    itemName,
     amountCents: interpretation.amountCents,
-    itemName: itemLabel(interpretation.items),
+  })
+  return assessPurchase(data.profile, purchases, {
+    amountCents: interpretation.amountCents,
+    itemName,
     purchaseDate: interpretation.date,
     today: data.today,
   })
@@ -216,6 +221,12 @@ function commitmentKind(text: string): CommitmentKind {
   const subscriptions = /subscription/i.test(text)
   const bills = /\bbills?\b|\brent\b/i.test(text)
   return subscriptions && !bills ? 'subscriptions' : bills && !subscriptions ? 'bills' : 'all'
+}
+const PAYDAY_PHRASE = /\b(?:pay\s*days?|pay\s*checks?|get(?:ting)?\s+paid|salary)\b/i
+/** A follow-up about the item under discussion, timed by a payday the plan already knows. */
+function paydayFollowUp(input: ChatInput, data: ChatData) {
+  if (!validContext(input) || !PAYDAY_PHRASE.test(input.message)) return false
+  return Boolean(localAnswer(input, data).assessment)
 }
 /** The deterministic route for a message when Claude is not involved. */
 function localIntent(input: ChatInput, data: ChatData): ChatIntent {
@@ -653,7 +664,11 @@ class Turn {
     const product = PRODUCTS.find((p) => p.id === parsed.data.item_id)
     // The answer shows the engine's assessment of the item, at its catalog price, today.
     if (product && !this.assessment && !this.clarify) {
-      this.assessment = assessPurchase(this.data.profile, this.data.purchases, {
+      const purchases = withoutOwnHold(this.data.purchases, {
+        productId: product.id,
+        amountCents: product.priceCents,
+      })
+      this.assessment = assessPurchase(this.data.profile, purchases, {
         amountCents: product.priceCents,
         itemName: product.name,
         today: this.data.today,
@@ -803,7 +818,17 @@ function answerFor(turn: Turn, final: Final | undefined): Answer {
       assessment: turn.assessment,
       interpretation: turn.interpretation,
     }
-  else if (turn.clarify) answer = { ...base, intent: 'clarify', clarify: turn.clarify }
+  else if (paydayFollowUp(input, data)) {
+    // "Wait until my next paycheck" names a date the plan already knows. The server resolves it
+    // for the item under discussion instead of letting the model ask which date.
+    const local = localAnswer(input, data)
+    answer = {
+      ...base,
+      intent: 'affordability',
+      assessment: local.assessment,
+      interpretation: local.interpretation,
+    }
+  } else if (turn.clarify) answer = { ...base, intent: 'clarify', clarify: turn.clarify }
   else {
     const local = localAnswer(input, data)
     const intent: ChatIntent =

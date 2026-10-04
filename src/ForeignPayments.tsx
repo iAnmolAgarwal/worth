@@ -1,8 +1,10 @@
-import { useState } from 'react'
-import type { AppState, ForeignPayment } from '../shared/types'
+import { useEffect, useRef, useState } from 'react'
+import type { ForeignPayment } from '../shared/types'
+import type { AppState } from './contract'
+import { CircleAlert } from 'lucide-react'
 import { api } from './api'
 import { currencyAmount, shortDate } from './format'
-import { Button } from './ui'
+import { Alert, Button } from './ui'
 
 type Resolution = { amountCents: number } | { oneOff: true }
 
@@ -21,6 +23,11 @@ export function ForeignPayments({
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState('')
   const open = (state.foreignPayments ?? []).filter((payment) => !payment.resolution)
+  const card = useRef<HTMLElement>(null)
+  // Arriving from "Resolve in Activity" puts focus on this card.
+  useEffect(() => {
+    if (window.location.hash.includes('focus=fx')) card.current?.focus()
+  }, [])
   if (!open.length) return null
 
   async function resolve(payment: ForeignPayment, resolution: Resolution) {
@@ -28,8 +35,13 @@ export function ForeignPayments({
     setError('')
     try {
       onUpdate(
-        await api<AppState>(`/import/unresolved/${encodeURIComponent(payment.id)}`, resolution),
+        (await api<AppState>(
+          `/import/unresolved/${encodeURIComponent(payment.id)}`,
+          resolution,
+        )) as AppState,
       )
+      // Keep focus in the resolver: on the card while payments remain, otherwise on the page.
+      setTimeout(() => (card.current ?? document.getElementById('main'))?.focus(), 0)
     } catch (failure) {
       setError((failure as Error).message)
     } finally {
@@ -48,39 +60,50 @@ export function ForeignPayments({
   }
 
   return (
-    <section
-      className="notice notice-warning foreign-payments"
-      aria-labelledby="foreign-payments-heading"
-    >
-      <h2 id="foreign-payments-heading">Foreign-currency payments to resolve</h2>
-      <p>
+    <section className="tile" aria-labelledby="foreign-payments-heading" ref={card} tabIndex={-1}>
+      <Alert tone="warn" icon={CircleAlert}>
+        <h2
+          id="foreign-payments-heading"
+          className="h-section"
+          style={{ fontSize: 'var(--fs-body)' }}
+        >
+          Foreign-currency payments to resolve
+        </h2>
         Your import has no USD conversion for{' '}
         {open.length === 1 ? 'this payment' : 'these payments'}. Until each one has its USD cost or
-        is marked as a one-off, Worth won’t show a positive result.
-      </p>
-      <ul>
+        is marked as a one-off, Worth won’t show room to spend.
+      </Alert>
+      <ul className="rows" style={{ listStyle: 'none', padding: 0, margin: '16px 0 0' }}>
         {open.map((payment) => (
-          <li key={payment.id}>
-            <span>
-              <strong>{payment.name}</strong>
-              <small>
+          <li
+            key={payment.id}
+            className="row plain"
+            style={{ flexWrap: 'wrap', alignItems: 'center' }}
+          >
+            <span className="body">
+              <span className="t" style={{ display: 'block', fontSize: 'var(--fs-body)' }}>
+                {payment.name}
+              </span>
+              <span className="s soft">
                 {shortDate(payment.date, { year: 'numeric' })} ·{' '}
                 {currencyAmount(Math.abs(payment.originalCents), payment.currency)}
-              </small>
+              </span>
             </span>
-            <input
-              className="input"
-              inputMode="decimal"
-              placeholder="USD cost"
-              aria-label={`USD cost of ${payment.name}`}
-              value={amounts[payment.id] ?? ''}
-              onChange={(event) =>
-                setAmounts((current) => ({ ...current, [payment.id]: event.target.value }))
-              }
-              disabled={busy !== null}
-            />
+            <span className="money-input" style={{ width: 140 }}>
+              <span aria-hidden="true">$</span>
+              <input
+                className="input num"
+                inputMode="decimal"
+                placeholder="USD cost"
+                aria-label={`USD cost of ${payment.name}`}
+                value={amounts[payment.id] ?? ''}
+                onChange={(event) =>
+                  setAmounts((current) => ({ ...current, [payment.id]: event.target.value }))
+                }
+                disabled={busy !== null}
+              />
+            </span>
             <Button
-              type="button"
               variant="secondary"
               loading={busy === payment.id}
               disabled={busy !== null}
@@ -89,8 +112,7 @@ export function ForeignPayments({
               Save USD cost
             </Button>
             <Button
-              type="button"
-              variant="ghost"
+              variant="text"
               disabled={busy !== null}
               onClick={() => void resolve(payment, { oneOff: true })}
             >
@@ -100,7 +122,7 @@ export function ForeignPayments({
         ))}
       </ul>
       {error && (
-        <p className="error-text" role="alert">
+        <p className="co-error" role="alert">
           {error}
         </p>
       )}
