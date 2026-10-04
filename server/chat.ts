@@ -384,6 +384,8 @@ function localIntent(input: ChatInput, data: ChatData): ChatIntent {
   if (/spent|spend|spending|categor|history|transactions?/.test(text)) return 'spending'
   if (followUpTiming) return 'affordability'
   if (FINANCE.test(text)) return 'overview'
+  // A named kind of product is never off topic: ask what the person wants to know about it.
+  if (categoryOf(input.message)) return 'clarify'
   return 'off_topic'
 }
 function localAnswer(input: ChatInput, data: ChatData): Answer {

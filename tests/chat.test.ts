@@ -1079,4 +1079,45 @@ describe('questions that say “cheaper” but are not product searches (verdict
     expect(findAlternatives).not.toHaveBeenCalled()
     expect(reply.intent).not.toBe('alternatives')
   })
+
+  it.each([
+    'Show me cheaper options for headphones',
+    'Is there something cheaper than the camera?',
+  ])('searches for “%s” in local mode and when the model only asks a question', async (message) => {
+    const local = vi.fn(async (query: string, max: number) => ({
+      status: 'ok' as const,
+      query,
+      maxPriceCents: max,
+      items: [],
+    }))
+    const offline = await localReply(ask(message), demo(), undefined, { findAlternatives: local })
+    expect(offline.intent).toBe('alternatives')
+    expect(local.mock.calls[0]![0]).toMatch(/headphones|camera/)
+    const online = vi.fn(async (query: string, max: number) => ({
+      status: 'ok' as const,
+      query,
+      maxPriceCents: max,
+      items: [],
+    }))
+    const { provider } = model([final('clarify')])
+    const reply = await provider.reply(ask(message), demo(), { findAlternatives: online })
+    expect(reply.intent).toBe('alternatives')
+    expect(online).toHaveBeenCalledTimes(1)
+  })
+  it('accepts the model’s search for “cheaper options for headphones”', async () => {
+    const findAlternatives = vi.fn(async (query: string, max: number) => ({
+      status: 'ok' as const,
+      query,
+      maxPriceCents: max,
+      items: [],
+    }))
+    const { provider } = model([
+      [tool('find_alternatives', { item: 'headphones', max_price_cents: null, ...shown() })],
+    ])
+    const reply = await provider.reply(ask('Show me cheaper options for headphones'), demo(), {
+      findAlternatives,
+    })
+    expect(reply.toolCalls).toEqual(['find_alternatives'])
+    expect(findAlternatives).toHaveBeenCalledWith('over-ear headphones', 44001)
+  })
 })

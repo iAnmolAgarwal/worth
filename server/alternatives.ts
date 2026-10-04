@@ -115,12 +115,31 @@ export function queryFor(item: { productId?: string; itemName?: string }): strin
 export const ALTERNATIVES_CUE =
   /\b(?:cheaper|cheapest|less expensive|lower[- ]priced|more affordable|budget (?:version|option|alternative)s?|alternatives?|similar\b[^.?!]{0,30}\b(?:less|cheaper|under|lower)|what (?:else )?(?:can|could) i (?:buy|get|afford) (?:for |with )?(?:under|below|for less than|up to)|(?:anything|something|items?|things?) (?:under|below|for less than)\s*\$|(?:find|show me|search for|look for|any)\b[^.?!]{0,40}\b(?:under|below|for less than)\s*\$)/i
 /**
- * Questions that use "cheaper" about paying, timing or the plan, never about another product: "Is
- * Pay in 4 cheaper than paying now?", "Is it cheaper to wait?", "Which option is cheapest?", "a
- * cheaper phone plan".
+ * Questions that use "cheaper" about how or when to pay, Worth's options or a service plan, never
+ * about another product: "Is Pay in 4 cheaper than paying now?", "Is it cheaper to wait?", "Which
+ * option is cheapest?", "a cheaper phone plan", "the cheapest way to pay". "Cheaper options for
+ * headphones" and "something cheaper than the camera" are product searches and are not matched.
  */
-const NOT_ALTERNATIVES =
-  /\bpay\s*(?:in\s*(?:4|four)|later|over time)\b|\binstal+ments?\b|\bbnpl\b|\bfinanc\w*|\bwait(?:ing|ed)?\b|\blater\b|\bnext (?:week|month|year)\b|\bpay ?(?:check|day)s?\b|\boptions?\b|\bplans?\b|\bbills?\b|\bsubscriptions?\b|\b(?:cheaper|cheapest|less expensive)\s+(?:than|to|if|when|by)\b|\b(?:paying|buy(?:ing)?) (?:it )?now\b/i
+const NOT_ALTERNATIVES = new RegExp(
+  [
+    String.raw`\bpay\s*(?:in\s*(?:4|four)|later|over time)\b`,
+    String.raw`\binstal+ments?\b`,
+    String.raw`\bbnpl\b`,
+    String.raw`\bfinanc\w*`,
+    String.raw`\bwait(?:ing|ed)?\b`,
+    String.raw`\bnext (?:week|month|year|pay ?check|pay ?day)\b`,
+    String.raw`\bpay ?(?:check|day)s?\b`,
+    String.raw`\b(?:which|what) (?:option|one)s?\b`,
+    String.raw`\boptions? (?:is|are|would|should)\b`,
+    String.raw`\b(?:worth[’']?s|my|your|these|those) options\b`,
+    String.raw`\b(?:phone|data|mobile|cell|internet|insurance|gym|subscription|payment|meal) plans?\b`,
+    String.raw`\bbills?\b`,
+    String.raw`\bsubscriptions?\b`,
+    String.raw`\b(?:cheaper|cheapest|less expensive) way to (?:pay|buy)\b`,
+    String.raw`\b(?:cheaper|cheapest|less expensive)\s+(?:than|to|if|when)\s+(?:i\s+)?(?:pay|paying|wait|waiting|split|splitting|using|use|with|buy(?:ing)?(?:\s+it)?\s+(?:now|later|today))\b`,
+  ].join('|'),
+  'i',
+)
 /** A question that uses "cheaper" about paying, timing, the options or a service. */
 export const notProductSearch = (message: string) => NOT_ALTERNATIVES.test(message)
 /** A thing to find: a product, or a general object such as "something" or "what can I buy". */

@@ -551,6 +551,22 @@ export const PROBES: Probe[] = [
       },
     ],
   },
+  {
+    id: 'C7-cheaper-options-for',
+    split: 'train',
+    covers: 'channel3 re-judge N1: "cheaper options for <kind>"',
+    kind: 'chat',
+    turns: [{ message: 'Show me cheaper options for headphones', expect: cheaper }],
+  },
+  {
+    id: 'C8-cheaper-than-the-item',
+    split: 'test',
+    covers: 'channel3 re-judge N1: "cheaper than the <item>"',
+    kind: 'chat',
+    turns: [
+      { message: 'Is there something cheaper than the camera?', context: camera, expect: cheaper },
+    ],
+  },
   // ---- Verdict finding 1: "cheaper" that is not a product search -------------------
   {
     id: 'NC1-pay-in-4-cheaper',

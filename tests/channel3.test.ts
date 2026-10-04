@@ -405,6 +405,13 @@ describe('what Worth searches for (privacy)', () => {
     'Can you find a cheaper camera?',
     "what's the cheapest thing in the store I could buy today without going under my cushion?",
     'Find headphones under $300',
+    'Show me cheaper options for headphones',
+    'Is there something cheaper than the camera?',
+    'Any cheaper backpack options?',
+    'Cheaper desk chair options please',
+    'Is there a camera cheaper than this one?',
+    'Find a cheaper chair I can buy now',
+    'Any cheaper alternatives? I can buy later',
   ])('treats “%s” as a request for something cheaper', (message) => {
     expect(wantsAlternatives(message)).toBe(true)
   })
@@ -418,6 +425,8 @@ describe('what Worth searches for (privacy)', () => {
     'I need a cheaper phone plan',
     'cheaper phone plan',
     'Show me cheaper flights to Denver',
+    'What is the cheapest way to pay for the camera?',
+    'Is it cheaper if I buy it now?',
     'Can I afford a $1,199 camera?',
     'How much can I spend today?',
     'What bills are coming up?',

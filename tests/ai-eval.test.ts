@@ -69,8 +69,8 @@ describe('AI eval regression gate (recorded model responses)', () => {
   })
 
   it('routes every request for something cheaper to find_alternatives (G-C3-2)', () => {
-    const cheaper = results.filter((r) => /^C[1-6]-(?!categorize)/.test(r.id))
-    expect(cheaper.map((r) => r.id)).toHaveLength(6)
+    const cheaper = results.filter((r) => /^C[1-8]-(?!categorize)/.test(r.id))
+    expect(cheaper.map((r) => r.id)).toHaveLength(8)
     for (const result of cheaper) {
       const reply = result.turns[0]!.reply
       expect(reply.toolCalls, result.id).toContain('find_alternatives')
