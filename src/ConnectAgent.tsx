@@ -14,9 +14,12 @@ interface Created extends TokensResponse {
   item: AgentToken
 }
 
-/** The Claude Desktop entry for Worth's hosted MCP endpoint, through the mcp-remote bridge. */
+/**
+ * The Claude Desktop entry for Worth's hosted MCP endpoint, through the mcp-remote bridge. The
+ * bridge carries the token, so its version is pinned exactly.
+ */
 function desktopConfig(endpoint: string, token: string) {
-  const args = ['-y', 'mcp-remote@0.14', endpoint, '--transport', 'http-only']
+  const args = ['-y', 'mcp-remote@0.14.3', endpoint, '--transport', 'http-only']
   if (endpoint.startsWith('http://')) args.push('--allow-http')
   args.push('--header', 'Authorization:${WORTH_AUTH}')
   return JSON.stringify(
@@ -171,8 +174,9 @@ export function ConnectAgent({
           <ol className="agent-steps caption">
             <li>In Claude Desktop, open Settings → Developer → Edit Config.</li>
             <li>
-              Add this under <code>mcpServers</code> (Node.js 18 or later is needed for{' '}
-              <code>npx</code>), then save and restart Claude Desktop.
+              Merge the <code>worth</code> entry below into <code>mcpServers</code> (or use the
+              whole snippet if the file is empty), then save and restart Claude Desktop. It needs
+              Node.js 20 or later for <code>npx</code>.
             </li>
             <li>Ask: “Can I afford the $1,199 camera?”</li>
           </ol>

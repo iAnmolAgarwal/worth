@@ -105,13 +105,16 @@ describe('Settings → Connect an agent', () => {
     const input = await within(section).findByLabelText('Agent token')
     expect((input as HTMLInputElement).value).toBe(TOKEN)
     expect(within(section).getByText(/Copy this token now/)).toBeTruthy()
+    // mcp-remote 0.14 needs Node 20+, and the snippet is merged, not nested (judge finding 4).
+    expect(within(section).getByText(/Node\.js 20 or later/)).toBeTruthy()
+    expect(within(section).getByText(/Merge the/)).toBeTruthy()
     const config = within(section).getByLabelText('Claude Desktop configuration').textContent!
     const parsed = JSON.parse(config)
     expect(parsed.mcpServers.worth).toEqual({
       command: 'npx',
       args: [
         '-y',
-        'mcp-remote@0.14',
+        'mcp-remote@0.14.3',
         endpoint,
         '--transport',
         'http-only',
