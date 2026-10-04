@@ -1,0 +1,32 @@
+# Checks links in the README and docs. On pushes and pull requests that touch Markdown it checks
+# only links inside the repository (fast, no network flakiness); the weekly run also probes
+# external URLs. workflow_dispatch runs the full check on demand.
+name: Link check
+on:
+  push:
+    branches: [main]
+    paths: ['**.md', '.github/workflows/link-check.yml']
+  pull_request:
+    paths: ['**.md', '.github/workflows/link-check.yml']
+  schedule:
+    - cron: '0 6 * * 1' # Mondays 06:00 UTC
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  links:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lycheeverse/lychee-action@v2
+        with:
+          fail: true
+          args: >-
+            ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '--max-retries 3 --accept 200,206,403,429' || '--offline' }}
+            --include-fragments
+            --exclude-path node_modules
+            --exclude '^https?://localhost'
+            --exclude '^https://unsplash\.com/'
+            --exclude '^https://github\.com/iAnmolAgarwal/worth/(security|actions)'
+            './*.md' './docs/**/*.md'
