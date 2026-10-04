@@ -35,6 +35,8 @@ In development, `server/index.ts` mounts Vite middleware in the same Express pro
 | `server/app.ts` | Session setup, schema validation, routes, ownership checks, financial/profile rules, payment reservation, and reconciliation. |
 | `server/store.ts` | SQLite tables, atomic operations, uniqueness constraints, session expiry, and deletion. |
 | `server/chat.ts` | Bounded Claude tool loop, input/output validation, deterministic fallback, and authoritative numeric text. |
+| `server/channel3.ts` | Channel3 search adapter: request band, response parsing, 6 h cache per query and $25 bucket, back-off, daily limit, recorded example results, health. |
+| `server/alternatives.ts` | What Worth searches for (generic catalog descriptions, brand-free words), the room today, and the "something cheaper" cue. |
 | `server/paypal.ts` | Sandbox OAuth, order creation/capture/get, signature verification, and order/capture amount validation. |
 | `server/index.ts` | Server startup, client serving, periodic expiry cleanup, and shutdown. |
 | `src/api.ts` | Same-origin JSON requests and application client header. |
@@ -89,6 +91,17 @@ The model's final response must match a small JSON shape. Narrative containing n
 Without a key, on provider failure, or when personal-data AI consent is off, `fallbackReply()` provides visibly labelled local calculations. Only an untouched synthetic profile can use external AI without opt-in; edited demo profiles also require consent. Local language interpretation is intentionally limited.
 
 Category suggestions are a separate bounded request: `POST /api/transactions/categories` sends at most 30 sanitized merchant labels with temporary row aliases, without amounts, dates, transaction IDs, or profile fields. Returned aliases and allowed category names are validated; nothing is applied by the model. `PATCH /api/transactions/:id` applies an explicit user correction to an owned record while preserving its amount, status, and confirmed daily-spending estimate. An active checkout blocks the edit. Imported data uses the same AI-consent gate.
+
+## Similar items from other stores (Channel3)
+
+Under the Spend less option, and in Ask answers to requests for something cheaper, Worth lists up to four real products from other stores, found through Channel3. It is discovery only: rows open the store's page in a new tab, and Worth never sells them or offers PayPal checkout for them.
+
+- **Server only.** `GET /api/alternatives?productId=…` (or `itemName`, `amountCents`, `maxPriceCents`, or `similarTo` for a Channel3 product) sets the ceiling from the session's room today (the Spend less amount, never above it). Channel3 receives a generic phrase (catalog items use a fixed description such as "interchangeable lens camera"; free text loses brands, model numbers and filler) and a price band: the ceiling rounded down to $25, and a floor at a quarter of it. The key stays on the server.
+- **Parsing.** Each product keeps its cheapest in-stock, new, USD offer inside the band; mispriced listings (another offer over three times higher) are dropped. Images are kept only on `cdn.trychannel3.com`, the one host added to `img-src`, so no image proxy is needed.
+- **Credits.** Results are cached for 6 h per query and $25 bucket, with one request in flight per key, and at most `CHANNEL3_DAILY_LIMIT` live searches a day. After a failure, live calls pause (6 h on 401/402/403, 60 s on 429, 30 s otherwise) and the recorded results in `server/fixtures/channel3.json` are served, labelled "Example results". `npm run channel3:record` refreshes them.
+- **Health.** `/api/health` and `state.config.alternatives` report `channel3: ok | fixture | off`. Without a key the panel stays hidden; no error is shown.
+- **AI.** Claude's `find_alternatives` tool takes a generic item and an optional ceiling the user wrote (checked against their words). The server searches and writes the answer; only the outcome (found, none found, needs an item) returns to the model, never product names, stores or prices. Local mode and a logged server override route the same phrasings without the model.
+- **Capture.** `?capture=1` blurs product photos, titles and store names for recordings.
 
 ## Payment state and concurrency
 
