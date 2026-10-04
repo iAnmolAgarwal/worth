@@ -7,6 +7,7 @@
     "dev": "NODE_OPTIONS=--max-old-space-size=1536 tsx server/index.ts",
     "build": "tsc -b && vite build",
     "start": "NODE_ENV=production NODE_OPTIONS=--max-old-space-size=${MAX_HEAP_MB:-384} tsx server/index.ts",
+    "mcp:stdio": "node server/mcpStdio.ts",
     "typecheck": "tsc -b",
     "test": "vitest run --maxWorkers=1",
     "test:watch": "vitest --maxWorkers=1",
@@ -20,6 +21,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
     "@fontsource-variable/figtree": "^5.3.0",
+    "@modelcontextprotocol/sdk": "^1.32.0",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-tooltip": "^1.2.8",
     "cookie-parser": "^1.4.7",

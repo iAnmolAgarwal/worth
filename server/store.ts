@@ -54,6 +54,10 @@ export class Store {
         status TEXT NOT NULL, order_id TEXT UNIQUE, capture_id TEXT UNIQUE, data TEXT NOT NULL);
       CREATE UNIQUE INDEX IF NOT EXISTS one_active_checkout ON purchases(session_id) WHERE status IN ('created','pending','unknown');
       CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE);
+      CREATE TABLE IF NOT EXISTS agent_tokens (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        hash TEXT NOT NULL UNIQUE, hint TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL,
+        last_used INTEGER, revoked INTEGER);
+      CREATE INDEX IF NOT EXISTS agent_tokens_session ON agent_tokens(session_id);
     `)
   }
   close() {
@@ -164,6 +168,45 @@ export class Store {
   recordEvent(id: string, sessionId: string) {
     this.db.prepare('INSERT OR IGNORE INTO events VALUES(?,?)').run(id, sessionId)
   }
+  /** Stores an agent token by its SHA-256 hash only; the token itself is never written. */
+  createAgentToken(token: Omit<AgentTokenRow, 'lastUsed' | 'revoked'> & { hash: string }) {
+    this.db
+      .prepare(
+        'INSERT INTO agent_tokens(id,session_id,hash,hint,created,expires) VALUES(?,?,?,?,?,?)',
+      )
+      .run(token.id, token.sessionId, token.hash, token.hint, token.created, token.expires)
+  }
+  /** One session's agent tokens, newest first, without their hashes. */
+  agentTokens(sessionId: string): AgentTokenRow[] {
+    return (
+      this.db
+        .prepare(
+          'SELECT id, session_id, hint, created, expires, last_used, revoked FROM agent_tokens WHERE session_id=? ORDER BY created DESC, rowid DESC',
+        )
+        .all(sessionId) as unknown as RawAgentToken[]
+    ).map(agentTokenRow)
+  }
+  /** The token with this hash and its session's expiry, if both still exist. */
+  agentTokenByHash(hash: string): (AgentTokenRow & { sessionExpires: number }) | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT t.id, t.session_id, t.hint, t.created, t.expires, t.last_used, t.revoked, s.expires AS session_expires
+        FROM agent_tokens t JOIN sessions s ON s.id = t.session_id WHERE t.hash=?`,
+      )
+      .get(hash) as (RawAgentToken & { session_expires: number }) | undefined
+    return row ? { ...agentTokenRow(row), sessionExpires: row.session_expires } : undefined
+  }
+  touchAgentToken(id: string, time: number) {
+    this.db.prepare('UPDATE agent_tokens SET last_used=? WHERE id=?').run(time, id)
+  }
+  /** Revokes one of this session's tokens; false when the session has no such token. */
+  revokeAgentToken(id: string, sessionId: string, time: number) {
+    return (
+      this.db
+        .prepare('UPDATE agent_tokens SET revoked=COALESCE(revoked, ?) WHERE id=? AND session_id=?')
+        .run(time, id, sessionId).changes > 0
+    )
+  }
   atomic<T>(fn: () => T): T {
     this.db.exec('BEGIN IMMEDIATE')
     try {
@@ -174,6 +217,38 @@ export class Store {
       this.db.exec('ROLLBACK')
       throw error
     }
+  }
+}
+
+/** An agent token as stored, without its hash. Times are in milliseconds. */
+export interface AgentTokenRow {
+  id: string
+  sessionId: string
+  /** The token's last four characters, so the user can tell tokens apart. */
+  hint: string
+  created: number
+  expires: number
+  lastUsed?: number
+  revoked?: number
+}
+interface RawAgentToken {
+  id: string
+  session_id: string
+  hint: string
+  created: number
+  expires: number
+  last_used: number | null
+  revoked: number | null
+}
+function agentTokenRow(row: RawAgentToken): AgentTokenRow {
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    hint: row.hint,
+    created: row.created,
+    expires: row.expires,
+    ...(row.last_used !== null ? { lastUsed: row.last_used } : {}),
+    ...(row.revoked !== null ? { revoked: row.revoked } : {}),
   }
 }
 
