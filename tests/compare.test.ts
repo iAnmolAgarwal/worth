@@ -375,14 +375,19 @@ describe('synthetic persona: Maya at Larkspur Supply', () => {
   const camera = PRODUCTS.find((item) => item.id === 'camera')!
   const headphones = PRODUCTS.find((item) => item.id === 'headphones')!
 
-  it('sells generic items from a separately branded store', () => {
+  it('sells every item, real brands included, from one separately branded store', () => {
     expect(new Set(PRODUCTS.map((item) => item.merchant))).toEqual(new Set(['Larkspur Supply']))
     expect(PRODUCTS.map((item) => [item.id, item.priceCents])).toEqual([
       ['headphones', 34900],
       ['camera', 119900],
       ['chair', 44900],
       ['backpack', 12900],
+      ['macbook-pro-14', 249900],
+      ['airpods-4', 12900],
     ])
+    // A real product keeps its own name; the store never takes the brand's.
+    expect(PRODUCTS.find((item) => item.id === 'macbook-pro-14')!.name).toBe('MacBook Pro 14-inch')
+    expect(PRODUCTS.every((item) => item.aliases?.length)).toBe(true)
   })
 
   it('produces the demo story from the engine', () => {
