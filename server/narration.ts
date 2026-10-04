@@ -750,7 +750,7 @@ const DATE_WORD =
   /\b(?:today|tonight|tomorrow|yesterday|weekends?|weekdays?|weeks?|months?|years?|fortnight|days?|nights?|hours?|mornings?|afternoons?|evenings?|noon|midnight|soon|shortly|later|earlier|lately|recently|ago|momentarily|holidays?|halloween|christmas|xmas|thanksgiving|easter|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:rs(?:day)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\b/i
 /** Advice and judgement: Worth states the engine's result and never recommends or rates options. */
 const ADVICE =
-  /\b(?:skip\w*|delay\w*|defer\w*|postpon\w*|late|miss(?:ing)?|borrow\w*|loans?|credit|financ\w*|overdraft|recommend\w*|suggest\w*|advis\w*|should|ought|smart\w*|wise\w*|better|best|ideal\w*|easier|easy|safer|prefer\w*|worth\s+it|go\s+with|opt\s+for|works?\s+out|good|great|fine|nice|ok(?:ay)?|no\s+(?:issue|problem|worries|concern)s?|covered|doable|manageable|dip\w*\s+into|tap\w*\s+into|use\s+(?:your|the)\s+cushion)\b|\b(?:use|using|try|consider|choose|pick|switch\s+to|split\w*)\b[^.]{0,40}\b(?:pay\s+in\s+4|pay\s+later|instal+ments?|bnpl)\b/i
+  /\b(?:skip\w*|delay\w*|defer\w*|postpon\w*|pa(?:y|ying|id)\s+(?:[a-z']+\s+){0,3}late|late\s+(?:fee|payment)s?|miss(?:ing)?|borrow\w*|loans?|credit|financ\w*|overdraft|recommend\w*|suggest\w*|advis\w*|should|ought|smart\w*|wise\w*|better|best|ideal\w*|easier|easy|safer|prefer\w*|worth\s+it|go\s+with|opt\s+for|works?\s+out|good|great|fine|nice|ok(?:ay)?|no\s+(?:issue|problem|worries|concern)s?|covered|doable|manageable|dip\w*\s+into|tap\w*\s+into|use\s+(?:your|the)\s+cushion)\b|\b(?:use|using|try|consider|choose|pick|switch\s+to|split\w*)\b[^.]{0,40}\b(?:pay\s+in\s+4|pay\s+later|instal+ments?|bnpl)\b/i
 /** A sentence about Pay in 4 or paying later. */
 const PAY_IN_4_MENTION =
   /\bpay\s+in\s+4\b|\bpay(?:ing)?\s+later\b|\bsplit\w*|\bspread\w*|\binstal+ments?\b|\bbnpl\b|\bpaypal\b/i
@@ -860,7 +860,7 @@ function payIn4Problem(sentence: string, values: Placeholders): SentenceRejectio
 function wrongValue(sentence: string, values: Placeholders) {
   // "{income_name} arrives on {low_day}": a day must belong to the value it is attached to.
   for (const m of sentence.matchAll(
-    /\{([a-z0-9_]+)\}((?:\s+[A-Za-z']+){0,4}?)\s+(?:on|by|around)\s+\{([a-z0-9_]+_day)\}/g,
+    /\{([a-z0-9_]+)\}(\s+(?:arrives?|arriving|lands?|landing|is\s+due|due|comes?|hits?|is\s+paid|gets?\s+paid|clears?))?\s+(?:on|by|around)\s+\{([a-z0-9_]+_day)\}/g,
   )) {
     const owner = values[m[1]!]?.date
     const day = values[m[3]!]?.date
@@ -872,7 +872,7 @@ function wrongValue(sentence: string, values: Placeholders) {
   if (/\{(?!cushion\})[a-z0-9_]+\}\s+cushion\b/i.test(sentence)) return true
   // "The most you can spend is {price}": only the engine's limits are limits.
   for (const m of sentence.matchAll(
-    /\b(?:the\s+most|at\s+most|up\s+to|limit|maximum|max)\b(?:\s+[A-Za-z']+){0,5}\s+\{([a-z0-9_]+)\}/gi,
+    /\b(?:the\s+most\s+(?:you\s+)?(?:can|could)\s+(?:spend|afford)\s+(?:is|would\s+be)|at\s+most|up\s+to|(?:limit|maximum|max)\s+(?:is|of|would\s+be))\s+\{([a-z0-9_]+)\}/gi,
   ))
     if (!['max_spend', 'room_today'].includes(m[1]!)) return true
   // "{gap} over your cushion" when the low point is below it, and the reverse.
@@ -891,7 +891,7 @@ function wrongValue(sentence: string, values: Placeholders) {
  * "{cause_bill} on {cause_day}, before {income_name}" when the income arrives first.
  */
 const PAYDAY_WORDS =
-  /\b(before|after|until|ahead\s+of)\s+(?:your\s+|the\s+|a\s+)?(?:next\s+)?(?:paycheck|pay\s*day|income|salary)\b(?!\s+(?:after|on|that|of)\b|\s+\{)/gi
+  /\b(before|after|until|ahead\s+of)\s+(?:your\s+|the\s+|a\s+)?(?:next\s+)?(?:paycheck|pay\s*day|income|salary)\b(?!\s+(?:after|on|that|of)\b|,?\s+\{)/gi
 function misordered(sentence: string, values: Placeholders) {
   // "before your next paycheck" written in words means the next income placeholder's day.
   const income = values.income_name?.date

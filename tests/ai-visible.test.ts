@@ -5,7 +5,12 @@ import { createChatProvider, fallbackReply, localReply } from '../server/chat.ts
 import type { ChatActions, ChatData, ChatInput } from '../server/chat.ts'
 import { readTiming } from '../server/dates.ts'
 import { namesOtherItem } from '../server/interpret.ts'
-import { checkSentence, purchasePlaceholders, templateSentence } from '../server/narration.ts'
+import {
+  checkSentence,
+  planPlaceholders,
+  purchasePlaceholders,
+  templateSentence,
+} from '../server/narration.ts'
 import { nearPhrase, planLabel } from '../shared/collision.ts'
 import { assessPurchase, payIn4Scenario, planCollisions } from '../shared/finance.ts'
 import { createDemoState } from '../shared/seed.ts'
@@ -559,6 +564,7 @@ describe('the sentence check rejects what the judge found (F3)', () => {
   const camera = purchasePlaceholders(assess(119900, 'camera'), { ...data, payIn4: 'paypal' })
   const cameraPlain = purchasePlaceholders(assess(119900, 'camera'), data)
   const book = purchasePlaceholders(assess(2000, 'book'), data)
+  const plan = planPlaceholders(data)
   const cases: [string, string, typeof camera, 'tight' | 'fits'][] = [
     // Pay in 4 recommendations
     ['recommends', 'Pay in 4 is the smarter way to buy {item}.', camera, 'tight'],
@@ -639,6 +645,7 @@ describe('the sentence check rejects what the judge found (F3)', () => {
     ['dip into', 'Dip into your {cushion} cushion for {item}.', camera, 'tight'],
     ['use your cushion', 'Use your {cushion} cushion to cover {item}.', camera, 'tight'],
     ['pay later, unasked', 'Pay later lets you keep {cushion} in place.', cameraPlain, 'tight'],
+    ['pay rent late', 'Paying {cause_bill} a little late keeps {cushion} intact.', camera, 'tight'],
     // Values in the wrong place
     [
       'cushion is the low point',
@@ -671,6 +678,26 @@ describe('the sentence check rejects what the judge found (F3)', () => {
 
   // Sentences Claude wrote in the live eval that are sound; they must keep passing.
   it.each([
+    [
+      '{cause_bill} on {cause_day} comes before the next payday, {cause_payday}, so the balance cannot absorb the {item} until that pay lands.',
+      camera,
+      'tight',
+    ],
+    [
+      'The next paycheck after {cause_bill}, {cause_payday}, comes too late to offset a {price} {item}.',
+      camera,
+      'tight',
+    ],
+    [
+      'Nothing turned up under that limit because {cause_bill}, due {cause_day}, pulls the balance to its lowest point, so only {room_today} is free today.',
+      plan,
+      'tight',
+    ],
+    [
+      'The {cause_bill} payment of {cause_amount} drives the low point on {low_day}, yet {price} for the {item} still leaves {gap} of room above your {cushion}.',
+      book,
+      'fits',
+    ],
     [
       'Splitting the {item} keeps the same {price} total, and the payments still land around {cause_bill}, so the low point of {p4_low_point} on {p4_low_day} stays below the {cushion} cushion.',
       camera,
