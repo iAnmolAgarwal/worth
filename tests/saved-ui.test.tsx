@@ -20,7 +20,6 @@ vi.mock('../src/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/api')>()
   return { ...actual, api: vi.fn() }
 })
-vi.mock('recharts', () => ({}))
 
 const TODAY = '2026-10-23'
 const apiMock = vi.mocked(api)
