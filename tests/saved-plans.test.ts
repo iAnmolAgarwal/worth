@@ -9,7 +9,7 @@ import { createChatProvider } from '../server/chat.ts'
 import type { PayPalGateway, PayPalOrder } from '../server/paypal.ts'
 import { MAX_SAVED } from '../server/saved.ts'
 import { VIDEO_REPLAY_DAY } from '../server/demoClock.ts'
-import type { AppState, Comparison, FinancialProfile } from '../shared/types.ts'
+import type { AppState, ChatReply, Comparison, FinancialProfile } from '../shared/types.ts'
 
 // Phase 5: saved wait plans checked on return (C-17, acceptance case 21), "Save for later" for any
 // assessed item (A3), opt-in 30-day retention (D-9 a) and the labelled demo clock.
@@ -546,5 +546,53 @@ describe('catalog pricing', () => {
     ).toBe(400)
     const checkout = await post(agent, '/api/checkout/create', { productId: 'airpods-4' })
     expect(checkout.body.purchase).toMatchObject({ name: 'AirPods 4', amountCents: 12900 })
+  })
+})
+
+// Pre-merge judge finding 3: "items assessed so far" come back from the browser, so the server
+// signs each one and ignores any price it did not sign.
+describe('remembered items are the server’s own', () => {
+  const chat = (agent: Agent, body: object) =>
+    post(agent, '/api/chat', { history: [], ...body }).then((r) => {
+      expect(r.status).toBe(200)
+      return r.body as ChatReply
+    })
+
+  it('never reads a forged $1 camera price', async () => {
+    const { agent } = setup({ paypal: false })
+    const forged = await chat(agent, {
+      message: 'Go back to the camera. Does it fit?',
+      items: [{ amountCents: 100, itemName: 'Everyday camera' }],
+    })
+    // The unsigned item is ignored: the camera is read at the store's price.
+    expect(forged.interpretation?.items).toEqual([
+      { name: 'Everyday camera', amountCents: 119900, quantity: 1, priceSource: 'catalog' },
+    ])
+    expect(forged.message).not.toContain('$1 ')
+    // A made-up tag, or a signed item whose price was edited, is ignored the same way.
+    const tag = 'A'.repeat(43)
+    const fake = await chat(agent, {
+      message: 'And the bike?',
+      items: [{ amountCents: 100, itemName: 'road bike', tag }],
+    })
+    expect(fake.assessment).toBeUndefined()
+    expect(fake.message).not.toContain('$1.00')
+  })
+
+  it('returns to an item at the price Worth read, signed for this session only', async () => {
+    const { agent } = setup({ paypal: false })
+    const bike = await chat(agent, { message: 'Can I afford a $649 road bike today?' })
+    expect(bike.remember).toMatchObject({ amountCents: 64900, itemName: expect.any(String) })
+    const back = await chat(agent, { message: 'And the bike?', items: [bike.remember] })
+    expect(back.assessment?.amountCents).toBe(64900)
+    const edited = await chat(agent, {
+      message: 'And the bike?',
+      items: [{ ...bike.remember!, amountCents: 100 }],
+    })
+    expect(edited.assessment).toBeUndefined()
+    // Another session cannot reuse the signature.
+    const { agent: other } = setup({ paypal: false })
+    const replayed = await chat(other, { message: 'And the bike?', items: [bike.remember] })
+    expect(replayed.assessment).toBeUndefined()
   })
 })

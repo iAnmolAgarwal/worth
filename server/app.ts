@@ -26,6 +26,7 @@ import { CSV_IMPORT_LIMITS, CSV_SIZE_MESSAGE, utf8Bytes } from '../shared/limits
 import type {
   AppState,
   Assessment,
+  ChatReply,
   FinancialProfile,
   PayIn4Eligibility,
   Product,
@@ -51,11 +52,12 @@ import { allowedOrigins, loadConfig } from './config.ts'
 import type { AppConfig } from './config.ts'
 import { WindowLimiter } from './limits.ts'
 import { contentSecurityPolicy } from './csp.ts'
+import { itemSigner } from './remember.ts'
 import { confirmPlan, confirmRefund, PlanError, recordRefund } from './plans.ts'
 import { queryFor, roomToday } from './alternatives.ts'
 import { createChannel3, loadFixtures } from './channel3.ts'
 import type { Channel3Client } from './channel3.ts'
-import type { Alternatives, ChatReply } from '../shared/types.ts'
+import type { Alternatives } from '../shared/types.ts'
 import {
   addSaved,
   ASSESSMENT_ONLY,
@@ -213,13 +215,20 @@ const chatSchema = z
       .max(16)
       .default([]),
     context: assessmentSchema.optional(),
-    /** Items assessed earlier in this conversation, so a later question can return to one. */
+    /**
+     * Items assessed earlier in this conversation, so a later question can return to one. Only
+     * items this session's replies signed are used; any other entry is dropped.
+     */
     items: z
       .array(
         z
           .object({
             amountCents: cents.min(1),
-            itemName: z.string().trim().min(1).max(150).optional(),
+            itemName: z.string().max(150).optional(),
+            tag: z
+              .string()
+              .regex(/^[A-Za-z0-9_-]{43}$/)
+              .optional(),
           })
           .strict(),
       )
@@ -316,6 +325,8 @@ export function createApp(options: AppOptions = {}) {
       fixtures: loadFixtures(),
       now: () => now().getTime(),
     })
+  // Signs the items each conversation assessed (see remember.ts).
+  const signer = itemSigner()
   const app = express()
   app.disable('x-powered-by')
   // Behind a proxy, req.ip must be the client address the proxy appended, not the proxy itself.
@@ -1585,8 +1596,14 @@ export function createApp(options: AppOptions = {}) {
     }
   }
   app.post('/api/chat', async (req, res) => {
-    const input = chatSchema.parse(req.body)
-    const current = state(sessionId(res))
+    const parsed = chatSchema.parse(req.body)
+    const session = sessionId(res)
+    // A remembered item counts only with this session's signature, so its price is one Worth read.
+    const { items: sent, ...rest } = parsed
+    const items = signer.verify(session, sent)
+    const input = { ...rest, ...(items.length ? { items } : {}) }
+    const reply = (answer: ChatReply) => res.json(signer.sign(session, answer))
+    const current = state(session)
     if (input.sessionKey && input.sessionKey !== current.sessionKey)
       throw new HttpError(
         409,
@@ -1599,22 +1616,22 @@ export function createApp(options: AppOptions = {}) {
       transactions: current.transactions,
       today: current.today,
     }
-    const id = sessionId(res)
+    const id = session
     const actions = chatActions(req, id, input)
     // Local answers still search other stores for something cheaper; nothing goes to Claude.
     /** Answers that list similar items record them as shown to this session. */
-    const shown = (reply: ChatReply) => {
-      rememberShown(id, reply.alternatives)
-      return reply
+    const shown = (answer: ChatReply) => {
+      rememberShown(id, answer.alternatives)
+      return answer
     }
     const local = async (reason?: string) => shown(await localReply(input, data, reason, actions))
     if (!mayUseExternalAi(current.profile))
-      return res.json(
+      return reply(
         await local(
           'AI sharing is off. This is a local calculation, not an AI response; your financial context was not sent to Claude.',
         ),
       )
-    if (!chat) return res.json(await local())
+    if (!chat) return reply(await local())
     if (chatBusy.has(id))
       throw new HttpError(
         429,
@@ -1623,18 +1640,18 @@ export function createApp(options: AppOptions = {}) {
       )
     const limited = claudeLimit(req)
     if (limited)
-      return res.json(
+      return reply(
         await local(
           `${CLAUDE_LIMIT_REASON[limited]}, so this answer uses local calculations, not an AI response.`,
         ),
       )
     chatBusy.add(id)
     try {
-      return res.json(shown(await chat.reply(input, data, actions)))
+      return reply(shown(await chat.reply(input, data, actions)))
     } catch (error) {
       // Error class only: never the message text, financial data, or credentials.
       console.warn('Worth chat used local fallback:', error instanceof Error ? error.name : 'Error')
-      return res.json(
+      return reply(
         await local(
           'Claude is temporarily unavailable. This answer uses local calculations, not an AI response.',
         ),

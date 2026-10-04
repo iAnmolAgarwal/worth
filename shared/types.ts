@@ -451,6 +451,13 @@ export interface PurchaseContext {
 }
 /** Earlier items in one conversation, so a later question can return to any of them. */
 export type RememberedItem = Pick<PurchaseContext, 'amountCents' | 'itemName'>
+/**
+ * An item Worth assessed, as the browser keeps it for the rest of the conversation. The tag is
+ * the server's signature for this session, so a price the browser edits or invents is ignored.
+ */
+export interface SignedItem extends RememberedItem {
+  tag: string
+}
 export type ChatIntent =
   | 'affordability'
   | 'subscriptions'
@@ -484,6 +491,8 @@ export interface ChatReply {
   checkout?: CheckoutHandoff
   /** Similar items under what fits today, from other stores. Shown only when some were found. */
   alternatives?: Alternatives
+  /** The assessed item, signed for this session, to send back with later questions. */
+  remember?: SignedItem
 }
 /** What the UI needs to hand a prepared order to PayPal for approval. */
 export interface CheckoutHandoff {

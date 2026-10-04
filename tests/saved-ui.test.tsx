@@ -329,6 +329,8 @@ describe('Save for later in Ask Worth', () => {
       },
       suggestions: [],
       toolCalls: [],
+      // The server signs each assessed item; the browser sends it back unchanged.
+      remember: { amountCents: cents, itemName: name, tag: `signed-${name}` },
     })
     const replies = [answer('Everyday camera', 119900, true), answer('headphones', 34900, false)]
     routeApi((path, data) => {
@@ -353,7 +355,9 @@ describe('Save for later in Ask Worth', () => {
     await user.type(box, 'And $349 headphones?')
     await user.click(screen.getByRole('button', { name: 'Send' }))
     await waitFor(() => expect(bodies).toHaveLength(2))
-    expect(bodies[1]!.items).toEqual([{ amountCents: 119900, itemName: 'Everyday camera' }])
+    expect(bodies[1]!.items).toEqual([
+      { amountCents: 119900, itemName: 'Everyday camera', tag: 'signed-Everyday camera' },
+    ])
   })
 })
 

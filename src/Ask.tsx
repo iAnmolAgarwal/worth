@@ -18,8 +18,8 @@ import type {
   OptionResult,
   Product,
   PurchaseContext,
-  RememberedItem,
   SavedItem,
+  SignedItem,
 } from '../shared/types'
 import { api, ApiError } from './api'
 import type {
@@ -552,7 +552,7 @@ export function Ask({
 }) {
   const [entries, setEntries] = useState<Entry[]>([])
   /** Every item this conversation assessed, so a later question can return to it (fix #3). */
-  const remembered = useRef<RememberedItem[]>([])
+  const remembered = useRef<SignedItem[]>([])
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -596,11 +596,9 @@ export function Ask({
           context: explicit ?? contextRef.current,
           ...(remembered.current.length ? { items: remembered.current } : {}),
         })) as ChatReply
-        if (reply.assessment) {
-          const item = {
-            amountCents: reply.assessment.amountCents,
-            itemName: reply.assessment.itemName.slice(0, 150),
-          }
+        // The server signs each assessed item; only signed items count when sent back.
+        if (reply.remember) {
+          const item = reply.remember
           remembered.current = [
             ...remembered.current.filter(
               (known) => known.itemName !== item.itemName || known.amountCents !== item.amountCents,
