@@ -20,10 +20,10 @@ import type {
 import { api, ApiError } from './api'
 import type { AgentCheckout, AppState, ChatReply, Comparison } from './contract'
 import { claudeUses } from './copy'
-import { breachLine, optionStatus, type DecisionRequest, type Explanation } from './Decision'
+import { optionStatus, type DecisionRequest, type Explanation } from './Decision'
 import { claudeOn, envLabel, fits, missingFix, useComparison } from './engine'
-import { capitalize, cx, dayLabel, fromMoney, money } from './format'
-import { Alert, Button, Field, Pill, ReadAsChip, Toggle } from './ui'
+import { capitalize, cx, dayLabel, fromMoney, money, signed } from './format'
+import { Alert, Button, Field, Pill, ReadAsChip, Toggle, type Tone } from './ui'
 
 /** `trace` is fixed when the answer arrives, so a later switch change never relabels it. */
 type Entry = ChatMessage & { reply?: ChatReply; id: number; trace?: string }
@@ -78,22 +78,12 @@ export function matchProduct(products: Product[], name: string, amountCents: num
 /** Claude on for this profile: the server's rule, read from state. */
 export const claudeAllowed = claudeOn
 
-const TOOL_TRACE: Record<string, string> = {
-  interpret_purchase: 'Worth’s assistant read your question and checked it against your plan',
-  list_commitments: 'Worth’s assistant looked up your upcoming bills',
-  spending_summary: 'Worth’s assistant summed up your recent spending',
-  get_plan_summary: 'Worth’s assistant read your plan totals',
-  prepare_checkout: 'Worth’s assistant prepared a PayPal checkout',
-}
 function traceText(reply: ChatReply, state: AppState) {
-  if (reply.mode !== 'anthropic')
-    return claudeAllowed(state)
-      ? 'Worth’s own calculation · assistant unavailable for this answer'
-      : 'Worth’s own calculation · assistant off'
-  const tools = [...new Set(reply.toolCalls)].map(
-    (tool) => TOOL_TRACE[tool] ?? 'Worth’s assistant used your plan',
-  )
-  return [...new Set(tools)].join(' · ') || 'Worth’s assistant used your plan'
+  // One caption for every answer, so the source reads the same each time.
+  if (reply.mode === 'anthropic') return 'Worth’s assistant answered from your plan'
+  return claudeAllowed(state)
+    ? 'Worth’s own calculation · assistant unavailable for this answer'
+    : 'Worth’s own calculation · assistant off'
 }
 
 /** The answer's own text; the facts Claude picked are shown separately. */
@@ -116,46 +106,35 @@ function OptionRows({ c, at }: { c: Comparison; at?: Assessment }) {
   const day = later ? dayLabel(later.purchaseDate) : 'today'
   const maxCents = later ? later.maxAffordableCents : c.spendLess.maxPriceCents
   const recommendation = later ? (fits(buy) ? 'buyToday' : c.recommendation) : c.recommendation
-  const rows = [
+  // Each row states its status once: as a pill when there is one, otherwise in words.
+  const lowest = (option: OptionResult) =>
+    `Lowest ${minus(signed(option.lowestBalanceCents))} · ${dayLabel(option.lowestDate)}`
+  const rows: { key: string; title: string; sub: string; pill?: readonly [Tone, string] }[] = [
     {
       key: 'buyToday',
       title: later ? `Buy ${day}` : 'Buy today',
-      sub: fits(buy)
-        ? `${money(buy.headroomCents)} above cushion at lowest`
-        : (breachLine(buy, c.cushionCents, true) ?? 'Below your cushion'),
+      sub: lowest(buy),
       pill: status(buy),
     },
     fits(buy)
-      ? {
-          key: 'wait',
-          title: 'Wait',
-          sub: `Not needed: it fits ${day}`,
-          pill: ['info', 'Not needed'] as const,
-        }
+      ? { key: 'wait', title: 'Wait', sub: `Not needed: it fits ${day}` }
       : c.wait.date
         ? {
             key: 'wait',
             title: `Wait until ${dayLabel(c.wait.date)}`,
-            sub: `${money(c.wait.headroomCents)} above cushion at lowest${c.wait.stressLowestCents < c.cushionCents ? ' · tight' : ''}`,
+            sub: `${lowest(c.wait)}${c.wait.stressLowestCents < c.cushionCents ? ' · tight' : ''}`,
             pill: status(c.wait),
           }
-        : {
-            key: 'wait',
-            title: 'Wait',
-            sub: 'No date in the next 30 days fits',
-            pill: ['info', 'No date'] as const,
-          },
-    {
-      key: 'spendLess',
-      title: 'Spend less',
-      sub:
-        maxCents > 0
-          ? `Up to ${money(maxCents)} ${later ? `on ${day}` : 'today'}`
-          : `Nothing fits ${day}`,
-      // Spending exactly the most you can keeps you at your limit, whichever day it is.
-      pill:
-        maxCents > 0 ? (['warn', 'At your limit'] as const) : (['info', 'Nothing fits'] as const),
-    },
+        : { key: 'wait', title: 'Wait', sub: 'No date in the next 30 days fits' },
+    maxCents > 0
+      ? {
+          key: 'spendLess',
+          title: 'Spend less',
+          sub: `Up to ${money(maxCents)} ${later ? `on ${day}` : 'today'}`,
+          // Spending exactly the most you can keeps you at your limit, whichever day it is.
+          pill: ['warn', 'At your limit'] as const,
+        }
+      : { key: 'spendLess', title: 'Spend less', sub: `Nothing fits ${day}` },
   ]
   // Spending less only matters when the item doesn't fit as it is.
   const shown = fits(buy) ? rows.filter((row) => row.key !== 'spendLess') : rows
@@ -166,7 +145,7 @@ function OptionRows({ c, at }: { c: Comparison; at?: Assessment }) {
           <div className="body">
             <div className="t">
               {row.title}
-              {recommendation === row.key && row.pill[0] !== 'info' && (
+              {recommendation === row.key && row.pill && (
                 <span className="tag-rec">Recommended</span>
               )}
             </div>
@@ -174,7 +153,7 @@ function OptionRows({ c, at }: { c: Comparison; at?: Assessment }) {
               <span className="soft">{row.sub}</span>
             </div>
           </div>
-          <Pill tone={row.pill[0]}>{row.pill[1]}</Pill>
+          {row.pill && <Pill tone={row.pill[0]}>{row.pill[1]}</Pill>}
         </div>
       ))}
     </div>
