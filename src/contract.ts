@@ -2,6 +2,7 @@
  * The Phase 3 / Phase 4 contract (specs/contract-phase3-4.md), now part of the shared types:
  * purchase lifecycle fields, the agent's checkout hand-off and Pay in 4 eligibility.
  */
+import { plainText } from '../shared/text'
 import type { Alternative, Purchase, SavedItem } from '../shared/types'
 
 export type {
@@ -37,9 +38,10 @@ export type SaveTarget =
  */
 export const alternativeTarget = (item: Alternative): SaveTarget => ({
   kind: 'custom',
-  name: item.title.slice(0, 120),
+  // Hidden characters a listing title may carry are dropped, so a real title always saves.
+  name: plainText(item.title).slice(0, 120),
   amountCents: item.priceCents,
-  retailer: item.retailer.slice(0, 80),
+  retailer: plainText(item.retailer).slice(0, 80),
   url: item.url,
   channel3Id: item.id,
 })

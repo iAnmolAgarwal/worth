@@ -4,6 +4,8 @@ import { addDays, WAIT_SEARCH_DAYS } from '../shared/finance.ts'
 import { PRODUCTS } from '../shared/seed.ts'
 import type { FinancialProfile, Purchase, SavedItem } from '../shared/types.ts'
 import type { SessionData } from './store.ts'
+import { storeLink } from './channel3.ts'
+import { isPlain } from '../shared/text.ts'
 
 /** Saved items one session may keep at once. */
 export const MAX_SAVED = 20
@@ -29,11 +31,17 @@ const isoDate = z
     return !Number.isNaN(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === value
   }, 'Use a valid calendar date')
 const option = z.enum(['buyToday', 'wait', 'spendLess'])
-// Labels must be plain text before they are shown or sent anywhere: no control characters,
-// zero-width marks or bidirectional overrides that could disguise a name.
-// oxlint-disable-next-line no-control-regex
-const NOT_PLAIN = /[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/
-const plain = (value: string) => !NOT_PLAIN.test(value)
+// Labels must be plain text before they are shown or sent anywhere (see shared/text.ts).
+const plain = isPlain
+/** An https link with no user name or password in it. */
+const cleanLink = (value: string) => {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && !url.username && !url.password
+  } catch {
+    return false
+  }
+}
 const catalogSave = z
   .object({
     kind: z.literal('catalog'),
@@ -58,7 +66,7 @@ const customSave = z
       .string()
       .max(2000)
       .url()
-      .refine((value) => value.startsWith('https://'), 'Use an https link')
+      .refine(cleanLink, 'Use an https link without a user name or password')
       .optional(),
     /** Channel3's product ID, for a row saved from "Similar items" (its price can be re-checked). */
     channel3Id: z
@@ -72,6 +80,15 @@ export const saveSchema = z
   .refine(
     (input) => !input.waitDate || (input.option ?? 'wait') === 'wait',
     'A plan date belongs to the wait option.',
+  )
+  // A Channel3 row keeps the link Channel3 itself allows: its own buy link or the store's domain.
+  .refine(
+    (input) =>
+      input.kind !== 'custom' ||
+      !input.channel3Id ||
+      !input.url ||
+      Boolean(storeLink(input.url, input.retailer ?? '')),
+    'Use the store’s own link for an item from another store.',
   )
 export type SaveInput = z.infer<typeof saveSchema>
 /** The browser's old per-device wait dates (`worth:planned`), sent once to move them here. */

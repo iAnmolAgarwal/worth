@@ -448,5 +448,46 @@ describe('saving a similar item for later', () => {
     expect(check.status).toBe(404)
     expect(channel3.checkPrice).not.toHaveBeenCalled()
     expect((await post(agent, '/api/saved', { ...row, channel3Id: '../x' })).status).toBe(400)
+    // Its link goes with it, so a stripped row keeps no link from an unchecked source.
+    expect(saved.body.item.url).toBeUndefined()
+  })
+
+  // Re-judge N2: a saved row keeps only a link Channel3 itself allows.
+  it('keeps Channel3’s own link rule for a saved row, and no credentials in any link', async () => {
+    const { agent } = setup()
+    await agent.get('/api/alternatives?productId=camera')
+    for (const url of [
+      'https://evil.example/phish',
+      'https://bestbuy.com.evil.example/x',
+      'https://user:pw@bestbuy.com/x',
+    ])
+      expect((await post(agent, '/api/saved', { ...row, url })).status).toBe(400)
+    for (const url of ['https://www.bestbuy.com/site/123', 'https://buy.trychannel3.com/DBouSIg'])
+      expect((await post(agent, '/api/saved', { ...row, url })).status).toBe(200)
+    const typed = { kind: 'custom', name: 'Road bike', amountCents: 64900 }
+    expect(
+      (await post(agent, '/api/saved', { ...typed, url: 'https://user:pw@shop.example/bike' }))
+        .status,
+    ).toBe(400)
+    expect(
+      (await post(agent, '/api/saved', { ...typed, url: 'https://shop.example/bike' })).status,
+    ).toBe(200)
+  })
+
+  // Re-judge N3: real listing titles save; hidden characters are still refused.
+  it('saves real titles with trademarks, dashes and accents, never hidden characters', async () => {
+    const { agent } = setup()
+    for (const name of [
+      'Sony™ Alpha a6400 – Mirrorless Camera Body®',
+      'Café Racer Helmet — Matte Noir',
+      'Bose QuietComfort® 45 Headphones – Triple Black',
+    ])
+      expect(
+        (await post(agent, '/api/saved', { kind: 'custom', name, amountCents: 10000 })).status,
+      ).toBe(200)
+    for (const name of ['x\u2060y', 'Camera\uFEFF Body', 'x\u200By'])
+      expect(
+        (await post(agent, '/api/saved', { kind: 'custom', name, amountCents: 10000 })).status,
+      ).toBe(400)
   })
 })

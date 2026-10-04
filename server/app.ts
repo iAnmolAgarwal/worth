@@ -1259,11 +1259,11 @@ export function createApp(options: AppOptions = {}) {
   app.post('/api/saved', (req, res) => {
     const parsed = saveSchema.parse(req.body)
     const id = sessionId(res)
-    // A Channel3 product ID is kept only for a product this session was shown, so a saved item
-    // can never make Worth read an arbitrary product (spec item 15).
+    // A Channel3 product ID (and its link) is kept only for a product this session was shown, so a
+    // saved item can never make Worth read an arbitrary product (spec item 15).
     const input =
       parsed.kind === 'custom' && parsed.channel3Id && !wasShown(id, parsed.channel3Id)
-        ? { ...parsed, channel3Id: undefined }
+        ? { ...parsed, channel3Id: undefined, url: undefined }
         : parsed
     const data = dataFor(res)
     const item = addSaved(data, input, sessionToday(data), now())

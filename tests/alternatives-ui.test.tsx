@@ -9,6 +9,7 @@ import { Decision } from '../src/Decision'
 import App from '../src/App'
 import { Saved, Settings } from '../src/Saved'
 import { api } from '../src/api'
+import { alternativeTarget } from '../src/contract'
 import { compareOptions } from '../shared/finance'
 import { createDemoState, PRODUCTS } from '../shared/seed'
 import type { Alternatives, AppState, ChatReply } from '../shared/types'
@@ -385,6 +386,17 @@ describe('saving a similar item for later', () => {
         'Interchangeable Lens Camera Body is in Saved. Assessment only — not sold in the demo store.',
       ),
     ).toBeTruthy()
+  })
+
+  it('drops hidden characters from a listing title so it always saves (re-judge N3)', () => {
+    const item = found().items[0]!
+    expect(
+      alternativeTarget({
+        ...item,
+        title: 'Sony™ Alpha\u2060 a6400 – Body®\uFEFF',
+        retailer: 'bestbuy.com\u200B',
+      }),
+    ).toMatchObject({ name: 'Sony™ Alpha a6400 – Body®', retailer: 'bestbuy.com' })
   })
 
   it('saves from an Ask answer about something cheaper', async () => {
