@@ -329,6 +329,7 @@ export function Checkout({
       const latest = (await api<AppState>(`/checkout/${purchase.id}/cancel`, {})) as AppState
       onUpdate(latest)
       setLocalPurchase(latest.purchases.find((p) => p.id === purchase.id))
+      setNotice('')
     } catch (failure) {
       setError((failure as Error).message)
     } finally {
@@ -436,6 +437,13 @@ export function Checkout({
     },
   }
   const c = content[view]
+  // Every status line follows the order's status: a note about leaving PayPal belongs only to a
+  // checkout still waiting for approval, never under "Checkout cancelled" or a payment (fix #9).
+  const statusNote =
+    view === 'approve' || view === 'waiting'
+      ? notice ||
+        (purchase?.lastError?.code === 'PAYPAL_CANCELLED' ? purchase.lastError.message : '')
+      : ''
 
   const footer = (
     <>
@@ -564,7 +572,7 @@ export function Checkout({
         <div role="status" aria-live="polite" className="sr">
           {c.title}
         </div>
-        {notice && <p className="meta strong">{notice}</p>}
+        {statusNote && <p className="meta strong">{statusNote}</p>}
         {view === 'approved' && shortfall && (
           <Alert tone="bad" icon={CircleAlert} live>
             <b>
