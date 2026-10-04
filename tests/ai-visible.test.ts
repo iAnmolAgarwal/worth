@@ -197,6 +197,19 @@ describe('Pay in 4 in chat (judge #2)', () => {
     expect(reply.message).not.toMatch(/apartment rent|Oct 21/)
   })
 
+  it('names only bills and income from the purchase date on in a later day’s sentence', () => {
+    const data = demo()
+    const a = assessPurchase(data.profile, [], {
+      amountCents: 119900,
+      itemName: 'camera',
+      purchaseDate: '2026-10-23',
+      today: TODAY,
+    })
+    const values = purchasePlaceholders(a, data)
+    expect(values.cause_day!.date! >= '2026-10-23').toBe(true)
+    expect(values.income_day!.date! >= '2026-10-23').toBe(true)
+  })
+
   it('gives the engine a start date while the window stays from today', () => {
     const seed = createDemoState(TODAY)
     const later = payIn4Scenario(seed.profile, [], {
@@ -568,6 +581,7 @@ describe('the sentence check rejects what the judge found (F3)', () => {
       camera,
       'tight',
     ],
+    ['credits Pay in 4', 'Pay in 4 helps spread {price}, and {p4_collision}.', camera, 'tight'],
     [
       'credits Pay in 4',
       'With Pay in 4, {item} works out because your low is {p4_low_point}.',
@@ -657,6 +671,16 @@ describe('the sentence check rejects what the judge found (F3)', () => {
 
   // Sentences Claude wrote in the live eval that are sound; they must keep passing.
   it.each([
+    [
+      '{income_name} on {income_day} helps cover {cause_bill} on {cause_day}, so the balance keeps your {cushion} cushion.',
+      book,
+      'fits',
+    ],
+    [
+      '{cause_bill} on {cause_day} pulls the balance to {low_point} before the next payday on {payday_after_low}.',
+      camera,
+      'tight',
+    ],
     [
       'Pay in 4 is not cheaper, since the {price} total stays the same with no interest; it only spreads payments of {p4_payment}, and {p4_collision}.',
       camera,

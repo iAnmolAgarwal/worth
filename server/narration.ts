@@ -513,8 +513,9 @@ export function purchasePlaceholders(a: Assessment, data: ChatData): Placeholder
       about: 'the low point if everyday spending runs 20% higher',
     },
   }
+  // From the purchase date on: for a later day, earlier bills and income never explain it.
   const cause = a.drivers
-    .filter((d) => d.kind !== 'income' && d.date >= a.today && d.date <= a.lowestDate)
+    .filter((d) => d.kind !== 'income' && d.date >= a.purchaseDate && d.date <= a.lowestDate)
     .sort((x, y) => y.amountCents - x.amountCents)[0]
   if (cause) {
     out.cause_bill = {
@@ -533,7 +534,7 @@ export function purchasePlaceholders(a: Assessment, data: ChatData): Placeholder
       date: cause.date,
     }
   }
-  const income = a.drivers.find((d) => d.kind === 'income' && d.date >= a.today)
+  const income = a.drivers.find((d) => d.kind === 'income' && d.date >= a.purchaseDate)
   if (income) {
     out.income_name = {
       value: chatLabel(income.name),
@@ -741,7 +742,7 @@ const DATE_WORD =
   /\b(?:today|tonight|tomorrow|yesterday|weekends?|weekdays?|weeks?|months?|years?|fortnight|days?|nights?|hours?|mornings?|afternoons?|evenings?|noon|midnight|soon|shortly|later|earlier|lately|recently|ago|momentarily|holidays?|halloween|christmas|xmas|thanksgiving|easter|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:rs(?:day)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\b/i
 /** Advice and judgement: Worth states the engine's result and never recommends or rates options. */
 const ADVICE =
-  /\b(?:skip\w*|delay\w*|defer\w*|postpon\w*|late|miss(?:ing)?|borrow\w*|loans?|credit|financ\w*|overdraft|recommend\w*|suggest\w*|advis\w*|should|ought|smart\w*|wise\w*|better|best|ideal\w*|easier|easy|safer|prefer\w*|worth\s+it|go\s+with|opt\s+for|works?\s+out|lifts?|lifting|helps?|helping|softens?|good|great|fine|nice|ok(?:ay)?|no\s+(?:issue|problem|worries|concern)s?|covered|doable|manageable|dip\w*\s+into|tap\w*\s+into|use\s+(?:your|the)\s+cushion)\b|\b(?:use|using|try|consider|choose|pick|switch\s+to|split\w*)\b[^.]{0,40}\b(?:pay\s+in\s+4|pay\s+later|instal+ments?|bnpl)\b/i
+  /\b(?:skip\w*|delay\w*|defer\w*|postpon\w*|late|miss(?:ing)?|borrow\w*|loans?|credit|financ\w*|overdraft|recommend\w*|suggest\w*|advis\w*|should|ought|smart\w*|wise\w*|better|best|ideal\w*|easier|easy|safer|prefer\w*|worth\s+it|go\s+with|opt\s+for|works?\s+out|good|great|fine|nice|ok(?:ay)?|no\s+(?:issue|problem|worries|concern)s?|covered|doable|manageable|dip\w*\s+into|tap\w*\s+into|use\s+(?:your|the)\s+cushion)\b|\b(?:use|using|try|consider|choose|pick|switch\s+to|split\w*)\b[^.]{0,40}\b(?:pay\s+in\s+4|pay\s+later|instal+ments?|bnpl)\b/i
 /** A sentence about Pay in 4 or paying later. */
 const PAY_IN_4_MENTION =
   /\bpay\s+in\s+4\b|\bpay(?:ing)?\s+later\b|\bsplit\w*|\bspread\w*|\binstal+ments?\b|\bbnpl\b|\bpaypal\b/i
@@ -816,6 +817,11 @@ function payIn4Problem(sentence: string, values: Placeholders): SentenceRejectio
     !/\b(?:no|without)\s+interest\b|\binterest[-\s]free\b/i.test(sentence)
   )
     return 'pay_in_4'
+  // Pay in 4 never improves anything: no lifting, softening or helping verbs about it.
+  if (
+    /\b(?:lifts?|lifting|raises?|improves?|helps?|helping|softens?|eases?|easing)\b/i.test(sentence)
+  )
+    return 'pay_in_4'
   if (
     /\bcheaper\b/i.test(sentence) &&
     !/\b(?:not|no|isn['’]t|never)\s+(?:any\s+)?cheaper\b/i.test(sentence)
@@ -872,7 +878,7 @@ function wrongValue(sentence: string, values: Placeholders) {
  * "{cause_bill} on {cause_day}, before {income_name}" when the income arrives first.
  */
 const PAYDAY_WORDS =
-  /\b(before|after|until|ahead\s+of)\s+(?:your\s+|the\s+|a\s+)?(?:next\s+)?(?:paycheck|pay\s*day|income|salary)\b/gi
+  /\b(before|after|until|ahead\s+of)\s+(?:your\s+|the\s+|a\s+)?(?:next\s+)?(?:paycheck|pay\s*day|income|salary)\b(?!\s+(?:after|on|that|of)\b|\s+\{)/gi
 function misordered(sentence: string, values: Placeholders) {
   // "before your next paycheck" written in words means the next income placeholder's day.
   const income = values.income_name?.date

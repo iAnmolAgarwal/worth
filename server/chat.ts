@@ -1063,12 +1063,12 @@ function sentenceRequest(values: Placeholders, shown: string[] = []) {
     .map(([name, value]) => `{${name}} (${value.value})`)
   const order =
     dated.length > 1
-      ? `\nIn time order: ${dated.join(', then ')}. Keep every before and after true to this order; "the next paycheck" means {income_name} on {income_day}.`
+      ? `\nIn time order: ${dated.join(', then ')}. Keep every before and after true to this order, and name a payday only with its placeholder.`
       : ''
   const seen = shown.length
     ? `\nThe person already sees these facts: ${shown.map((text) => JSON.stringify(text)).join(' ')}\nDo not repeat them. Connect them instead: what causes the result, or what would change it.`
     : ''
-  return `Tools are now closed. Reply with JSON {"note": ...}. In note, write one sentence of at most 30 words that tells the person why the engine's result is what it is, for the question they asked. Name any amount, date, count or name only with these placeholders, written exactly with their braces:\n${list}\nNever write a digit, amount, date, weekday, month, relative day or number word yourself. Keep every before or after true to the dates listed. Do not restate the verdict. Do not suggest skipping or delaying a bill, credit, a loan, Pay in 4 or using the cushion. Use null when no sentence would help.${order}${seen}`
+  return `Tools are now closed. Reply with JSON {"note": ...}. In note, write one sentence of at most 30 words that tells the person why the engine's result is what it is, for the question they asked. Name any amount, date, count or name only with these placeholders, written exactly with their braces:\n${list}\nNever write a digit, amount, percentage, date, weekday, month, relative time word (later, earlier, soon) or number word yourself. Keep every before or after true to the dates listed. Do not restate the verdict. Do not suggest skipping or delaying a bill, credit, a loan, Pay in 4 or using the cushion. Use null when no sentence would help.${order}${seen}`
 }
 const TOOLS_CLOSED =
   'Tools are now closed for this answer. Reply with the final JSON only, using the tool results you already have.'
