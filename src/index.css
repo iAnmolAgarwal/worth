@@ -1364,14 +1364,17 @@ textarea.input {
 .inst .top {
   display: flex;
   align-items: center;
-  gap: var(--s-3);
+  gap: var(--s-2);
 }
 .inst .amt {
   font-weight: var(--fw-bold);
   color: var(--c-text-strong);
 }
+.inst .top > div {
+  min-width: 0;
+}
+/* "About" wraps above the date in a narrow card; the date itself stays on one line. */
 .inst .when {
-  white-space: nowrap;
   font-size: var(--fs-meta);
   line-height: var(--lh-meta);
   color: var(--c-text-2);
@@ -2749,7 +2752,6 @@ textarea.input {
 }
 /* Dates and short labels never break across lines; long lines balance instead of orphaning. */
 .opt .ot,
-.inst .when,
 .nowrap {
   white-space: nowrap;
 }

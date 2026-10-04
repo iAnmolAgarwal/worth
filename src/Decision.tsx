@@ -399,7 +399,13 @@ function PayIn4Panel({
                 <div>
                   <div className="amt num">{money(item.amountCents)}</div>
                   <div className="when">
-                    {item.date === c.today ? 'Today' : `About ${dayLabel(item.date)}`}
+                    {item.date === c.today ? (
+                      'Today'
+                    ) : (
+                      <>
+                        About <span className="nowrap">{dayLabel(item.date)}</span>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
