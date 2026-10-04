@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   Bookmark,
   BookmarkCheck,
+  Bot,
   CalendarCheck,
   CalendarClock,
   CircleAlert,
@@ -18,6 +19,7 @@ import type { Product, SavedItem } from '../shared/types'
 import { api, ApiError } from './api'
 import { usePriceDrop } from './Alternatives'
 import { ClaudeSwitch, JudgeBadge } from './Ask'
+import { ConnectAgent } from './ConnectAgent'
 import {
   ASSESSMENT_ONLY,
   CHANNEL3_SHARED_DATA,
@@ -888,6 +890,15 @@ export function Settings({
                 When the assistant is on, these go to Anthropic (Claude): {CLAUDE_SHARED_DATA}.
               </p>
             </details>
+          </section>
+          <section className="tile" aria-labelledby="set-agent">
+            <div className="sec-head">
+              <h2 className="h-section" id="set-agent">
+                <Bot size={18} aria-hidden="true" style={{ verticalAlign: -3, marginRight: 8 }} />
+                Connect an agent
+              </h2>
+            </div>
+            <ConnectAgent state={state} onToast={onToast} />
           </section>
           <section className="tile" aria-labelledby="set-channel3">
             <div className="sec-head">

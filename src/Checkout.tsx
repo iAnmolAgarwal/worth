@@ -559,6 +559,12 @@ export function Checkout({
             here.
           </p>
         )}
+        {purchase?.preparedBy === 'external' && view !== 'completed' && (
+          <p className="caption">
+            Requested by an external agent connected to Worth. Nothing is paid until you approve in
+            PayPal and confirm here.
+          </p>
+        )}
         <Steps view={view} />
         <div className="co-head">
           <span className={`co-icon ${c.tone}`} aria-hidden="true">

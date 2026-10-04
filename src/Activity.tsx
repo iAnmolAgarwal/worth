@@ -50,6 +50,14 @@ const iconFor = (t: Transaction): LucideIcon =>
           ? CalendarCheck
           : Store
 const PAGE = 25
+/** An order an outside agent asked for through Worth's MCP server (prepare_order). */
+function ExternalAgent() {
+  return (
+    <div className="pills">
+      <Pill tone="info">Requested by an external agent</Pill>
+    </div>
+  )
+}
 
 interface CategoryResult {
   mode: 'anthropic' | 'demo'
@@ -170,6 +178,7 @@ export function Activity({
   const row = (t: Transaction) => {
     const purchaseId = t.source === 'purchase' ? t.id.replace(/^purchase-/, '') : undefined
     const needsPlan = purchaseId && unconfirmed.has(purchaseId)
+    const bought = purchaseId ? state.purchases.find((p) => p.id === purchaseId) : undefined
     return (
       <button
         type="button"
@@ -183,10 +192,11 @@ export function Activity({
           <div className="s">
             {shortDate(t.date)} ·{' '}
             {t.source === 'purchase'
-              ? `${state.purchases.find((p) => p.id === purchaseId)?.paymentPlan?.product === 'payIn4' ? 'Pay in 4' : 'Payment'} · Worth checkout`
+              ? `${bought?.paymentPlan?.product === 'payIn4' ? 'Pay in 4' : 'Payment'} · Worth checkout`
               : KIND_TEXT[t.kind]}
             {t.status === 'excluded' ? ' · not counted' : ''}
           </div>
+          {bought?.preparedBy === 'external' && <ExternalAgent />}
           {needsPlan && (
             <div className="pills">
               <Pill tone="warn">Confirm your plan</Pill>
@@ -348,6 +358,7 @@ export function Activity({
                         ? 'Waiting for PayPal'
                         : 'PayPal is confirming'}
                     </div>
+                    {purchase.preparedBy === 'external' && <ExternalAgent />}
                   </div>
                   <div className="amt num">{signed(-purchase.amountCents)}</div>
                 </button>
