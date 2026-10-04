@@ -634,7 +634,7 @@ async function prepareOrder(
       ...(fits
         ? []
         : [
-            'This purchase dips below your cushion, and you said to go ahead; Worth will ask you to confirm that again before payment.',
+            'This purchase dips below your cushion. Your agent said you chose to go ahead, so Worth will ask you to confirm that yourself before any payment.',
           ]),
       `Open this link to review and approve it in PayPal: ${structured.approval_url}`,
       'Then confirm the payment in Worth. Only then is it captured.',
