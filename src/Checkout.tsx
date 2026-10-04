@@ -106,6 +106,7 @@ export function Checkout({
   purchaseId?: string
   returnedApproved?: boolean
   returnedCancelled?: boolean
+  /** The user came from "Buy today anyway"; the consent box still starts unticked. */
   acknowledge?: boolean
   instance?: PayPalSdkInstance
   sdkStatus?: SdkStatus
@@ -125,7 +126,9 @@ export function Checkout({
   const [assessment, setAssessment] = useState<Assessment>()
   const [room, setRoom] = useState<Comparison>()
   const [fundsOk, setFundsOk] = useState(false)
-  const [ack, setAck] = useState(acknowledge)
+  // Consent below the cushion is always ticked here, on this review's own figures, even after
+  // "Buy today anyway" (pre-merge judge finding 5).
+  const [ack, setAck] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState(
@@ -613,6 +616,11 @@ export function Checkout({
               />
               <span>My money and bills are still as entered today.</span>
             </label>
+            {tight && acknowledge && (
+              <p className="caption" style={{ margin: '8px 0 0' }}>
+                You chose to buy today anyway. These are today’s figures; tick below to confirm.
+              </p>
+            )}
             {tight && (
               <label className="check">
                 <input

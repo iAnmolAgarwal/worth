@@ -642,6 +642,30 @@ describe('decision view', () => {
     expect(screen.queryByRole('button', { name: /Compare with PayPal Pay in 4/ })).toBeNull()
   })
 
+  // Pre-merge judge finding 5: consent below the cushion is given on the checkout review itself.
+  it('starts the below-cushion consent unticked, even after “Buy today anyway”', async () => {
+    const user = userEvent.setup()
+    const state = makeState()
+    const camera = state.products.find((p) => p.id === 'camera')!
+    routeApi((path, data) => {
+      if (path === '/assess')
+        return assessPurchase(state.profile, [], { amountCents: 119900, today: TODAY })
+      if (path === '/compare') return compare(state, data)
+      throw new Error(`Unexpected API request: ${path}`)
+    })
+    render(<Checkout {...checkoutProps(state)} product={camera} acknowledge />)
+    const consent = (await screen.findByRole('checkbox', {
+      name: /I understand buying today takes me below my \$300\.00 cushion/,
+    })) as HTMLInputElement
+    expect(consent.checked).toBe(false)
+    expect(screen.getByText(/You chose to buy today anyway/)).toBeTruthy()
+    const start = screen.getByRole('button', { name: /Continue to PayPal|simulated checkout/ })
+    await user.click(screen.getByRole('checkbox', { name: /My money and bills are still/ }))
+    expect((start as HTMLButtonElement).disabled).toBe(true)
+    await user.click(consent)
+    expect((start as HTMLButtonElement).disabled).toBe(false)
+  })
+
   it('restates the breach before buying today anyway', async () => {
     const user = userEvent.setup()
     const state = makeState()
