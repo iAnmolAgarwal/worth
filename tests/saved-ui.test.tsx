@@ -6,7 +6,7 @@ import App from '../src/App'
 import { Ask } from '../src/Ask'
 import { Checkout } from '../src/Checkout'
 import { Home } from '../src/Home'
-import { migratePlanned, Saved, Settings } from '../src/Saved'
+import { FundsDialog, migratePlanned, Saved, Settings } from '../src/Saved'
 import { api, ApiError } from '../src/api'
 import { assessPurchase, compareOptions } from '../shared/finance'
 import { createDemoState, PRODUCTS } from '../shared/seed'
@@ -176,6 +176,52 @@ describe('a saved wait plan on return', () => {
     expect(calls.indexOf('/funds/confirm')).toBeLessThan(
       calls.indexOf('/saved/saved-camera/prepare'),
     )
+  })
+
+  // Pre-merge judge finding 2: on real data nothing that changes the money starts ticked.
+  it('starts every "already in this amount" box unticked on imported data', async () => {
+    const user = userEvent.setup()
+    const sample = makeState()
+    const state: AppState = {
+      ...sample,
+      demoClock: undefined,
+      fundsProjection: undefined,
+      profile: { ...sample.profile, source: 'import' },
+      purchases: [
+        {
+          id: 'bought-1',
+          productId: 'headphones',
+          name: 'Studio headphones',
+          amountCents: 34900,
+          currency: 'USD',
+          mode: 'sandbox',
+          status: 'completed',
+          createdAt: '2026-10-20T12:00:00Z',
+          completedAt: '2026-10-20T12:05:00Z',
+          profileVersion: 1,
+          assessmentDate: '2026-10-20',
+        },
+      ],
+    }
+    const posted: unknown[] = []
+    routeApi((path, data) => {
+      if (path !== '/funds/confirm') throw new Error(`Unexpected ${path}`)
+      posted.push(data)
+      return state
+    })
+    const onConfirmed = vi.fn()
+    render(<FundsDialog state={state} onClose={vi.fn()} onConfirmed={onConfirmed} />)
+    const dialog = screen.getByRole('dialog', { name: 'Confirm today’s funds' })
+    const amount = within(dialog).getByLabelText(/^Money available today/) as HTMLInputElement
+    // A stale real snapshot is never offered as today's amount.
+    expect(amount.value).toBe('')
+    const boxes = within(dialog).getAllByRole('checkbox') as HTMLInputElement[]
+    expect(boxes.map((box) => box.checked)).toEqual([false, false])
+    expect(within(dialog).queryByText(/sample projection/)).toBeNull()
+    await user.type(amount, '1,250.00')
+    await user.click(within(dialog).getByRole('button', { name: 'Confirm and check again' }))
+    await waitFor(() => expect(onConfirmed).toHaveBeenCalled())
+    expect(posted).toEqual([{ balanceCents: 125000, paidFlowIds: [], reflectedPurchaseIds: [] }])
   })
 
   it('never offers checkout for an assessment-only item', async () => {

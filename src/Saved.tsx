@@ -251,8 +251,11 @@ export function FundsDialog({
   const unreflected = state.purchases.filter(
     (p) => p.status === 'completed' && !p.archived && !profile.reflectedPurchaseIds.includes(p.id),
   )
-  const [paid, setPaid] = useState<string[]>(due.map((flow) => flow.id))
-  const [included, setIncluded] = useState<string[]>(unreflected.map((p) => p.id))
+  // Only Maya's sample projection already counts these payments, so only it starts them ticked.
+  // On any other plan each one stays unticked until the user says it has happened.
+  const projected = Boolean(fundsProjection)
+  const [paid, setPaid] = useState<string[]>(projected ? due.map((flow) => flow.id) : [])
+  const [included, setIncluded] = useState<string[]>(projected ? unreflected.map((p) => p.id) : [])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const toggle = (list: string[], id: string) =>
@@ -328,6 +331,11 @@ export function FundsDialog({
             <legend className="meta strong" style={{ fontWeight: 700, marginBottom: 4 }}>
               Already in this amount
             </legend>
+            <p className="caption" style={{ margin: '0 0 4px' }}>
+              {projected
+                ? 'Ticked because Maya’s sample projection already counts them. Sample data only.'
+                : 'Tick each one your accounts already show.'}
+            </p>
             {due.map((flow) => (
               <label className="check" key={flow.id}>
                 <input
