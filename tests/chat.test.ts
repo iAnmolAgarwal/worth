@@ -1121,3 +1121,78 @@ describe('questions that say “cheaper” but are not product searches (verdict
     expect(findAlternatives).toHaveBeenCalledWith('over-ear headphones', 44001)
   })
 })
+
+// After merging Channel3 with Phase 5: whole-name catalog grounding and the cheaper-search routing
+// hold together.
+describe('catalog grounding and the cheaper-search routing together', () => {
+  const ok = () =>
+    vi.fn(async (query: string, max: number) => ({
+      status: 'ok' as const,
+      query,
+      maxPriceCents: max,
+      items: [],
+    }))
+  const camera = { amountCents: 119900, itemName: 'Everyday camera', purchaseDate: TODAY }
+
+  it.each([
+    ['Can I afford a camera bag?', undefined],
+    ['What about a camera bag?', camera],
+  ])('“%s” is neither the store camera nor a search', async (message, context) => {
+    const findAlternatives = vi.fn()
+    const local = await localReply(ask(message, context ? { context } : {}), demo(), undefined, {
+      findAlternatives,
+    })
+    expect(local.assessment).toBeUndefined()
+    expect(local.intent).toBe('clarify')
+    const { provider } = model([
+      interpret([item('camera bag', null)], { refers_to_previous_item: Boolean(context) }),
+      final('clarify'),
+    ])
+    const reply = await provider.reply(ask(message, context ? { context } : {}), demo(), {
+      findAlternatives,
+    })
+    expect(reply.assessment).toBeUndefined()
+    expect(reply.intent).not.toBe('alternatives')
+    expect(findAlternatives).not.toHaveBeenCalled()
+  })
+
+  it('still searches for “cheaper options for headphones”, even with the store item named', async () => {
+    const findAlternatives = ok()
+    const local = await localReply(
+      ask('Show me cheaper options for headphones'),
+      demo(),
+      undefined,
+      { findAlternatives },
+    )
+    expect(local.intent).toBe('alternatives')
+    expect(findAlternatives.mock.calls[0]![0]).toMatch(/headphones/)
+    const online = ok()
+    const { provider } = model([
+      [tool('find_alternatives', { item: 'headphones', max_price_cents: null, ...shown() })],
+    ])
+    const reply = await provider.reply(ask('Show me cheaper options for headphones'), demo(), {
+      findAlternatives: online,
+    })
+    expect(reply.toolCalls).toEqual(['find_alternatives'])
+    expect(online).toHaveBeenCalledTimes(1)
+  })
+
+  it('never searches for “Is Pay in 4 cheaper than paying now?” about the store camera', async () => {
+    const findAlternatives = vi.fn()
+    const local = await localReply(
+      ask('Is Pay in 4 cheaper than paying now?', { context: camera }),
+      demo(),
+      undefined,
+      { findAlternatives },
+    )
+    expect(local.intent).not.toBe('alternatives')
+    const { provider } = model([final('overview')])
+    const reply = await provider.reply(
+      ask('Is Pay in 4 cheaper than paying now?', { context: camera }),
+      demo(),
+      { findAlternatives },
+    )
+    expect(reply.intent).not.toBe('alternatives')
+    expect(findAlternatives).not.toHaveBeenCalled()
+  })
+})
