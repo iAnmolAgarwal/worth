@@ -51,7 +51,7 @@ const interpret = (input: Record<string, unknown> = {}) =>
     points: ['low_point'],
     lead_in: 'none',
     follow_ups: [],
-    point_reasons: [],
+    point_reasons: '',
     ...input,
   })
 const note = (text: string | null) => [{ type: 'text', text: JSON.stringify({ note: text }) }]
@@ -71,10 +71,7 @@ describe('Pay in 4 in chat (judge #2)', () => {
     const { provider } = model([
       interpret({
         points: ['pay_in_4_schedule', 'pay_in_4_stacking'],
-        point_reasons: [
-          { point: 'pay_in_4_schedule', reason: 'answers_question' },
-          { point: 'pay_in_4_stacking', reason: 'shows_risk' },
-        ],
+        point_reasons: 'answers_question, shows_risk',
       }),
       note(null),
     ])
@@ -357,6 +354,7 @@ describe('one Claude sentence with engine placeholders only (C-13)', () => {
     ['a Pay in 4 suggestion', 'Consider PayPal Pay in 4 for the {item}.', 'advice'],
     ['a credit suggestion', 'A credit card could cover {item}.', 'advice'],
     ['two sentences', 'It is {cause_bill}. That comes first.', 'not_one_sentence'],
+    ['a figure next to Pay in 4', 'Pay in 4 splits it into 4 parts.', 'free_number'],
     ['no sentence', null, 'no_sentence'],
   ])('shows the template instead of %s', async (_, sentence, reason) => {
     const { provider } = purchase(sentence)
@@ -365,6 +363,25 @@ describe('one Claude sentence with engine placeholders only (C-13)', () => {
     expect(reply.explanation).toBe(
       'Apartment rent ($1,450) on Fri, Oct 16 is the largest bill due before your balance reaches its low point on Thu, Oct 22.',
     )
+  })
+
+  it('reads “Pay in 4” as a name, and allows clauses joined in one sentence', () => {
+    const data = { ...demo(), payIn4: 'paypal' as const }
+    const a = assessPurchase(data.profile, [], {
+      amountCents: 119900,
+      itemName: 'camera',
+      today: TODAY,
+    })
+    const values = purchasePlaceholders(a, data)
+    const checked = checkSentence(
+      'Pay in 4 keeps the same {price} total with no interest; {p4_collision}.',
+      values,
+      'tight',
+    )
+    expect(checked).toEqual({
+      ok: true,
+      text: 'Pay in 4 keeps the same $1,199 total with no interest; payment 2 would land about 1 day after your apartment rent.',
+    })
   })
 
   it('accepts what would fit for a tight result', () => {

@@ -372,7 +372,10 @@ describe('Claude consent in chat', () => {
     })[0]!
     expect(toggle.getAttribute('aria-checked')).toBe('true')
     expect((toggle as HTMLButtonElement).disabled).toBe(false)
-    expect(screen.getAllByText(/^On: Claude reads your question, picks which of Worth’s facts to show/).length).toBeGreaterThan(0)
+    expect(
+      screen.getAllByText(/^On: Claude reads your question, picks which of Worth’s facts to show/)
+        .length,
+    ).toBeGreaterThan(0)
     await user.click(toggle)
     expect(document.activeElement).toBe(toggle)
     expect(toggle.getAttribute('aria-disabled')).toBe('true')

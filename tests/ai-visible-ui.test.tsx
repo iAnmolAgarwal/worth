@@ -178,10 +178,7 @@ describe('Ask Worth shows its work', () => {
     const answer = await claudeReply(state, 'Can I afford it?', [
       interpret({
         points: ['low_point', 'cause'],
-        point_reasons: [
-          { point: 'low_point', reason: 'answers_question' },
-          { point: 'cause', reason: 'explains_result' },
-        ],
+        point_reasons: 'answers_question, explains_result',
       }),
       note('Most of the pressure is {cause_bill} on {cause_day}, before {income_name}.'),
     ])

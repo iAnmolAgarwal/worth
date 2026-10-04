@@ -728,7 +728,7 @@ Reading a purchase question
 
 Choosing what to show
 - Every tool takes points: up to three facts from the engine that best answer what the person asked, most important first. The app writes each fact from the engine's numbers and leaves out any that do not apply to the result.
-- point_reasons: for each fact in points, why you picked it, from a fixed set: answers_question (it answers what they asked), explains_result (it explains the verdict), shows_timing (it is about when), shows_risk (it shows what could go wrong), adds_context (useful background).
+- point_reasons: one reason per fact, comma-separated in the same order as points, from a fixed set: answers_question (it answers what they asked), explains_result (it explains the verdict), shows_timing (it is about when), shows_risk (it shows what could go wrong), adds_context (useful background).
 - lead_in picks an optional opening line from a fixed set. Use a refusal line when the person asks about skipping or delaying a bill, using credit, loans or instalments to make a purchase fit, or dipping into the cushion; use "not_yes" when they ask you to just approve the purchase.
 - follow_ups: up to three short next questions in the person's own voice, without amounts, dates, or mentions of bills, credit or the cushion.
 
@@ -777,18 +777,10 @@ function presentation(points: readonly string[], about: string) {
       description:
         'Up to three short next questions in the user’s voice, with no amounts, dates, or mentions of bills, credit or the cushion.',
     },
+    // Plain text checked by the server: enums here make the strict tools' grammar too large.
     point_reasons: {
-      type: 'array',
-      description: 'For each fact in points, the reason you picked it.',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['point', 'reason'],
-        properties: {
-          point: { type: 'string', enum: [...points] },
-          reason: { type: 'string', enum: [...FACT_REASONS] },
-        },
-      },
+      type: 'string',
+      description: `Why you picked each fact: one reason per fact, comma-separated, in the same order as points, each one of ${FACT_REASONS.join(', ')}.`,
     },
   }
 }
@@ -1036,11 +1028,18 @@ const presentationSchema = z.object({
   lead_in: z.enum(Object.keys(LEAD_INS) as [LeadIn, ...LeadIn[]]),
   follow_ups: z.array(z.string().max(300)).max(10),
   // Optional here so answers recorded before reasons existed still replay.
-  point_reasons: z
-    .array(z.object({ point: z.string(), reason: z.enum(FACT_REASONS) }))
-    .max(10)
-    .optional(),
+  point_reasons: z.string().max(400).optional(),
 })
+/** Claude's reasons, one per fact in order; anything outside the fixed set is dropped. */
+function reasonsFor(points: FactId[], text: string | undefined) {
+  const given = (text ?? '').split(/[\s,;]+/).filter(Boolean)
+  return Object.fromEntries(
+    points.flatMap((point, index) => {
+      const reason = given[index] as FactReason | undefined
+      return reason && (FACT_REASONS as readonly string[]).includes(reason) ? [[point, reason]] : []
+    }),
+  )
+}
 /** The one-sentence request after a tool result: placeholder text, or null. */
 const SENTENCE_FORMAT = {
   type: 'json_schema' as const,
@@ -1146,11 +1145,7 @@ class Turn {
       points,
       lead: shown.data.lead_in,
       followUps: shown.data.follow_ups,
-      reasons: Object.fromEntries(
-        (shown.data.point_reasons ?? [])
-          .filter((r) => points.includes(r.point as FactId))
-          .map((r) => [r.point, r.reason]),
-      ),
+      reasons: reasonsFor(points, shown.data.point_reasons),
     }
     if (name === 'interpret_purchase') return await this.interpret(input, chosen)
     if (name === 'find_alternatives') return await this.findAlternatives(input, chosen)

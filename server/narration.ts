@@ -612,6 +612,9 @@ export function templateSentence(
 ): string | undefined {
   const has = (...keys: string[]) => keys.every((key) => key in values)
   if (kind === 'purchase') {
+    // Asked about Pay in 4, the sentence names where its payments land.
+    if (outcome !== 'incomplete' && has('p4_collision'))
+      return 'With PayPal Pay in 4, {p4_collision}.'
     if (outcome === 'fits' && has('low_point', 'low_day', 'cushion'))
       return 'Even at its lowest, {low_point} on {low_day}, your balance keeps your {cushion} cushion.'
     if (outcome === 'tight' && has('cause_bill', 'cause_amount', 'cause_day', 'low_day'))
@@ -673,12 +676,14 @@ export function checkSentence(
   if (names.some((name) => !(name in values)) || /[{}]/.test(sentence.replace(PLACEHOLDER, '')))
     return { ok: false, reason: 'unknown_placeholder' }
   const prose = sentence.replace(PLACEHOLDER, ' ')
-  if (!/[.!]$/.test(sentence) || /[.!?;:]\s+\S/.test(prose.slice(0, -1)))
+  if (!/[.!]$/.test(sentence) || /[.!?]\s+\S/.test(prose.slice(0, -1)))
     return { ok: false, reason: 'not_one_sentence' }
   if (ADVICE.test(prose)) return { ok: false, reason: 'advice' }
-  if (/[\p{N}\p{Sc}%#]/u.test(prose) || NUMBER_WORD.test(prose))
+  // "Pay in 4" is PayPal's product name, not a figure.
+  const words = prose.replace(/\bPay\s+in\s+4\b/gi, 'PayPal')
+  if (/[\p{N}\p{Sc}%#]/u.test(words) || NUMBER_WORD.test(words))
     return { ok: false, reason: 'free_number' }
-  if (DATE_WORD.test(prose)) return { ok: false, reason: 'free_date' }
+  if (DATE_WORD.test(words)) return { ok: false, reason: 'free_date' }
   // A tight result may still say what would fit: waiting, or spending less.
   const conditional = /\{(?:wait_day|max_spend)\}/.test(sentence)
   if (
