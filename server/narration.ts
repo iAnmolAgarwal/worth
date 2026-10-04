@@ -879,6 +879,9 @@ function wrongValue(sentence: string, values: Placeholders) {
     /\b(?:the\s+most\s+(?:you\s+)?(?:can|could)\s+(?:spend|afford)\s+(?:is|would\s+be)|at\s+most|up\s+to|(?:limit|maximum|max)\s+(?:is|of|would\s+be))\s+\{([a-z0-9_]+)\}/gi,
   ))
     if (!['max_spend', 'room_today'].includes(m[1]!)) return true
+  // The room above the cushion and the stressed balance are different values ("trim the {gap} of
+  // room to {stress_low}" mislabels one as the other).
+  if (/\{gap\}/.test(sentence) && /\{stress_low\}/.test(sentence)) return true
   // "{gap} over your cushion" when the low point is below it, and the reverse.
   const gap = values.gap?.about ?? ''
   if (

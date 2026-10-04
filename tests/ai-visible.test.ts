@@ -655,6 +655,12 @@ describe('the sentence check rejects what the judge found (F3)', () => {
     ],
     ['income on the low day', '{income_name} arrives on {low_day}.', camera, 'tight'],
     ['price as the limit', 'The most you can spend is {price}.', camera, 'tight'],
+    [
+      'room relabelled as the stressed balance',
+      'The {item} still leaves {gap} of room, and higher everyday spending would only trim it to {stress_low}.',
+      book,
+      'fits',
+    ],
     // Not one sentence
     [
       'two semicolons',
