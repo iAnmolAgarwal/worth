@@ -135,6 +135,14 @@ After buyer approval, the user performs a distinct confirmation action in Worth.
 
 The webhook route verifies the signature through PayPal, resolves the related order, retrieves the authoritative order, and uses the same reconciliation path. Event IDs are deduplicated. Late approval events cannot downgrade a completed purchase. Refund/reversal/denial events after a completion mark the profile for review; automatic refund accounting is outside the MVP.
 
+## Saved items, wait plans and the demo clock
+
+Saved items live in the session on the server (`server/saved.ts`): a catalog item (name and price from the server catalog) or a custom item from an Ask Worth assessment, which is labelled "Assessment only — not sold in the demo store" and never checked out. A session keeps at most 20. A wait plan whose date has come is reported as `ready`; there is no scheduler, email or push. On return the user confirms today's funds (`POST /api/funds/confirm`), the plan is assessed again, and only then can `POST /api/saved/:id/prepare` create the order, through `checkoutGuards` in `server/agentCheckout.ts`, the same guards Claude's `prepare_checkout` uses.
+
+Sessions expire 24 hours after creation unless the user opts in to 30-day retention (`POST /api/retention`), which moves both the session row's expiry and the cookie's.
+
+The demo clock (`server/demoClock.ts`) sets the session's today for the synthetic persona only: `sessionToday()` in `server/app.ts` reads it, and importing data removes it. The Video replay preset restarts the persona on Sat, Oct 3, 2026. Moving the clock to a later day leaves the funds snapshot behind, so today's funds need confirming, exactly as for real data; for the persona the confirmation offers the sample plan's own projected balance.
+
 ## Session and data boundary
 
 - Opaque random cookie: HttpOnly, SameSite=Lax, and Secure in production mode.
