@@ -255,21 +255,24 @@ function ChartTile({
               point.events.some((event) => event.kind === 'income'),
           )?.date,
         }}
-        label={`Projected balance ${title.replace(/^If/, 'if')}. Lowest point ${signed(option.lowestBalanceCents)} on ${fullDate(option.lowestDate)}, which ${above ? 'stays above' : 'is below'} your ${money(c.cushionCents)} cushion.`}
+        label={`Projected balance ${title.replace(/^If/, 'if')}. Lowest point ${signed(option.lowestBalanceCents)} on ${fullDate(option.lowestDate)}, which ${option.lowestBalanceCents === c.cushionCents ? 'is exactly' : above ? 'stays above' : 'is below'} your ${money(c.cushionCents)} cushion.`}
       />
-      <p className="meta" style={{ marginTop: 12, color: 'var(--c-text-strong)' }}>
-        Lowest <b className="num">{signed(option.lowestBalanceCents)}</b> on{' '}
-        {dayLabel(option.lowestDate)} (
-        {option.lowestBalanceCents === c.cushionCents
-          ? 'exactly your cushion'
-          : `${money(Math.abs(option.lowestBalanceCents - c.cushionCents))} ${above ? 'above' : 'below'} your cushion`}
-        )
-        {cause && cause.date === option.lowestDate && payday
-          ? `: ${lower(cause.name)} leaves before your paycheck lands that day.`
-          : cause
-            ? `, after ${lower(cause.name)} on ${dayLabel(cause.date)}.`
-            : '.'}
-      </p>
+      {/* With Pay in 4 open, the chart's own two-row comparison already states both lows. */}
+      {!payIn4 && (
+        <p className="meta" style={{ marginTop: 12, color: 'var(--c-text-strong)' }}>
+          Lowest <b className="num">{signed(option.lowestBalanceCents)}</b> on{' '}
+          {dayLabel(option.lowestDate)} (
+          {option.lowestBalanceCents === c.cushionCents
+            ? 'exactly your cushion'
+            : `${money(Math.abs(option.lowestBalanceCents - c.cushionCents))} ${above ? 'above' : 'below'} your cushion`}
+          )
+          {cause && cause.date === option.lowestDate && payday
+            ? `: ${lower(cause.name)} leaves before your paycheck lands that day.`
+            : cause
+              ? `, after ${lower(cause.name)} on ${dayLabel(cause.date)}.`
+              : '.'}
+        </p>
+      )}
     </section>
   )
 }
