@@ -19,6 +19,7 @@ import type {
 } from '../shared/types'
 import { api, ApiError } from './api'
 import type { AgentCheckout, AppState, ChatReply, Comparison } from './contract'
+import { AlternativesList } from './Alternatives'
 import { claudeUses } from './copy'
 import { optionStatus, type DecisionRequest, type Explanation } from './Decision'
 import { claudeOn, envLabel, fits, missingFix, useComparison } from './engine'
@@ -934,6 +935,7 @@ function Answer({
           )}
         </section>
       )}
+      {reply.alternatives && <AlternativesList result={reply.alternatives} />}
       {reply.checkout && <AgentHandoff checkout={reply.checkout} onOpen={onOpenCheckout} />}
       {fix && last && (
         <button type="button" className="link" onClick={() => onNavigate(fix.hash)}>
