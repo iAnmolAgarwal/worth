@@ -210,7 +210,12 @@ function compose(answer: Answer, data: ChatData): ChatReply {
       verdict,
       chosen,
       body,
-      answer.alternatives && alternativesText(answer.alternatives, shown),
+      answer.alternatives &&
+        alternativesText(
+          answer.alternatives,
+          shown,
+          points?.some((p) => p.id === 'room_today'),
+        ),
       answer.note,
     ]
       .filter(Boolean)
@@ -231,23 +236,28 @@ function compose(answer: Answer, data: ChatData): ChatReply {
  * The engine's sentence for a request for something cheaper. Results are discovery only, so the
  * text says where they come from and that Worth does not sell them.
  */
-function alternativesText(outcome: AlternativesOutcome, shown: Alternatives | undefined) {
+function alternativesText(
+  outcome: AlternativesOutcome,
+  shown: Alternatives | undefined,
+  /** The room today is already shown as a fact Claude picked, so it is not repeated. */
+  roomShown = false,
+) {
   const room = money(outcome.roomCents)
   const cushion = money(outcome.cushionCents)
   if (outcome.roomCents < PRICE_BUCKET_CENTS)
     return outcome.roomCents > 0
       ? `Only ${room} fits today without going below your ${cushion} cushion, so Worth didn’t look for alternatives.`
       : `Nothing fits today without going below your ${cushion} cushion, so Worth didn’t look for alternatives.`
-  const fits = `Up to ${room} fits today and keeps your ${cushion} cushion.`
+  const fits = roomShown ? '' : `Up to ${room} fits today and keeps your ${cushion} cushion.`
   const above =
     outcome.statedCents !== undefined && outcome.statedCents > outcome.roomCents
       ? ` That is less than the ${money(outcome.statedCents)} you mentioned, so Worth searched below it.`
       : ''
   if (!outcome.query)
-    return `${fits} Tell me what kind of item you’re looking for, and Worth will look for similar ones under that amount from other stores.`
+    return `${fits} Tell me what kind of item you’re looking for, and Worth will look for similar ones under that amount from other stores.`.trim()
   if (!shown)
-    return `${fits}${above} Worth couldn’t find similar items from other stores right now.`
-  return `${fits}${above} Here are similar items under ${money(shown.maxPriceCents)} from other stores, found through Channel3${shown.status === 'fixture' ? ' (example results recorded earlier)' : ''}. Prices may change, and Worth doesn’t sell these items.`
+    return `${fits}${above} Worth couldn’t find similar items from other stores right now.`.trim()
+  return `${fits}${above} Here are similar items under ${money(shown.maxPriceCents)} from other stores, found through Channel3${shown.status === 'fixture' ? ' (example results recorded earlier)' : ''}. Prices may change, and Worth doesn’t sell these items.`.trim()
 }
 /** What fits today and the phrase to search, for a request for something cheaper. */
 function alternativesFor(
