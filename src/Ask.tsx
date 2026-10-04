@@ -977,6 +977,10 @@ function Answer({
   const stale =
     Boolean(assessment) &&
     (assessment!.profileVersion !== state.profile.version || assessment!.today !== state.today)
+  // The strip already shows the schedule Claude picked, so the list doesn't repeat it.
+  const picked = (reply.points ?? []).filter(
+    (point) => !(point.id === 'pay_in_4_schedule' && reply.payIn4?.payments.length),
+  )
   const explanation: Explanation = {
     lead: reply.lead,
     points: reply.points?.map((point) => point.text) ?? [],
@@ -1054,7 +1058,7 @@ function Answer({
           }
         />
       )}
-      {!!reply.points?.length && (
+      {!!picked.length && (
         <section className="picked" aria-label="Picked for your question">
           <span className="claude">
             <Sparkles className="ico" aria-hidden="true" />
@@ -1062,11 +1066,11 @@ function Answer({
           </span>
           {reply.lead && <p style={{ marginTop: 8 }}>{reply.lead}</p>}
           <ul>
-            {(allFacts ? reply.points : reply.points.slice(0, 2)).map((point) => (
+            {(allFacts ? picked : picked.slice(0, 2)).map((point) => (
               <li key={point.id}>{minus(point.text)}</li>
             ))}
           </ul>
-          {reply.points.length > 2 && (
+          {picked.length > 2 && (
             <button
               type="button"
               className="link"
@@ -1074,7 +1078,7 @@ function Answer({
               onClick={() => setAllFacts(!allFacts)}
               style={{ fontSize: 'var(--fs-meta)' }}
             >
-              {allFacts ? 'Less' : `More (${reply.points.length - 2})`}
+              {allFacts ? 'Less' : `More (${picked.length - 2})`}
             </button>
           )}
         </section>
