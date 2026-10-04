@@ -5,6 +5,8 @@
 import type { Purchase } from '../shared/types'
 
 export type {
+  Alternative,
+  Alternatives,
   AppState,
   ChatReply,
   CheckoutHandoff as AgentCheckout,

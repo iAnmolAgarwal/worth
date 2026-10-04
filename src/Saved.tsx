@@ -6,12 +6,13 @@ import {
   Database,
   Info,
   Sparkles,
+  Store,
   Trash2,
 } from 'lucide-react'
 import type { Product } from '../shared/types'
 import { api } from './api'
 import { ClaudeSwitch, JudgeBadge } from './Ask'
-import { CLAUDE_SHARED_DATA, claudeUses } from './copy'
+import { CHANNEL3_SHARED_DATA, CLAUDE_SHARED_DATA, claudeUses } from './copy'
 import { boughtProductIds, claudeOn } from './engine'
 import type { AppState } from './contract'
 import { isActive } from './contract'
@@ -239,6 +240,24 @@ export function Settings({
                 When the assistant is on, these go to Anthropic (Claude): {CLAUDE_SHARED_DATA}.
               </p>
             </details>
+          </section>
+          <section className="tile" aria-labelledby="set-channel3">
+            <div className="sec-head">
+              <h2 className="h-section" id="set-channel3">
+                <Store size={18} aria-hidden="true" style={{ verticalAlign: -3, marginRight: 8 }} />
+                Similar items (Channel3)
+              </h2>
+            </div>
+            <dl className="kvlist">
+              <div>
+                <dt>Sent to Channel3</dt>
+                <dd>{CHANNEL3_SHARED_DATA}</dd>
+              </div>
+              <div>
+                <dt>Your name, plan or other words</dt>
+                <dd>Never</dd>
+              </div>
+            </dl>
           </section>
           <section className="tile" aria-labelledby="set-data">
             <div className="sec-head">

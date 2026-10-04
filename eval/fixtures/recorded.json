@@ -1,7 +1,7 @@
 {
  "model": "claude-sonnet-5-5",
  "today": "2026-10-03",
- "recordedAt": "2026-10-03T17:11:53.181Z",
+ "recordedAt": "2026-10-04T04:05:48.093Z",
  "probes": {
   "P1-camera-today": {
    "messages": [
@@ -2441,6 +2441,617 @@
        "inference_geo": "global"
       },
       "ms": 2083
+     }
+    ]
+   ]
+  },
+  "C1-something-cheaper": {
+   "messages": [
+    "Is there something cheaper?"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_017jBWnTv36xmftPoM9aSZdD",
+        "name": "find_alternatives",
+        "input": {
+         "item": "camera",
+         "max_price_cents": null,
+         "points": [
+          "room_today"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "Which of these is the best value?",
+          "Can I afford the cheapest one?"
+         ]
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 173,
+       "cache_creation_input_tokens": 5579,
+       "cache_read_input_tokens": 0,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 5579,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 176,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 3303
+     }
+    ]
+   ]
+  },
+  "C2-buy-under": {
+   "messages": [
+    "What can I buy under $300?"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01G1fv2xyqZAiAJJGcquqJ8B",
+        "name": "find_alternatives",
+        "input": {
+         "item": "camera",
+         "max_price_cents": 30000,
+         "points": [
+          "room_today"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "Can I afford a different one?",
+          "How much room do I have today?"
+         ]
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 173,
+       "cache_creation_input_tokens": 5579,
+       "cache_read_input_tokens": 0,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 5579,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 173,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 3138
+     }
+    ]
+   ]
+  },
+  "C3-cheapest-keeps-cushion": {
+   "messages": [
+    "What’s the cheapest thing that keeps my cushion?"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_011K2hKEeHj3c6uzxG2kuWLK",
+        "name": "find_alternatives",
+        "input": {
+         "item": "camera",
+         "max_price_cents": null,
+         "points": [
+          "room_today",
+          "low_point",
+          "cause"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "Can I afford the camera later?",
+          "What bills are coming up?",
+          "How much room do I have today?"
+         ]
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 183,
+       "cache_creation_input_tokens": 5579,
+       "cache_read_input_tokens": 0,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 5579,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 189,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 3372
+     }
+    ]
+   ]
+  },
+  "C4-similar-but-less": {
+   "messages": [
+    "Show me something similar but less"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01EesSmtgtivSbKSzE8khtuv",
+        "name": "find_alternatives",
+        "input": {
+         "item": "camera",
+         "max_price_cents": null,
+         "points": [
+          "room_today"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "Can I afford the original camera later?",
+          "What bills are coming up?",
+          "How much room do I have today?"
+         ]
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 172,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 5579,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 183,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 2453
+     }
+    ]
+   ]
+  },
+  "C5-cheaper-camera": {
+   "messages": [
+    "Can you find a cheaper camera?"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01CU6JWPXiuw4yEfuHpn14YP",
+        "name": "find_alternatives",
+        "input": {
+         "item": "camera",
+         "max_price_cents": null,
+         "points": [
+          "room_today"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "What about a cheaper lens?",
+          "How much room do I have today?",
+          "Show me my upcoming bills"
+         ]
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 154,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 5579,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 184,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 2428
+     }
+    ]
+   ]
+  },
+  "C6-cheapest-in-store": {
+   "messages": [
+    "what's the cheapest thing in the store I could buy today without going under my cushion?"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01NV5XuYJBz4oL2BDWFFqyE8",
+        "name": "find_alternatives",
+        "input": {
+         "item": null,
+         "max_price_cents": null,
+         "points": [
+          "room_today"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "What about something for a different purpose?",
+          "How much room do I have today?"
+         ]
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 167,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 5579,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 172,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 2423
+     }
+    ]
+   ]
+  },
+  "NC1-pay-in-4-cheaper": {
+   "messages": [
+    "Is Pay in 4 cheaper than paying now?"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01AbCZkKRZ3vgD9u6Z6gQJxt",
+        "name": "interpret_purchase",
+        "input": {
+         "items": [],
+         "combine": "single",
+         "refers_to_previous_item": true,
+         "date_phrase": null,
+         "date": null,
+         "option": "check",
+         "points": [
+          "pay_in_4",
+          "low_point",
+          "cause"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "Can I buy it later instead?",
+          "What's the most I could spend on it?",
+          "Show me cheaper options"
+         ]
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 182,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 5579,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 288,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 3228
+     }
+    ]
+   ]
+  },
+  "NC2-cheaper-to-wait": {
+   "messages": [
+    "Is it cheaper to wait?"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_014vQxdECLmHWzGpHrk1hz1M",
+        "name": "interpret_purchase",
+        "input": {
+         "items": [],
+         "combine": "single",
+         "refers_to_previous_item": true,
+         "date_phrase": null,
+         "date": null,
+         "option": "earliest_date",
+         "points": [
+          "wait",
+          "low_point",
+          "income"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "Can I afford it today?",
+          "What's the most I could spend on it?",
+          "Show me cheaper cameras"
+         ]
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 175,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 5579,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 287,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 3005
+     }
+    ]
+   ]
+  },
+  "NC3-cheapest-option-chair": {
+   "messages": [
+    "Which option is cheapest for the chair?"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01C9NFoE9rme6j6MEx7a45hW",
+        "name": "interpret_purchase",
+        "input": {
+         "items": [],
+         "combine": "single",
+         "refers_to_previous_item": true,
+         "date_phrase": null,
+         "date": null,
+         "option": "check",
+         "points": [
+          "low_point",
+          "wait",
+          "spend_less"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "Can I buy it later instead?",
+          "How much could I spend on it?",
+          "What bills are coming up?"
+         ]
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 179,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 5579,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 284,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 2823
+     }
+    ]
+   ]
+  },
+  "NC4-cheaper-phone-plan": {
+   "messages": [
+    "I need a cheaper phone plan"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "text",
+        "text": "{\"intent\":\"off_topic\",\"follow_ups\":[\"What subscriptions do I have coming up?\",\"How much room do I have to spend today?\",\"Can I afford a new phone?\"]}"
+       }
+      ],
+      "stop_reason": "end_turn",
+      "usage": {
+       "input_tokens": 153,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 5579,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 59,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 1767
+     }
+    ]
+   ]
+  },
+  "C7-cheaper-options-for": {
+   "messages": [
+    "Show me cheaper options for headphones"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01Pofvx8jbh6LUF1dpL89yz9",
+        "name": "find_alternatives",
+        "input": {
+         "item": "headphones",
+         "max_price_cents": null,
+         "points": [
+          "room_today"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "What about wireless earbuds?",
+          "Can I afford a pair next week?",
+          "How much room do I have today?"
+         ]
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 154,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 5579,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 186,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 2480
+     }
+    ]
+   ]
+  },
+  "C8-cheaper-than-the-item": {
+   "messages": [
+    "Is there something cheaper than the camera?"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01SsUrazS3zeKGfgSygK43T7",
+        "name": "find_alternatives",
+        "input": {
+         "item": "camera",
+         "max_price_cents": null,
+         "points": [
+          "room_today"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "Can I afford the camera later?",
+          "What bills are coming up?"
+         ]
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 177,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 5579,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 173,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 2401
      }
     ]
    ]

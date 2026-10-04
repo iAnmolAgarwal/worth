@@ -45,18 +45,17 @@ import {
 import type { PayPalGateway, PayPalOrder } from './paypal.ts'
 import { decideAgentCheckout } from './agentCheckout.ts'
 import type { PrepareCheckoutRequest, PrepareCheckoutResult } from './agentCheckout.ts'
-import {
-  categoryCandidates,
-  createChatProvider,
-  fallbackCategories,
-  fallbackReply,
-} from './chat.ts'
+import { categoryCandidates, createChatProvider, fallbackCategories, localReply } from './chat.ts'
 import type { ChatActions, ChatProvider } from './chat.ts'
 import { allowedOrigins, loadConfig } from './config.ts'
 import type { AppConfig } from './config.ts'
 import { WindowLimiter } from './limits.ts'
 import { contentSecurityPolicy } from './csp.ts'
 import { confirmPlan, confirmRefund, PlanError, recordRefund } from './plans.ts'
+import { queryFor, roomToday } from './alternatives.ts'
+import { createChannel3, loadFixtures } from './channel3.ts'
+import type { Channel3Client } from './channel3.ts'
+import type { Alternatives, ChatReply } from '../shared/types.ts'
 
 export type { AppConfig } from './config.ts'
 export interface AppOptions {
@@ -64,6 +63,8 @@ export interface AppOptions {
   config?: Partial<AppConfig>
   paypal?: PayPalGateway
   chat?: ChatProvider
+  /** Channel3 search; defaults to the live client when CHANNEL3_API_KEY is set. */
+  channel3?: Channel3Client
   now?: () => Date
 }
 class HttpError extends Error {
@@ -152,6 +153,25 @@ const compareSchema = z
   .refine(
     (input) => input.amountCents !== undefined || input.productId !== undefined,
     'Send a price or a product.',
+  )
+const alternativesSchema = z
+  .object({
+    productId: identifier.optional(),
+    itemName: z.string().trim().min(1).max(150).optional(),
+    /** The item's own price, so its reservation is not counted against the room. */
+    amountCents: z.coerce.number().int().min(0).max(100_000_000).optional(),
+    /** A lower ceiling the person chose; never above what fits today. */
+    maxPriceCents: z.coerce.number().int().min(0).max(100_000_000).optional(),
+    /** A Channel3 product to find similar products for, such as a saved alternative. */
+    similarTo: z
+      .string()
+      .regex(/^[A-Za-z0-9_-]{1,64}$/)
+      .optional(),
+  })
+  .strict()
+  .refine(
+    (input) => Boolean(input.productId ?? input.itemName ?? input.similarTo),
+    'Send a product, an item name or a Channel3 product.',
   )
 const instalmentsSchema = z.array(z.object({ date, amountCents: cents }).strict()).max(4)
 const planSchema = z.discriminatedUnion('product', [
@@ -253,6 +273,15 @@ export function createApp(options: AppOptions = {}) {
     (config.anthropicKey
       ? createChatProvider(config.anthropicKey, config.anthropicModel)
       : undefined)
+  const channel3 =
+    options.channel3 ??
+    createChannel3({
+      apiKey: config.channel3ApiKey,
+      mode: config.channel3Mode,
+      dailyLimit: config.channel3DailyLimit,
+      fixtures: loadFixtures(),
+      now: () => now().getTime(),
+    })
   const app = express()
   app.disable('x-powered-by')
   // Behind a proxy, req.ip must be the client address the proxy appended, not the proxy itself.
@@ -274,6 +303,41 @@ export function createApp(options: AppOptions = {}) {
   const sessionLimiter = new WindowLimiter(config.sessionIpHourlyLimit, 60 * 60_000)
   const claudePerIp = new WindowLimiter(config.claudeIpHourlyLimit, 60 * 60_000)
   const claudeDaily = new WindowLimiter(config.claudeDailyLimit, DAY, 1)
+  const channel3PerIp = new WindowLimiter(config.channel3IpHourlyLimit, 60 * 60_000)
+  /** Price checks per session and per IP per hour; each one is a Channel3 product read. */
+  const priceChecksPerSession = new WindowLimiter(30, 60 * 60_000)
+  const priceChecksPerIp = new WindowLimiter(60, 60 * 60_000)
+  /**
+   * Channel3 products each session has been shown (or, from Phase 5, saved). Only these can seed
+   * "More like this" or a price check, so no client can make Worth read arbitrary products.
+   */
+  const shownProducts = new Map<string, Set<string>>()
+  function rememberShown(id: string, result: Alternatives | undefined) {
+    if (!result || result.status === 'off') return
+    const rows = [...result.items, ...(result.unverified ?? [])]
+    if (!rows.length) return
+    const shown = shownProducts.get(id) ?? new Set<string>()
+    shownProducts.delete(id)
+    shownProducts.set(id, shown)
+    for (const row of rows) shown.add(row.id)
+    while (shown.size > 200) shown.delete(shown.values().next().value!)
+    while (shownProducts.size > config.maxSessions)
+      shownProducts.delete(shownProducts.keys().next().value!)
+  }
+  const wasShown = (id: string, productId: string) => shownProducts.get(id)?.has(productId) ?? false
+  /** For Phase 5: register a Channel3 product the session saved, so its price can be checked. */
+  app.locals.rememberAlternative = (id: string, productId: string) =>
+    rememberShown(id, {
+      status: 'ok',
+      query: '',
+      maxPriceCents: 0,
+      items: [],
+      unverified: [{ id: productId, title: '', retailer: '', source: 'channel3' }],
+    })
+  /** Each client's share of the day's live Channel3 searches; cached results never count. */
+  const liveSearches = (req: Request) => ({
+    allowLive: () => channel3PerIp.take(req.ip ?? 'local', now().getTime()),
+  })
   /** Spends one Claude request from the client's hourly and the server's daily allowance. */
   function claudeLimit(req: Request): keyof typeof CLAUDE_LIMIT_REASON | undefined {
     const time = now().getTime()
@@ -334,6 +398,7 @@ export function createApp(options: AppOptions = {}) {
         paypal: paypal ? 'sandbox' : 'demo',
         ...(paypal && config.paypalClientId ? { paypalClientId: config.paypalClientId } : {}),
         ...(chat ? { model: config.anthropicModel } : {}),
+        alternatives: channel3.health(),
       },
     }
   }
@@ -778,7 +843,9 @@ export function createApp(options: AppOptions = {}) {
   app.use('/api/import', express.json({ limit: IMPORT_BODY_LIMIT }))
   app.use(express.json({ limit: '1200kb' }))
   app.use(cookieParser())
-  app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'worth' }))
+  app.get('/api/health', (_req, res) =>
+    res.json({ ok: true, service: 'worth', channel3: channel3.health() }),
+  )
   const webhookEvent = z.object({
     id: identifier,
     event_type: z.string().max(100),
@@ -944,6 +1011,62 @@ export function createApp(options: AppOptions = {}) {
       },
     )
     res.json({ ...comparison, payIn4: { ...comparison.payIn4, eligibility } })
+  })
+  /**
+   * Similar items from other stores, priced at or below what fits today (the Spend less amount,
+   * rounded down to $25). Only a generic description and the price band reach Channel3. With
+   * nothing to show, the answer is status "off" and the panel stays hidden.
+   */
+  app.get('/api/alternatives', async (req, res) => {
+    const input = alternativesSchema.parse(req.query)
+    const product = input.productId ? PRODUCTS.find((p) => p.id === input.productId) : undefined
+    if (input.productId && !product) throw new HttpError(404, 'Product not found.', 'NOT_FOUND')
+    const current = state(sessionId(res))
+    const room = roomToday(
+      current.profile,
+      withoutOwnHold(current.purchases, {
+        productId: product?.id,
+        itemName: product?.name ?? input.itemName,
+        amountCents: product?.priceCents ?? input.amountCents ?? 0,
+      }),
+      current.today,
+    )
+    const ceiling = Math.min(room, input.maxPriceCents ?? room)
+    const query = input.similarTo
+      ? undefined
+      : queryFor({ productId: product?.id, itemName: input.itemName })
+    if (!input.similarTo && !query)
+      return res.json({ status: 'off', query: '', maxPriceCents: 0, items: [] })
+    const id = sessionId(res)
+    // "More like this" only starts from a product this session was shown.
+    if (input.similarTo && !wasShown(id, input.similarTo))
+      return res.json({ status: 'off', query: input.similarTo, maxPriceCents: 0, items: [] })
+    const result = input.similarTo
+      ? await channel3.similar(input.similarTo, ceiling, liveSearches(req))
+      : await channel3.search(query!, ceiling, liveSearches(req))
+    rememberShown(id, result)
+    res.json(result)
+  })
+  /**
+   * Whether a saved Channel3 product is cheaper now than when it was saved, read with Channel3's
+   * free product endpoint (no search credits). For Phase 5's Saved list: "price dropped to $X".
+   */
+  app.get('/api/alternatives/price', async (req, res) => {
+    const input = z
+      .object({
+        id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+        savedPriceCents: z.coerce.number().int().min(1).max(100_000_000),
+      })
+      .strict()
+      .parse(req.query)
+    const id = sessionId(res)
+    if (!wasShown(id, input.id))
+      throw new HttpError(404, 'Check prices only for items Worth showed you.', 'NOT_FOUND')
+    const time = now().getTime()
+    if (!priceChecksPerSession.take(id, time) || !priceChecksPerIp.take(req.ip ?? 'local', time))
+      throw new HttpError(429, 'Please wait a while before checking more prices.', 'RATE_LIMITED')
+    // Product reads are cached per ID for 15 minutes inside the Channel3 client.
+    res.json(await channel3.checkPrice(input.id, input.savedPriceCents))
   })
   /** Saves a purchase's new cash effect and moves the plan version, so older answers expire. */
   function savePurchase(id: string, purchase: StoredPurchase) {
@@ -1275,11 +1398,13 @@ export function createApp(options: AppOptions = {}) {
     res.json(state(id))
   })
   /** What Claude's tools may ask the server to do for this session, each behind its own guard. */
-  function chatActions(id: string, input: z.infer<typeof chatSchema>): ChatActions {
+  function chatActions(req: Request, id: string, input: z.infer<typeof chatSchema>): ChatActions {
     return {
       payIn4Eligibility,
       prepareCheckout: (request) =>
         prepareCheckout(id, input.message, input.context?.itemName, request),
+      findAlternatives: (query, maxPriceCents) =>
+        channel3.search(query, maxPriceCents, liveSearches(req)),
     }
   }
   app.post('/api/chat', async (req, res) => {
@@ -1297,16 +1422,22 @@ export function createApp(options: AppOptions = {}) {
       transactions: current.transactions,
       today: current.today,
     }
+    const id = sessionId(res)
+    const actions = chatActions(req, id, input)
+    // Local answers still search other stores for something cheaper; nothing goes to Claude.
+    /** Answers that list similar items record them as shown to this session. */
+    const shown = (reply: ChatReply) => {
+      rememberShown(id, reply.alternatives)
+      return reply
+    }
+    const local = async (reason?: string) => shown(await localReply(input, data, reason, actions))
     if (!mayUseExternalAi(current.profile))
       return res.json(
-        fallbackReply(
-          input,
-          data,
+        await local(
           'AI sharing is off. This is a local calculation, not an AI response; your financial context was not sent to Claude.',
         ),
       )
-    if (!chat) return res.json(fallbackReply(input, data))
-    const id = sessionId(res)
+    if (!chat) return res.json(await local())
     if (chatBusy.has(id))
       throw new HttpError(
         429,
@@ -1316,22 +1447,18 @@ export function createApp(options: AppOptions = {}) {
     const limited = claudeLimit(req)
     if (limited)
       return res.json(
-        fallbackReply(
-          input,
-          data,
+        await local(
           `${CLAUDE_LIMIT_REASON[limited]}, so this answer uses local calculations, not an AI response.`,
         ),
       )
     chatBusy.add(id)
     try {
-      return res.json(await chat.reply(input, data, chatActions(id, input)))
+      return res.json(shown(await chat.reply(input, data, actions)))
     } catch (error) {
       // Error class only: never the message text, financial data, or credentials.
       console.warn('Worth chat used local fallback:', error instanceof Error ? error.name : 'Error')
       return res.json(
-        fallbackReply(
-          input,
-          data,
+        await local(
           'Claude is temporarily unavailable. This answer uses local calculations, not an AI response.',
         ),
       )

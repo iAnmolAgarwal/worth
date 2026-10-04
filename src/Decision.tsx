@@ -11,7 +11,8 @@ import {
   TriangleAlert,
 } from 'lucide-react'
 import { confirmedSchedule, dateInTimezone } from '../shared/finance'
-import type { ForecastPoint, OptionResult, Product } from '../shared/types'
+import type { Alternative, ForecastPoint, OptionResult, Product } from '../shared/types'
+import { AlternativesPanel } from './Alternatives'
 import { BalanceChart } from './BalanceChart'
 import type { AppState, Comparison, PayIn4 } from './contract'
 import {
@@ -496,6 +497,7 @@ export function Decision({
   onBack,
   onBuy,
   onSave,
+  onSaveAlternative,
   onViewActivity,
 }: {
   state: AppState
@@ -506,6 +508,8 @@ export function Decision({
   onBack: () => void
   onBuy: (product: Product, acknowledgeShortfall: boolean) => void
   onSave: (product: Product, waitDate?: string) => void
+  /** Saves a similar item from another store for later; the row's button shows only when set. */
+  onSaveAlternative?: (item: Alternative) => void
   /** Kept for callers; missing inputs now link to their exact fix. */
   onEditPlan?: () => void
   onViewActivity: () => void
@@ -609,7 +613,10 @@ export function Decision({
       )}
       {anyway && (
         <Button variant="text" onClick={() => setConfirmBuy(true)}>
-          Buy today anyway
+          {/* Next to other stores' items, the action names the demo store's own product. */}
+          {selected === 'spendLess'
+            ? `Buy the ${product!.name.toLowerCase()} anyway`
+            : 'Buy today anyway'}
         </Button>
       )}
     </>
@@ -799,6 +806,20 @@ export function Decision({
               />
             ))}
           </div>
+          {/* Under Spend less: real items from other stores that fit today, for discovery only. */}
+          {selected === 'spendLess' &&
+            keys.includes('spendLess') &&
+            c.spendLess.maxPriceCents > 0 && (
+              <AlternativesPanel
+                state={state}
+                request={
+                  product
+                    ? { productId: product.id }
+                    : { itemName: c.itemName, amountCents: c.amountCents }
+                }
+                onSave={onSaveAlternative}
+              />
+            )}
           <ChartTile c={c} k={selected} payIn4={p4Open ? p4 : undefined} />
           <PayIn4Panel
             c={c}

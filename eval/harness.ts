@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import request from 'supertest'
 import { createApp } from '../server/app.ts'
+import { createChannel3, loadFixtures } from '../server/channel3.ts'
 import { createChatProvider, fallbackReply } from '../server/chat.ts'
 import type { ChatData, ChatProvider } from '../server/chat.ts'
 import { Store } from '../server/store.ts'
@@ -194,6 +195,13 @@ function plumbingFor(
   }
 }
 
+/** Evals never spend Channel3 credits: searches are answered from the recorded example results. */
+const recordedSearch = createChannel3({ mode: 'fixture', fixtures: loadFixtures(), log: () => {} })
+const actions = {
+  findAlternatives: (query: string, maxPriceCents: number) =>
+    recordedSearch.search(query, maxPriceCents),
+}
+
 const UNAVAILABLE =
   'Claude is temporarily unavailable. This answer uses local calculations, not an AI response.'
 
@@ -215,7 +223,7 @@ async function runChat(probe: Probe, clientFor: ClientFor): Promise<ProbeResult>
     let reply: ChatReply
     let failedOver = false
     try {
-      reply = await provider.reply(input, data)
+      reply = await provider.reply(input, data, actions)
     } catch (error) {
       // The app answers locally when Claude fails; grade what the user would see.
       events.push({ event: 'chat_failed', error: error instanceof Error ? error.name : 'Error' })

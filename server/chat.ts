@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { addDays, assessPurchase, money, withoutOwnHold } from '../shared/finance.ts'
 import { PRODUCTS } from '../shared/seed.ts'
 import type {
+  Alternatives,
   Assessment,
   ChatIntent,
   ChatReply,
@@ -12,6 +13,15 @@ import type {
   Transaction,
 } from '../shared/types.ts'
 import { CHECKOUT_OPTIONS } from './agentCheckout.ts'
+import {
+  categoryOf,
+  notProductSearch,
+  queryFor,
+  roomToday,
+  SUGGESTED_CATEGORIES,
+  wantsAlternatives,
+} from './alternatives.ts'
+import { PRICE_BUCKET_CENTS } from './channel3.ts'
 import type { PrepareCheckoutRequest, PrepareCheckoutResult } from './agentCheckout.ts'
 import { readTiming } from './dates.ts'
 import {
@@ -66,6 +76,8 @@ export interface CategoryReply {
 export interface ChatActions {
   payIn4Eligibility?(amountCents: number): Promise<PayIn4Eligibility>
   prepareCheckout?(request: PrepareCheckoutRequest): Promise<PrepareCheckoutResult>
+  /** Similar products from other stores (Channel3), priced at or below the ceiling. */
+  findAlternatives?(query: string, maxPriceCents: number): Promise<Alternatives>
 }
 export interface ChatProvider {
   reply(input: ChatInput, data: ChatData, actions?: ChatActions): Promise<ChatReply>
@@ -137,6 +149,18 @@ interface Answer {
   toolCalls?: string[]
   note?: string
   checkout?: CheckoutHandoff
+  alternatives?: AlternativesOutcome
+}
+/**
+ * A request for something cheaper: what fits today, the ceiling searched under (the person's own
+ * limit when lower), the generic phrase searched for and what Channel3 returned.
+ */
+interface AlternativesOutcome {
+  roomCents: number
+  cushionCents: number
+  statedCents?: number
+  query?: string
+  result?: Alternatives
 }
 /** The facts available for an answer, built from engine values. */
 function catalogFor(answer: Answer, data: ChatData): FactCatalog {
@@ -144,7 +168,7 @@ function catalogFor(answer: Answer, data: ChatData): FactCatalog {
   if (answer.intent === 'subscriptions')
     return commitmentFacts(data, answer.kind ?? 'subscriptions')
   if (answer.intent === 'spending') return spendingFacts30(data)
-  if (answer.intent === 'overview') return planFacts(data)
+  if (answer.intent === 'overview' || answer.intent === 'alternatives') return planFacts(data)
   return {}
 }
 /** Render the facts Claude chose, in its order; facts the result does not support are skipped. */
@@ -177,25 +201,128 @@ function compose(answer: Answer, data: ChatData): ChatReply {
           ? answer.clarify
             ? clarificationText(answer.clarify, data)
             : 'Tell me what you would like to buy, its total price in US dollars, and when you would buy it.'
-          : answer.intent === 'subscriptions'
-            ? commitmentsFacts(data, answer.kind ?? 'subscriptions')
-            : answer.intent === 'spending'
-              ? spendingFacts(data)
-              : overviewFacts(data)
+          : answer.intent === 'alternatives'
+            ? undefined
+            : answer.intent === 'subscriptions'
+              ? commitmentsFacts(data, answer.kind ?? 'subscriptions')
+              : answer.intent === 'spending'
+                ? spendingFacts(data)
+                : overviewFacts(data)
   const { points, lead } = pointsFor(answer, data)
   const chosen = points && [lead, ...points.map((p) => p.text)].filter(Boolean).join(' ')
+  const found = answer.alternatives?.result
+  const shown =
+    found && found.status !== 'off' && (found.items.length || found.unverified?.length)
+      ? found
+      : undefined
   return {
-    message: [verdict, chosen, body, answer.note].filter(Boolean).join('\n\n'),
+    message: [
+      verdict,
+      chosen,
+      body,
+      answer.alternatives &&
+        alternativesText(
+          answer.alternatives,
+          shown,
+          points?.some((p) => p.id === 'room_today'),
+        ),
+      answer.note,
+    ]
+      .filter(Boolean)
+      .join('\n\n'),
     mode: answer.mode,
     intent: answer.intent,
     ...(assessment ? { assessment, verdict } : {}),
     ...(answer.interpretation ? { interpretation: answer.interpretation } : {}),
     ...(points ? { points, ...(lead ? { lead } : {}) } : {}),
     ...(answer.clarify?.pending ? { pending: answer.clarify.pending } : {}),
-    suggestions: answer.suggestions?.length ? answer.suggestions : DEFAULT_SUGGESTIONS,
+    suggestions:
+      categoryChips(answer.alternatives) ??
+      (answer.suggestions?.length ? answer.suggestions : DEFAULT_SUGGESTIONS),
     toolCalls: answer.toolCalls ?? [],
     ...(answer.checkout ? { checkout: answer.checkout } : {}),
+    ...(shown ? { alternatives: shown } : {}),
   }
+}
+/**
+ * The engine's sentence for a request for something cheaper. Results are discovery only, so the
+ * text says where they come from and that Worth does not sell them.
+ */
+function alternativesText(
+  outcome: AlternativesOutcome,
+  shown: Alternatives | undefined,
+  /** The room today is already shown as a fact Claude picked, so it is not repeated. */
+  roomShown = false,
+) {
+  const room = money(outcome.roomCents)
+  const cushion = money(outcome.cushionCents)
+  if (outcome.roomCents < PRICE_BUCKET_CENTS)
+    return outcome.roomCents > 0
+      ? `Only ${room} fits today without going below your ${cushion} cushion, so Worth didn’t look for alternatives.`
+      : `Nothing fits today without going below your ${cushion} cushion, so Worth didn’t look for alternatives.`
+  const fits = roomShown ? '' : `Up to ${room} fits today and keeps your ${cushion} cushion.`
+  const above =
+    outcome.statedCents !== undefined && outcome.statedCents > outcome.roomCents
+      ? ` That is less than the ${money(outcome.statedCents)} you mentioned, so Worth searched below it.`
+      : ''
+  if (!outcome.query)
+    return `${fits}${above} Tell me what kind of item you’d like under ${money(ceilingOf(outcome))}, such as headphones or a desk chair, and Worth will look for some from other stores.`.trim()
+  if (!shown)
+    return `${fits}${above} Worth couldn’t find similar items from other stores right now.`.trim()
+  return `${fits}${above} Here are similar items under ${money(shown.maxPriceCents)} from other stores, found through Channel3${shown.status === 'fixture' ? ' (example results recorded earlier)' : ''}. Prices may change, and Worth doesn’t sell these items.`.trim()
+}
+/** The most a search for this request may show: the person's own limit when it is lower. */
+const ceilingOf = (outcome: AlternativesOutcome) =>
+  Math.min(outcome.roomCents, outcome.statedCents ?? outcome.roomCents)
+/**
+ * One-tap searches when a cheaper request names no kind of item ("What can I buy under $300?"),
+ * each under the same limit, so the next message runs the search.
+ */
+function categoryChips(outcome: AlternativesOutcome | undefined) {
+  if (!outcome || outcome.query || ceilingOf(outcome) < PRICE_BUCKET_CENTS) return undefined
+  return SUGGESTED_CATEGORIES.slice(0, 3).map(
+    (category) => `Find ${category.toLowerCase()} under ${money(ceilingOf(outcome))}`,
+  )
+}
+/** What fits today and the phrase to search, for a request for something cheaper. */
+function alternativesFor(
+  input: ChatInput,
+  data: ChatData,
+  item: string | undefined,
+  statedCents: number | undefined,
+): AlternativesOutcome {
+  const context = validContext(input)
+  const purchases = context
+    ? withoutOwnHold(data.purchases, {
+        itemName: context.itemName,
+        amountCents: context.amountCents,
+      })
+    : data.purchases
+  return {
+    roomCents: roomToday(data.profile, purchases, data.today),
+    cushionCents: data.profile.cushionCents,
+    ...(statedCents !== undefined ? { statedCents } : {}),
+    query:
+      queryFor({ itemName: item }) ??
+      (context ? queryFor({ itemName: context.itemName }) : undefined),
+  }
+}
+/** Runs the search for an outcome; a failure leaves the result empty and the panel hidden. */
+async function searchAlternatives(
+  outcome: AlternativesOutcome,
+  actions: ChatActions,
+): Promise<AlternativesOutcome> {
+  const ceiling = ceilingOf(outcome)
+  if (!outcome.query || !actions.findAlternatives || ceiling < PRICE_BUCKET_CENTS) return outcome
+  const result = await actions.findAlternatives(outcome.query, ceiling).catch(() => undefined)
+  return result ? { ...outcome, result } : outcome
+}
+/** A US dollar ceiling the person wrote ("under $300"), when there is exactly one. */
+function statedCeiling(message: string) {
+  const amounts = extractMoneyMentions(message).filter(
+    (m) => (m.currency === 'USD' || m.currency === 'NONE') && m.cents !== null,
+  )
+  return amounts.length === 1 ? amounts[0]!.cents! : undefined
 }
 function assess(data: ChatData, interpretation: Interpretation) {
   const itemName = itemLabel(interpretation.items)
@@ -236,6 +363,15 @@ function localIntent(input: ChatInput, data: ChatData): ChatIntent {
   const followUpTiming =
     Boolean(context) && readTiming(input.message, data.today).phrases.length > 0
   if (OFF_TOPIC_CUE.test(text) && !looksLikePurchase(input)) return 'off_topic'
+  const mentions = extractMoneyMentions(input.message)
+  // "What can I buy under $300?" names a limit, not a priced item, so it is a search; a priced
+  // item asked about with "or something cheaper" is assessed first (localAnswer adds the search).
+  if (
+    wantsAlternatives(input.message) &&
+    !hasForeignAmount(mentions) &&
+    !mentions.some((m) => m.role === 'price')
+  )
+    return 'alternatives'
   if (looksLikePurchase(input) || aboutContext) return 'affordability'
   if (/subscription|recurring|\bbills?\b|upcoming|coming up|\bdue\b|commitments?/.test(text))
     return 'subscriptions'
@@ -248,10 +384,23 @@ function localIntent(input: ChatInput, data: ChatData): ChatIntent {
   if (/spent|spend|spending|categor|history|transactions?/.test(text)) return 'spending'
   if (followUpTiming) return 'affordability'
   if (FINANCE.test(text)) return 'overview'
+  // A named kind of product is never off topic: ask what the person wants to know about it.
+  if (categoryOf(input.message)) return 'clarify'
   return 'off_topic'
 }
 function localAnswer(input: ChatInput, data: ChatData): Answer {
   const intent = localIntent(input, data)
+  if (intent === 'alternatives')
+    return {
+      mode: 'demo',
+      intent,
+      alternatives: alternativesFor(
+        input,
+        data,
+        categoryOf(input.message),
+        statedCeiling(input.message),
+      ),
+    }
   if (intent !== 'affordability')
     return { mode: 'demo', intent, kind: commitmentKind(input.message) }
   const result = localInterpretation(input, data)
@@ -261,14 +410,34 @@ function localAnswer(input: ChatInput, data: ChatData): Answer {
     intent: 'affordability',
     interpretation: result.interpretation,
     assessment: assess(data, result.interpretation),
+    // Asked together, the verdict comes first and the similar items follow, as with Claude.
+    ...(wantsAlternatives(input.message)
+      ? {
+          alternatives: alternativesFor(
+            input,
+            data,
+            categoryOf(input.message),
+            statedCeiling(input.message),
+          ),
+        }
+      : {}),
   }
 }
-export function fallbackReply(
+const LOCAL_NOTE = 'Claude is not connected. This is a local calculation, not an AI response.'
+export function fallbackReply(input: ChatInput, data: ChatData, reason = LOCAL_NOTE): ChatReply {
+  return compose({ ...localAnswer(input, data), note: reason }, data)
+}
+/** The local answer, with any search for something cheaper run through the server's actions. */
+export async function localReply(
   input: ChatInput,
   data: ChatData,
-  reason = 'Claude is not connected. This is a local calculation, not an AI response.',
-): ChatReply {
-  return compose({ ...localAnswer(input, data), note: reason }, data)
+  reason = LOCAL_NOTE,
+  actions: ChatActions = {},
+): Promise<ChatReply> {
+  const answer = localAnswer(input, data)
+  if (answer.alternatives)
+    answer.alternatives = await searchAlternatives(answer.alternatives, actions)
+  return compose({ ...answer, note: reason }, data)
 }
 
 // ---- Claude -----------------------------------------------------------------------
@@ -297,6 +466,13 @@ Choosing what to show
 - Every tool takes points: up to three facts from the engine that best answer what the person asked, most important first. The app writes each fact from the engine's numbers and leaves out any that do not apply to the result.
 - lead_in picks an optional opening line from a fixed set. Use a refusal line when the person asks about skipping or delaying a bill, using credit, loans or instalments, or dipping into the cushion; use "not_yes" when they ask you to just approve the purchase.
 - follow_ups: up to three short next questions in the person's own voice, without amounts, dates, or mentions of bills, credit or the cushion.
+
+Finding something cheaper
+- When the person asks for something cheaper, a cheaper or similar item for less, what they could buy under an amount, or the cheapest thing that keeps their cushion, call find_alternatives. Do not call interpret_purchase for these unless they also ask whether a specific priced item fits.
+- item: the kind of product in two to four plain words, from their words or the purchase being discussed, such as "camera" or "desk chair". Never a brand, model, store or person's name. Null when they name no kind of item and none is being discussed.
+- max_price_cents: only a US dollar ceiling the person wrote in this message ("under $300" is 30000); otherwise null. Worth never searches above what keeps the cushion today.
+- Never call find_alternatives when "cheaper" is about how or when to pay or which of Worth's options to pick ("Is Pay in 4 cheaper than paying now?", "Is it cheaper to wait?", "Which option is cheapest?"), or about a service such as a phone plan, flights or a subscription. Answer those with interpret_purchase or another tool.
+- Worth searches other stores through Channel3 and lists what it finds. These are suggestions to look at, not items Worth sells or can check out.
 
 Other tools
 - list_commitments: upcoming bills and subscriptions. Use kind "subscriptions" when the person asks only about subscriptions and "bills" when they ask only about bills.
@@ -494,6 +670,37 @@ const PREPARE_CHECKOUT_TOOL: Anthropic.Tool = {
     },
   },
 }
+const FIND_ALTERNATIVES_TOOL: Anthropic.Tool = {
+  name: 'find_alternatives',
+  description:
+    'Find similar, cheaper products from other stores (through Channel3), priced within what keeps the cushion today. Call it when the person asks for something cheaper, a cheaper or similar item for less, what they could buy under an amount, or the cheapest thing that keeps their cushion. The server sets the price ceiling from the plan, runs the search and lists the results; Worth does not sell them.',
+  strict: true,
+  input_schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['item', 'max_price_cents', ...PRESENTATION_KEYS],
+    properties: {
+      item: {
+        ...nullable({ type: 'string' }),
+        description:
+          'The kind of product to look for in two to four plain words, from the person’s words or the purchase being discussed (for example "camera", "desk chair"). Never a brand, model, store or person’s name. Null when no kind of item is named or being discussed.',
+      },
+      max_price_cents: {
+        ...nullable({ type: 'integer' }),
+        description:
+          'A US dollar ceiling the person wrote in this message, in cents ("under $300" is 30000). Null when they wrote none.',
+      },
+      ...presentation(
+        PLAN_FACTS,
+        'room_today: the most that could be spent today while keeping the cushion. low_point: the lowest projected balance before any purchase. cause: the bill that drives it. income: the next paycheck.',
+      ),
+    },
+  },
+}
+const findSchema = z.object({
+  item: z.string().max(200).nullable(),
+  max_price_cents: z.number().int().min(0).max(100_000_000).nullable(),
+})
 const prepareSchema = z
   .object({
     item_id: z.string().max(100),
@@ -512,7 +719,15 @@ const FINAL_FORMAT = {
     properties: {
       intent: {
         type: 'string',
-        enum: ['affordability', 'subscriptions', 'spending', 'overview', 'clarify', 'off_topic'],
+        enum: [
+          'affordability',
+          'subscriptions',
+          'spending',
+          'overview',
+          'alternatives',
+          'clarify',
+          'off_topic',
+        ],
       },
       follow_ups: { type: 'array', items: { type: 'string' } },
     },
@@ -524,6 +739,7 @@ const finalSchema = z.object({
     'subscriptions',
     'spending',
     'overview',
+    'alternatives',
     'clarify',
     'off_topic',
   ]),
@@ -578,6 +794,8 @@ class Turn {
   /** The order prepared for approval, or the server's reason for not preparing one. */
   checkout?: CheckoutHandoff
   checkoutNote?: string
+  /** What fits today and what Channel3 found, when the person asked for something cheaper. */
+  alternatives?: AlternativesOutcome
   private checkoutRequested = false
   data: ChatData
   constructor(
@@ -603,6 +821,7 @@ class Turn {
       followUps: shown.data.follow_ups,
     }
     if (name === 'interpret_purchase') return await this.interpret(input, chosen)
+    if (name === 'find_alternatives') return await this.findAlternatives(input, chosen)
     if (name === 'list_commitments') {
       const kind = z.enum(['subscriptions', 'bills', 'all']).safeParse(input.kind)
       if (!kind.success)
@@ -700,6 +919,53 @@ class Turn {
         requires_proceed_confirm: checkout.requiresProceedConfirm,
         shown_by_app:
           'The app shows the PayPal approval step. Payment happens only after the person approves in PayPal and confirms in Worth.',
+      }),
+    }
+  }
+
+  /** Searches other stores under what fits today. The server sets the ceiling and runs the search. */
+  private async findAlternatives(
+    raw: Record<string, unknown>,
+    chosen: Presentation,
+  ): Promise<ToolOutcome> {
+    const parsed = findSchema.safeParse({ item: raw.item, max_price_cents: raw.max_price_cents })
+    if (!parsed.success)
+      return { content: 'item and max_price_cents must be a string or null.', isError: true }
+    const stated = parsed.data.max_price_cents ?? undefined
+    if (
+      stated !== undefined &&
+      !extractMoneyMentions(this.input.message).some(
+        (m) => (m.currency === 'USD' || m.currency === 'NONE') && m.cents === stated,
+      )
+    )
+      return {
+        content:
+          'max_price_cents must be a US dollar amount the person wrote in this message; otherwise null.',
+        isError: true,
+      }
+    // "Is Pay in 4 cheaper than paying now?", "Which option is cheapest?", "a cheaper phone plan":
+    // the server refuses the search, so the model answers with the right tool instead.
+    if (notProductSearch(this.input.message))
+      return {
+        content:
+          'This question is about paying, timing, Worth’s options or a service, not another product. Do not search; answer it with interpret_purchase or another tool.',
+        isError: true,
+      }
+    if (this.alternatives) return { content: JSON.stringify({ status: 'already_searched' }) }
+    this.alternatives = await searchAlternatives(
+      alternativesFor(this.input, this.data, parsed.data.item ?? undefined, stated),
+      this.actions,
+    )
+    this.presentations.set('find_alternatives', chosen)
+    this.calls.push('find_alternatives')
+    this.read.add('find_alternatives')
+    const found = this.alternatives.result?.items.length ?? 0
+    // Only the outcome goes back to the model, never product names, stores or prices.
+    return {
+      content: JSON.stringify({
+        status: !this.alternatives.query ? 'needs_item' : found ? 'found' : 'none_found',
+        shown_by_app:
+          'The app shows what fits today and lists any similar items from other stores. Worth does not sell them.',
       }),
     }
   }
@@ -811,7 +1077,9 @@ function answerFor(turn: Turn, final: Final | undefined): Answer {
   const { input, data } = turn
   const base = { mode: 'anthropic' as const, toolCalls: turn.calls }
   let answer: Answer
-  if (turn.assessment)
+  if (turn.alternatives && !turn.assessment)
+    answer = { ...base, intent: 'alternatives', alternatives: turn.alternatives }
+  else if (turn.assessment)
     answer = {
       ...base,
       intent: 'affordability',
@@ -859,6 +1127,8 @@ function answerFor(turn: Turn, final: Final | undefined): Answer {
   }
   if (turn.checkout) answer.checkout = turn.checkout
   if (turn.checkoutNote) answer.note = turn.checkoutNote
+  // Asked together with a priced item, the similar items follow its verdict.
+  if (turn.alternatives) answer.alternatives = turn.alternatives
   // Claude's choice of facts and lead-in applies only with the tool that produced this
   // answer; with two tools in one round, each keeps its own choice.
   const source =
@@ -872,7 +1142,9 @@ function answerFor(turn: Turn, final: Final | undefined): Answer {
           ? 'spending_summary'
           : answer.intent === 'overview'
             ? 'get_plan_summary'
-            : undefined
+            : answer.intent === 'alternatives'
+              ? 'find_alternatives'
+              : undefined
   const chosen = source ? turn.presentations.get(source) : undefined
   if (chosen) answer.presentation = chosen
   const followUps = chosen?.followUps ?? final?.follow_ups ?? []
@@ -946,7 +1218,11 @@ export function createChatProvider(
       const started = Date.now()
       const deadline = started + deadlineMs
       const turn = new Turn(input, data, actions)
-      const tools = actions.prepareCheckout ? [...TOOLS, PREPARE_CHECKOUT_TOOL] : TOOLS
+      const tools = [
+        ...TOOLS,
+        ...(actions.findAlternatives ? [FIND_ALTERNATIVES_TOOL] : []),
+        ...(actions.prepareCheckout ? [PREPARE_CHECKOUT_TOOL] : []),
+      ]
       const messages: Anthropic.MessageParam[] = [
         ...history(input),
         {
@@ -1033,7 +1309,32 @@ export function createChatProvider(
         // Engine results already established still answer the question, without narration.
         if (!turn.calls.length && !turn.clarify) throw error
       }
-      return compose(answerFor(turn, final), turn.data)
+      const answer = answerFor(turn, final)
+      // A clear request for a cheaper product is still searched when the model only asked a
+      // question or summarised the plan. Any other reading the model chose (Pay in 4, waiting,
+      // the options, bills) stands; the override is logged so evals can count it.
+      const unanswered = answer.intent === 'clarify' || answer.intent === 'overview'
+      if (
+        !answer.alternatives &&
+        !answer.assessment &&
+        !answer.checkout &&
+        (answer.intent === 'alternatives' ||
+          (unanswered && localIntent(input, turn.data) === 'alternatives'))
+      ) {
+        if (answer.intent !== 'alternatives') log({ event: 'alternatives_override' })
+        answer.intent = 'alternatives'
+        delete answer.presentation
+        answer.alternatives = await searchAlternatives(
+          alternativesFor(
+            input,
+            turn.data,
+            categoryOf(input.message),
+            statedCeiling(input.message),
+          ),
+          actions,
+        )
+      }
+      return compose(answer, turn.data)
     },
   }
 }

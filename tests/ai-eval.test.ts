@@ -67,4 +67,34 @@ describe('AI eval regression gate (recorded model responses)', () => {
     expect([TWO_DAYS, undefined]).toContain(reply('R1-days-from-now').assessment?.purchaseDate)
     expect([EVAL_TODAY, undefined]).toContain(reply('R3-past-reference').assessment?.purchaseDate)
   })
+
+  it('routes every request for something cheaper to find_alternatives (G-C3-2)', () => {
+    const cheaper = results.filter((r) => /^C[1-8]-(?!categorize)/.test(r.id))
+    expect(cheaper.map((r) => r.id)).toHaveLength(8)
+    for (const result of cheaper) {
+      const reply = result.turns[0]!.reply
+      expect(reply.toolCalls, result.id).toContain('find_alternatives')
+      expect(reply.intent, result.id).toBe('alternatives')
+      expect(reply.assessment, result.id).toBeUndefined()
+    }
+    // Evals never re-read prices, so recorded rows arrive without a price or link.
+    const listed = cheaper.filter((r) => r.turns[0]!.reply.alternatives)
+    expect(listed.length).toBeGreaterThanOrEqual(4)
+    for (const result of listed) {
+      const shown = result.turns[0]!.reply.alternatives!
+      expect(shown.maxPriceCents).toBeLessThanOrEqual(44001)
+      expect(JSON.stringify(shown.unverified ?? [])).not.toMatch(/priceCents|"url"/)
+    }
+  })
+
+  it('never searches other stores when "cheaper" is about paying, timing, options or a service', () => {
+    const negatives = results.filter((r) => r.id.startsWith('NC'))
+    expect(negatives).toHaveLength(4)
+    for (const result of negatives) {
+      const reply = result.turns[0]!.reply
+      expect(reply.intent, result.id).not.toBe('alternatives')
+      expect(reply.toolCalls, result.id).not.toContain('find_alternatives')
+      expect(reply.alternatives, result.id).toBeUndefined()
+    }
+  })
 })

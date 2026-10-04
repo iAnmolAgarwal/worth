@@ -346,7 +346,7 @@ describe('queued prompts', () => {
 
 describe('Claude consent in chat', () => {
   const shared =
-    'your messages, recent chat history (including figures), the item, price and date you ask about, a forecast summary, 30-day spending totals by category, income and bill names with amounts and dates, minimized merchant labels, whether PayPal offers Pay in 4 for the price, and whether Worth prepared a checkout for a catalog item and how it went'
+    'your messages, recent chat history (including figures), the item, price and date you ask about, a forecast summary, 30-day spending totals by category, income and bill names with amounts and dates, minimized merchant labels, whether PayPal offers Pay in 4 for the price, whether Worth prepared a checkout for a catalog item and how it went, and, when you ask for something cheaper, the kind of item to look for and whether similar items were found (never their names, stores or prices)'
   it('lets the untouched sample profile turn Claude off, keeping focus on the switch while it saves', async () => {
     const user = userEvent.setup()
     const state = makeState()
