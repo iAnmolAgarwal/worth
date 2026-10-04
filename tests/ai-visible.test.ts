@@ -679,6 +679,21 @@ describe('the sentence check rejects what the judge found (F3)', () => {
   // Sentences Claude wrote in the live eval that are sound; they must keep passing.
   it.each([
     [
+      'Pay in 4 doesn’t make the {item} cheaper: the total stays {price}, and {p4_collision}.',
+      camera,
+      'tight',
+    ],
+    [
+      'The {item} fits because {cause_bill} is covered by {income_name} on {income_day}, leaving {low_point} on {low_day}.',
+      book,
+      'fits',
+    ],
+    [
+      '{cause_bill} pulls your balance down before {cause_payday}, so the {item} fits only once {payday_after_low} has restored the {cushion} buffer.',
+      camera,
+      'tight',
+    ],
+    [
       '{cause_bill} on {cause_day} comes before the next payday, {cause_payday}, so the balance cannot absorb the {item} until that pay lands.',
       camera,
       'tight',

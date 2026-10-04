@@ -750,12 +750,12 @@ const DATE_WORD =
   /\b(?:today|tonight|tomorrow|yesterday|weekends?|weekdays?|weeks?|months?|years?|fortnight|days?|nights?|hours?|mornings?|afternoons?|evenings?|noon|midnight|soon|shortly|later|earlier|lately|recently|ago|momentarily|holidays?|halloween|christmas|xmas|thanksgiving|easter|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:rs(?:day)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\b/i
 /** Advice and judgement: Worth states the engine's result and never recommends or rates options. */
 const ADVICE =
-  /\b(?:skip\w*|delay\w*|defer\w*|postpon\w*|pa(?:y|ying|id)\s+(?:[a-z']+\s+){0,3}late|late\s+(?:fee|payment)s?|miss(?:ing)?|borrow\w*|loans?|credit|financ\w*|overdraft|recommend\w*|suggest\w*|advis\w*|should|ought|smart\w*|wise\w*|better|best|ideal\w*|easier|easy|safer|prefer\w*|worth\s+it|go\s+with|opt\s+for|works?\s+out|good|great|fine|nice|ok(?:ay)?|no\s+(?:issue|problem|worries|concern)s?|covered|doable|manageable|dip\w*\s+into|tap\w*\s+into|use\s+(?:your|the)\s+cushion)\b|\b(?:use|using|try|consider|choose|pick|switch\s+to|split\w*)\b[^.]{0,40}\b(?:pay\s+in\s+4|pay\s+later|instal+ments?|bnpl)\b/i
+  /\b(?:skip\w*|delay\w*|defer\w*|postpon\w*|pa(?:y|ying|id)\s+(?:[a-z']+\s+){0,3}late|late\s+(?:fee|payment)s?|miss(?:ing)?|borrow\w*|loans?|credit|financ\w*|overdraft|recommend\w*|suggest\w*|advis\w*|should|ought|smart\w*|wise\w*|better|best|ideal\w*|easier|easy|safer|prefer\w*|worth\s+it|go\s+with|opt\s+for|works?\s+out|good|great|fine|nice|ok(?:ay)?|no\s+(?:issue|problem|worries|concern)s?|doable|manageable|dip\w*\s+into|tap\w*\s+into|use\s+(?:your|the)\s+cushion)\b|\b(?:use|using|try|consider|choose|pick|switch\s+to|split\w*)\b[^.]{0,40}\b(?:pay\s+in\s+4|pay\s+later|instal+ments?|bnpl)\b/i
 /** A sentence about Pay in 4 or paying later. */
 const PAY_IN_4_MENTION =
   /\bpay\s+in\s+4\b|\bpay(?:ing)?\s+later\b|\bsplit\w*|\bspread\w*|\binstal+ments?\b|\bbnpl\b|\bpaypal\b/i
 const POSITIVE =
-  /\b(?:fits?|fitting|afford\w*|safe(?:ly)?|comfortabl\w*|go\s+ahead|easily|plenty|stays?\s+above|keeps?\s+your\s+cushion|in\s+good\s+shape|remains?\s+(?:above|over))\b/i
+  /\b(?:fits?|fitting|afford\w*|safe(?:ly)?|comfortabl\w*|go\s+ahead|easily|plenty|covered|stays?\s+above|keeps?\s+your\s+cushion|in\s+good\s+shape|remains?\s+(?:above|over))\b/i
 const NEGATIVE =
   /\b(?:dips?|dipping|below|under|short(?:fall)?|overdrawn|negative|too\s+much|too\s+little|tight|risky|breaks?)\b|\b(?:not|never|cannot|can['’]?t|won['’]?t|\w+n['’]t)\b(?:\s+[A-Za-z']+){0,2}\s+(?:fit|afford|enough|keep|hold|cover|stay|make|leave)\w*/i
 
@@ -801,7 +801,9 @@ export function checkSentence(
   if (wrongValue(sentence, values)) return reject('wrong_value')
   if (misordered(sentence, values)) return reject('contradicts_result')
   // A tight result may still say what would fit: waiting, or spending less.
-  const conditional = /\{(?:wait_day|max_spend)\}|\bwait\w*/i.test(sentence)
+  const conditional = /\{(?:wait_day|max_spend)\}|\bwait\w*|\bonly\s+(?:once|after|when)\b/i.test(
+    sentence,
+  )
   // A fitting result may still say what higher everyday spending would do.
   const stressed =
     /\{stress_low\}/.test(sentence) && /\b(?:if|higher|ran|runs|running)\b/i.test(sentence)
@@ -834,8 +836,10 @@ function payIn4Problem(sentence: string, values: Placeholders): SentenceRejectio
   )
     return 'pay_in_4'
   if (
-    /\bcheaper\b/i.test(sentence) &&
-    !/\b(?:not|no|isn['’]t|never)\s+(?:any\s+)?cheaper\b/i.test(sentence)
+    /\bcheaper\b/i.test(sentence.replace(PLACEHOLDER, 'it')) &&
+    !/\b(?:not|no|isn['’]t|never|doesn['’]t|does\s+not|won['’]t)\b(?:\s+[A-Za-z']+){0,3}\s+cheaper\b/i.test(
+      sentence.replace(PLACEHOLDER, 'it'),
+    )
   )
     return 'pay_in_4'
   // The full-price low point belongs to paying in full, never to the instalments.
