@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import type { ReactNode } from 'react'
+import { StrictMode, type ReactNode } from 'react'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import Anthropic from '@anthropic-ai/sdk'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import App from '../src/App'
 import { Ask } from '../src/Ask'
 import { Decision } from '../src/Decision'
 import { Home } from '../src/Home'
@@ -289,5 +290,23 @@ describe('the collision, surfaced', () => {
       expect(options.nextElementSibling?.textContent).toContain('Compare with PayPal Pay in 4'),
     )
     expect(options.nextElementSibling?.textContent).toContain('about every 2 weeks')
+  })
+})
+
+describe('the Home starter chip on a first visit', () => {
+  it('starts one session even when React mounts twice in development', async () => {
+    const state = { ...makeState(), sessionKey: 'aaaaaaaaaaaaaaaaaaaa' }
+    let loads = 0
+    apiMock.mockImplementation(((path: string, input: unknown) => {
+      if (path === '/state') loads++
+      return Promise.resolve(path === '/compare' ? compare(state, input) : state)
+    }) as typeof api)
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    )
+    await screen.findByRole('heading', { name: 'Thinking about buying something?' })
+    expect(loads).toBe(1)
   })
 })

@@ -144,10 +144,20 @@ export default function App() {
     },
     [clearConversation],
   )
+  /**
+   * The state request in flight. Overlapping loads share it: on a first visit, two parallel
+   * requests (React's development double mount, or a focus refresh) would each start a session,
+   * and the cookie could end up on a different session than the state shown, so the first
+   * question was refused as a session change and the conversation cleared.
+   */
+  const loading = useRef<Promise<AppState> | undefined>(undefined)
   const load = useCallback(async () => {
     const started = revision.current
     try {
-      const next = (await api<AppState>('/state')) as AppState
+      loading.current ??= (api<AppState>('/state') as Promise<AppState>).finally(() => {
+        loading.current = undefined
+      })
+      const next = await loading.current
       // A slower refresh must not overwrite a completed edit or checkout.
       if (started !== revision.current) return
       replaceState(next)
