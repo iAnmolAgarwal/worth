@@ -114,6 +114,11 @@ describe('GET /api/alternatives', () => {
   it('finds similar products for a Channel3 product ID', async () => {
     const channel3 = fakeChannel3()
     const { agent } = setup(channel3)
+    // Only a product this session was shown can seed a similar search.
+    const unseen = await agent.get('/api/alternatives?similarTo=DBouSIg')
+    expect(unseen.body.status).toBe('off')
+    expect(channel3.similar).not.toHaveBeenCalled()
+    await agent.get('/api/alternatives?productId=camera')
     const response = await agent.get('/api/alternatives?similarTo=DBouSIg')
     expect(response.status).toBe(200)
     expect(channel3.similar).toHaveBeenCalledWith('DBouSIg', 44001, expect.anything())
@@ -210,11 +215,77 @@ describe('GET /api/alternatives', () => {
       current: { priceCents: 30000, url: 'https://buy.trychannel3.com/x', retailer: 'bestbuy.com' },
       droppedByCents: 2249,
     } as never)
-    const { agent } = setup(channel3)
+    const { app, agent } = setup(channel3)
+    // Never for a product this session was not shown, including one another session saw.
+    const unseen = await agent.get('/api/alternatives/price?id=DBouSIg&savedPriceCents=32249')
+    expect(unseen.status).toBe(404)
+    expect(channel3.checkPrice).not.toHaveBeenCalled()
+    await agent.get('/api/alternatives?productId=camera')
+    const other = request.agent(app)
+    expect((await other.get('/api/alternatives/price?id=DBouSIg&savedPriceCents=1')).status).toBe(
+      404,
+    )
     const response = await agent.get('/api/alternatives/price?id=DBouSIg&savedPriceCents=32249')
     expect(response.body).toMatchObject({ status: 'dropped', droppedByCents: 2249 })
     expect(channel3.checkPrice).toHaveBeenCalledWith('DBouSIg', 32249)
     expect((await agent.get('/api/alternatives/price?id=../x&savedPriceCents=1')).status).toBe(400)
+  })
+  it('caps price checks per session and per IP, and reads each product once per 15 minutes', async () => {
+    const reads: string[] = []
+    const fetch = vi.fn(async (url: string) => {
+      if (url.includes('/v1/products/')) {
+        reads.push(url)
+        return new Response(JSON.stringify({ id: 'DBouSIg', title: 'Camera body', offers: [] }), {
+          status: 200,
+        })
+      }
+      return new Response(
+        JSON.stringify({
+          products: [
+            {
+              id: 'DBouSIg',
+              title: 'Camera body',
+              offers: [
+                {
+                  url: 'https://buy.trychannel3.com/x',
+                  domain: 'bestbuy.com',
+                  price: { price: 322.49, currency: 'USD' },
+                  availability: 'InStock',
+                  condition: 'new',
+                },
+              ],
+            },
+          ],
+        }),
+        { status: 200 },
+      )
+    })
+    const channel3 = createChannel3({
+      apiKey: 'c3-test-key',
+      fetch: fetch as unknown as typeof globalThis.fetch,
+      log: () => {},
+    })
+    const { agent } = setup(channel3)
+    await agent.get('/api/alternatives?productId=camera')
+    const statuses: number[] = []
+    for (let i = 0; i < 31; i++)
+      statuses.push(
+        (await agent.get('/api/alternatives/price?id=DBouSIg&savedPriceCents=32249')).status,
+      )
+    expect(statuses.slice(0, 30).every((status) => status === 200)).toBe(true)
+    expect(statuses[30]).toBe(429)
+    expect(reads).toHaveLength(1)
+  })
+  it('lets a session check prices of items Ask Worth listed for it', async () => {
+    const channel3 = fakeChannel3()
+    const { agent } = setup(channel3)
+    await agent
+      .post('/api/chat')
+      .set('X-Worth-Client', 'web')
+      .send({ message: 'Can you find a cheaper camera?', history: [] })
+    const response = await agent.get('/api/alternatives/price?id=DBouSIg&savedPriceCents=32249')
+    expect(response.status).toBe(200)
+    expect(channel3.checkPrice).toHaveBeenCalledWith('DBouSIg', 32249)
   })
   it('reports off and hides the panel without a key', async () => {
     const { agent } = setup(createChannel3({ fixtures: loadFixtures() }))

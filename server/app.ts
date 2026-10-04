@@ -55,6 +55,7 @@ import { confirmPlan, confirmRefund, PlanError, recordRefund } from './plans.ts'
 import { queryFor, roomToday } from './alternatives.ts'
 import { createChannel3, loadFixtures } from './channel3.ts'
 import type { Channel3Client } from './channel3.ts'
+import type { Alternatives, ChatReply } from '../shared/types.ts'
 
 export type { AppConfig } from './config.ts'
 export interface AppOptions {
@@ -303,6 +304,36 @@ export function createApp(options: AppOptions = {}) {
   const claudePerIp = new WindowLimiter(config.claudeIpHourlyLimit, 60 * 60_000)
   const claudeDaily = new WindowLimiter(config.claudeDailyLimit, DAY, 1)
   const channel3PerIp = new WindowLimiter(config.channel3IpHourlyLimit, 60 * 60_000)
+  /** Price checks per session and per IP per hour; each one is a Channel3 product read. */
+  const priceChecksPerSession = new WindowLimiter(30, 60 * 60_000)
+  const priceChecksPerIp = new WindowLimiter(60, 60 * 60_000)
+  /**
+   * Channel3 products each session has been shown (or, from Phase 5, saved). Only these can seed
+   * "More like this" or a price check, so no client can make Worth read arbitrary products.
+   */
+  const shownProducts = new Map<string, Set<string>>()
+  function rememberShown(id: string, result: Alternatives | undefined) {
+    if (!result || result.status === 'off') return
+    const rows = [...result.items, ...(result.unverified ?? [])]
+    if (!rows.length) return
+    const shown = shownProducts.get(id) ?? new Set<string>()
+    shownProducts.delete(id)
+    shownProducts.set(id, shown)
+    for (const row of rows) shown.add(row.id)
+    while (shown.size > 200) shown.delete(shown.values().next().value!)
+    while (shownProducts.size > config.maxSessions)
+      shownProducts.delete(shownProducts.keys().next().value!)
+  }
+  const wasShown = (id: string, productId: string) => shownProducts.get(id)?.has(productId) ?? false
+  /** For Phase 5: register a Channel3 product the session saved, so its price can be checked. */
+  app.locals.rememberAlternative = (id: string, productId: string) =>
+    rememberShown(id, {
+      status: 'ok',
+      query: '',
+      maxPriceCents: 0,
+      items: [],
+      unverified: [{ id: productId, title: '', retailer: '', source: 'channel3' }],
+    })
   /** Each client's share of the day's live Channel3 searches; cached results never count. */
   const liveSearches = (req: Request) => ({
     allowLive: () => channel3PerIp.take(req.ip ?? 'local', now().getTime()),
@@ -1006,11 +1037,15 @@ export function createApp(options: AppOptions = {}) {
       : queryFor({ productId: product?.id, itemName: input.itemName })
     if (!input.similarTo && !query)
       return res.json({ status: 'off', query: '', maxPriceCents: 0, items: [] })
-    res.json(
-      input.similarTo
-        ? await channel3.similar(input.similarTo, ceiling, liveSearches(req))
-        : await channel3.search(query!, ceiling, liveSearches(req)),
-    )
+    const id = sessionId(res)
+    // "More like this" only starts from a product this session was shown.
+    if (input.similarTo && !wasShown(id, input.similarTo))
+      return res.json({ status: 'off', query: input.similarTo, maxPriceCents: 0, items: [] })
+    const result = input.similarTo
+      ? await channel3.similar(input.similarTo, ceiling, liveSearches(req))
+      : await channel3.search(query!, ceiling, liveSearches(req))
+    rememberShown(id, result)
+    res.json(result)
   })
   /**
    * Whether a saved Channel3 product is cheaper now than when it was saved, read with Channel3's
@@ -1024,7 +1059,13 @@ export function createApp(options: AppOptions = {}) {
       })
       .strict()
       .parse(req.query)
-    sessionId(res)
+    const id = sessionId(res)
+    if (!wasShown(id, input.id))
+      throw new HttpError(404, 'Check prices only for items Worth showed you.', 'NOT_FOUND')
+    const time = now().getTime()
+    if (!priceChecksPerSession.take(id, time) || !priceChecksPerIp.take(req.ip ?? 'local', time))
+      throw new HttpError(429, 'Please wait a while before checking more prices.', 'RATE_LIMITED')
+    // Product reads are cached per ID for 15 minutes inside the Channel3 client.
     res.json(await channel3.checkPrice(input.id, input.savedPriceCents))
   })
   /** Saves a purchase's new cash effect and moves the plan version, so older answers expire. */
@@ -1384,7 +1425,12 @@ export function createApp(options: AppOptions = {}) {
     const id = sessionId(res)
     const actions = chatActions(req, id, input)
     // Local answers still search other stores for something cheaper; nothing goes to Claude.
-    const local = (reason?: string) => localReply(input, data, reason, actions)
+    /** Answers that list similar items record them as shown to this session. */
+    const shown = (reply: ChatReply) => {
+      rememberShown(id, reply.alternatives)
+      return reply
+    }
+    const local = async (reason?: string) => shown(await localReply(input, data, reason, actions))
     if (!mayUseExternalAi(current.profile))
       return res.json(
         await local(
@@ -1407,7 +1453,7 @@ export function createApp(options: AppOptions = {}) {
       )
     chatBusy.add(id)
     try {
-      return res.json(await chat.reply(input, data, actions))
+      return res.json(shown(await chat.reply(input, data, actions)))
     } catch (error) {
       // Error class only: never the message text, financial data, or credentials.
       console.warn('Worth chat used local fallback:', error instanceof Error ? error.name : 'Error')
