@@ -54,6 +54,8 @@ import {
   AgentTokenError,
   createAgentToken,
   listAgentTokens,
+  MCP_BODY_LIMIT,
+  mcpBodyError,
   mountMcp,
   revokeAgentToken,
 } from './mcp.ts'
@@ -986,7 +988,7 @@ export function createApp(options: AppOptions = {}) {
   app.use('/api/paypal/webhook', express.raw({ type: () => true, limit: '64kb' }))
   app.use('/api/import', express.json({ limit: IMPORT_BODY_LIMIT }))
   // MCP messages are small tool calls; the parser leaves other content types unparsed.
-  app.use('/mcp', express.json({ limit: '32kb' }))
+  app.use('/mcp', express.json({ limit: MCP_BODY_LIMIT }))
   app.use(express.json({ limit: '1200kb' }))
   app.use(cookieParser())
   // Worth as an outside agent's affordability check (Phase MCP). Bearer tokens only: this route is
@@ -2044,7 +2046,10 @@ export function createApp(options: AppOptions = {}) {
   app.use('/api', (_req, res) =>
     res.status(404).json({ error: 'API endpoint not found.', code: 'NOT_FOUND' }),
   )
-  const errors: ErrorRequestHandler = (error, _req, res, _next) => {
+  const errors: ErrorRequestHandler = (error, req, res, _next) => {
+    // /mcp speaks JSON-RPC: a body the parser refused gets a JSON-RPC error, never the CSV message.
+    if (req.path === '/mcp' && (error?.type === 'entity.too.large' || error instanceof SyntaxError))
+      return void mcpBodyError(res, error?.type === 'entity.too.large' ? 'too_large' : 'parse')
     if (error instanceof z.ZodError)
       return void res
         .status(400)

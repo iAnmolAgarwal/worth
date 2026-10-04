@@ -261,6 +261,38 @@ describe('the Streamable HTTP transport at /mcp', () => {
     }
   })
 
+  it('answers an oversized or malformed body with a JSON-RPC error, not the CSV message', async () => {
+    const { app } = setup()
+    const { token } = await connected(app)
+    const big = await request(app)
+      .post('/mcp')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Accept', 'application/json, text/event-stream')
+      .set('Content-Type', 'application/json')
+      .send(
+        JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', pad: 'x'.repeat(40_000) }),
+      )
+    expect(big.status).toBe(413)
+    expect(big.body).toEqual({
+      jsonrpc: '2.0',
+      error: {
+        code: -32600,
+        message: 'Request too large. Worth accepts MCP requests up to 32 KB.',
+        data: { code: 'REQUEST_TOO_LARGE' },
+      },
+      id: null,
+    })
+    expect(JSON.stringify(big.body)).not.toMatch(/CSV/)
+    const broken = await request(app)
+      .post('/mcp')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Accept', 'application/json, text/event-stream')
+      .set('Content-Type', 'application/json')
+      .send('{"jsonrpc": "2.0", "id": 1,')
+    expect(broken.status).toBe(400)
+    expect(broken.body.error).toMatchObject({ code: -32700, data: { code: 'INVALID_JSON' } })
+  })
+
   it('relays the same tools over stdio for Claude Desktop', async () => {
     const { app } = setup()
     const { token } = await connected(app)

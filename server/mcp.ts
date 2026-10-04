@@ -804,6 +804,24 @@ export function buildMcpServer(ctx: McpContext, caller: Caller, prepareLimiter: 
 
 // ---- HTTP ---------------------------------------------------------------------------------
 
+/** MCP request bodies above this are refused before any parsing (see app.ts). */
+export const MCP_BODY_LIMIT = '32kb'
+/** A body the JSON parser refused on /mcp: too large (-32600) or not JSON (-32700). */
+export function mcpBodyError(res: Response, kind: 'too_large' | 'parse') {
+  const tooLarge = kind === 'too_large'
+  res.status(tooLarge ? 413 : 400).json({
+    jsonrpc: '2.0',
+    error: {
+      code: tooLarge ? -32600 : -32700,
+      message: tooLarge
+        ? 'Request too large. Worth accepts MCP requests up to 32 KB.'
+        : 'Parse error. Send a JSON-RPC request as JSON.',
+      data: { code: tooLarge ? 'REQUEST_TOO_LARGE' : 'INVALID_JSON' },
+    },
+    id: null,
+  })
+}
+
 /** A JSON-RPC error for a request that never reached a tool. */
 function rpcError(
   res: Response,
