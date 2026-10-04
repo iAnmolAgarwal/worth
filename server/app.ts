@@ -1336,11 +1336,16 @@ export function createApp(options: AppOptions = {}) {
     const id = sessionId(res)
     const data = dataFor(res)
     const time = now().getTime()
-    const lifetime = keep30 ? RETENTION_MS : SESSION_DAY_MS
+    // Turning retention off never extends a session: it ends within 24 hours, or sooner if it
+    // was never kept longer (a session that never opted in keeps its own expiry).
+    const expires = keep30
+      ? time + RETENTION_MS
+      : Math.min(store.expiry(id) ?? time + SESSION_DAY_MS, time + SESSION_DAY_MS)
+    const lifetime = Math.max(0, expires - time)
     data.keep30 = keep30
     store.atomic(() => {
       store.save(id, data)
-      store.setExpiry(id, time + lifetime)
+      store.setExpiry(id, expires)
     })
     res.cookie(cookieName, id, {
       httpOnly: true,

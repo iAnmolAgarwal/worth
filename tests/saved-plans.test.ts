@@ -559,6 +559,19 @@ describe('opt-in 30-day retention (D-9 a)', () => {
     expect(off.body.retention).toEqual({ keep30: false, expiresAt: '2026-10-05T16:00:00.000Z' })
     expect((await post(other, '/api/retention', { keep30: 'yes' })).status).toBe(400)
   })
+
+  // Pre-merge judge finding 8: switching retention off never keeps a session alive longer.
+  it('never extends a 24-hour session that did not opt in', async () => {
+    const { agent } = setup()
+    await state(agent)
+    clock.value = new Date('2026-10-05T10:00:00Z')
+    const off = await post(agent, '/api/retention', { keep30: false })
+    expect(off.body.retention).toEqual({ keep30: false, expiresAt: '2026-10-05T16:00:00.000Z' })
+    expect(off.headers['set-cookie'][0]).toContain('Max-Age=21600')
+    clock.value = new Date('2026-10-05T16:00:01Z')
+    expect((await state(agent)).retention.keep30).toBe(false)
+    expect((await agent.get('/api/state')).body.sessionKey).not.toBe(off.body.sessionKey)
+  })
 })
 
 describe('catalog pricing', () => {
