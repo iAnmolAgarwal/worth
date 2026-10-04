@@ -793,6 +793,52 @@ describe('prepare_order', () => {
   })
 })
 
+describe('every refusal', () => {
+  it('carries source, as_of and summary, like every success (judge finding 5)', async () => {
+    const { app, store } = setup({ mcpPrepareHourly: 2 })
+    const { token } = await connected(app, LATER)
+    const refusals = [
+      await check(app, token, { item: 'camera', amount_usd: 12.345 }),
+      await check(app, token, { item: 'camera', amount_usd: 100, date: '2026-10-02' }),
+      await tool(app, token, 'prepare_order', { catalog_item_id: 'yacht' }),
+      await tool(app, token, 'prepare_order', { catalog_item_id: 'camera' }),
+      // The hourly prepare limit (2) is now spent.
+      await tool(app, token, 'prepare_order', { catalog_item_id: 'camera' }),
+    ]
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    vi.spyOn(store, 'get').mockImplementation(() => {
+      throw new Error('unavailable')
+    })
+    refusals.push(await tool(app, token, 'list_saved_plans'))
+    warn.mockRestore()
+    expect(refusals.map((r) => r.body.error?.code)).toEqual([
+      'INVALID_AMOUNT',
+      'INVALID_DATE',
+      'UNKNOWN_ITEM',
+      'SHORTFALL_NOT_CONFIRMED',
+      'RATE_LIMITED',
+      'INTERNAL_ERROR',
+    ])
+    for (const { isError, body } of refusals) {
+      expect(isError).toBe(true)
+      expect(body).toMatchObject({ source: 'Worth engine', as_of: TODAY })
+      expect(typeof body.summary).toBe('string')
+    }
+  })
+
+  it('carries the server’s date when the plan is gone', async () => {
+    const { app, store } = setup()
+    const { token } = await connected(app)
+    vi.spyOn(store, 'get').mockReturnValue(undefined)
+    const expired = await tool(app, token, 'list_saved_plans')
+    expect(expired.body).toMatchObject({
+      source: 'Worth engine',
+      as_of: TODAY,
+      error: { code: 'PLAN_EXPIRED' },
+    })
+  })
+})
+
 describe('list_saved_plans', () => {
   it('lists saved items read-only, with catalog IDs, wait dates and Worth’s summary', async () => {
     const { app, store } = setup()

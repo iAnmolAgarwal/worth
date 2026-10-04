@@ -210,14 +210,15 @@ function ok<T extends Record<string, unknown>>(
 function failure(
   code: string,
   message: string,
-  extra: Record<string, unknown> = {},
-  asOf?: string,
+  extra: Record<string, unknown>,
+  /** The plan's today, or the server's UTC date when no plan could be read. */
+  asOf: string,
   /** The person-facing part, when the message also tells the agent what to do. */
   summary = message,
 ) {
   const body = {
     source: SOURCE,
-    ...(asOf ? { as_of: asOf } : {}),
+    as_of: asOf,
     summary,
     error: { code, message },
     ...extra,
@@ -227,18 +228,39 @@ function failure(
     content: [{ type: 'text' as const, text: JSON.stringify(body) }],
   } satisfies CallToolResult
 }
-const EXPIRED = () =>
+/** The day a refusal speaks for: the plan's today, or the server's UTC date without a plan. */
+function asOfFor(ctx: McpContext, caller: Caller) {
+  try {
+    const plan = ctx.plan(caller.sessionId)
+    if (plan) return plan.today
+  } catch {
+    // The plan could not be read; the server's date stands in.
+  }
+  return ctx.now().toISOString().slice(0, 10)
+}
+const EXPIRED = (ctx: McpContext) =>
   failure(
     'PLAN_EXPIRED',
     'This Worth plan has expired or was deleted. Create a new agent token in Worth’s Settings.',
+    {},
+    ctx.now().toISOString().slice(0, 10),
   )
-async function safely(run: () => Promise<CallToolResult> | CallToolResult) {
+async function safely(
+  ctx: McpContext,
+  caller: Caller,
+  run: () => Promise<CallToolResult> | CallToolResult,
+) {
   try {
     return await run()
   } catch (error) {
     // Error class only: never the message text, financial data or credentials.
     console.warn('Worth MCP tool failed:', error instanceof Error ? error.name : 'Error')
-    return failure('INTERNAL_ERROR', 'Worth could not answer just now. Try again in a moment.')
+    return failure(
+      'INTERNAL_ERROR',
+      'Worth could not answer just now. Try again in a moment.',
+      {},
+      asOfFor(ctx, caller),
+    )
   }
 }
 
@@ -377,7 +399,7 @@ export const UNNAMED_ITEM = 'this item'
  * page an agent scraped) could otherwise put words in Worth's mouth.
  */
 const NOT_A_LABEL =
-  /\b(?:approv\w*|safe\w*|ignor\w*|worth|says?|said|system|assistant|developer|instruct\w*|prompt|override|verdict|afford\w*|recommend\w*|fits?|cushion|report|tell|confirm\w*|authori[sz]\w*|allow\w*|guarantee\w*|proceed|go\s+ahead|buy\s+(?:it\s+)?now|ok(?:ay)?|yes|must|should|price|cost|usd|dollars?|pay|paid|free|previous|rules?)\b|[:$€£₹<>{}\[\]|\\=]/i
+  /\b(?:approv\w*|safe\w*|ignor\w*|worth|says?|said|system|assistant|developer|instruct\w*|prompt|override|verdict|afford\w*|recommend\w*|fits?|cushion|report|tell|confirm\w*|authori[sz]\w*|allow\w*|guarantee\w*|proceed|go\s+ahead|buy\s+(?:it\s+)?now|ok(?:ay)?|yes|must|should|price|cost|usd|dollars?|pay|paid|free|previous|rules?)\b|[:$€£₹<>{}[\]|\\=]/i
 /**
  * The caller's item text as a short plain label Worth may echo, inside quotes and after its own
  * sentences: hidden characters removed, links and long numbers stripped, quotes dropped, at most
@@ -428,7 +450,7 @@ async function checkAffordability(
   args: { item: string; amount_usd: number; date?: string },
 ): Promise<CallToolResult> {
   const plan = ctx.plan(caller.sessionId)
-  if (!plan) return EXPIRED()
+  if (!plan) return EXPIRED(ctx)
   const { today } = plan
   // Fail closed on any input Worth cannot use as given: no amount or date is ever guessed.
   const amountCents = Math.round(args.amount_usd * 100)
@@ -610,7 +632,7 @@ async function prepareOrder(
   args: { catalog_item_id: string; acknowledge_below_cushion?: boolean },
 ): Promise<CallToolResult> {
   const plan = ctx.plan(caller.sessionId)
-  if (!plan) return EXPIRED()
+  if (!plan) return EXPIRED(ctx)
   const acknowledge = args.acknowledge_below_cushion === true
   const result = await ctx.prepareOrder(caller.sessionId, args.catalog_item_id, acknowledge)
   if (!result.ok) {
@@ -683,7 +705,7 @@ function savedLabel(item: SavedItem) {
 }
 function listSavedPlans(ctx: McpContext, caller: Caller): CallToolResult {
   const plan = ctx.plan(caller.sessionId)
-  if (!plan) return EXPIRED()
+  if (!plan) return EXPIRED(ctx)
   const items = publicSaved(plan.saved, plan.today, plan.purchases)
   const structured = {
     plans: items.map((item) => ({
@@ -747,7 +769,7 @@ export function buildMcpServer(ctx: McpContext, caller: Caller, prepareLimiter: 
       outputSchema: checkOutput,
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    (args) => safely(() => checkAffordability(ctx, caller, args)),
+    (args) => safely(ctx, caller, () => checkAffordability(ctx, caller, args)),
   )
   server.registerTool(
     'prepare_order',
@@ -779,12 +801,14 @@ export function buildMcpServer(ctx: McpContext, caller: Caller, prepareLimiter: 
       },
     },
     (args) =>
-      safely(() =>
+      safely(ctx, caller, () =>
         prepareLimiter.take(caller.tokenId, ctx.now().getTime())
           ? prepareOrder(ctx, caller, args)
           : failure(
               'RATE_LIMITED',
               `This agent token can prepare at most ${prepareLimiter.limit} orders an hour. Try again later.`,
+              {},
+              asOfFor(ctx, caller),
             ),
       ),
   )
@@ -797,7 +821,7 @@ export function buildMcpServer(ctx: McpContext, caller: Caller, prepareLimiter: 
       outputSchema: savedOutput,
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    () => safely(() => listSavedPlans(ctx, caller)),
+    () => safely(ctx, caller, () => listSavedPlans(ctx, caller)),
   )
   return server
 }

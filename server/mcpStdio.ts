@@ -64,6 +64,8 @@ function unreachable(error: unknown) {
         type: 'text' as const,
         text: JSON.stringify({
           source: 'Worth engine',
+          // Worth could not be asked, so this is the relay's own (UTC) date.
+          as_of: new Date().toISOString().slice(0, 10),
           summary: message,
           error: { code: status === 401 ? 'UNAUTHORIZED' : 'WORTH_UNREACHABLE', message },
         }),
