@@ -90,8 +90,10 @@ Each browser gets an isolated temporary session, expiring 24 hours after creatio
 
 Edited or imported personal financial context requires AI-sharing consent, which can be toggled in the chat panel. Only the synthetic persona, before you save your own inputs or import, may use Claude without that opt-in; demo purchases do not change this, and they are archived when you import. With sharing on, Anthropic receives your messages, recent chat history (including figures), the item, price and date you ask about, the items and prices you asked about earlier in the same conversation, a forecast summary, 30-day spending totals by category, income and bill names with amounts and dates, and minimized merchant labels. This is minimization, not guaranteed anonymization. Calculations work with sharing off. See [architecture](docs/ARCHITECTURE.md) for boundaries.
 
+**Agents (MCP).** Any MCP client, such as Claude Desktop, can ask Worth before it pays, using a revocable agent token from Settings → Connect an agent. It can check affordability, list saved plans, and prepare a PayPal sandbox order that the person approves. It can never capture. These calls use no Claude. See [MCP](docs/MCP.md).
+
 Worth is independently branded and **not embedded in PayPal**. Consumer history is **CSV-only**; automatic access to all personal PayPal activity is unverified. It supports USD and a demo merchant catalog, with no goods sold or shipped. Estimates depend on confirmed inputs, not a guarantee of future funds. Production payments, autonomous purchases, bank aggregation, and refund management are outside this prototype. The app remains **undeployed**; public hackathon source/video publication is pending. Source has been pushed to the [private repository](https://github.com/iAnmolAgarwal/worth); GitHub CI passes.
 
-[Demo script](docs/DEMO.md) · [Architecture](docs/ARCHITECTURE.md) · [Design credits](docs/DESIGN-SOURCES.md) · [Audited scope](project%20scope.md)
+[Demo script](docs/DEMO.md) · [MCP for agents](docs/MCP.md) · [Architecture](docs/ARCHITECTURE.md) · [Design credits](docs/DESIGN-SOURCES.md) · [Audited scope](project%20scope.md)
 
 Source: [MIT License](LICENSE). Third-party assets and dependencies retain their own licenses and trademarks.

@@ -228,8 +228,11 @@ export interface Purchase {
    * step, and capture requires `{ acknowledgeShortfall: true }` from the user.
    */
   proceedConfirmRequired?: boolean
-  /** 'agent' when Claude's prepare_checkout created the order; absent on older purchases. */
-  preparedBy?: 'agent' | 'user'
+  /**
+   * 'agent' when Ask Worth's prepare_checkout created the order; 'external' when an outside agent
+   * asked for it through Worth's MCP server (prepare_order); absent on older purchases.
+   */
+  preparedBy?: 'agent' | 'external' | 'user'
 }
 /** Something the user must confirm before Worth changes how a purchase affects their plan. */
 export type PurchaseReview =
@@ -389,6 +392,17 @@ export interface Comparison {
   /** Null while information is missing. Pay in 4 is never a recommendation. */
   recommendation: Recommendation | null
   assumptions: string[]
+}
+/** An agent token as Settings lists it. The token itself is shown once, when it is created. */
+export interface AgentToken {
+  id: string
+  /** The token's last four characters. */
+  hint: string
+  createdAt: string
+  /** The earlier of the token's own 30-day expiry and the plan's deletion. */
+  expiresAt: string
+  lastUsedAt?: string
+  status: 'active' | 'revoked' | 'expired'
 }
 export interface AppState {
   /** Public session fingerprint for clearing browser-only context; never an authentication token. */

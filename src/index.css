@@ -3146,3 +3146,68 @@ textarea.input {
     grid-template-columns: 1fr;
   }
 }
+
+/* Settings → Connect an agent (Phase MCP). */
+.agent-new {
+  margin-top: var(--s-4);
+}
+.mono-input,
+.code-block {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.code-block {
+  margin: 8px 0 0;
+  padding: var(--s-3);
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  color: var(--c-text-strong);
+  font-size: var(--fs-caption);
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre;
+}
+.code-block:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+.agent-steps {
+  margin: 4px 0 0;
+  padding-left: 1.25rem;
+}
+.agent-steps li + li {
+  margin-top: 2px;
+}
+.agent-tokens {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.agent-tokens li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-3) 0;
+  border-bottom: 1px solid var(--c-divider);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+.agent-tokens li:last-child {
+  border-bottom: 0;
+}
+.agent-tokens li > div {
+  min-width: 0;
+}
+.agent-tokens .caption {
+  display: block;
+  margin-top: 2px;
+}
+.agent-tokens .pill {
+  margin-left: 4px;
+}
+.caption code,
+.agent-steps code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
+}

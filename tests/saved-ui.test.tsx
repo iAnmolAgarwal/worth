@@ -519,7 +519,8 @@ describe('settings, demo clock and mobile reach', () => {
     const state = makeState()
     const calls: [string, unknown][] = []
     routeApi((path, data) => {
-      calls.push([path, data])
+      // Connect an agent reads its token list on open; that read is not under test here.
+      if (path !== '/agent-tokens') calls.push([path, data])
       return state
     })
     render(

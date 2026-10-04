@@ -45,7 +45,21 @@ import {
 } from './paypal.ts'
 import type { PayPalGateway, PayPalOrder } from './paypal.ts'
 import { checkoutGuards, decideAgentCheckout } from './agentCheckout.ts'
-import type { PrepareCheckoutRequest, PrepareCheckoutResult } from './agentCheckout.ts'
+import type {
+  PrepareCheckoutRequest,
+  PrepareCheckoutResult,
+  PrepareRefusal,
+} from './agentCheckout.ts'
+import {
+  AgentTokenError,
+  createAgentToken,
+  listAgentTokens,
+  MCP_BODY_LIMIT,
+  mcpBodyError,
+  mountMcp,
+  revokeAgentToken,
+} from './mcp.ts'
+import type { ExternalOrderResult } from './mcp.ts'
 import { categoryCandidates, createChatProvider, fallbackCategories, localReply } from './chat.ts'
 import type { ChatActions, ChatProvider } from './chat.ts'
 import { allowedOrigins, loadConfig } from './config.ts'
@@ -766,7 +780,8 @@ export function createApp(options: AppOptions = {}) {
        * capture needs the user's own explicit acknowledgement.
        */
       confirmAtCapture?: boolean
-      preparedBy: 'agent' | 'user'
+      /** 'agent': Ask Worth's prepare_checkout; 'external': an outside agent's prepare_order. */
+      preparedBy: 'agent' | 'external' | 'user'
       /** The plan the agent's assessment used; any change since makes it stale. */
       assessed?: { profileVersion: number; today: string }
     },
@@ -775,7 +790,7 @@ export function createApp(options: AppOptions = {}) {
     let purchase = store.atomic(() => {
       const existing = active(id)
       if (existing) {
-        if (existing.productId !== product.id || options.preparedBy === 'agent')
+        if (existing.productId !== product.id || options.preparedBy !== 'user')
           throw new HttpError(
             409,
             'You already have a checkout in progress. Finish or cancel it first.',
@@ -857,17 +872,7 @@ export function createApp(options: AppOptions = {}) {
         assessed: { profileVersion: decision.profileVersion, today: decision.today },
       })
     } catch (error) {
-      if (error instanceof HttpError) {
-        const code =
-          error.code === 'CHECKOUT_ACTIVE' || error.code === 'ASSESSMENT_EXPIRED'
-            ? error.code
-            : error.code === 'PLAN_INCOMPLETE'
-              ? 'PLAN_INCOMPLETE'
-              : error.code === 'SHORTFALL_ACKNOWLEDGEMENT_REQUIRED'
-                ? 'SHORTFALL_NOT_CONFIRMED'
-                : 'PAYPAL_UNAVAILABLE'
-        return { ok: false, code, message: error.message }
-      }
+      if (error instanceof HttpError) return checkoutRefusal(error)
       throw error
     }
     if (!purchase.orderId || !purchase.approvalUrl || purchase.status !== 'created')
@@ -889,6 +894,72 @@ export function createApp(options: AppOptions = {}) {
       },
     }
   }
+  /** A checkout error from startCheckout, as an agent's refusal code and message. */
+  function checkoutRefusal(error: HttpError): { ok: false; code: PrepareRefusal; message: string } {
+    const code =
+      error.code === 'CHECKOUT_ACTIVE' || error.code === 'ASSESSMENT_EXPIRED'
+        ? error.code
+        : error.code === 'PLAN_INCOMPLETE'
+          ? 'PLAN_INCOMPLETE'
+          : error.code === 'SHORTFALL_ACKNOWLEDGEMENT_REQUIRED'
+            ? 'SHORTFALL_NOT_CONFIRMED'
+            : 'PAYPAL_UNAVAILABLE'
+    return { ok: false, code, message: error.message }
+  }
+  /**
+   * An outside agent's prepare_order (MCP): the same checkoutGuards as a saved plan's Buy button,
+   * then the same checkout path. Below the cushion the agent must acknowledge it, the order is
+   * stored unacknowledged, and capture needs the person's own confirmation in Worth.
+   */
+  async function prepareExternalOrder(
+    id: string,
+    productId: string,
+    acknowledgeBelowCushion: boolean,
+  ): Promise<ExternalOrderResult> {
+    const data = store.get(id)
+    if (!data) return { ok: false, code: 'ASSESSMENT_EXPIRED', message: 'This plan has expired.' }
+    const product = PRODUCTS.find((p) => p.id === productId)
+    if (!product)
+      return {
+        ok: false,
+        code: 'UNKNOWN_ITEM',
+        message: 'Worth prepares orders only for items in its sandbox catalog.',
+      }
+    const decision = checkoutGuards({
+      profile: data.profile,
+      purchases: livePurchases(id),
+      today: sessionToday(data),
+      product,
+      request: { option: 'buyToday' },
+      proceedDespiteShortfall: acknowledgeBelowCushion,
+    })
+    if (!decision.ok) return decision
+    if (!paypal)
+      return {
+        ok: false,
+        code: 'PAYPAL_UNAVAILABLE',
+        message: 'PayPal sandbox checkout is not connected, so Worth cannot prepare an order.',
+      }
+    let purchase: StoredPurchase
+    try {
+      purchase = await startCheckout(id, product, {
+        acknowledgeShortfall: false,
+        confirmAtCapture: !decision.fits,
+        preparedBy: 'external',
+        assessed: { profileVersion: decision.profileVersion, today: decision.today },
+      })
+    } catch (error) {
+      if (error instanceof HttpError) return checkoutRefusal(error)
+      throw error
+    }
+    if (!purchase.orderId || !purchase.approvalUrl || purchase.status !== 'created')
+      return {
+        ok: false,
+        code: 'PAYPAL_UNAVAILABLE',
+        message: 'PayPal did not return an approval link. Open the checkout in Worth to continue.',
+      }
+    return { ok: true, purchase, fits: decision.fits }
+  }
   let proxyHopsLogged = !config.production
   app.use((req, res, next) => {
     // Logs the forwarding chain length once so TRUST_PROXY can be checked after a deploy.
@@ -909,14 +980,43 @@ export function createApp(options: AppOptions = {}) {
     )
     if (config.production)
       res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
-    if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store')
+    if (req.path.startsWith('/api/') || req.path === '/mcp')
+      res.setHeader('Cache-Control', 'no-store')
     next()
   })
   // Webhook signatures cover the exact bytes PayPal sent, so this route keeps the raw body.
   app.use('/api/paypal/webhook', express.raw({ type: () => true, limit: '64kb' }))
   app.use('/api/import', express.json({ limit: IMPORT_BODY_LIMIT }))
+  // MCP messages are small tool calls; the parser leaves other content types unparsed.
+  app.use('/mcp', express.json({ limit: MCP_BODY_LIMIT }))
   app.use(express.json({ limit: '1200kb' }))
   app.use(cookieParser())
+  // Worth as an outside agent's affordability check (Phase MCP). Bearer tokens only: this route is
+  // mounted outside /api, so it never reads or sets the session cookie.
+  mountMcp(app, {
+    store,
+    config,
+    origins,
+    now,
+    plan: (id) => {
+      const data = store.get(id)
+      if (!data) return undefined
+      // An older session's wishlist becomes saved items once, with stable IDs, as in state().
+      if (!data.saved) {
+        savedOf(data, now())
+        store.save(id, data)
+      }
+      return {
+        profile: data.profile,
+        purchases: livePurchases(id),
+        transactions: data.transactions,
+        saved: data.saved,
+        today: sessionToday(data),
+      }
+    },
+    payIn4Eligibility,
+    prepareOrder: prepareExternalOrder,
+  })
   app.get('/api/health', (_req, res) =>
     res.json({ ok: true, service: 'worth', channel3: channel3.health() }),
   )
@@ -1324,6 +1424,36 @@ export function createApp(options: AppOptions = {}) {
       mode: purchase.mode,
       state: state(id),
     })
+  })
+  /** Agent tokens for "Connect an agent" in Settings: list, create (shown once) and revoke. */
+  const tokenCreations = new WindowLimiter(10, 60 * 60_000)
+  const mcpEndpoint = `${config.origin}/mcp`
+  app.get('/api/agent-tokens', (_req, res) => {
+    const id = sessionId(res)
+    dataFor(res)
+    res.json({ endpoint: mcpEndpoint, tokens: listAgentTokens(store, id, now().getTime()) })
+  })
+  app.post('/api/agent-tokens', (req, res) => {
+    z.object({}).strict().parse(req.body)
+    const id = sessionId(res)
+    dataFor(res)
+    const time = now().getTime()
+    if (!tokenCreations.take(id, time))
+      throw new HttpError(429, 'Please wait before creating more agent tokens.', 'RATE_LIMITED')
+    const created = createAgentToken(store, id, time, config.maxAgentTokens)
+    res.json({
+      endpoint: mcpEndpoint,
+      token: created.token,
+      item: created.item,
+      tokens: listAgentTokens(store, id, time),
+    })
+  })
+  app.post('/api/agent-tokens/:id/revoke', (req, res) => {
+    z.object({}).strict().parse(req.body)
+    const id = sessionId(res)
+    const time = now().getTime()
+    revokeAgentToken(store, id, String(req.params.id).slice(0, 100), time)
+    res.json({ endpoint: mcpEndpoint, tokens: listAgentTokens(store, id, time) })
   })
   /** Confirms today's available funds, the step a saved plan asks for before a fresh check. */
   app.post('/api/funds/confirm', (req, res) => {
@@ -1916,7 +2046,10 @@ export function createApp(options: AppOptions = {}) {
   app.use('/api', (_req, res) =>
     res.status(404).json({ error: 'API endpoint not found.', code: 'NOT_FOUND' }),
   )
-  const errors: ErrorRequestHandler = (error, _req, res, _next) => {
+  const errors: ErrorRequestHandler = (error, req, res, _next) => {
+    // /mcp speaks JSON-RPC: a body the parser refused gets a JSON-RPC error, never the CSV message.
+    if (req.path === '/mcp' && (error?.type === 'entity.too.large' || error instanceof SyntaxError))
+      return void mcpBodyError(res, error?.type === 'entity.too.large' ? 'too_large' : 'parse')
     if (error instanceof z.ZodError)
       return void res
         .status(400)
@@ -1924,7 +2057,8 @@ export function createApp(options: AppOptions = {}) {
     if (
       error instanceof PlanError ||
       error instanceof SavedError ||
-      error instanceof DemoClockError
+      error instanceof DemoClockError ||
+      error instanceof AgentTokenError
     )
       return void res.status(error.status).json({ error: error.message, code: error.code })
     if (error instanceof HttpError)

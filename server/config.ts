@@ -40,6 +40,16 @@ export interface AppConfig {
   channel3DailyLimit: number
   /** Live Channel3 searches per client IP per hour; cached results do not count. */
   channel3IpHourlyLimit: number
+  /** Requests to /mcp per client IP per minute, counted before the token is checked. */
+  mcpIpPerMinute: number
+  /** Requests to /mcp per agent token per minute. */
+  mcpTokenPerMinute: number
+  /** Failed agent-token checks per client IP per 15 minutes, then /mcp refuses that IP. */
+  mcpAuthFailures: number
+  /** prepare_order calls per agent token per hour. */
+  mcpPrepareHourly: number
+  /** Agent tokens one plan may have active at once. */
+  maxAgentTokens: number
 }
 
 export class ConfigError extends Error {
@@ -127,6 +137,11 @@ export function loadConfig(env: Env = process.env, overrides: Partial<AppConfig>
     channel3Mode: channel3Mode(env),
     channel3DailyLimit: wholeNumber(env, 'CHANNEL3_DAILY_LIMIT', 300),
     channel3IpHourlyLimit: wholeNumber(env, 'CHANNEL3_IP_HOURLY_LIMIT', 20, 1),
+    mcpIpPerMinute: wholeNumber(env, 'MCP_IP_PER_MINUTE', 120, 1),
+    mcpTokenPerMinute: wholeNumber(env, 'MCP_TOKEN_PER_MINUTE', 30, 1),
+    mcpAuthFailures: 20,
+    mcpPrepareHourly: wholeNumber(env, 'MCP_PREPARE_HOURLY', 5, 1),
+    maxAgentTokens: 3,
     ...overrides,
   }
   config.origin = publicOrigin(config.origin, config.production)

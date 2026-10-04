@@ -342,7 +342,8 @@ describe('plan setup wizard', () => {
     const remove = screen.getByRole('button', { name: 'Delete my data now' }) as HTMLButtonElement
     expect(remove.disabled).toBe(true)
     await user.click(remove)
-    expect(apiMock).not.toHaveBeenCalled()
+    // Only Connect an agent's read of the token list; nothing is written or deleted.
+    expect(apiMock.mock.calls.filter(([path]) => path !== '/agent-tokens')).toEqual([])
   })
 })
 

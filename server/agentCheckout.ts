@@ -260,3 +260,29 @@ export function checkoutGuardTrail(
     passed: index < failed,
   }))
 }
+
+/**
+ * The same trail for an order an external agent asked for through Worth's MCP server
+ * (prepare_order). The chat-only checks on the user's own words do not apply: the agent's token
+ * stands in for them, and going ahead below the cushion needs the agent's explicit acknowledgement.
+ */
+const EXTERNAL_LABELS: Partial<Record<CheckoutGuardId, string>> = {
+  cushion:
+    'Keeps your cushion, or the agent passed acknowledge_below_cushion after you said to go ahead',
+  catalog_price: 'Price, currency and store come from Worth’s catalog, not from the agent',
+}
+export const AGENT_TOKEN_GUARD = {
+  id: 'agent_token',
+  label: 'A valid, unrevoked agent token for this plan',
+  passed: true,
+} as const
+export function externalGuardTrail(
+  result: { ok: true } | { ok: false; code: PrepareRefusal },
+): { id: string; label: string; passed: boolean }[] {
+  return [
+    AGENT_TOKEN_GUARD,
+    ...checkoutGuardTrail(result)
+      .filter((guard) => guard.id !== 'asked' && guard.id !== 'item_named')
+      .map((guard) => ({ ...guard, label: EXTERNAL_LABELS[guard.id] ?? guard.label })),
+  ]
+}

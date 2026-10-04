@@ -187,10 +187,17 @@ function lowPointFact(
   return `${lead} ${money(low)} on ${day(date, today)}, ${relation}.`
 }
 /** The largest bill or subscription due from today up to the low point, if any. */
-function causeFact(a: Assessment, data: ChatData) {
-  const due = a.drivers
+export function lowPointCause(a: Assessment) {
+  return a.drivers
     .filter((d) => d.kind !== 'income' && d.date >= a.today && d.date <= a.lowestDate)
     .sort((x, y) => y.amountCents - x.amountCents)[0]
+}
+/** The next income in the plan window, if any. */
+export function nextIncome(a: Assessment) {
+  return a.drivers.find((d) => d.kind === 'income' && d.date >= a.today)
+}
+function causeFact(a: Assessment, data: ChatData) {
+  const due = lowPointCause(a)
   if (due)
     return `${chatLabel(due.name)} (${money(due.amountCents)}) is due ${day(due.date, a.today)}, before that low point.`
   if (data.profile.dailySpendCents > 0)
@@ -198,7 +205,7 @@ function causeFact(a: Assessment, data: ChatData) {
   return undefined
 }
 function incomeFact(a: Assessment) {
-  const income = a.drivers.find((d) => d.kind === 'income' && d.date >= a.today)
+  const income = nextIncome(a)
   return income
     ? `Your next income, ${chatLabel(income.name)} (${money(income.amountCents)}), arrives ${day(income.date, a.today)}.`
     : 'No income is recorded in the plan window.'
