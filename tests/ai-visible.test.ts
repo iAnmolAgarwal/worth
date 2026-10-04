@@ -428,6 +428,26 @@ describe('one Claude sentence with engine placeholders only (C-13)', () => {
     expect(own.ok).toBe(true)
   })
 
+  it('reads “today” as the engine’s day only when the answer is about today, and “one” as a word', () => {
+    const data = demo()
+    const at = (date: string) =>
+      purchasePlaceholders(
+        assessPurchase(data.profile, [], {
+          amountCents: 34900,
+          itemName: 'headphones',
+          purchaseDate: date,
+          today: TODAY,
+        }),
+        data,
+      )
+    const sentence = 'Buying the {item} today, the next one due is {cause_bill} on {cause_day}.'
+    expect(checkSentence(sentence, at(TODAY), 'fits').ok).toBe(true)
+    expect(checkSentence(sentence, at('2026-10-16'), 'fits')).toEqual({
+      ok: false,
+      reason: 'free_date',
+    })
+  })
+
   it('accepts what would fit for a tight result', () => {
     const data = demo()
     const a = assessPurchase(data.profile, [], {

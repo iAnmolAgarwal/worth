@@ -536,6 +536,9 @@ export interface PayIn4Chat {
   payments: PayIn4ChatPayment[]
   /** The engine's one-line result for the instalment scenario. */
   label: string
+  /** The lowest projected balance with the Pay in 4 payments instead of paying in full. */
+  lowestCents: number
+  lowestDate: string
   /** Plans already running inside the window, and what they still take. */
   stacking: { activePlans: number; totalCents: number; message: string } | null
 }

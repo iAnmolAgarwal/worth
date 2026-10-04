@@ -305,6 +305,8 @@ export function payIn4Chat(a: Assessment, data: ChatData, asked: boolean): PayIn
           eligibility: 'unavailable',
           payments: [],
           label: `PayPal Pay in 4 is not available for ${money(a.amountCents)}`,
+          lowestCents: a.lowestBalanceCents,
+          lowestDate: a.lowestDate,
           stacking: null,
         }
       : undefined
@@ -322,6 +324,8 @@ export function payIn4Chat(a: Assessment, data: ChatData, asked: boolean): PayIn
       belowCushion: p.belowCushion,
     })),
     label: scenario.label,
+    lowestCents: scenario.lowestBalanceCents,
+    lowestDate: scenario.lowestDate,
     stacking: scenario.stacking && {
       activePlans: scenario.stacking.activePlans,
       totalCents: scenario.stacking.totalCents,
@@ -726,7 +730,7 @@ export type SentenceRejection =
   | 'contradicts_result'
 const PLACEHOLDER = /\{([a-z0-9_]+)\}/g
 const NUMBER_WORD =
-  /\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundreds?|thousands?|millions?|dozens?|half|quarter|double|twice|triple|percent|dollars?|bucks|grand|cents?)\b/i
+  /\b(?:zero|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundreds?|thousands?|millions?|dozens?|half|quarter|double|twice|triple|percent|dollars?|bucks|grand|cents?)\b/i
 const DATE_WORD =
   /\b(?:today|tonight|tomorrow|yesterday|weekend|weeks?|months?|years?|fortnight|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:rs(?:day)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\b/i
 const ADVICE =
@@ -760,7 +764,11 @@ export function checkSentence(
   const words = prose.replace(/\bPay\s+in\s+4\b/gi, 'PayPal')
   if (/[\p{N}\p{Sc}%#]/u.test(words) || NUMBER_WORD.test(words))
     return { ok: false, reason: 'free_number' }
-  if (DATE_WORD.test(words)) return { ok: false, reason: 'free_date' }
+  // "Today" is the engine's own day when the answer is about today (room to spend, a purchase
+  // today); about a later day it would be a free date.
+  const aboutToday = values.buy_day ? values.buy_day.value === 'today' : true
+  const dated = aboutToday ? words.replace(/\b(?:today|right\s+now|now)\b/gi, ' ') : words
+  if (DATE_WORD.test(dated)) return { ok: false, reason: 'free_date' }
   if (misordered(sentence, values)) return { ok: false, reason: 'contradicts_result' }
   // A sentence about Pay in 4 may not borrow the full-price low point for the instalments.
   if (
