@@ -80,6 +80,7 @@ function HeroTile({
   onNavigate,
   onOpenCheckout,
   onConfirmFunds,
+  fundsElsewhere = false,
 }: {
   state: AppState
   onAsk: () => void
@@ -87,6 +88,8 @@ function HeroTile({
   onNavigate: (hash: string) => void
   onOpenCheckout: (purchase: Purchase) => void
   onConfirmFunds: () => void
+  /** The saved plan's own card below asks for today's funds, so this tile doesn't repeat it. */
+  fundsElsewhere?: boolean
 }) {
   const hold = countedHold(state)
   const { comparison: room, loading } = useComparison(
@@ -130,12 +133,13 @@ function HeroTile({
         <h2 className="h-section" id="bal-k">
           {first ?? 'Your plan needs a detail before Worth can show room to spend.'}
         </h2>
-        <p className="meta">Room to spend shows again once this is done.</p>
-        {quickFunds ? (
-          <Button onClick={onConfirmFunds}>Confirm today’s funds</Button>
-        ) : (
-          fix && <Button onClick={() => onNavigate(fix.hash)}>{fix.label}</Button>
-        )}
+        <p className="meta">
+          Room to spend shows again once this is done
+          {quickFunds && fundsElsewhere ? ', from your saved plan below.' : '.'}
+        </p>
+        {quickFunds
+          ? !fundsElsewhere && <Button onClick={onConfirmFunds}>Confirm today’s funds</Button>
+          : fix && <Button onClick={() => onNavigate(fix.hash)}>{fix.label}</Button>}
       </section>
     )
   }
@@ -401,6 +405,7 @@ export function Home({
               onNavigate={onNavigate}
               onOpenCheckout={onOpenCheckout}
               onConfirmFunds={() => setFunds(true)}
+              fundsElsewhere={Boolean(ready) && !fundsToday}
             />
             {ready && (
               <section

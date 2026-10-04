@@ -649,6 +649,8 @@ function RetentionSwitch({
         minute: '2-digit',
       })
     : ''
+  // Retention runs on real time, even while the demo clock moves Maya's day.
+  const real = state.demoClock ? ' (real time)' : ''
   async function change(next: boolean) {
     setBusy(true)
     setError('')
@@ -676,8 +678,8 @@ function RetentionSwitch({
       </div>
       <p className="caption" id="keep-note" style={{ marginTop: 4 }}>
         {keep
-          ? `On: kept until ${when}, so a saved plan is here when you come back. Only this browser can open it: no account and no recovery.`
-          : `Off: your plan and saved items are deleted ${when ? `on ${when}` : 'after 24 hours'}.`}{' '}
+          ? `On: kept until ${when}${real}, so a saved plan is here when you come back. Only this browser can open it: no account and no recovery.`
+          : `Off: your plan and saved items are deleted ${when ? `on ${when}${real}` : 'after 24 hours'}.`}{' '}
         You can delete it any time below.
       </p>
       {error && (

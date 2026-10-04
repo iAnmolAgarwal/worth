@@ -255,6 +255,26 @@ describe('a saved wait plan on return', () => {
     expect(screen.queryByRole('button', { name: 'Buy with PayPal' })).toBeNull()
   })
 
+  // Pre-merge judge finding 11a: one "Confirm today's funds" on Home, on the plan's own card.
+  it('asks for today’s funds once on Home when a saved plan is ready', async () => {
+    routeApi((_path, data) => compare(makeState(), data))
+    const state = makeState([item({ option: 'wait', waitDate: TODAY, status: 'ready' })])
+    render(
+      <Home
+        state={state}
+        onAsk={vi.fn()}
+        onNavigate={vi.fn()}
+        onOpenProduct={vi.fn()}
+        onEditPlan={vi.fn()}
+        onOpenCheckout={vi.fn()}
+        onConfirmPlan={vi.fn()}
+        onReviewRefund={vi.fn()}
+      />,
+    )
+    await screen.findByText(/once this is done, from your saved plan below/)
+    expect(screen.getAllByRole('button', { name: 'Confirm today’s funds' })).toHaveLength(1)
+  })
+
   it('shows the ready prompt on Home, with the camera starter first', () => {
     routeApi((_path, data) => compare(makeState(), data))
     const state = makeState([item({ option: 'wait', waitDate: TODAY, status: 'ready' })])
@@ -503,6 +523,8 @@ describe('settings, demo clock and mobile reach', () => {
     )
     const keep = screen.getByRole('switch', { name: 'Keep my plan on this device for 30 days' })
     expect(keep.getAttribute('aria-checked')).toBe('false')
+    // The deletion time is real time, even while the clock moves Maya's day (finding 11c).
+    expect(screen.getByText(/deleted on .*\(real time\)/)).toBeTruthy()
     await user.click(keep)
     await user.click(screen.getByRole('button', { name: 'Video replay · Sat, Oct 3, 2026' }))
     expect(calls).toEqual([

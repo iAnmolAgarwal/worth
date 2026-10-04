@@ -170,6 +170,13 @@ a:hover,
   gap: 6px;
   min-height: 44px;
 }
+/* A link button inside a sentence sits on the text's baseline without an extra line gap; it
+   keeps its 44px touch target by overlapping the lines around it. */
+.link.inline {
+  vertical-align: baseline;
+  line-height: inherit;
+  margin-block: -12px;
+}
 :focus-visible {
   outline: 3px solid var(--c-focus);
   outline-offset: 2px;

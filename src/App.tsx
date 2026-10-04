@@ -538,7 +538,7 @@ export default function App() {
               <b>Demo clock:</b> Maya’s sample plan is set to {fullDate(state.today)}
               {state.demoClock.preset === 'video' ? ', the day the video was recorded' : ''}. Your
               own data never uses it.{' '}
-              <button type="button" className="link" onClick={() => void endReplay()}>
+              <button type="button" className="link inline" onClick={() => void endReplay()}>
                 Back to today
               </button>
             </Alert>
