@@ -1,49 +1,69 @@
 # Worth architecture
 
-Worth is one TypeScript application: a React client, an Express server, a deterministic financial module, and a local SQLite database. The language model is an interpreter and explanation layer with read-only tools. Payment execution belongs to explicit server endpoints.
+Worth is one TypeScript application: a React client, an Express server, a deterministic
+financial engine shared by both, and SQLite. Claude interprets questions and chooses what to
+show through read-only engine tools; its one action, preparing a checkout, is decided by server
+guards. Payment execution belongs to explicit server endpoints and the user's own confirmation.
+
+This document describes the code on `main`. The README is the short version; the
+[evaluation](EVALUATION.md) and the [MCP contract](MCP.md) are separate.
 
 ## Request path
 
 ```mermaid
 flowchart LR
-  UI[React interface] --> API[Express JSON API]
-  API --> Store[Session-scoped SQLite]
-  API --> Math[Deterministic finance engine]
-  API --> Import[CSV normalization]
-  API --> Claude[Claude with read-only tools]
-  Claude --> Math
-  API --> PayPal[PayPal sandbox Orders v2]
-  UI --> SDK[PayPal JavaScript SDK v6]
+  UI[React client] -->|JSON + X-Worth-Client| API[Express API]
+  API --> Store[(Session-scoped SQLite)]
+  API --> Engine[Deterministic engine<br/>shared/finance.ts]
+  API --> Import[CSV normalisation]
+  API --> Claude[Claude Sonnet 5.5<br/>engine tools]
+  Claude --> Engine
+  Claude -.prepare_checkout.-> Guards[checkoutGuards]
+  API --> Guards
+  Guards --> PayPal[PayPal sandbox<br/>Orders v2 · eligibility]
+  API --> Channel3[Channel3 search]
+  UI --> SDK[PayPal JS SDK v6<br/>button · popup · Messages]
   SDK --> Approval[Buyer approval in PayPal]
-  PayPal --> Approval
-  Approval --> UI
-  PayPal --> Webhook[Verified webhook and order lookup]
+  PayPal -->|webhook, raw body| Webhook[Verify signature<br/>re-read order or refund]
   Webhook --> Store
+  Agent[MCP client] -->|bearer token| MCP[/mcp]
+  MCP --> Engine
+  MCP --> Guards
 ```
 
-In development, `server/index.ts` mounts Vite middleware in the same Express process. In production mode it serves the built `dist/` client. Credentials are read by the server; the client receives only public mode/configuration fields.
+In development, `server/index.ts` mounts Vite middleware in the same Express process. In
+production it serves the built `dist/` client. Credentials are read by the server; the client
+receives only public configuration (`state.config`: AI mode, PayPal mode, the public client ID,
+the model name and the Channel3 status).
 
 ## Code map
 
 | Module | Responsibility |
 | --- | --- |
-| `shared/types.ts` | Profile, transaction, assessment, forecast, purchase, and API response contracts. |
-| `shared/finance.ts` | Date recurrence, commitments, integer-cent forecasts, missing-data precedence, outcomes, and earliest-date search. |
-| `shared/csv.ts` | PayPal personal and business export headers, per-file date order, currency-conversion pairing, unresolved foreign payments, transfer/memo/hold rules, Pay in 4 proposals, transaction identity, classification, anchored recurring suggestions, and daily-spending estimate. |
-| `shared/limits.ts` | The one CSV size and row limit read by the browser, the server and the parser. |
-| `shared/seed.ts` | Relative-date synthetic persona and server-owned demo product catalog. |
-| `server/app.ts` | Session setup, schema validation, routes, ownership checks, financial/profile rules, payment reservation, and reconciliation. |
-| `server/store.ts` | SQLite tables, atomic operations, uniqueness constraints, session expiry, and deletion. |
-| `server/chat.ts` | Bounded Claude tool loop, input/output validation, deterministic fallback, and authoritative numeric text. |
-| `server/channel3.ts` | Channel3 search adapter: request band, response parsing, 6 h cache per query and $25 bucket, back-off, daily limit, recorded example results, health. |
-| `server/alternatives.ts` | What Worth searches for (generic catalog descriptions, brand-free words), the room today, and the "something cheaper" cue. |
-| `server/paypal.ts` | Sandbox OAuth, order creation/capture/get, signature verification, and order/capture amount validation. |
-| `server/index.ts` | Server startup, client serving, periodic expiry cleanup, and shutdown. |
-| `src/api.ts` | Same-origin JSON requests and application client header. |
-| `src/paypalSdk.ts` | Bounded SDK v6 loading, per-client initialization, and one-time payment session interface. |
-| `src/PlanDialogs.tsx` | Financial-picture review, explicit confirmation/AI choice, and CSV import preview, including the date-order question. |
-| `src/ForeignPayments.tsx` | Activity panel for resolving imported foreign-currency payments. |
-| `src/ForecastChart.tsx`, `src/CashFlowPlot.tsx` | Lazy-loaded forecast visualization; the chart payload is separate from the initial application bundle. |
+| `shared/finance.ts` | Recurrence, commitments, integer-cent forecasts, missing-data precedence, outcomes, the earliest-date search, option comparison, the illustrative Pay in 4 schedule and instalment stacking. |
+| `shared/collision.ts` | Which bill or other instalment a Pay in 4 payment lands next to, and the wording for it. |
+| `shared/csv.ts` | PayPal personal and business export parsing: headers, per-file date order, currency-conversion pairing, transfer/memo/hold rules, Pay in 4 proposals, transaction identity, recurring suggestions and the daily-spending estimate. |
+| `shared/seed.ts` | The relative-dated sample persona (Maya) and the server-owned demo catalog (Larkspur Supply). |
+| `shared/types.ts`, `shared/limits.ts`, `shared/text.ts` | API contracts, the one CSV size and row limit, and plain-text rules for saved names. |
+| `server/app.ts` | Sessions, validation, routes, ownership, plan rules, checkout reservation, capture, cancel, webhooks and reconciliation. |
+| `server/store.ts` | SQLite tables, atomic operations, uniqueness constraints, expiry and deletion. |
+| `server/chat.ts` | The Claude tool loop, tool schemas, the answer's trace, and the deterministic local fallback. |
+| `server/interpret.ts`, `server/money.ts`, `server/dates.ts` | Checks Claude's reading against the user's own words: amounts, currencies, timing phrases and which item a follow-up means. |
+| `server/narration.ts` | Every sentence the user reads: verdict templates, fact catalogs, the Pay in 4 wording and `checkSentence` for Claude's one sentence. |
+| `server/agentCheckout.ts` | `asksToCheckOut` (the user's own unqualified instruction) and `checkoutGuards`, shared by Ask Worth, the saved-plan Buy button and MCP. |
+| `server/paypal.ts` | Sandbox OAuth, Orders v2 create/get/capture, refunds, `find-eligible-methods`, webhook signature verification and order validation. |
+| `server/channel3.ts`, `server/alternatives.ts` | The Channel3 adapter (band, parsing, cache, back-off, limits, recorded fallback) and what Worth searches for. |
+| `server/saved.ts`, `server/plans.ts`, `server/remember.ts` | Saved items and wait plans, confirmed Pay in 4 and refund schedules, and signed memory of items assessed earlier in a conversation. |
+| `server/demoClock.ts` | The labelled demo clock for the sample persona (`/?replay=video`). |
+| `server/mcp.ts`, `server/mcpDecision.ts`, `server/mcpStdio.ts` | The MCP server, its decision contract with coherence invariants, and the stdio relay. |
+| `server/config.ts`, `server/csp.ts`, `server/limits.ts` | Environment parsing with production guards, the Content-Security-Policy, and fixed-window rate limiters. |
+| `src/App.tsx` | Routing, state refresh, toasts and the `?replay=video` entry. |
+| `src/Home.tsx`, `src/Ask.tsx`, `src/AskTrace.tsx` | Room to spend today, the conversation, and "How Ask Worth read this". |
+| `src/Decision.tsx`, `src/BalanceChart.tsx`, `src/chartLayout.ts` | The option comparison, the Pay in 4 panel and the SVG balance chart with its label layout. |
+| `src/Checkout.tsx`, `src/paypal.tsx`, `src/paypalSdk.ts` | The checkout dialog and the SDK v6 loader, button, eligibility and Messages. |
+| `src/Saved.tsx`, `src/Alternatives.tsx`, `src/Activity.tsx`, `src/Reviews.tsx` | Saved items and wait plans, similar items, activity, and the "how did you pay" and refund reviews. |
+| `src/Plan.tsx`, `src/Import.tsx`, `src/ForeignPayments.tsx` | The four-step plan editor, CSV import preview and unresolved foreign payments. |
+| `src/ConnectAgent.tsx` | Settings → Connect an agent: create, copy and revoke MCP tokens. |
 
 ## Financial calculation
 
@@ -66,7 +86,7 @@ Purchase dates range from today through 30 days ahead. Each candidate is assesse
 
 Missing confirmation, a funds snapshot that is not for today, unconfirmed active flows, invalid amounts, or unresolved profile fields force `incomplete`. The forecast remains inspectable, but it cannot support a positive result.
 
-The financial-picture editor separates Funds, Income, Bills & subscriptions, and Review. It validates each step, preserves drafts through Back navigation, and only writes on final Save. Review includes completed-purchase inclusion and explicit AI consent. Name/timezone are an optional disclosure; recurring items use compact rows with one editor at a time. The assistant can show a short `intro` above its structured assessment, avoiding a second copy of the same numerical explanation.
+The financial-picture editor separates Funds, Income, Bills & subscriptions, and Review. It validates each step, preserves drafts through Back navigation, and only writes on final Save. Review includes completed-purchase inclusion and explicit AI consent. Name/timezone are an optional disclosure; recurring items use compact rows with one editor at a time.
 
 ## CSV import
 
@@ -78,19 +98,107 @@ The financial-picture editor separates Funds, Income, Bills & subscriptions, and
 
 ## AI boundary
 
-Claude receives the current prompt and at most eight prior messages, plus relevant results from three available tools:
+Ask Worth calls `claude-sonnet-5-5` through `@anthropic-ai/sdk` with a fixed system prompt
+(prompt-cached) and strict tool schemas. The loop allows at most four model rounds and six tool
+calls under a per-answer deadline (15 seconds by default), with no SDK retries and at most one
+retry of a retryable provider error while time remains. The person's message, up to
+eight prior messages and a bounded request context are sent; transaction and merchant strings
+are minimised and marked as data, never instructions.
 
-1. `assess_purchase` — validated amount/date to the deterministic engine.
-2. `upcoming_commitments` — upcoming confirmed subscriptions and bills.
-3. `spending_summary` — aggregate completed expenses by category over the last 30 days.
+Tools, all read-only except the guarded request in `prepare_checkout`:
 
-The loop allows at most three model calls and five tool requests, with a 25-second provider timeout and no SDK retries. Tool inputs are validated. Transaction and merchant strings are treated as data. No tool can mutate a profile or execute a payment.
+| Tool | What Claude reports | What the server does |
+| --- | --- | --- |
+| `interpret_purchase` | Items in the user's words, stated price in cents, ISO currency, quantity, whether it continues the previous item, the timing phrase copied verbatim and its date, and the option (check, earliest date, most to spend) | Checks every amount and date against the message (`server/money.ts`, `server/dates.ts`); asks instead of guessing when the price is missing, not USD, ambiguous, or the date is vague, past or beyond 30 days; then runs `assessPurchase` and, when asked, the Pay in 4 scenario |
+| `list_commitments` | Subscriptions, bills or both | Lists confirmed obligations due in the next 30 days |
+| `spending_summary` | — | Totals completed USD spending by category for 30 days |
+| `get_plan_summary` | — | Room to spend today, the baseline low point and its cause |
+| `find_alternatives` | A generic kind of item and a ceiling the user wrote | Refuses for "cheaper" about timing, payment method or services; otherwise searches Channel3 within the room today; only the outcome returns to Claude, never product names or prices |
+| `prepare_checkout` | Catalog item ID, option, and whether the user said to go ahead below the cushion | Runs `checkoutGuards`; Claude receives only the outcome |
 
-The model's final response must match a small JSON shape. Narrative containing numeric/currency characters, spelled-out quantities, dates, percentages, or selected unsupported approval claims is discarded. Explicit price notation or validated purchase context establishes the amount; a product model number is not treated as a price. Authoritative amounts, dates, outcomes, and assumptions are generated from deterministic results by application code. A conservative prose filter also removes suggestions to lower the protected cushion, skip obligations, or borrow to force a purchase to fit. It may omit benign cautionary wording; engine facts remain available. These guards narrow model authority; they are not a general proof that every possible narrative is correct.
+Every read tool also takes **presentation fields**: up to three facts from a fixed catalog for
+that tool, a reason for each from a fixed set (`answers_question`, `explains_result`,
+`shows_timing`, `shows_risk`, `adds_context`), an optional lead-in from a fixed set (including
+refusals for skipping bills, credit and dipping into the cushion) and up to three follow-up
+chips. The server writes each fact from engine values and drops any that do not apply. Chips
+pass `chipAllowed` (short questions with no numbers and no verdict); the client also drops any
+that name a price other than the item's.
 
-Without a key, on provider failure, or when personal-data AI consent is off, `fallbackReply()` provides visibly labelled local calculations. Only an untouched synthetic profile can use external AI without opt-in; edited demo profiles also require consent. Local language interpretation is intentionally limited.
+**One sentence.** After the tool result, Claude is asked once (low effort, JSON output) for one
+sentence of at most 30 words explaining the result, naming every amount, date, count and name
+only through the placeholders the server lists for that answer. `checkSentence` in
+`server/narration.ts` requires one plain ASCII sentence with known placeholders, and rejects free
+numbers or number words, dates and time words, advice and judgement words, Pay in 4 when it was
+not asked about or in terms that rate it, values placed against the wrong role or out of date
+order, and claims that contradict the engine's outcome. On any rejection the engine's template
+sentence is shown and the trace records why. The verdict sentence is always a template.
 
-Category suggestions are a separate bounded request: `POST /api/transactions/categories` sends at most 30 sanitized merchant labels with temporary row aliases, without amounts, dates, transaction IDs, or profile fields. Returned aliases and allowed category names are validated; nothing is applied by the model. `PATCH /api/transactions/:id` applies an explicit user correction to an owned record while preserving its amount, status, and confirmed daily-spending estimate. An active checkout blocks the edit. Imported data uses the same AI-consent gate.
+**The trace.** Each answer carries how it was read (item, price source, timing words → date),
+which tool ran, the facts Claude picked with their reasons, every server check that passed or
+stopped the answer, and Claude's raw placeholder sentence with whether it was accepted. The
+client shows it under "How Ask Worth read this".
+
+**Checkout.** `checkoutGuards` (`server/agentCheckout.ts`) runs in order: an explicit purchase
+instruction in the user's own words (quoted or pasted text dropped, no question, no negation or
+condition), a catalog item, named in the message or the item under discussion, no other active
+checkout, funds confirmed today, a complete plan, the wait date reached for the wait option, the
+spend-less limit for that option, and below the cushion only with the user's own go-ahead.
+Creating the order then re-checks a fresh assessment and that PayPal is available. The price, currency and merchant come from the catalog. An
+order prepared below the cushion is stored as needing confirmation, and capture refuses until
+the user confirms that in the checkout.
+
+**Fallback.** Without a key, on a provider error or timeout, past `CLAUDE_IP_HOURLY_LIMIT` or
+`CLAUDE_DAILY_LIMIT`, or when AI sharing is off for an edited or imported plan, `fallbackReply()`
+answers with labelled local calculations from the same engine and the same sentences. Only the
+untouched sample plan can use Claude without opt-in.
+
+**Categories** are a separate bounded request: `POST /api/transactions/categories` sends at most
+30 minimised merchant labels with temporary aliases, without amounts, dates, transaction IDs or
+profile fields. Returned aliases and category names are validated; nothing is applied until the
+user applies it, and an edit never changes the confirmed daily-spending estimate.
+
+## Pay in 4 comparison
+
+PayPal does not tell the merchant how the buyer paid (neither the order nor the capture says),
+and its schedule is set at checkout, so Worth treats Pay in 4 as a labelled comparison and a
+confirmed fact afterwards, never as a prediction.
+
+- **Eligibility.** `/api/compare` asks PayPal's `find-eligible-methods` (US buyer, USD amount)
+  and caches the answer per price band; Worth's own $10–$2,000 range applies on top. If the call
+  fails the comparison is shown as range-only. The browser's `findEligibleMethods` decides only
+  whether to render the button and `<paypal-message>`.
+- **Schedule.** `payIn4Schedule` splits the total into four whole-cent payments on days 0, 14,
+  28 and 42, with any remainder on the first ($1,199.00 is 4 × $299.75). The sandbox's real
+  schedule used 16-day gaps, so every date is "about".
+- **Collisions.** Each payment is paired with the nearest bill, subscription or other plan's
+  payment at most three days away (`shared/collision.ts`), and instalment plans already running
+  in the window are reported as stacking.
+- **After purchase.** A completed purchase counts at full price until the user confirms how they
+  paid (`POST /api/purchases/:id/plan`); a confirmed plan replaces the debit with its remaining
+  payments. Refunds arrive as review items and change nothing until confirmed.
+
+## Balance chart
+
+`src/BalanceChart.tsx` draws the forecast as inline SVG with no chart library:
+`src/chartLayout.ts` computes the geometry and places labels without collisions. The chart shows
+the daily lowest balance as a step line, the cushion, hatching below it, and every payday and
+bill of $100 or more as a full-height line where it moves the balance; the two behind the
+answer are drawn at full strength. A line opens a card (amount, balance after, one sentence) on
+click, tap or Enter, and arrow keys move between lines. A day scrubber works with mouse, touch
+and keyboard and announces through an `aria-live` region, and "View as table" lists the same
+values. With Pay in 4 open, the instalment path is drawn dotted with numbered payments. Every
+value is read from engine output; the chart computes no money of its own.
+
+## Agents over MCP
+
+`/mcp` is mounted outside `/api`: it reads only an `Authorization: Bearer wrth_…` token, never
+the session cookie. Tokens are created in Settings → Connect an agent, stored as SHA-256
+fingerprints with the last four characters, bound to one session's plan, capped at three per
+plan, and expire with the plan or after 30 days. Three tools map existing engine functions:
+`check_affordability` (a decision contract checked by `checkDecision` before it is sent),
+`prepare_order` (the same `checkoutGuards`, returning an approval link and never capturing) and
+`list_saved_plans`. Orders an agent requested are labelled in Activity. The MCP path makes no
+Anthropic call. Limits, refusals and setup are in [MCP.md](MCP.md).
 
 ## Similar items from other stores (Channel3)
 
@@ -129,11 +237,11 @@ stateDiagram-v2
 
 PayPal create/capture request IDs derive from the persisted purchase ID and are reused on retry. Returned order identity, purchase reference, merchant, currency, amount, and capture count must match. A completed capture writes one expense and updates the profile version atomically. Order and capture IDs also have database uniqueness constraints.
 
-`src/paypalSdk.ts` loads the sandbox JavaScript SDK v6 with bounded initialization, retryable failures, and an instance cache keyed by public client ID. `PurchaseDialog` checks PayPal eligibility and creates a one-time payment session with `commit: false`. It starts in the user's click handler and passes the server order promise to preserve browser popup permission. SDK approval updates the UI; it does not capture. If SDK loading or eligibility is unavailable, the server-provided approval URL remains a redirect fallback.
+`src/paypalSdk.ts` loads the sandbox JavaScript SDK v6 with bounded initialization, retryable failures, and an instance cache keyed by public client ID. The checkout dialog (`src/Checkout.tsx`) checks PayPal eligibility and creates a one-time payment session with `commit: false`. It starts in the user's click handler and passes the server order promise to preserve browser popup permission. SDK approval updates the UI; it does not capture. If SDK loading or eligibility is unavailable, the server-provided approval URL remains a redirect fallback.
 
 After buyer approval, the user performs a distinct confirmation action in Worth. Capture revalidates the current date/profile and excludes its own reservation when recalculating affordability. If a transport failure makes the result uncertain, the allocation remains reserved. A retry fetches PayPal's order status before attempting capture again. The frontend refreshes state after uncertain creation so the outstanding checkout remains visible and recoverable after closing its dialog.
 
-The webhook route verifies the signature through PayPal, resolves the related order, retrieves the authoritative order, and uses the same reconciliation path. Event IDs are deduplicated. Late approval events cannot downgrade a completed purchase. Refund/reversal/denial events after a completion mark the profile for review; automatic refund accounting is outside the MVP.
+The webhook route verifies the signature through PayPal, resolves the related order, retrieves the authoritative order, and uses the same reconciliation path. Event IDs are deduplicated. Late approval events cannot downgrade a completed purchase. `PAYMENT.CAPTURE.REFUNDED` and `REVERSED` events are re-read from PayPal (`GET /v2/payments/refunds/:id`), matched to the purchase through the capture, and recorded as a review item; spending room changes only when the user confirms what came back.
 
 ## Saved items, wait plans and the demo clock
 
@@ -141,7 +249,7 @@ Saved items live in the session on the server (`server/saved.ts`): a catalog ite
 
 Sessions expire 24 hours after creation unless the user opts in to 30-day retention (`POST /api/retention`), which moves both the session row's expiry and the cookie's.
 
-The demo clock (`server/demoClock.ts`) sets the session's today for the synthetic persona only: `sessionToday()` in `server/app.ts` reads it, and importing data removes it. The Video replay preset restarts the persona on Sat, Oct 3, 2026. Moving the clock to a later day leaves the funds snapshot behind, so today's funds need confirming, exactly as for real data; for the untouched persona the confirmation offers the sample plan's own projected balance, and only there are the past one-time payments and completed purchases pre-ticked as already in that amount. Hand-typed numbers are the user's own, so they stay off the clock: while it runs the plan editor is locked (`PATCH /api/profile` returns `DEMO_CLOCK_RUNNING`), a plan edited before it starts cannot be moved to a later day (`DEMO_CLOCK_SAMPLE_ONLY`; the Video replay restarts the untouched sample), and an edited plan gets no projection. A purchase completed under the clock records the clock's day as `completedOn`, which "bought on" shows.
+The demo clock (`server/demoClock.ts`) sets the session's today for the synthetic persona only: `sessionToday()` in `server/app.ts` reads it, and importing data removes it. The video replay (`/?replay=video`, `POST /api/demo-clock`) restarts the persona on Sat, Oct 3, 2026, the day the demo video was recorded. Moving the clock to a later day leaves the funds snapshot behind, so today's funds need confirming, exactly as for real data; for the untouched persona the confirmation offers the sample plan's own projected balance, and only there are the past one-time payments and completed purchases pre-ticked as already in that amount. Hand-typed numbers are the user's own, so they stay off the clock: while it runs the plan editor is locked (`PATCH /api/profile` returns `DEMO_CLOCK_RUNNING`), a plan edited before it starts cannot be moved to a later day (`DEMO_CLOCK_SAMPLE_ONLY`; the Video replay restarts the untouched sample), and an edited plan gets no projection. A purchase completed under the clock records the clock's day as `completedOn`, which "bought on" shows.
 
 Ask Worth reads a catalog item's store price only when the message names the item as a whole phrase ("the camera", "the MacBook Pro"); "a camera bag", "a Sony camera" or "a MacBook Air" get a question about the price instead. A conversation can return to an item it assessed earlier: each reply carries that item with an HMAC tag bound to the session (`server/remember.ts`, key held in memory), the browser sends the tagged items back, and the server drops any item whose tag does not verify, so an edited or invented remembered item is never used. The tag proves Worth assessed the item, not that its price was grounded: the current-purchase `context` the browser sends is the user's own claim, like a typed price, and an item assessed from it is signed like any other.
 
@@ -159,14 +267,21 @@ Ask Worth reads a catalog item's store price only when the message names the ite
 
 AI consent applies to edited or imported personal context. Model tools receive relevant summaries and commitment names rather than the raw CSV. User chat and editable names can still contain personal information. Reset cannot remove data already held by PayPal, Anthropic, or operating-system backups.
 
-## Verification boundaries
+## Verification
 
-The verified suite has **135 passing tests**: 46 finance/CSV, 73 server, 10 frontend, and 6 financial-picture wizard cases. It covers chronology, missing inputs, import identities, ownership, reservations/reconciliation, session-change consent boundaries, conversation reset/late replies, queued prompts, SDK approve/cancel callbacks, uncertain-checkout recovery, and stepped form behavior. Type checking, the production build, and lint also pass. Mocked callbacks and payment gateways do not establish every live provider behavior.
+`npm run check` (lint, TypeScript, the Vitest suite and the production build) runs in GitHub
+Actions on every push to `main` and every pull request. The suite covers the engine's chronology
+and boundaries, CSV import rules, server ownership and reservations, capture and webhook
+reconciliation with a fake gateway, the checkout guards, the sentence check as table tests, the
+chart, the MCP contract and the client flows. The AI path is also replayed from recorded model
+responses on every run, and run live against the real model on demand; see
+[EVALUATION.md](EVALUATION.md).
 
-Real provider evidence: Claude Sonnet 5.5 answered the camera question in the UI. A $349 headphones order used the approval redirect and changed purchase capacity from $850.52 to $501.52 after explicit capture. A $249 weekend order then used the SDK v6 popup; `onApprove` displayed the approval notice while Worth still held an uncaptured `CREATED` purchase. Explicit confirmation produced `COMPLETED`, exactly one matching activity row, and $252.52 remaining purchase capacity.
+Provider behaviour verified against the real sandbox, outside the suite: SDK v6 popup approval
+with exactly one capture and one activity row; cancellation and recovery; a US sandbox buyer
+completing Pay in 4 for $1,199 inside PayPal's checkout; PayPal Messages rendering on the US
+sandbox merchant; and, on the hosted app, a capture followed by a $50 refund whose webhook was
+delivered, verified and turned into a review item.
 
-Desktop and 390 px mobile wizard checks confirmed step layout, Enter behavior, preserved Back edits, explicit consent and purchase inclusion, and unchanged purchase capacity after saving the restored funds snapshot. The build splits the application/chart into approximately 354/359 kB chunks (107/105 kB gzip) without the earlier chunk warning.
-
-Real SDK cancellation was exercised separately: closing the approval flow retained a recoverable checkout; cancelling in Worth reconciled it as cancelled and restored purchase capacity. The production build passed a synthetic CSV import, recurring-confirmation gate, manual category correction with an unchanged daily estimate, and consent-off local reply. Live Claude categorization produced a reviewed correction without changing purchase capacity. External webhook delivery remains untested; its handler uses mocked gateways in tests. See the [verification ledger](BUILD.md).
-
-React/Vite and SQLite are the selected implementation, replacing the provisional scope's framework suggestions. Native PayPal placement, automatic full consumer-history access, goods fulfillment, production money movement, and deployment remain outside this prototype. Historical data comes from CSV or synthetic fixtures.
+Not covered: production payments, automatic access to personal PayPal history, goods
+fulfilment, more than one server instance, and encryption at rest.
