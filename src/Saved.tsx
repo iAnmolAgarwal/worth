@@ -16,6 +16,7 @@ import {
 import { addDays } from '../shared/finance'
 import type { Product, SavedItem } from '../shared/types'
 import { api, ApiError } from './api'
+import { usePriceDrop } from './Alternatives'
 import { ClaudeSwitch, JudgeBadge } from './Ask'
 import {
   ASSESSMENT_ONLY,
@@ -116,6 +117,7 @@ function SavedCard({
   onOpen: () => void
   onRemove: () => void
 }) {
+  const dropped = usePriceDrop(item)
   return (
     <article className="saved-card" style={{ position: 'relative' }}>
       <Picture item={item} product={product} large />
@@ -141,6 +143,11 @@ function SavedCard({
       {item.kind === 'custom' && <p className="caption hide-m">{ASSESSMENT_ONLY}</p>}
       {item.status === 'bought' && <span className="corner-pill">Bought</span>}
       {item.status !== 'bought' && statusPill(item) && <div>{statusPill(item)}</div>}
+      {item.status !== 'bought' && dropped !== undefined && (
+        <div>
+          <Pill tone="ok">Price dropped to {money(dropped)}</Pill>
+        </div>
+      )}
       <div className="foot">
         <button
           type="button"

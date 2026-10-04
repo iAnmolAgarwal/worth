@@ -20,7 +20,7 @@ import { api } from './api'
 import { Ask } from './Ask'
 import { Checkout } from './Checkout'
 import type { AppState, Purchase, SavePlan, SaveTarget } from './contract'
-import { saveRequest } from './contract'
+import { alternativeTarget, saveRequest } from './contract'
 import { Decision, type DecisionRequest, type Explanation } from './Decision'
 import { envLabel } from './engine'
 import { dayLabel, fullDate } from './format'
@@ -613,6 +613,7 @@ export default function App() {
                 setCheckout({ productId: product.id, purchaseId: active?.id, acknowledge })
               }}
               onSave={(target, plan) => void saveItem(target, plan)}
+              onSaveAlternative={(item) => void saveItem(alternativeTarget(item))}
               onEditPlan={() => navigate('plan/edit')}
               onViewActivity={() => navigate('activity')}
             />

@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AlternativesPanel } from '../src/Alternatives'
 import { Ask } from '../src/Ask'
 import { Decision } from '../src/Decision'
-import { Settings } from '../src/Saved'
+import App from '../src/App'
+import { Saved, Settings } from '../src/Saved'
 import { api } from '../src/api'
 import { compareOptions } from '../shared/finance'
 import { createDemoState, PRODUCTS } from '../shared/seed'
@@ -328,5 +329,135 @@ describe('where the similar items appear', () => {
     )
     expect(section.textContent).toContain('even when the assistant is off')
     expect(within(section).getByText('Never')).toBeTruthy()
+  })
+})
+
+// Spec item 15: "Save for later" on a Channel3 row saves an assessment-only custom item that keeps
+// the product's ID, and Saved checks its price once per page load.
+describe('saving a similar item for later', () => {
+  const saved = {
+    kind: 'custom' as const,
+    name: 'Interchangeable Lens Camera Body',
+    amountCents: 32249,
+    retailer: 'bestbuy.com',
+    url: 'https://buy.trychannel3.com/DBouSIg',
+    channel3Id: 'DBouSIg',
+  }
+
+  it('saves from the app’s Decision view with the assessment-only label', async () => {
+    const user = userEvent.setup()
+    const state = makeState()
+    const posts: unknown[] = []
+    apiMock.mockImplementation(((path: string, data?: unknown) =>
+      Promise.resolve().then(() => {
+        if (path === '/saved') {
+          posts.push(data)
+          return {
+            item: { ...saved, id: 's1', createdAt: '', status: 'active' },
+            state: { ...state, saved: [] },
+          }
+        }
+        if (path.startsWith('/alternatives')) return found()
+        if (path === '/compare') {
+          const input = data as { productId?: string; amountCents?: number }
+          const product = PRODUCTS.find((p) => p.id === input.productId)
+          return compareOptions(state.profile, state.purchases, {
+            amountCents: product?.priceCents ?? input.amountCents ?? 0,
+            itemName: product?.name,
+            today: TODAY,
+            payIn4Eligible: true,
+          })
+        }
+        return state
+      })) as typeof api)
+    window.history.replaceState(null, '', '/#decision?product=camera')
+    render(<App />)
+    const group = await screen.findByRole('radiogroup', { name: 'Your options' })
+    await user.click(within(group).getAllByRole('radio')[2]!)
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Save Interchangeable Lens Camera Body for later',
+      }),
+    )
+    await waitFor(() => expect(posts).toEqual([saved]))
+    expect(
+      await screen.findByText(
+        'Interchangeable Lens Camera Body is in Saved. Assessment only — not sold in the demo store.',
+      ),
+    ).toBeTruthy()
+  })
+
+  it('saves from an Ask answer about something cheaper', async () => {
+    const user = userEvent.setup()
+    apiMock.mockResolvedValue({
+      message: 'Up to $440.01 fits today.',
+      mode: 'anthropic',
+      intent: 'alternatives',
+      suggestions: [],
+      toolCalls: ['find_alternatives'],
+      alternatives: found(),
+    } as never)
+    const onSave = vi.fn(async () => undefined)
+    render(
+      <Ask
+        state={makeState()}
+        visible
+        onOpenDecision={vi.fn()}
+        onOpenCheckout={vi.fn()}
+        onNavigate={vi.fn()}
+        onSave={onSave}
+      />,
+    )
+    await user.type(screen.getByRole('textbox', { name: 'Message Worth' }), 'Something cheaper?')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Save Interchangeable Lens Camera Body for later',
+      }),
+    )
+    expect(onSave).toHaveBeenCalledWith(saved)
+  })
+
+  it('shows “Price dropped to $X” on Saved, checking each item once per page load', async () => {
+    const state: AppState = {
+      ...makeState(),
+      saved: [
+        { ...saved, id: 'c3-dropped', createdAt: '2026-10-03T12:00:00Z', status: 'active' },
+        {
+          ...saved,
+          channel3Id: 'RSNbAN5',
+          name: 'Mirrorless Digital Camera Body',
+          id: 'c3-failing',
+          createdAt: '2026-10-03T12:00:00Z',
+          status: 'active',
+        },
+      ],
+    }
+    const checks: string[] = []
+    apiMock.mockImplementation(((path: string) =>
+      Promise.resolve().then(() => {
+        if (!path.startsWith('/alternatives/price')) return state
+        checks.push(path)
+        if (path.includes('RSNbAN5')) throw new Error('Channel3 is unavailable')
+        return { status: 'dropped', current: { priceCents: 29900 }, droppedByCents: 2349 }
+      })) as typeof api)
+    const props = {
+      onOpenDecision: vi.fn(),
+      onUpdate: vi.fn(),
+      onToast: vi.fn(),
+      onOpenCheckout: vi.fn(),
+    }
+    const view = render(<Saved {...props} state={state} />)
+    expect(await screen.findByText('Price dropped to $299.00')).toBeTruthy()
+    view.unmount()
+    render(<Saved {...props} state={state} />)
+    await screen.findByText('Price dropped to $299.00')
+    // One check per item for the page load; the failing one shows nothing and no error.
+    expect(checks).toEqual([
+      '/alternatives/price?id=DBouSIg&savedPriceCents=32249',
+      '/alternatives/price?id=RSNbAN5&savedPriceCents=32249',
+    ])
+    expect(screen.getAllByText(/Price dropped/)).toHaveLength(1)
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 })

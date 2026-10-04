@@ -22,6 +22,7 @@ import type {
   SignedItem,
 } from '../shared/types'
 import { api, ApiError } from './api'
+import { alternativeTarget } from './contract'
 import type {
   AgentCheckout,
   AppState,
@@ -1048,7 +1049,13 @@ function Answer({
           )}
         </section>
       )}
-      {reply.alternatives && <SimilarItems state={state} result={reply.alternatives} />}
+      {reply.alternatives && (
+        <SimilarItems
+          state={state}
+          result={reply.alternatives}
+          onSave={onSave && ((item) => void onSave(alternativeTarget(item)))}
+        />
+      )}
       {reply.checkout && <AgentHandoff checkout={reply.checkout} onOpen={onOpenCheckout} />}
       {fix && last && (
         <button type="button" className="link" onClick={() => onNavigate(fix.hash)}>
