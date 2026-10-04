@@ -242,6 +242,12 @@ describe('saved items on the server', () => {
 
   it('moves the browser’s old wait dates to the server once and survives malformed values', async () => {
     const { agent } = setup()
+    // The old browser kept dates for items the server wishlist held (headphones and camera are
+    // the persona's own).
+    for (const productId of ['chair', 'backpack', 'macbook-pro-14'])
+      await post(agent, '/api/wishlist', { productId })
+    const removed = (await state(agent)).saved!.find((i) => i.productId === 'macbook-pro-14')!
+    expect((await post(agent, `/api/saved/${removed.id}/remove`)).status).toBe(200)
     const moved = await post(agent, '/api/saved/migrate', {
       planned: {
         camera: '2026-10-23',
@@ -249,10 +255,19 @@ describe('saved items on the server', () => {
         headphones: 42,
         yacht: '2026-10-20',
         backpack: '2027-01-01',
+        // Pre-merge judge finding 9: a past date, a removed item and a never-saved item stay out.
+        'macbook-pro-14': '2026-10-20',
+        'airpods-4': '2026-10-20',
       },
     })
     expect(moved.status).toBe(200)
     expect(moved.body.moved).toBe(1)
+    const after = (moved.body.state as AppState).saved!
+    expect(after.some((i) => i.productId === 'macbook-pro-14' || i.productId === 'airpods-4')).toBe(
+      false,
+    )
+    const past = await post(agent, '/api/saved/migrate', { planned: { chair: '2026-10-03' } })
+    expect(past.body.moved).toBe(0)
     const camera = (moved.body.state as AppState).saved!.find((i) => i.productId === 'camera')!
     expect(camera).toMatchObject({ option: 'wait', waitDate: '2026-10-23' })
     // A date already on the server wins over a stale browser copy.

@@ -7,7 +7,7 @@ import type { SessionData } from './store.ts'
 
 /** Saved items one session may keep at once. */
 export const MAX_SAVED = 20
-/** Removed items kept as tombstones, so an old browser's migration cannot bring them back. */
+/** Removed items kept as tombstones: the record that the user removed them. */
 const MAX_REMOVED = 20
 export const ASSESSMENT_ONLY = 'Assessment only — not sold in the demo store'
 
@@ -225,8 +225,10 @@ export function toggleCatalog(data: SessionData, productId: string, today: strin
 }
 
 /**
- * Moves the browser's old wait dates to the server once. Malformed entries, unknown products and
- * dates outside a month either side of today are skipped; a date the server already has wins.
+ * Moves the browser's old wait dates to the server once. A date moves only onto an item that is
+ * still saved: a removed item, or one this session never saved, is not brought back. Malformed
+ * entries, past dates and dates beyond the comparison window are skipped; a date the server
+ * already has wins.
  */
 export function migratePlanned(
   data: SessionData,
@@ -235,22 +237,13 @@ export function migratePlanned(
   now: Date,
 ) {
   let moved = 0
+  const items = savedOf(data, now)
   for (const [productId, value] of Object.entries(planned)) {
     const date = isoDate.safeParse(value)
-    if (!date.success || !PRODUCTS.some((p) => p.id === productId)) continue
-    if (
-      date.data < addDays(today, -WAIT_SEARCH_DAYS) ||
-      date.data > addDays(today, WAIT_SEARCH_DAYS)
-    )
-      continue
-    const items = savedOf(data, now)
+    if (!date.success || date.data < today || date.data > addDays(today, WAIT_SEARCH_DAYS)) continue
     const existing = items.find((item) => item.status !== 'removed' && item.productId === productId)
-    if (existing?.waitDate) continue
-    if (existing) Object.assign(existing, { option: 'wait', waitDate: date.data })
-    else {
-      if (items.filter((item) => item.status !== 'removed').length >= MAX_SAVED) break
-      items.push({ ...catalogItem(productId, now), option: 'wait', waitDate: date.data })
-    }
+    if (!existing || existing.waitDate) continue
+    Object.assign(existing, { option: 'wait', waitDate: date.data })
     moved++
   }
   return moved
