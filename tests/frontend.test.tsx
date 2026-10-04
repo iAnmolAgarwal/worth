@@ -230,7 +230,7 @@ describe('conversation isolation across sessions', () => {
     await screen.findByText('A fresh sample answer.')
     expect(requests[2]!.history).toEqual([])
     expect(requests[2]!.context).toBeUndefined()
-    expect(screen.getByText('Worth’s assistant used your plan')).toBeTruthy()
+    expect(screen.getByText('Worth’s assistant answered from your plan')).toBeTruthy()
   })
 
   it('replaces the sample conversation on import before the plan review and a new chat', async () => {
@@ -464,7 +464,7 @@ describe('Ask answers', () => {
     expect(within(picked).getByText(/Apartment rent/)).toBeTruthy()
     expect(screen.queryByText('full text')).toBeNull()
     expect(
-      screen.getByText('Worth’s assistant read your question and checked it against your plan'),
+      screen.getByText('Worth’s assistant answered from your plan'),
     ).toBeTruthy()
     await user.click(screen.getByRole('button', { name: /See the comparison/ }))
     expect(onOpenDecision).toHaveBeenCalledWith(
@@ -531,7 +531,7 @@ describe('Ask answers', () => {
     await user.click(within(confirm).getByRole('button', { name: 'Yes, continue' }))
     await user.click(screen.getByRole('button', { name: 'Open checkout' }))
     expect(onOpenCheckout).toHaveBeenCalledWith('agent-order', expect.stringContaining('ORDER'))
-    expect(screen.getByText('Worth’s assistant prepared a PayPal checkout')).toBeTruthy()
+    expect(screen.getByText('Worth’s assistant answered from your plan')).toBeTruthy()
   })
 
   it('discards private history when the server rejects a chat across a session change', async () => {
@@ -604,7 +604,9 @@ describe('decision view', () => {
     expect(toggle.getAttribute('aria-expanded')).toBe('true')
     const scenario = compare(state, { productId: 'camera' }).payIn4
     if (!scenario.available) throw new Error('Expected a Pay in 4 scenario')
-    expect(screen.getByText(`${scenario.label}.`)).toBeTruthy()
+    // The engine's label, with its date written in full for display ("on Thu, Oct 22").
+    const stem = scenario.label.replace(/ on \w{3} \d+$/, '')
+    expect(screen.getByText(new RegExp(`^${stem} on \\w{3}, \\w{3} \\d+\\.$`))).toBeTruthy()
     const schedule = screen.getByRole('list', { name: 'Illustrative Pay in 4 schedule' })
     expect(within(schedule).getAllByRole('listitem')).toHaveLength(4)
     expect(screen.getByText(scenario.stacking!.message)).toBeTruthy()
