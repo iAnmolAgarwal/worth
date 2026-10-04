@@ -294,7 +294,8 @@ function payIn4ScheduleText(scenario: Scenario) {
  * for a purchase PayPal's range covers. Out of range, an answer that asked shows it is unavailable.
  */
 export function payIn4Chat(a: Assessment, data: ChatData, asked: boolean): PayIn4Chat | undefined {
-  if (a.outcome === 'incomplete') return undefined
+  // The schedule starts today; the neutral row stays off a question about a later day.
+  if (a.outcome === 'incomplete' || (!asked && a.purchaseDate !== a.today)) return undefined
   const eligibility = asked ? (data.payIn4 ?? 'range-only') : 'range-only'
   if (!payIn4InRange(a.amountCents) || eligibility === 'unavailable')
     return asked

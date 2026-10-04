@@ -724,7 +724,7 @@ Reading a purchase question
 - Report amounts exactly as stated, expanding shorthand such as k (thousand) or m (million). Report the currency the user used as its ISO code; never convert, never assume an exchange rate, and use USD only when the user wrote dollars or $.
 - Use a quantity above one only when the user wrote a count next to the item and a price for each one.
 - If the user names a different item from the one being discussed, it is a new purchase: refers_to_previous_item is false and it needs its own price.
-- Copy the user's timing words exactly into date_phrase and resolve them against today's date in the request context. If the timing is vague or could mean several different days, set date to null. With no timing words, date_phrase and date are null and the app uses today.
+- Copy the user's timing words exactly into date_phrase and resolve them against today's date in the request context. If the timing is vague or could mean several different days, set date to null. With no timing words, date_phrase and date are null and the app uses today. "Pay later", "Pay in 4" and "paying now" name ways to pay, not timing.
 
 Choosing what to show
 - Every tool takes points: up to three facts from the engine that best answer what the person asked, most important first. The app writes each fact from the engine's numbers and leaves out any that do not apply to the result.

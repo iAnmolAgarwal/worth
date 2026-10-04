@@ -326,6 +326,8 @@ export function readTiming(text: string, today: string, incomeDate?: string): Ti
       /\b(?:mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)[a-z]*,?\s+(?=(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d)/g,
       (m) => ' '.repeat(m.length),
     )
+    // "Pay later" names a way to pay (PayPal Pay Later), not when the purchase happens.
+    .replace(/\bpay(?:ing)?\s+(?:for\s+it\s+|it\s+)?later\b/g, (m) => ' '.repeat(m.length))
   // Every rule reads the original text; where spans overlap, the longest wins, so
   // "two days from now" is not read as "now" and "last Friday" is not read as "Friday".
   const found: Span[] = []

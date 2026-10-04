@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { checkoutGuardTrail, CHECKOUT_GUARDS } from '../server/agentCheckout.ts'
 import { createChatProvider, fallbackReply, localReply } from '../server/chat.ts'
 import type { ChatActions, ChatData, ChatInput } from '../server/chat.ts'
+import { readTiming } from '../server/dates.ts'
 import { namesOtherItem } from '../server/interpret.ts'
 import { checkSentence, purchasePlaceholders, templateSentence } from '../server/narration.ts'
 import { nearPhrase, planLabel } from '../shared/collision.ts'
@@ -169,6 +170,16 @@ describe('Pay in 4 in chat (judge #2)', () => {
     const reply = fallbackReply(ask('Can I get a $2,500 TV with Pay in 4?'), demo())
     expect(reply.payIn4).toMatchObject({ asked: true, eligibility: 'unavailable', payments: [] })
     expect(reply.message).toContain('PayPal Pay in 4 is not available for $2,500.')
+  })
+
+  it('never reads “pay later” as timing', () => {
+    expect(readTiming('Could I pay later with Pay in 4 for a $2,400 TV?', TODAY).phrases).toEqual(
+      [],
+    )
+    expect(readTiming('Can I pay for it later next Friday?', TODAY).phrases).toEqual([
+      'next friday',
+    ])
+    expect(readTiming('Can I buy it later?', TODAY).blocking).toBe('vague')
   })
 
   it('never reads how to pay as another item', () => {

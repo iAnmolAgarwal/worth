@@ -302,6 +302,8 @@ async function runCategorize(probe: Probe, clientFor: ClientFor): Promise<ProbeR
           misses: graded.misses,
           selected: false,
           withFacts: false,
+          explained: false,
+          withSentence: false,
         },
         plumbing: plumbingFor(responses, [], failed, 0),
       },
@@ -381,6 +383,9 @@ export interface Summary {
   /** Of those, answers that showed Claude's choice of facts. */
   selected: number
   selectionRate: number
+  /** On-topic Claude answers with a sentence slot, and how many Claude wrote (§9 case 20). */
+  withSentence: number
+  explained: number
   misses: number
   plumbing: Omit<Plumbing, 'failedOver' | 'ms'> & {
     failedOver: number
@@ -403,6 +408,8 @@ export function summarize(results: ProbeResult[]): Summary {
     selectionRate: withFacts.length
       ? withFacts.filter((t) => t.grade.selected).length / withFacts.length
       : 0,
+    withSentence: turns.filter((t) => t.grade.withSentence).length,
+    explained: turns.filter((t) => t.grade.explained).length,
     misses: turns.reduce((n, t) => n + t.grade.misses.length, 0),
     plumbing: {
       requests: sum('requests'),

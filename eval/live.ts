@@ -123,7 +123,7 @@ for (let run = 1; run <= Number(values.runs); run++) {
   console.log(
     `run ${run}: unsafe ${report.all.unsafe}, contradictions ${report.all.contradictions}` +
       `${report.judge ? ` (judge ${report.judge.contradictions.length}, flips ${report.judge.flips.length})` : ''}` +
-      `, facts selected ${report.all.selected}/${report.all.withFacts}, requests ${report.all.plumbing.requests}` +
+      `, facts selected ${report.all.selected}/${report.all.withFacts}, Claude sentences ${report.all.explained}/${report.all.withSentence}, requests ${report.all.plumbing.requests}` +
       `, timeouts ${report.all.plumbing.timeouts}, api errors ${report.all.plumbing.apiErrors}`,
   )
 }
@@ -162,16 +162,16 @@ if (values.record && runs[0]) {
 
 const pct = (n: number) => `${Math.round(n * 100)}%`
 const row = (label: string, s: Summary, judged?: RunReport['judge']) =>
-  `| ${label} | ${s.replies} | ${s.unsafe} | ${s.contradictions}${judged ? ` / ${judged.contradictions.length}` : ''} | ${s.selected}/${s.withFacts} (${pct(s.selectionRate)}) | ${s.misses} | ${s.plumbing.requests} | ${s.plumbing.timeouts} | ${s.plumbing.apiErrors} | ${s.plumbing.cutoffs} | ${s.plumbing.refusals} | ${s.plumbing.retries} | ${s.plumbing.failedOver} | ${s.plumbing.meanMs}/${s.plumbing.maxMs} | $${cost(s).toFixed(3)} |`
+  `| ${label} | ${s.replies} | ${s.unsafe} | ${s.contradictions}${judged ? ` / ${judged.contradictions.length}` : ''} | ${s.selected}/${s.withFacts} (${pct(s.selectionRate)}) | ${s.explained}/${s.withSentence}${s.withSentence ? ` (${pct(s.explained / s.withSentence)})` : ''} | ${s.misses} | ${s.plumbing.requests} | ${s.plumbing.timeouts} | ${s.plumbing.apiErrors} | ${s.plumbing.cutoffs} | ${s.plumbing.refusals} | ${s.plumbing.retries} | ${s.plumbing.failedOver} | ${s.plumbing.meanMs}/${s.plumbing.maxMs} | $${cost(s).toFixed(3)} |`
 const lines = [
   `# Worth AI eval (${values.label})`,
   '',
   `Model under test: \`${MODEL}\`. Judge: ${values.judge ? `\`${JUDGE_MODEL}\` (run 1 judged twice for stability)` : 'not run'}. Persona date: ${EVAL_TODAY}. Probes: ${selected.length} (${selected.filter((p) => p.split === 'train').length} train, ${selected.filter((p) => p.split === 'test').length} held-out test). Generated ${new Date().toISOString()}.`,
   '',
-  "Contradictions are programmatic / judge. Facts selected counts on-topic Claude answers with engine facts to choose from where Claude's choice was shown. Latency is mean/max ms per answer.",
+  "Contradictions are programmatic / judge. Facts selected counts on-topic Claude answers with engine facts to choose from where Claude's choice was shown. Claude sentence counts answers whose sentence under the verdict Claude wrote and the server's check accepted, out of answers with a sentence (the rest show the template). Latency is mean/max ms per answer.",
   '',
-  '| Run · split | Replies | Unsafe | Contradictions | Facts selected | Misses | Requests | Timeouts | API errors | Cut-offs | Refusals | Retries | Fell back | Latency | Cost |',
-  '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
+  '| Run · split | Replies | Unsafe | Contradictions | Facts selected | Claude sentence | Misses | Requests | Timeouts | API errors | Cut-offs | Refusals | Retries | Fell back | Latency | Cost |',
+  '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
   ...runs.flatMap((r) => [
     row(`${r.run} · all`, r.all, r.judge),
     row(`${r.run} · train`, r.train),
@@ -218,6 +218,21 @@ for (const result of runs[0]?.results ?? [])
           ]
         : []),
       ...(t.reply.verdict ? [`- Verdict: ${t.reply.verdict}`] : []),
+      ...(t.reply.trace?.sentence
+        ? [
+            `- Sentence (${t.reply.trace.sentence.source}${t.reply.trace.sentence.rejected ? `, Claude's rejected: ${t.reply.trace.sentence.rejected}` : ''}): ${t.reply.trace.sentence.raw}`,
+          ]
+        : []),
+      ...(t.reply.payIn4
+        ? [
+            `- Pay in 4 (${t.reply.payIn4.asked ? 'asked' : 'row'}): ${t.reply.payIn4.payments.map((p) => `${p.date} ${p.amountCents}${p.nearestBill ? ` near ${p.nearestBill.name} (${p.nearestBill.daysFromInstalment})` : ''}`).join('; ') || 'unavailable'}`,
+          ]
+        : []),
+      ...(t.reply.trace
+        ? [
+            `- Trace: tools ${t.reply.trace.tools.map((x) => `${x.name}:${x.outcome}`).join(', ') || 'none'}; facts ${t.reply.trace.facts.map((f) => `${f.id}${f.reason ? `(${f.reason})` : ''}`).join(', ') || 'none'}; checks ${t.reply.trace.guards.map((g) => `${g.id}${g.passed ? '' : ' STOP'}`).join(', ') || 'none'}`,
+          ]
+        : []),
       `- Picked by Claude: ${t.reply.points?.length ? `${t.reply.lead ? `${t.reply.lead} ` : ''}${t.reply.points.map((p) => `[${p.id}] ${p.text}`).join(' ')}` : '(none)'}`,
       ...(t.reply.verdict ? [] : [`- Message: ${t.reply.message.replace(/\n+/g, ' ')}`]),
       `- Suggestions: ${t.reply.suggestions.join(' | ')}`,
