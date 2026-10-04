@@ -1,58 +1,177 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Bookmark,
   BookmarkCheck,
+  CalendarCheck,
+  CalendarClock,
   CircleAlert,
+  Clock,
   Database,
   Info,
+  ShoppingBag,
   Sparkles,
   Store,
   Trash2,
 } from 'lucide-react'
-import type { Product } from '../shared/types'
-import { api } from './api'
+import { addDays } from '../shared/finance'
+import type { Product, SavedItem } from '../shared/types'
+import { api, ApiError } from './api'
 import { ClaudeSwitch, JudgeBadge } from './Ask'
-import { CHANNEL3_SHARED_DATA, CLAUDE_SHARED_DATA, claudeUses } from './copy'
-import { boughtProductIds, claudeOn } from './engine'
-import type { AppState } from './contract'
-import { isActive } from './contract'
-import { shortDate, money } from './format'
-import { Alert, Button, Dialog, Pill } from './ui'
+import {
+  ASSESSMENT_ONLY,
+  CHANNEL3_SHARED_DATA,
+  CLAUDE_SHARED_DATA,
+  claudeUses,
+  MAY_FIT_NOW,
+} from './copy'
+import type { DecisionRequest } from './Decision'
+import { claudeOn, fits, useComparison } from './engine'
+import type { AppState, Purchase } from './contract'
+import { isActive, saveRequest } from './contract'
+import { dayLabel, fromMoney, fullDate, money, shortDate, signed } from './format'
+import { Alert, Button, DateStepper, Dialog, Disc, Field, Pill, Toggle } from './ui'
 
+/** The browser's old per-device wait dates, from before plans moved to the server (G5-6). */
 const PLANNED_KEY = 'worth:planned'
-/** Wait dates the viewer chose ("Plan to buy on…"): a per-browser convenience, never shared. */
-export function readPlanned(): Record<string, string> {
+/**
+ * Reads the old wait dates once, sends them to the server, then clears them. A malformed value is
+ * cleared without sending; a failed request leaves it for the next load.
+ */
+export async function migratePlanned(onUpdate: (state: AppState) => void) {
+  let raw: string | null
   try {
-    return JSON.parse(localStorage.getItem(PLANNED_KEY) ?? '{}') as Record<string, string>
+    raw = localStorage.getItem(PLANNED_KEY)
   } catch {
-    return {}
+    return
   }
-}
-export function writePlanned(productId: string, date: string | undefined) {
+  if (raw === null) return
+  let planned: unknown
   try {
-    const planned = readPlanned()
-    if (date) planned[productId] = date
-    else delete planned[productId]
-    localStorage.setItem(PLANNED_KEY, JSON.stringify(planned))
+    planned = JSON.parse(raw)
   } catch {
-    /* Storage can be unavailable; the plan still saves the item. */
+    planned = undefined
+  }
+  const clear = () => {
+    try {
+      localStorage.removeItem(PLANNED_KEY)
+    } catch {
+      /* Storage can be unavailable; the server already holds the plan. */
+    }
+  }
+  if (!planned || typeof planned !== 'object' || Array.isArray(planned)) return clear()
+  try {
+    const result = await api<{ state: AppState }>('/saved/migrate', { planned })
+    onUpdate(result.state)
+    clear()
+  } catch (failure) {
+    // A rejected payload will never succeed; a network failure may on the next load.
+    if (failure instanceof ApiError && failure.status === 400) clear()
   }
 }
 
-function Card({
+const decisionFor = (item: SavedItem): DecisionRequest =>
+  item.kind === 'catalog'
+    ? { productId: item.productId }
+    : { amountCents: item.amountCents, itemName: item.name.slice(0, 150) }
+
+/** A saved item's picture: the store photo, or a plain disc for an assessment-only item. */
+function Picture({
+  item,
   product,
-  saved,
-  planned,
-  bought,
+  large,
+}: {
+  item: SavedItem
+  product?: Product
+  large?: boolean
+}) {
+  if (product)
+    return large ? (
+      <img className="hide-m" src={product.image} alt={product.name} />
+    ) : (
+      <img className="thumb" src={product.image} alt="" />
+    )
+  return large ? (
+    <span className="ph hide-m" aria-hidden="true">
+      <ShoppingBag className="ico" strokeWidth={1.75} />
+    </span>
+  ) : (
+    <Disc icon={item.retailer ? ShoppingBag : Bookmark} kind="plan" />
+  )
+}
+
+function statusPill(item: SavedItem) {
+  if (item.status === 'ready') return <Pill tone="ok">May fit now</Pill>
+  if (item.waitDate) return <Pill tone="sug">Planned for {shortDate(item.waitDate)}</Pill>
+  return null
+}
+
+function SavedCard({
+  item,
+  product,
   onOpen,
-  onToggle,
+  onRemove,
+}: {
+  item: SavedItem
+  product?: Product
+  onOpen: () => void
+  onRemove: () => void
+}) {
+  return (
+    <article className="saved-card" style={{ position: 'relative' }}>
+      <Picture item={item} product={product} large />
+      <div className="row plain show-m" style={{ padding: 0 }}>
+        <Picture item={item} product={product} />
+        <div className="body">
+          <div className="t" style={{ fontSize: 'var(--fs-body)' }}>
+            {item.name}
+          </div>
+          <div className="s soft">{product?.merchant ?? item.retailer ?? ASSESSMENT_ONLY}</div>
+        </div>
+        <div className="amt num" style={{ fontSize: 'var(--fs-body)' }}>
+          {money(item.amountCents)}
+        </div>
+      </div>
+      <div className="hide-m">
+        <div className="t">{item.name}</div>
+        <div className="meta">{product?.merchant ?? item.retailer ?? 'Your assessment'}</div>
+        <div className="num strong" style={{ fontWeight: 700, marginTop: 4 }}>
+          {money(item.amountCents)}
+        </div>
+      </div>
+      {item.kind === 'custom' && <p className="caption hide-m">{ASSESSMENT_ONLY}</p>}
+      {item.status === 'bought' && <span className="corner-pill">Bought</span>}
+      {item.status !== 'bought' && statusPill(item) && <div>{statusPill(item)}</div>}
+      <div className="foot">
+        <button
+          type="button"
+          className="link"
+          onClick={onOpen}
+          aria-label={`${item.status === 'bought' ? 'View' : 'Check'} ${item.name}`}
+        >
+          {item.status === 'bought' ? 'View' : 'Check'}
+        </button>
+        <button
+          type="button"
+          className="icon-btn quiet"
+          aria-pressed="true"
+          aria-label={`Remove ${item.name} from Saved`}
+          onClick={onRemove}
+        >
+          <BookmarkCheck className="ico" aria-hidden="true" />
+        </button>
+      </div>
+    </article>
+  )
+}
+
+function StoreCard({
+  product,
+  onOpen,
+  onSave,
 }: {
   product: Product
-  saved: boolean
-  bought: boolean
-  planned?: string
   onOpen: () => void
-  onToggle: () => void
+  onSave: () => void
 }) {
   return (
     <article className="saved-card" style={{ position: 'relative' }}>
@@ -76,77 +195,352 @@ function Card({
           {money(product.priceCents)}
         </div>
       </div>
-      {bought && <span className="corner-pill">Bought</span>}
-      {!bought && planned && <Pill tone="sug">Planned for {shortDate(planned)}</Pill>}
       <div className="foot">
-        {bought ? (
-          <button type="button" className="link" onClick={onOpen}>
-            View
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="link"
-            onClick={onOpen}
-            aria-label={`Check ${product.name}`}
-          >
-            Check
-          </button>
-        )}
+        <button
+          type="button"
+          className="link"
+          onClick={onOpen}
+          aria-label={`Check ${product.name}`}
+        >
+          Check
+        </button>
         <button
           type="button"
           className="icon-btn quiet"
-          aria-pressed={saved}
-          aria-label={saved ? `Remove ${product.name} from Saved` : `Save ${product.name}`}
-          onClick={onToggle}
+          aria-pressed="false"
+          aria-label={`Save ${product.name}`}
+          onClick={onSave}
         >
-          {saved ? (
-            <BookmarkCheck className="ico" aria-hidden="true" />
-          ) : (
-            <Bookmark className="ico" aria-hidden="true" />
-          )}
+          <Bookmark className="ico" aria-hidden="true" />
         </button>
       </div>
     </article>
   )
 }
 
-export function Saved({
+/**
+ * Confirming today's funds (C-17): the money available now, the one-time payments since the last
+ * snapshot, and the Worth purchases already in that amount. Nothing is bought here.
+ */
+export function FundsDialog({
   state,
-  onOpen,
-  onUpdate,
-  onToast,
+  onClose,
+  onConfirmed,
 }: {
   state: AppState
-  onOpen: (product: Product) => void
+  onClose: () => void
+  onConfirmed: (state: AppState) => void
+}) {
+  const { profile, fundsProjection } = state
+  const sample = profile.source === 'demo'
+  const stale = profile.snapshotDate < state.today
+  const [amount, setAmount] = useState(() =>
+    fundsProjection
+      ? (fundsProjection.cents / 100).toFixed(2)
+      : stale && !sample
+        ? ''
+        : (profile.balanceCents / 100).toFixed(2),
+  )
+  const due = profile.flows.filter(
+    (flow) =>
+      flow.active &&
+      flow.cadence === 'once' &&
+      flow.nextDate < state.today &&
+      flow.paidOn !== flow.nextDate,
+  )
+  const unreflected = state.purchases.filter(
+    (p) => p.status === 'completed' && !p.archived && !profile.reflectedPurchaseIds.includes(p.id),
+  )
+  const [paid, setPaid] = useState<string[]>(due.map((flow) => flow.id))
+  const [included, setIncluded] = useState<string[]>(unreflected.map((p) => p.id))
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const toggle = (list: string[], id: string) =>
+    list.includes(id) ? list.filter((item) => item !== id) : [...list, id]
+  async function confirm() {
+    const cents = fromMoney(amount)
+    if (!amount.trim() || !Number.isSafeInteger(cents) || cents < 0)
+      return setError('Enter the money available to you today, like 1,250.00.')
+    setBusy(true)
+    setError('')
+    try {
+      const next = (await api<AppState>('/funds/confirm', {
+        balanceCents: cents,
+        paidFlowIds: paid,
+        reflectedPurchaseIds: included,
+      })) as AppState
+      onConfirmed(next)
+    } catch (failure) {
+      setError((failure as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Dialog
+      title="Confirm today’s funds"
+      onClose={onClose}
+      dismissible={!busy}
+      footer={
+        <>
+          <Button block loading={busy} onClick={() => void confirm()}>
+            Confirm and check again
+          </Button>
+          <Button variant="text" onClick={onClose} disabled={busy}>
+            Not now
+          </Button>
+        </>
+      }
+    >
+      <form
+        className="stack tight"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void confirm()
+        }}
+      >
+        <p className="meta">
+          Worth checks a saved plan against today’s money before anything is bought. Nothing is
+          charged here.
+        </p>
+        <Field
+          label="Money available today"
+          error={error}
+          hint={
+            fundsProjection
+              ? `Maya’s sample plan projects this for the start of ${dayLabel(state.today)}, from the funds confirmed ${dayLabel(fundsProjection.from)}. Sample data only.`
+              : `Last confirmed ${money(profile.balanceCents)} on ${dayLabel(profile.snapshotDate)}.${stale ? ' Enter what your accounts show now.' : ''}`
+          }
+        >
+          <span className="money-input">
+            <span aria-hidden="true">$</span>
+            <input
+              className="input num"
+              inputMode="decimal"
+              value={amount}
+              aria-invalid={Boolean(error)}
+              onChange={(event) => setAmount(event.target.value)}
+            />
+          </span>
+        </Field>
+        {(due.length > 0 || unreflected.length > 0) && (
+          <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
+            <legend className="meta strong" style={{ fontWeight: 700, marginBottom: 4 }}>
+              Already in this amount
+            </legend>
+            {due.map((flow) => (
+              <label className="check" key={flow.id}>
+                <input
+                  type="checkbox"
+                  checked={paid.includes(flow.id)}
+                  onChange={() => setPaid(toggle(paid, flow.id))}
+                />
+                <span>
+                  {flow.name}, {money(flow.amountCents)} on {dayLabel(flow.nextDate)}: paid
+                </span>
+              </label>
+            ))}
+            {unreflected.map((purchase) => (
+              <label className="check" key={purchase.id}>
+                <input
+                  type="checkbox"
+                  checked={included.includes(purchase.id)}
+                  onChange={() => setIncluded(toggle(included, purchase.id))}
+                />
+                <span>
+                  {purchase.name}, {money(purchase.amountCents)}: bought through Worth
+                </span>
+              </label>
+            ))}
+          </fieldset>
+        )}
+      </form>
+    </Dialog>
+  )
+}
+
+/**
+ * A wait plan whose day has come: confirm today's funds, see the fresh check, then (catalog items
+ * only, behind the same guards as Claude's prepare_checkout) buy with PayPal (G5-4).
+ */
+function ReadyPlan({
+  item,
+  product,
+  state,
+  onConfirm,
+  onUpdate,
+  onToast,
+  onOpenCheckout,
+  onOpen,
+}: {
+  item: SavedItem
+  product?: Product
+  state: AppState
+  onConfirm: () => void
   onUpdate: (state: AppState) => void
   onToast: (text: string) => void
+  onOpenCheckout: (purchase: Purchase) => void
+  onOpen: () => void
 }) {
-  const planned = readPlanned()
-  const bought = boughtProductIds(state)
-  const saved = state.products.filter((p) => state.wishlist.includes(p.id))
-  const more = state.products.filter((p) => !state.wishlist.includes(p.id))
-  async function toggle(product: Product) {
+  const fundsToday = state.profile.confirmed && state.profile.snapshotDate === state.today
+  // Today's funds, once confirmed, hold for every plan whose day has come.
+  const fresh = fundsToday
+  const { comparison: c, loading } = useComparison(
+    fresh ? decisionFor(item) : null,
+    state.profile.version,
+  )
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const active = state.purchases.find(isActive)
+  async function buy() {
+    setBusy(true)
+    setError('')
     try {
-      onUpdate((await api<AppState>('/wishlist', { productId: product.id })) as AppState)
-      if (state.wishlist.includes(product.id)) writePlanned(product.id, undefined)
+      const result = await api<{ purchase: Purchase; state: AppState }>(
+        `/saved/${item.id}/prepare`,
+        {},
+      )
+      onUpdate(result.state)
+      onOpenCheckout(result.purchase)
+    } catch (failure) {
+      setError((failure as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  async function moveDate(date: string) {
+    try {
+      const result = await api<{ state: AppState }>(
+        '/saved',
+        saveRequest(
+          item.kind === 'catalog'
+            ? { kind: 'catalog', productId: item.productId! }
+            : { kind: 'custom', name: item.name, amountCents: item.amountCents },
+          { waitDate: date },
+        ),
+      )
+      onUpdate(result.state)
+      onToast(`Saved for ${dayLabel(date)}. Check it again then.`)
+    } catch (failure) {
+      setError((failure as Error).message)
+    }
+  }
+  const fitsNow = c ? fits(c.buyToday) : false
+  return (
+    <section className="tile notice" aria-label={`${item.name}: your saved plan`}>
+      <div className="row plain">
+        <Disc icon={CalendarCheck} kind="plan" />
+        <div className="body">
+          <div className="t">
+            {fresh && c
+              ? fitsNow
+                ? 'Fresh check: this fits today'
+                : 'Fresh check: not yet'
+              : MAY_FIT_NOW}
+          </div>
+          <div className="s">
+            <span className="soft">
+              {item.name} · {money(item.amountCents)} · planned for {dayLabel(item.waitDate!)}
+            </span>
+          </div>
+          {fresh && loading && <p className="caption">Checking your plan for today…</p>}
+          {fresh && c && (
+            <p className="meta" style={{ marginTop: 4 }} role="status">
+              {fitsNow
+                ? `Checked just now: buying today keeps your ${money(c.cushionCents)} cushion. Lowest ${signed(c.buyToday.lowestBalanceCents)} on ${dayLabel(c.buyToday.lowestDate)}.`
+                : c.wait.date
+                  ? `Checked just now: not yet. Your plan now suggests ${dayLabel(c.wait.date)}.`
+                  : 'Checked just now: it doesn’t fit in the next 30 days.'}
+            </p>
+          )}
+          {fresh && c && fitsNow && item.kind === 'custom' && (
+            <p className="caption">{ASSESSMENT_ONLY}.</p>
+          )}
+          {error && (
+            <p className="co-error" role="alert">
+              {error}
+            </p>
+          )}
+        </div>
+      </div>
+      <div className="actions">
+        {!fresh ? (
+          <Button onClick={onConfirm}>Confirm today’s funds</Button>
+        ) : c && fitsNow && product ? (
+          active ? (
+            <Button variant="secondary" onClick={() => onOpenCheckout(active)}>
+              {active.productId === item.productId
+                ? 'Finish checkout'
+                : 'Finish your open checkout first'}
+            </Button>
+          ) : (
+            <Button loading={busy} onClick={() => void buy()}>
+              Buy with PayPal
+            </Button>
+          )
+        ) : c && !fitsNow && c.wait.date ? (
+          <Button variant="secondary" onClick={() => void moveDate(c.wait.date!)}>
+            Save for {dayLabel(c.wait.date)}
+          </Button>
+        ) : c ? (
+          <Button variant="secondary" onClick={onOpen}>
+            See your options
+          </Button>
+        ) : null}
+      </div>
+    </section>
+  )
+}
+
+export function Saved({
+  state,
+  checkId,
+  onOpenDecision,
+  onUpdate,
+  onToast,
+  onOpenCheckout,
+}: {
+  state: AppState
+  /** A saved item to confirm funds for on arrival, e.g. from Home's ready-plan prompt. */
+  checkId?: string
+  onOpenDecision: (request: DecisionRequest) => void
+  onUpdate: (state: AppState) => void
+  onToast: (text: string) => void
+  onOpenCheckout: (purchase: Purchase) => void
+}) {
+  const saved = state.saved ?? []
+  const productOf = (item: SavedItem) =>
+    item.kind === 'catalog' ? state.products.find((p) => p.id === item.productId) : undefined
+  const ready = saved.filter((item) => item.status === 'ready')
+  const more = state.products.filter(
+    (p) => !saved.some((item) => item.kind === 'catalog' && item.productId === p.id),
+  )
+  const fundsToday = state.profile.confirmed && state.profile.snapshotDate === state.today
+  const asked = checkId && ready.some((item) => item.id === checkId) ? checkId : undefined
+  // Arriving for a plan: confirm today's funds first, unless they were just confirmed today.
+  const [confirming, setConfirming] = useState<string | undefined>(() =>
+    fundsToday ? undefined : asked,
+  )
+  async function remove(item: SavedItem) {
+    try {
+      onUpdate((await api<AppState>(`/saved/${item.id}/remove`, {})) as AppState)
+      onToast(`${item.name} is no longer in Saved.`)
     } catch (failure) {
       onToast((failure as Error).message)
     }
   }
-  const card = (product: Product) => (
-    <Card
-      key={product.id}
-      product={product}
-      saved={state.wishlist.includes(product.id)}
-      bought={bought.has(product.id)}
-      planned={
-        planned[product.id] && planned[product.id]! >= state.today ? planned[product.id] : undefined
-      }
-      onOpen={() => onOpen(product)}
-      onToggle={() => void toggle(product)}
-    />
-  )
+  async function saveProduct(product: Product) {
+    try {
+      const result = await api<{ state: AppState }>('/saved', {
+        kind: 'catalog',
+        productId: product.id,
+      })
+      onUpdate(result.state)
+      onToast(`${product.name} is in Saved.`)
+    } catch (failure) {
+      onToast((failure as Error).message)
+    }
+  }
   return (
     <div className="page plain">
       <div className="wrap">
@@ -155,16 +549,242 @@ export function Saved({
         </h1>
         <p className="meta" style={{ margin: '-12px 0 var(--s-5)' }}>
           {saved.length
-            ? `${saved.length} saved · more from ${state.products[0]?.merchant ?? 'the demo store'} below`
-            : 'Nothing saved yet. Save an item to check it again later.'}
+            ? `${saved.length} saved · plans are checked when you come back, never bought for you`
+            : 'Nothing saved yet. Save an item from Ask Worth or the store below to check it again later.'}
         </p>
-        {/* One full grid: saved items first, then the rest of the store. */}
-        <div className="saved-grid">{[...saved, ...more].map(card)}</div>
+        {ready.length > 0 && (
+          <div className="stack" style={{ marginBottom: 'var(--s-5)' }}>
+            {ready.map((item) => (
+              <ReadyPlan
+                key={item.id}
+                item={item}
+                product={productOf(item)}
+                state={state}
+                onConfirm={() => setConfirming(item.id)}
+                onUpdate={onUpdate}
+                onToast={onToast}
+                onOpenCheckout={onOpenCheckout}
+                onOpen={() => onOpenDecision(decisionFor(item))}
+              />
+            ))}
+          </div>
+        )}
+        {saved.length > 0 && (
+          <div className="saved-grid">
+            {saved.map((item) => (
+              <SavedCard
+                key={item.id}
+                item={item}
+                product={productOf(item)}
+                onOpen={() => onOpenDecision(decisionFor(item))}
+                onRemove={() => void remove(item)}
+              />
+            ))}
+          </div>
+        )}
+        {more.length > 0 && (
+          <section aria-labelledby="store-title" style={{ marginTop: 'var(--s-6)' }}>
+            <div className="sec-head">
+              <h2 className="h-section" id="store-title">
+                More from {state.products[0]?.merchant ?? 'the demo store'}
+              </h2>
+            </div>
+            <div className="saved-grid">
+              {more.map((product) => (
+                <StoreCard
+                  key={product.id}
+                  product={product}
+                  onOpen={() => onOpenDecision({ productId: product.id })}
+                  onSave={() => void saveProduct(product)}
+                />
+              ))}
+            </div>
+          </section>
+        )}
         <p className="caption" style={{ marginTop: 'var(--s-6)' }}>
-          A demo store for the PayPal sandbox. Nothing is sold or shipped.
+          A demo store for the PayPal sandbox. Nothing is sold or shipped. Items saved from Ask
+          Worth that the store doesn’t sell are assessments only.
         </p>
       </div>
+      {confirming && (
+        <FundsDialog
+          state={state}
+          onClose={() => setConfirming(undefined)}
+          onConfirmed={(next) => {
+            onUpdate(next)
+            setConfirming(undefined)
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+/** "Keep my plan on this device for 30 days" (D-9 a). Off by default. */
+function RetentionSwitch({
+  state,
+  onUpdate,
+}: {
+  state: AppState
+  onUpdate: (s: AppState) => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const keep = state.retention?.keep30 ?? false
+  const until = state.retention ? new Date(state.retention.expiresAt) : undefined
+  const when = until
+    ? until.toLocaleString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      })
+    : ''
+  async function change(next: boolean) {
+    setBusy(true)
+    setError('')
+    try {
+      onUpdate((await api<AppState>('/retention', { keep30: next })) as AppState)
+    } catch (failure) {
+      setError((failure as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div className="switch-row">
+        <span className="strong" style={{ fontWeight: 700 }} aria-hidden="true">
+          Keep my plan on this device for 30 days
+        </span>
+        <Toggle
+          checked={keep}
+          busy={busy}
+          label="Keep my plan on this device for 30 days"
+          describedBy="keep-note"
+          onChange={(next) => void change(next)}
+        />
+      </div>
+      <p className="caption" id="keep-note" style={{ marginTop: 4 }}>
+        {keep
+          ? `On: kept until ${when}, so a saved plan is here when you come back. Only this browser can open it: no account and no recovery.`
+          : `Off: your plan and saved items are deleted ${when ? `on ${when}` : 'after 24 hours'}.`}{' '}
+        You can delete it any time below.
+      </p>
+      {error && (
+        <p className="co-error" role="alert">
+          {error}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The labelled demo clock (C-17): moves only the synthetic persona's day, so a video can show a
+ * return visit on the wait date. Imported data never follows it.
+ */
+function DemoClock({
+  state,
+  onUpdate,
+  onToast,
+}: {
+  state: AppState
+  onUpdate: (s: AppState) => void
+  onToast: (text: string) => void
+}) {
+  const sample = state.profile.source === 'demo'
+  const from = state.profile.snapshotDate
+  const planned = (state.saved ?? [])
+    .map((item) => item.waitDate)
+    .filter((date): date is string => Boolean(date && date > state.today))
+    .sort()
+  const [date, setDate] = useState(planned[0] ?? addDays(state.today, 1))
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const active = state.purchases.some(isActive)
+  async function set(body: object, done: string) {
+    setBusy(true)
+    setError('')
+    try {
+      onUpdate((await api<AppState>('/demo-clock', body)) as AppState)
+      onToast(done)
+    } catch (failure) {
+      setError((failure as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  if (!sample)
+    return (
+      <p className="meta">
+        The demo clock works only on the sample persona. Your imported data always uses today’s
+        date.
+      </p>
+    )
+  return (
+    <>
+      <p className="meta">
+        Moves only Maya’s sample plan, so a demo can show a return visit on a plan’s date. Your own
+        data never uses it.{' '}
+        {state.demoClock
+          ? `Maya’s day is ${fullDate(state.today)}.`
+          : 'Maya’s day follows today’s date.'}
+      </p>
+      <div className="actions" style={{ marginTop: 12 }}>
+        <Button
+          variant="secondary"
+          disabled={busy || active}
+          onClick={() =>
+            void set({ preset: 'video' }, 'Showing the video scenario: Maya on Sat, Oct 3, 2026.')
+          }
+        >
+          Video replay · Sat, Oct 3, 2026
+        </Button>
+        {state.demoClock && (
+          <Button
+            variant="text"
+            disabled={busy || active}
+            onClick={() =>
+              void set({ preset: 'today' }, 'Maya’s sample plan is back on today’s date.')
+            }
+          >
+            Back to today
+          </Button>
+        )}
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <DateStepper
+          label="Move Maya’s day to"
+          value={date < from ? from : date}
+          min={from}
+          max={addDays(from, 60)}
+          onChange={setDate}
+          disabled={busy || active}
+        />
+        <div className="actions" style={{ marginTop: 8 }}>
+          <Button
+            variant="secondary"
+            icon={Clock}
+            disabled={busy || active}
+            onClick={() => void set({ date }, `Maya’s day is now ${dayLabel(date)}.`)}
+          >
+            Set Maya’s day
+          </Button>
+        </div>
+      </div>
+      {active && (
+        <p className="caption" style={{ marginTop: 8 }}>
+          Finish or cancel your checkout before changing the demo clock.
+        </p>
+      )}
+      {error && (
+        <p className="co-error" role="alert">
+          {error}
+        </p>
+      )}
+    </>
   )
 }
 
@@ -174,12 +794,14 @@ export function Settings({
   onReset,
   onEditPlan,
   onImport,
+  onToast,
 }: {
   state: AppState
   onUpdate: (state: AppState) => void
   onReset: (state: AppState) => void
   onEditPlan: (step: number) => void
   onImport: () => void
+  onToast?: (text: string) => void
 }) {
   const [confirm, setConfirm] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -204,6 +826,12 @@ export function Settings({
       return undefined
     }
   })()
+  // Settings opened from "See the exact video scenario" lands on the demo clock.
+  const clockRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (window.location.hash.includes('focus=clock'))
+      clockRef.current?.scrollIntoView?.({ block: 'start' })
+  }, [])
   return (
     <div className="page plain">
       <div className="wrap narrow">
@@ -297,6 +925,7 @@ export function Settings({
                 </dd>
               </div>
             </dl>
+            <RetentionSwitch state={state} onUpdate={onUpdate} />
             <div className="actions" style={{ marginTop: 12 }}>
               <Button variant="secondary" onClick={onImport}>
                 Import PayPal activity
@@ -315,6 +944,19 @@ export function Settings({
                 Finish or cancel your checkout before deleting your data.
               </p>
             )}
+          </section>
+          <section className="tile" aria-labelledby="set-clock" ref={clockRef}>
+            <div className="sec-head">
+              <h2 className="h-section" id="set-clock">
+                <CalendarClock
+                  size={18}
+                  aria-hidden="true"
+                  style={{ verticalAlign: -3, marginRight: 8 }}
+                />
+                Demo clock
+              </h2>
+            </div>
+            <DemoClock state={state} onUpdate={onUpdate} onToast={onToast ?? (() => undefined)} />
           </section>
           <section className="tile" aria-labelledby="set-about">
             <div className="sec-head">
@@ -362,8 +1004,8 @@ export function Settings({
           }
         >
           <Alert tone="bad" icon={CircleAlert}>
-            Your imported history, your plan and your Worth purchase records are deleted. Worth
-            starts again with the sample profile.
+            Your imported history, your plan, your saved items and your Worth purchase records are
+            deleted. Worth starts again with the sample profile.
           </Alert>
         </Dialog>
       )}

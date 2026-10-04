@@ -2,6 +2,8 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import {
   ArrowRight,
   ArrowUp,
+  Bookmark,
+  BookmarkCheck,
   CircleAlert,
   ExternalLink,
   ListChecks,
@@ -16,15 +18,34 @@ import type {
   OptionResult,
   Product,
   PurchaseContext,
+  RememberedItem,
+  SavedItem,
 } from '../shared/types'
 import { api, ApiError } from './api'
-import type { AgentCheckout, AppState, ChatReply, Comparison } from './contract'
+import type {
+  AgentCheckout,
+  AppState,
+  ChatReply,
+  Comparison,
+  SavePlan,
+  SaveTarget,
+} from './contract'
 import { SimilarItems } from './Alternatives'
-import { claudeUses } from './copy'
+import { ASSESSMENT_ONLY, claudeUses } from './copy'
 import { optionStatus, type DecisionRequest, type Explanation } from './Decision'
 import { claudeOn, envLabel, fits, missingFix, useComparison } from './engine'
 import { capitalize, cx, dayLabel, fromMoney, money, signed } from './format'
+import { countedHold, ReservationNote } from './Reservation'
 import { Alert, Button, Field, Pill, ReadAsChip, Toggle, type Tone } from './ui'
+
+type OnSave = (target: SaveTarget, plan?: SavePlan) => Promise<SavedItem | undefined>
+/** "Read as Everyday camera · $1,199.00 (Larkspur price) · today" for a store price (fix #3). */
+export function priceLabel(read: Interpretation, products: Product[]) {
+  const store = products[0]?.merchant.split(' ')[0] ?? 'Store'
+  return read.items.some((item) => item.priceSource === 'catalog')
+    ? `${money(read.amountCents)} (${store} price)`
+    : money(read.amountCents)
+}
 
 /** `trace` is fixed when the answer arrives, so a later switch change never relabels it. */
 type Entry = ChatMessage & { reply?: ChatReply; id: number; trace?: string }
@@ -65,14 +86,23 @@ export function itemLabel(read: Interpretation) {
 export const readAsText = (read: Interpretation) =>
   `${itemLabel(read)} · ${money(read.amountCents)} · ${read.dateLabel}`
 
-/** A catalog item the question is about: same price and a shared word in the name. */
-export function matchProduct(products: Product[], name: string, amountCents: number) {
+/**
+ * A catalog item the question is about: same price and a shared word in the name. Unless `strict`,
+ * the only item at that price also counts; saving uses `strict`, so a "$1,199 road bike" is never
+ * saved as the camera.
+ */
+export function matchProduct(
+  products: Product[],
+  name: string,
+  amountCents: number,
+  strict = false,
+) {
   const words = new Set(name.toLowerCase().match(/[a-z]{4,}/g) ?? [])
   const priced = products.filter((product) => product.priceCents === amountCents)
   return (
     priced.find((product) =>
       (product.name.toLowerCase().match(/[a-z]{4,}/g) ?? []).some((word) => words.has(word)),
-    ) ?? (priced.length === 1 ? priced[0] : undefined)
+    ) ?? (!strict && priced.length === 1 ? priced[0] : undefined)
   )
 }
 
@@ -168,6 +198,9 @@ function VerdictTile({
   busy,
   onRecheck,
   onOpen,
+  onSave,
+  onNavigate,
+  onOpenCheckout,
 }: {
   reply: ChatReply
   state: AppState
@@ -175,7 +208,12 @@ function VerdictTile({
   busy: boolean
   onRecheck: () => void
   onOpen: (request: DecisionRequest) => void
+  onSave?: OnSave
+  onNavigate: (hash: string) => void
+  onOpenCheckout: (purchaseId: string) => void
 }) {
+  const [saved, setSaved] = useState<SavedItem>()
+  const [saving, setSaving] = useState(false)
   const assessment = reply.assessment!
   const amountCents = reply.interpretation?.amountCents ?? assessment.amountCents
   const name = reply.interpretation ? itemLabel(reply.interpretation) : assessment.itemName
@@ -187,6 +225,29 @@ function VerdictTile({
     assessment.outcome === 'incomplete' ? null : request,
     state.profile.version,
   )
+  // "Save for later" for any assessed item (A3): store items by product, anything else as an
+  // assessment only, with the date the comparison suggests when waiting is the plan.
+  const waitDate =
+    comparison?.recommendation === 'wait' ? (comparison.wait.date ?? undefined) : undefined
+  const stored = matchProduct(state.products, name, amountCents, true)
+  const target: SaveTarget = stored
+    ? { kind: 'catalog', productId: stored.id }
+    : { kind: 'custom', name: name.slice(0, 120), amountCents }
+  const hold = countedHold(state, { productId: product?.id, itemName: name, amountCents })
+  async function save() {
+    if (!onSave) return
+    setSaving(true)
+    const item = await onSave(
+      target,
+      waitDate
+        ? { waitDate }
+        : comparison?.recommendation
+          ? { option: comparison.recommendation }
+          : {},
+    )
+    setSaving(false)
+    if (item) setSaved(item)
+  }
   return (
     <section
       className="tile"
@@ -213,16 +274,44 @@ function VerdictTile({
           <span className="sk" style={{ width: '60%' }} />
         </div>
       ) : null}
-      {assessment.outcome !== 'incomplete' && (
-        <button
-          type="button"
-          className="link"
-          style={{ marginTop: 'var(--s-2)' }}
-          onClick={() => onOpen(request)}
-        >
-          See the comparison <ArrowRight size={16} aria-hidden="true" />
-        </button>
+      {hold && (
+        <div style={{ marginTop: 'var(--s-2)' }}>
+          <ReservationNote purchase={hold} onReview={(p) => onOpenCheckout(p.id)} />
+        </div>
       )}
+      <div className="actions" style={{ marginTop: 'var(--s-2)', gap: 'var(--s-4)' }}>
+        {assessment.outcome !== 'incomplete' && (
+          <button type="button" className="link" onClick={() => onOpen(request)}>
+            See the comparison <ArrowRight size={16} aria-hidden="true" />
+          </button>
+        )}
+        {onSave &&
+          (saved ? (
+            <span className="meta" role="status" style={{ display: 'inline-flex', gap: 6 }}>
+              <BookmarkCheck size={16} aria-hidden="true" style={{ marginTop: 2 }} />
+              {saved.waitDate ? `Saved for ${dayLabel(saved.waitDate)}` : 'Saved'} ·{' '}
+              <button
+                type="button"
+                className="link"
+                style={{ minHeight: 0, fontSize: 'inherit' }}
+                onClick={() => onNavigate('saved')}
+              >
+                View in Saved
+              </button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              className="link"
+              disabled={saving || (assessment.outcome !== 'incomplete' && !comparison)}
+              onClick={() => void save()}
+            >
+              <Bookmark size={16} aria-hidden="true" />
+              {waitDate ? `Save for ${dayLabel(waitDate)}` : 'Save for later'}
+            </button>
+          ))}
+      </div>
+      {saved?.kind === 'custom' && <p className="caption">{ASSESSMENT_ONLY}.</p>}
     </section>
   )
 }
@@ -449,6 +538,7 @@ export function Ask({
   onOpenDecision,
   onOpenCheckout,
   onNavigate,
+  onSave,
 }: {
   state: AppState
   initialPrompt?: { text: string; id: number }
@@ -458,8 +548,11 @@ export function Ask({
   onOpenDecision: (request: DecisionRequest, explanation?: Explanation) => void
   onOpenCheckout: (purchaseId: string, approveUrl?: string) => void
   onNavigate: (hash: string) => void
+  onSave?: OnSave
 }) {
   const [entries, setEntries] = useState<Entry[]>([])
+  /** Every item this conversation assessed, so a later question can return to it (fix #3). */
+  const remembered = useRef<RememberedItem[]>([])
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -501,7 +594,20 @@ export function Ask({
           sessionKey: state.sessionKey,
           history,
           context: explicit ?? contextRef.current,
+          ...(remembered.current.length ? { items: remembered.current } : {}),
         })) as ChatReply
+        if (reply.assessment) {
+          const item = {
+            amountCents: reply.assessment.amountCents,
+            itemName: reply.assessment.itemName.slice(0, 150),
+          }
+          remembered.current = [
+            ...remembered.current.filter(
+              (known) => known.itemName !== item.itemName || known.amountCents !== item.amountCents,
+            ),
+            item,
+          ].slice(-12)
+        }
         setEntries((prev) => [
           ...prev,
           {
@@ -535,6 +641,7 @@ export function Ask({
         if (failure instanceof ApiError && failure.code === 'SESSION_CHANGED') {
           setEntries([])
           setContext(undefined)
+          remembered.current = []
           setMessage('')
           setError('Your session changed. Start a new question with your current plan.')
           onSessionChange?.()
@@ -629,6 +736,7 @@ export function Ask({
                       onOpenDecision={onOpenDecision}
                       onOpenCheckout={onOpenCheckout}
                       onNavigate={onNavigate}
+                      onSave={onSave}
                     />
                   </div>
                 ),
@@ -761,6 +869,7 @@ export function Ask({
                       onClick={() => {
                         setEntries([])
                         setContext(undefined)
+                        remembered.current = []
                         setError('')
                       }}
                     >
@@ -814,6 +923,7 @@ function Answer({
   onOpenDecision,
   onOpenCheckout,
   onNavigate,
+  onSave,
 }: {
   entry: Entry
   state: AppState
@@ -827,6 +937,7 @@ function Answer({
   onOpenDecision: (request: DecisionRequest, explanation?: Explanation) => void
   onOpenCheckout: (purchaseId: string, approveUrl?: string) => void
   onNavigate: (hash: string) => void
+  onSave?: OnSave
 }) {
   const reply = entry.reply!
   const [allFacts, setAllFacts] = useState(false)
@@ -858,13 +969,13 @@ function Answer({
     points: reply.points?.map((point) => point.text) ?? [],
     toolCalls: reply.toolCalls,
     mode: reply.mode,
-    readAs: read ? `${readName} · ${money(read.amountCents)} · today` : undefined,
+    readAs: read ? `${readName} · ${priceLabel(read, state.products)} · today` : undefined,
   }
   return (
     <>
       {read && !editing && (
         <ReadAsChip
-          value={`${readName} · ${money(read!.amountCents)} · ${read!.dateLabel}`}
+          value={`${readName} · ${priceLabel(read!, state.products)} · ${read!.dateLabel}`}
           onAction={onEdit}
           disabled={busy}
         />
@@ -892,6 +1003,7 @@ function Answer({
           onAction={onAnswer}
         />
       )}
+      {assessment && reply.lead && !reply.points?.length && <p>{reply.lead}</p>}
       {assessment ? (
         <VerdictTile
           reply={reply}
@@ -906,6 +1018,9 @@ function Answer({
             })
           }
           onOpen={(request) => onOpenDecision(request, explanation)}
+          onSave={onSave}
+          onNavigate={onNavigate}
+          onOpenCheckout={(purchaseId) => onOpenCheckout(purchaseId)}
         />
       ) : (
         paragraphs(reply).map((text, index) => <p key={index}>{text}</p>)

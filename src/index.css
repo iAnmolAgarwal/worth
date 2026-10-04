@@ -537,6 +537,15 @@ main:focus {
   margin-top: var(--s-4);
   min-height: 44px;
 }
+/* An open checkout already counted in room to spend (fix #9). */
+.balance .hold {
+  color: #fff;
+  margin-top: var(--s-2);
+}
+.balance .hold .link {
+  color: #fff;
+  text-decoration: underline;
+}
 .balance .side {
   text-align: right;
   font-size: var(--fs-meta);
@@ -1350,6 +1359,10 @@ textarea.input {
 .alert.info > .ico {
   color: var(--c-text-2);
 }
+/* The brand blue is 4.45:1 on the info tint; the primary blue clears 4.5:1. */
+.alert.info .link {
+  color: var(--c-primary);
+}
 .alert.warn {
   background: var(--c-warning-bg);
 }
@@ -1988,12 +2001,23 @@ textarea.input {
   border-radius: var(--r-lg);
   padding: var(--s-3);
 }
-.saved-card > img {
+.saved-card > img,
+.saved-card > .ph {
   width: 100%;
   aspect-ratio: 1;
   object-fit: cover;
   border-radius: var(--r-lg);
   background: var(--c-fill);
+}
+/* An assessment-only item has no store photo: the same square, with the item's icon. */
+.saved-card > .ph {
+  display: grid;
+  place-items: center;
+  color: var(--c-navy);
+}
+.saved-card > .ph .ico {
+  width: 48px;
+  height: 48px;
 }
 .saved-card .t {
   font-weight: var(--fw-bold);

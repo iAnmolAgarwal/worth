@@ -2,15 +2,19 @@ import { useState } from 'react'
 import {
   ArrowRight,
   ArrowUp,
+  Bookmark,
   CalendarCheck,
   CircleAlert,
   ReceiptText,
   RefreshCw,
 } from 'lucide-react'
 import { getUpcomingFlows } from '../shared/finance'
-import type { Product } from '../shared/types'
+import type { Product, SavedItem } from '../shared/types'
 import type { AppState, Purchase } from './contract'
 import { isActive } from './contract'
+import { ASSESSMENT_ONLY, MAY_FIT_NOW } from './copy'
+import { countedHold, ReservationNote } from './Reservation'
+import { FundsDialog } from './Saved'
 import {
   allPlans,
   boughtProductIds,
@@ -24,10 +28,11 @@ import {
 import { dayLabel, daysFrom, money, signed, displayName } from './format'
 import { Button, Disc, Pill, SkeletonRow } from './ui'
 
+/** The camera starter comes first, so it shows at every width (judge fix #10). */
 export const HOME_SUGGESTIONS = [
+  'Can I afford a $1,199 camera?',
   'What’s coming up?',
   'How much can I spend today?',
-  'Can I afford a $1,199 camera?',
 ]
 
 export function Composer({
@@ -73,12 +78,17 @@ function HeroTile({
   onAsk,
   onPlan,
   onNavigate,
+  onOpenCheckout,
+  onConfirmFunds,
 }: {
   state: AppState
   onAsk: () => void
   onPlan: () => void
   onNavigate: (hash: string) => void
+  onOpenCheckout: (purchase: Purchase) => void
+  onConfirmFunds: () => void
 }) {
+  const hold = countedHold(state)
   const { comparison: room, loading } = useComparison(
     { amountCents: 0, itemName: 'Room to spend' },
     state.profile.version,
@@ -106,6 +116,11 @@ function HeroTile({
     // The plan is confirmed, so name the one thing that still blocks an answer and where to fix it.
     const [first, ...rest] = room.missingFields
     const fix = first ? missingFix(first) : undefined
+    // Only a stale funds date (and one-time payments since then) is missing: today's funds can be
+    // confirmed in place, without reopening the whole plan.
+    const quickFunds = room.missingFields.every((field) =>
+      /^Refresh available funds|already happened/.test(field),
+    )
     return (
       <section className="balance unconfirmed" aria-labelledby="bal-k">
         <Pill tone="warn">
@@ -116,7 +131,11 @@ function HeroTile({
           {first ?? 'Your plan needs a detail before Worth can show room to spend.'}
         </h2>
         <p className="meta">Room to spend shows again once this is done.</p>
-        {fix && <Button onClick={() => onNavigate(fix.hash)}>{fix.label}</Button>}
+        {quickFunds ? (
+          <Button onClick={onConfirmFunds}>Confirm today’s funds</Button>
+        ) : (
+          fix && <Button onClick={() => onNavigate(fix.hash)}>{fix.label}</Button>
+        )}
       </section>
     )
   }
@@ -150,6 +169,7 @@ function HeroTile({
             : `on ${dayLabel(state.profile.snapshotDate)}`}
           .
         </p>
+        {hold && <ReservationNote purchase={hold} onReview={onOpenCheckout} onBrand />}
         <a
           href="#ask"
           onClick={(event) => {
@@ -284,31 +304,46 @@ function ComingUp({ state, onShowAll }: { state: AppState; onShowAll: () => void
 }
 
 export function SavedRows({
+  items,
   products,
   onOpen,
 }: {
+  items: SavedItem[]
   products: Product[]
-  onOpen: (product: Product) => void
+  onOpen: (item: SavedItem) => void
 }) {
   return (
     <div className="rows">
-      {products.map((product) => (
-        <button
-          type="button"
-          className="row plain small"
-          key={product.id}
-          onClick={() => onOpen(product)}
-        >
-          <img className="thumb" src={product.image} alt="" />
-          <div className="body">
-            <div className="t">{product.name}</div>
-            <div className="s">
-              <span className="soft">{product.merchant}</span>
+      {items.map((item) => {
+        const product = products.find((p) => p.id === item.productId)
+        return (
+          <button
+            type="button"
+            className="row plain small"
+            key={item.id}
+            onClick={() => onOpen(item)}
+          >
+            {product ? (
+              <img className="thumb" src={product.image} alt="" />
+            ) : (
+              <Disc icon={Bookmark} kind="plan" />
+            )}
+            <div className="body">
+              <div className="t">{item.name}</div>
+              <div className="s">
+                <span className="soft">
+                  {item.status === 'ready'
+                    ? 'May fit now'
+                    : item.waitDate
+                      ? `Planned for ${dayLabel(item.waitDate)}`
+                      : (product?.merchant ?? ASSESSMENT_ONLY)}
+                </span>
+              </div>
             </div>
-          </div>
-          <div className="amt num">{money(product.priceCents)}</div>
-        </button>
-      ))}
+            <div className="amt num">{money(item.amountCents)}</div>
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -318,26 +353,39 @@ export function Home({
   onAsk,
   onNavigate,
   onOpenProduct,
+  onOpenSaved,
   onEditPlan,
   onOpenCheckout,
   onConfirmPlan,
   onReviewRefund,
+  onUpdate,
 }: {
   state: AppState
   onAsk: (text?: string) => void
   onNavigate: (hash: string) => void
   onOpenProduct: (product: Product) => void
+  /** Opens a saved custom item's comparison. */
+  onOpenSaved?: (item: SavedItem) => void
   onEditPlan: () => void
   onOpenCheckout: (purchase: Purchase) => void
   onConfirmPlan: (purchaseId: string) => void
   onReviewRefund: (purchaseId: string, refundId: string) => void
+  onUpdate?: (state: AppState) => void
 }) {
+  const [funds, setFunds] = useState(false)
   const active = state.purchases.find(isActive)
   const bought = boughtProductIds(state)
   // Bought items leave the Saved list on Home; the Saved page marks them instead.
-  const saved = state.products.filter(
-    (product) => state.wishlist.includes(product.id) && !bought.has(product.id),
+  const saved = (state.saved ?? []).filter(
+    (item) => item.status !== 'bought' && !(item.productId && bought.has(item.productId)),
   )
+  const ready = saved.find((item) => item.status === 'ready')
+  const fundsToday = state.profile.confirmed && state.profile.snapshotDate === state.today
+  const openSaved = (item: SavedItem) => {
+    const product = state.products.find((p) => p.id === item.productId)
+    if (product) onOpenProduct(product)
+    else onOpenSaved?.(item)
+  }
   const income = state.profile.flows.find((flow) => flow.kind === 'income' && flow.active)
   const plans = allPlans(state)
   return (
@@ -351,7 +399,37 @@ export function Home({
               onAsk={() => onAsk()}
               onPlan={onEditPlan}
               onNavigate={onNavigate}
+              onOpenCheckout={onOpenCheckout}
+              onConfirmFunds={() => setFunds(true)}
             />
+            {ready && (
+              <section
+                className="tile notice"
+                aria-label={fundsToday ? 'Your saved plan’s day has come' : MAY_FIT_NOW}
+              >
+                <div className="row plain">
+                  <Disc icon={CalendarCheck} kind="plan" />
+                  <div className="body">
+                    <div className="t">
+                      {fundsToday
+                        ? 'Your saved plan’s day has come: today’s funds are confirmed'
+                        : MAY_FIT_NOW}
+                    </div>
+                    <div className="s">
+                      <span className="soft">
+                        {ready.name} · {money(ready.amountCents)} · planned for{' '}
+                        {dayLabel(ready.waitDate!)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <div className="actions" style={{ marginTop: 12 }}>
+                  <Button onClick={() => onNavigate(`saved?check=${ready.id}`)}>
+                    {fundsToday ? 'See today’s check' : 'Confirm today’s funds'}
+                  </Button>
+                </div>
+              </section>
+            )}
             {active && (
               <section className="tile notice" aria-label="Checkout to finish">
                 <div className="row plain">
@@ -440,7 +518,7 @@ export function Home({
                 </button>
               </div>
               {saved.length ? (
-                <SavedRows products={saved.slice(0, 3)} onOpen={onOpenProduct} />
+                <SavedRows items={saved.slice(0, 3)} products={state.products} onOpen={openSaved} />
               ) : (
                 <p className="meta">Nothing saved yet. Items you plan to buy later show up here.</p>
               )}
@@ -499,6 +577,18 @@ export function Home({
           </aside>
         </div>
       </div>
+      {funds && (
+        <FundsDialog
+          state={state}
+          onClose={() => setFunds(false)}
+          onConfirmed={(next) => {
+            setFunds(false)
+            onUpdate?.(next)
+            // A plan whose day has come shows its fresh check in Saved.
+            if (ready) onNavigate(`saved?check=${ready.id}`)
+          }}
+        />
+      )}
     </div>
   )
 }

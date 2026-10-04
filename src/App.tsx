@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeft,
   Bookmark,
+  CalendarClock,
   CircleAlert,
   FileUp,
   House,
@@ -13,20 +14,22 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react'
-import type { InstalmentPlanProposal, Product } from '../shared/types'
+import type { InstalmentPlanProposal, Product, SavedItem } from '../shared/types'
 import { Activity } from './Activity'
 import { api } from './api'
 import { Ask } from './Ask'
 import { Checkout } from './Checkout'
-import type { AppState, Purchase } from './contract'
+import type { AppState, Purchase, SavePlan, SaveTarget } from './contract'
+import { saveRequest } from './contract'
 import { Decision, type DecisionRequest, type Explanation } from './Decision'
 import { envLabel } from './engine'
-import { dayLabel } from './format'
+import { dayLabel, fullDate } from './format'
 import { Home, HomeSkeleton } from './Home'
 import { ImportDialog } from './Import'
 import { PlanPage, PlanWizard } from './Plan'
 import { ConfirmPlanDialog, RefundDialog } from './Reviews'
-import { readPlanned, Saved, Settings, writePlanned } from './Saved'
+import { migratePlanned, Saved, Settings } from './Saved'
+import { ASSESSMENT_ONLY } from './copy'
 import { usePayPalSdk } from './paypal'
 import { Alert, Button, IconButton, Wordmark } from './ui'
 
@@ -43,7 +46,7 @@ const NAV: { screen: Screen; label: string; tabLabel?: string; icon: LucideIcon;
     { screen: 'ask', label: 'Ask Worth', tabLabel: 'Ask', icon: Sparkles, tab: true },
     { screen: 'activity', label: 'Activity', icon: ReceiptText, tab: true },
     { screen: 'plan', label: 'Plan', icon: SlidersHorizontal, tab: true },
-    { screen: 'saved', label: 'Saved', icon: Bookmark, tab: false },
+    { screen: 'saved', label: 'Saved', icon: Bookmark, tab: true },
   ]
 const DETAIL: Screen[] = ['decision', 'plan-edit', 'settings']
 
@@ -201,6 +204,25 @@ export default function App() {
     // Runs once, when the first state arrives.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [Boolean(state)])
+  // Once per load: move the browser's old wait dates to the server (G5-6), and start the video
+  // replay when the README link asks for it (?replay=video).
+  useEffect(() => {
+    if (!state) return
+    void migratePlanned(replaceState)
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('replay') === 'video') {
+      params.delete('replay')
+      const query = params.toString()
+      history.replaceState(
+        null,
+        '',
+        window.location.pathname + (query ? `?${query}` : '') + window.location.hash,
+      )
+      void startReplay()
+    }
+    // Runs once, when the first state arrives.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [Boolean(state)])
   useEffect(() => {
     if (!toast) return
     const timer = setTimeout(() => setToast(''), 6000)
@@ -255,17 +277,45 @@ export default function App() {
     openDecision({ productId: product.id }, undefined, from)
   const openCheckout = (purchase: Purchase) =>
     setCheckout({ productId: purchase.productId, purchaseId: purchase.id })
-  async function saveForLater(product: Product, date?: string) {
-    if (!state) return
+  /** Saves any assessed item, with the plan's option and date (C-17, A3). */
+  async function saveItem(target: SaveTarget, plan: SavePlan = {}) {
     try {
-      if (!state.wishlist.includes(product.id))
-        replaceState((await api<AppState>('/wishlist', { productId: product.id })) as AppState)
-      writePlanned(product.id, date)
-      setToast(
-        date
-          ? `Saved for ${dayLabel(date)}. Check it again from Saved.`
-          : `${product.name} is in Saved.`,
+      const result = await api<{ item: SavedItem; state: AppState }>(
+        '/saved',
+        saveRequest(target, plan),
       )
+      replaceState(result.state)
+      const custom = target.kind === 'custom' ? ` ${ASSESSMENT_ONLY}.` : ''
+      setToast(
+        plan.waitDate
+          ? `Saved for ${dayLabel(plan.waitDate)}. Worth checks it again when you come back.${custom}`
+          : `${result.item.name} is in Saved.${custom}`,
+      )
+      return result.item
+    } catch (failure) {
+      setToast((failure as Error).message)
+      return undefined
+    }
+  }
+  /** "See the exact video scenario": pins the sample persona to the recording day (G5-3). */
+  async function startReplay() {
+    try {
+      const next = (await api<AppState>('/demo-clock', { preset: 'video' })) as AppState
+      clearConversation()
+      replaceState(next)
+      setEnvOpen(false)
+      setToast('Showing the video scenario: Maya on Sat, Oct 3, 2026.')
+      navigate('home')
+    } catch (failure) {
+      setToast((failure as Error).message)
+    }
+  }
+  async function endReplay() {
+    try {
+      const next = (await api<AppState>('/demo-clock', { preset: 'today' })) as AppState
+      clearConversation()
+      replaceState(next)
+      setToast('Maya’s sample plan is back on today’s date.')
     } catch (failure) {
       setToast((failure as Error).message)
     }
@@ -401,6 +451,16 @@ export default function App() {
                   {env.split(' · ').map((part) => (
                     <span key={part}>{part}</span>
                   ))}
+                  {state.profile.source === 'demo' && (
+                    <button
+                      type="button"
+                      className="link"
+                      style={{ fontSize: 'inherit', justifyContent: 'flex-start' }}
+                      onClick={() => void startReplay()}
+                    >
+                      See the exact video scenario
+                    </button>
+                  )}
                   <a href="#settings" onClick={() => setEnvOpen(false)}>
                     About this demo
                   </a>
@@ -472,6 +532,18 @@ export default function App() {
         </div>
       </header>
       <main id="main" tabIndex={-1}>
+        {state.demoClock && (
+          <div className="wrap" style={{ paddingBottom: 0 }}>
+            <Alert tone="info" icon={CalendarClock}>
+              <b>Demo clock:</b> Maya’s sample plan is set to {fullDate(state.today)}
+              {state.demoClock.preset === 'video' ? ', the day the video was recorded' : ''}. Your
+              own data never uses it.{' '}
+              <button type="button" className="link" onClick={() => void endReplay()}>
+                Back to today
+              </button>
+            </Alert>
+          </div>
+        )}
         {error && (
           <div className="wrap" style={{ paddingBottom: 0 }}>
             <Alert tone="warn" icon={CircleAlert}>
@@ -488,12 +560,20 @@ export default function App() {
             onAsk={ask}
             onNavigate={navigate}
             onOpenProduct={(product) => openProduct(product, 'home')}
+            onOpenSaved={(item) =>
+              openDecision(
+                { amountCents: item.amountCents, itemName: item.name.slice(0, 150) },
+                undefined,
+                'home',
+              )
+            }
             onEditPlan={() => navigate('plan/edit')}
             onOpenCheckout={openCheckout}
             onConfirmPlan={(purchaseId) => setReview({ kind: 'plan', purchaseId })}
             onReviewRefund={(purchaseId, refundId) =>
               setReview({ kind: 'refund', purchaseId, refundId })
             }
+            onUpdate={replaceState}
           />
         )}
         <div hidden={screen !== 'ask'}>
@@ -505,6 +585,7 @@ export default function App() {
             onUpdate={replaceState}
             onSessionChange={() => void load()}
             onOpenDecision={(request, explanation) => openDecision(request, explanation, 'ask')}
+            onSave={saveItem}
             onOpenCheckout={(purchaseId) => {
               const purchase = state.purchases.find((p) => p.id === purchaseId)
               if (purchase) openCheckout(purchase)
@@ -531,7 +612,7 @@ export default function App() {
                 )
                 setCheckout({ productId: product.id, purchaseId: active?.id, acknowledge })
               }}
-              onSave={(product, date) => void saveForLater(product, date)}
+              onSave={(target, plan) => void saveItem(target, plan)}
               onEditPlan={() => navigate('plan/edit')}
               onViewActivity={() => navigate('activity')}
             />
@@ -581,10 +662,11 @@ export default function App() {
         {screen === 'saved' && (
           <Saved
             state={state}
-            onOpen={(product) => openProduct(product, 'saved')}
+            checkId={params.get('check') ?? undefined}
+            onOpenDecision={(request) => openDecision(request, undefined, 'saved')}
             onUpdate={replaceState}
             onToast={setToast}
-            key={JSON.stringify(readPlanned())}
+            onOpenCheckout={openCheckout}
           />
         )}
         {screen === 'settings' && (
@@ -599,6 +681,7 @@ export default function App() {
             }}
             onEditPlan={(step) => navigate(`plan/edit?step=${step}`)}
             onImport={() => setImporting(true)}
+            onToast={setToast}
           />
         )}
       </main>
