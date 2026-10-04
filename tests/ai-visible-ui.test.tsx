@@ -151,7 +151,7 @@ describe('Ask Worth shows its work', () => {
     const state = makeState()
     const answer = await claudeReply(state, 'Is Pay in 4 cheaper than paying now?', [
       interpret({ points: ['pay_in_4_schedule'] }),
-      note('Most of the pressure is {cause_bill} on {cause_day}, before {income_name}.'),
+      note('Most of the pressure is {cause_bill} on {cause_day}, even after {income_name}.'),
     ])
     await ask(state, answer)
     const strip = await screen.findByRole('region', {
@@ -180,11 +180,11 @@ describe('Ask Worth shows its work', () => {
         points: ['low_point', 'cause'],
         point_reasons: 'answers_question, explains_result',
       }),
-      note('Most of the pressure is {cause_bill} on {cause_day}, before {income_name}.'),
+      note('Most of the pressure is {cause_bill} on {cause_day}, even after {income_name}.'),
     ])
     const user = await ask(state, answer)
     const sentence = await screen.findByText(
-      'Most of the pressure is Apartment rent on Fri, Oct 16, before Biweekly paycheck.',
+      'Most of the pressure is Apartment rent on Fri, Oct 16, even after Biweekly paycheck.',
     )
     expect(sentence.previousElementSibling?.className).toBe('verdict')
     const toggle = screen.getByRole('button', { name: 'How Ask Worth read this' })
@@ -201,7 +201,7 @@ describe('Ask Worth shows its work', () => {
     expect(trace.textContent).toContain('The amount is the one Worth read earlier in this chat')
     expect(trace.textContent).toContain('The verdict sentence is Worth’s template')
     expect(trace.textContent).toContain(
-      'Claude wrote “Most of the pressure is {cause_bill} on {cause_day}, before {income_name}.”',
+      'Claude wrote “Most of the pressure is {cause_bill} on {cause_day}, even after {income_name}.”',
     )
     expect(within(trace).getAllByLabelText('Passed').length).toBeGreaterThan(2)
   })

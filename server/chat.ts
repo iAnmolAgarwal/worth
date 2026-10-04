@@ -1056,7 +1056,7 @@ function sentenceRequest(values: Placeholders) {
   const list = Object.entries(values)
     .map(([name, value]) => `{${name}} = ${JSON.stringify(value.value)}: ${value.about}`)
     .join('\n')
-  return `Tools are now closed. Reply with JSON {"note": ...}. In note, write one sentence of at most 30 words that tells the person why the engine's result is what it is, for the question they asked. Name any amount, date, count or name only with these placeholders, written exactly with their braces:\n${list}\nNever write a digit, amount, date, weekday, month, relative day or number word yourself. Do not restate the verdict. Do not suggest skipping or delaying a bill, credit, a loan, Pay in 4 or using the cushion. Use null when no sentence would help.`
+  return `Tools are now closed. Reply with JSON {"note": ...}. In note, write one sentence of at most 30 words that tells the person why the engine's result is what it is, for the question they asked. Name any amount, date, count or name only with these placeholders, written exactly with their braces:\n${list}\nNever write a digit, amount, date, weekday, month, relative day or number word yourself. Keep every before or after true to the dates listed. Do not restate the verdict. Do not suggest skipping or delaying a bill, credit, a loan, Pay in 4 or using the cushion. Use null when no sentence would help.`
 }
 const TOOLS_CLOSED =
   'Tools are now closed for this answer. Reply with the final JSON only, using the tool results you already have.'

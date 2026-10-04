@@ -342,15 +342,15 @@ describe('one Claude sentence with engine placeholders only (C-13)', () => {
 
   it('fills Claude’s placeholders with the engine’s values', async () => {
     const { provider } = purchase(
-      'Most of the pressure comes from {cause_bill} on {cause_day}, before {income_name} arrives.',
+      'Most of the pressure comes from {cause_bill} on {cause_day}, even after {income_name} arrives.',
     )
     const reply = await provider.reply(ask('Can I afford it?', { context: camera }), demo())
     expect(reply.explanation).toBe(
-      'Most of the pressure comes from Apartment rent on Fri, Oct 16, before Biweekly paycheck arrives.',
+      'Most of the pressure comes from Apartment rent on Fri, Oct 16, even after Biweekly paycheck arrives.',
     )
     expect(reply.trace!.sentence).toEqual({
       source: 'claude',
-      raw: 'Most of the pressure comes from {cause_bill} on {cause_day}, before {income_name} arrives.',
+      raw: 'Most of the pressure comes from {cause_bill} on {cause_day}, even after {income_name} arrives.',
     })
     // The verdict stays the template, first; the sentence follows it.
     expect(reply.message.split('\n\n')[1]).toBe(reply.explanation)
@@ -365,6 +365,11 @@ describe('one Claude sentence with engine placeholders only (C-13)', () => {
     ['a Pay in 4 suggestion', 'Consider PayPal Pay in 4 for the {item}.', 'advice'],
     ['a credit suggestion', 'A credit card could cover {item}.', 'advice'],
     ['two sentences', 'It is {cause_bill}. That comes first.', 'not_one_sentence'],
+    [
+      'days in the wrong order',
+      '{cause_bill} on {cause_day} lands before {income_name} can cover it.',
+      'contradicts_result',
+    ],
     ['a figure next to Pay in 4', 'Pay in 4 splits it into 4 parts.', 'free_number'],
     ['no sentence', null, 'no_sentence'],
   ])('shows the template instead of %s', async (_, sentence, reason) => {

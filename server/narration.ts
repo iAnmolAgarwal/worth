@@ -472,6 +472,8 @@ export function chipAllowed(text: string) {
 export interface Placeholder {
   value: string
   about: string
+  /** The day the value belongs to, so "before" and "after" in Claude's sentence can be checked. */
+  date?: string
 }
 export type Placeholders = Record<string, Placeholder>
 
@@ -479,12 +481,24 @@ export type Placeholders = Record<string, Placeholder>
 export function purchasePlaceholders(a: Assessment, data: ChatData): Placeholders {
   if (a.outcome === 'incomplete') return {}
   const out: Placeholders = {
-    item: { value: chatLabel(a.itemName), about: 'the item' },
-    price: { value: money(a.amountCents), about: 'its total price' },
-    buy_day: { value: dateLabel(a.purchaseDate, a.today), about: 'the day they would buy it' },
+    item: { value: chatLabel(a.itemName), about: 'the item', date: a.purchaseDate },
+    price: { value: money(a.amountCents), about: 'its total price', date: a.purchaseDate },
+    buy_day: {
+      value: dateLabel(a.purchaseDate, a.today),
+      about: 'the day they would buy it',
+      date: a.purchaseDate,
+    },
     cushion: { value: money(a.cushionCents), about: 'the cushion they keep' },
-    low_point: { value: money(a.lowestBalanceCents), about: 'the lowest projected balance' },
-    low_day: { value: day(a.lowestDate, a.today), about: 'the day of that low point' },
+    low_point: {
+      value: money(a.lowestBalanceCents),
+      about: 'the lowest projected balance',
+      date: a.lowestDate,
+    },
+    low_day: {
+      value: day(a.lowestDate, a.today),
+      about: 'the day of that low point',
+      date: a.lowestDate,
+    },
     gap: {
       value: money(Math.abs(a.lowestBalanceCents - a.cushionCents)),
       about: `how far the low point is ${a.lowestBalanceCents < a.cushionCents ? 'below' : 'above'} the cushion`,
@@ -501,17 +515,45 @@ export function purchasePlaceholders(a: Assessment, data: ChatData): Placeholder
     out.cause_bill = {
       value: chatLabel(cause.name),
       about: 'the largest bill before the low point',
+      date: cause.date,
     }
-    out.cause_amount = { value: money(cause.amountCents), about: 'that bill’s amount' }
-    out.cause_day = { value: day(cause.date, a.today), about: 'the day that bill is due' }
+    out.cause_amount = {
+      value: money(cause.amountCents),
+      about: 'that bill’s amount',
+      date: cause.date,
+    }
+    out.cause_day = {
+      value: day(cause.date, a.today),
+      about: 'the day that bill is due',
+      date: cause.date,
+    }
   }
   const income = a.drivers.find((d) => d.kind === 'income' && d.date >= a.today)
   if (income) {
-    out.income_name = { value: chatLabel(income.name), about: 'the next income' }
-    out.income_day = { value: day(income.date, a.today), about: 'the day it arrives' }
+    out.income_name = {
+      value: chatLabel(income.name),
+      about: 'the next income, which arrives on {income_day}',
+      date: income.date,
+    }
+    out.income_day = {
+      value: day(income.date, a.today),
+      about: 'the day it arrives',
+      date: income.date,
+    }
   }
+  const after = a.drivers.find((d) => d.kind === 'income' && d.date >= a.lowestDate)
+  if (after && after.date !== income?.date)
+    out.payday_after_low = {
+      value: day(after.date, a.today),
+      about: 'the first payday on or after the low point',
+      date: after.date,
+    }
   if (a.outcome === 'tight' && a.earliestDate && a.earliestDate > a.purchaseDate)
-    out.wait_day = { value: day(a.earliestDate, a.today), about: 'the earliest day that fits' }
+    out.wait_day = {
+      value: day(a.earliestDate, a.today),
+      about: 'the earliest day that fits',
+      date: a.earliestDate,
+    }
   if (a.maxAffordableCents > 0)
     out.max_spend = {
       value: money(a.maxAffordableCents),
@@ -546,8 +588,16 @@ export function planPlaceholders(data: ChatData): Placeholders {
   const out: Placeholders = {
     room_today: { value: money(base.maxAffordableCents), about: 'what fits today' },
     cushion: { value: money(base.cushionCents), about: 'the cushion they keep' },
-    low_point: { value: money(base.baselineLowestCents), about: 'the lowest projected balance' },
-    low_day: { value: day(base.lowestDate, data.today), about: 'the day of that low point' },
+    low_point: {
+      value: money(base.baselineLowestCents),
+      about: 'the lowest projected balance',
+      date: base.lowestDate,
+    },
+    low_day: {
+      value: day(base.lowestDate, data.today),
+      about: 'the day of that low point',
+      date: base.lowestDate,
+    },
   }
   const cause = base.drivers
     .filter((d) => d.kind !== 'income' && d.date >= base.today && d.date <= base.lowestDate)
@@ -556,13 +606,26 @@ export function planPlaceholders(data: ChatData): Placeholders {
     out.cause_bill = {
       value: chatLabel(cause.name),
       about: 'the largest bill before the low point',
+      date: cause.date,
     }
-    out.cause_day = { value: day(cause.date, data.today), about: 'the day that bill is due' }
+    out.cause_day = {
+      value: day(cause.date, data.today),
+      about: 'the day that bill is due',
+      date: cause.date,
+    }
   }
   const income = base.drivers.find((d) => d.kind === 'income' && d.date >= base.today)
   if (income) {
-    out.income_name = { value: chatLabel(income.name), about: 'the next income' }
-    out.income_day = { value: day(income.date, data.today), about: 'the day it arrives' }
+    out.income_name = {
+      value: chatLabel(income.name),
+      about: 'the next income, which arrives on {income_day}',
+      date: income.date,
+    }
+    out.income_day = {
+      value: day(income.date, data.today),
+      about: 'the day it arrives',
+      date: income.date,
+    }
   }
   return out
 }
@@ -574,9 +637,9 @@ export function commitmentPlaceholders(data: ChatData, kind: CommitmentKind): Pl
   return {
     count: { value: String(value.events.length), about: 'how many are due in the next 30 days' },
     total: { value: money(value.totalCents), about: 'their total' },
-    next_name: { value: next.name, about: 'the next one due' },
-    next_day: { value: day(next.date, data.today), about: 'the day it is due' },
-    next_amount: { value: money(next.amountCents), about: 'its amount' },
+    next_name: { value: next.name, about: 'the next one due', date: next.date },
+    next_day: { value: day(next.date, data.today), about: 'the day it is due', date: next.date },
+    next_amount: { value: money(next.amountCents), about: 'its amount', date: next.date },
     largest_name: { value: largest.name, about: 'the largest one' },
     largest_amount: { value: money(largest.amountCents), about: 'its amount' },
   }
@@ -685,6 +748,7 @@ export function checkSentence(
   if (/[\p{N}\p{Sc}%#]/u.test(words) || NUMBER_WORD.test(words))
     return { ok: false, reason: 'free_number' }
   if (DATE_WORD.test(words)) return { ok: false, reason: 'free_date' }
+  if (misordered(sentence, values)) return { ok: false, reason: 'contradicts_result' }
   // A tight result may still say what would fit: waiting, or spending less.
   const conditional = /\{(?:wait_day|max_spend)\}/.test(sentence)
   if (
@@ -693,6 +757,26 @@ export function checkSentence(
   )
     return { ok: false, reason: 'contradicts_result' }
   return { ok: true, text: fill(sentence, values) }
+}
+/**
+ * Whether "before" or "after" in the sentence puts two dated values in the wrong order, as in
+ * "{cause_bill} on {cause_day}, before {income_name}" when the income arrives first.
+ */
+function misordered(sentence: string, values: Placeholders) {
+  for (const m of sentence.matchAll(
+    /\b(before|after|until|ahead\s+of|followed\s+by)\s+(?:[a-z']+\s+){0,3}\{([a-z0-9_]+)\}/gi,
+  )) {
+    const later = values[m[2]!]?.date
+    const earlier = [...sentence.slice(0, m.index).matchAll(PLACEHOLDER)]
+      .map((p) => values[p[1]!]?.date)
+      .filter(Boolean)
+      .at(-1)
+    if (!later || !earlier) continue
+    const word = m[1]!.toLowerCase()
+    const forward = !/^after/.test(word)
+    if (forward ? earlier > later : earlier < later) return true
+  }
+  return false
 }
 /** The sentence with each placeholder replaced by the engine's value. */
 export function fill(sentence: string, values: Placeholders) {
