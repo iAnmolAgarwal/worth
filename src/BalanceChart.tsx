@@ -307,15 +307,16 @@ export function BalanceChart({
   // always dock it under the chart.
   const [measured, setMeasured] = useState<{ key: string; at: PopoverPlacement } | null>(null)
   const cardKey = card && layout ? `${card.rule}:${width}:${layout.low.index}` : ''
+  // Hover previews always sit under the chart, so they never cover the line being scrubbed.
   const placement: PopoverPlacement | null = !card
     ? null
-    : compact
+    : compact || !card.pinned
       ? { side: 'below', left: 0, top: 0 }
       : measured?.key === cardKey
         ? measured.at
         : null
   useLayoutEffect(() => {
-    if (!card || !layout || compact || measured?.key === cardKey) return
+    if (!card?.pinned || !layout || compact || measured?.key === cardKey) return
     const element = popover.current
     const size = { w: element?.offsetWidth || 280, h: element?.offsetHeight || 220 }
     const lowBox = layout.placed.find((box) => box.id === 'low')
