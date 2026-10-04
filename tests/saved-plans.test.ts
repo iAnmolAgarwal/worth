@@ -372,7 +372,19 @@ describe('acceptance case 21: a saved wait plan, checked on return', () => {
     await post(agent, '/api/funds/confirm', { balanceCents: 20000 })
     const refused = await post(agent, `/api/saved/${plan.body.item.id}/prepare`)
     expect(refused.status).toBe(409)
-    expect(['WAIT_NOT_REACHED', 'SHORTFALL_NOT_CONFIRMED']).toContain(refused.body.code)
+    expect(refused.body.code).toBe('WAIT_NOT_REACHED')
+    expect(paypal!.create).not.toHaveBeenCalled()
+  })
+
+  // Pre-merge judge finding 7: the Buy button never goes below the cushion on its own.
+  it('never prepares a below-cushion "buy today" plan from the button', async () => {
+    const { agent, paypal } = setup()
+    await realPlan(agent)
+    const plan = await save(agent, { kind: 'catalog', productId: 'camera', option: 'buyToday' })
+    expect(plan.status).toBe(200)
+    const refused = await post(agent, `/api/saved/${plan.body.item.id}/prepare`)
+    expect(refused.status).toBe(409)
+    expect(refused.body.code).toBe('SHORTFALL_NOT_CONFIRMED')
     expect(paypal!.create).not.toHaveBeenCalled()
   })
 
