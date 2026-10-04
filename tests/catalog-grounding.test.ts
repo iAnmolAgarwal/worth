@@ -10,7 +10,7 @@ import {
 } from '../server/interpret.ts'
 import type { RawInterpretation } from '../server/interpret.ts'
 import { refusalFor } from '../server/narration.ts'
-import { createDemoState } from '../shared/seed.ts'
+import { createDemoState, PRODUCTS } from '../shared/seed.ts'
 
 // Round-2 judge fix #3 (G5-2): a demo-store item named without a price is read at the store's
 // price, a conversation remembers every item it assessed, and a refusal to skip a bill shows even
@@ -109,6 +109,64 @@ describe('catalog price grounding', () => {
   it('only matches an item the message names', () => {
     expect(catalogItemFor('camera', 'Can I afford a lens?')).toBeUndefined()
     expect(catalogItemFor('AirPods', 'What about AirPods?')?.id).toBe('airpods-4')
+  })
+
+  // Pre-merge judge finding 1: only a whole-name mention reads the store price.
+  it.each([
+    ['Can I afford a camera bag?', 'camera bag'],
+    ['Can I afford a Sony camera?', 'Sony camera'],
+    ['Is a gaming chair a good idea?', 'gaming chair'],
+    ['Can I afford a MacBook Air?', 'MacBook Air'],
+    ['What about AirPods Pro?', 'AirPods Pro'],
+    ['Can I get a chair mat?', 'chair mat'],
+  ])('never reads "%s" at a store price', (message, name) => {
+    expect(catalogItemFor(name, message)).toBeUndefined()
+    const claude = validateInterpretation(raw([item(name, null)]), ask(message), data)
+    expect(claude.ok ? claude.interpretation.items : claude.reason).toBe('price_missing')
+    // Claude naming the store item anyway is not enough: the user's words must name it too.
+    const product = name.includes('Mac') ? 'MacBook' : name.split(' ').at(-1)!
+    expect(validateInterpretation(raw([item(product, null)]), ask(message), data).ok).toBe(false)
+    const local = localInterpretation(focusInput(ask(message)), data)
+    expect(local.ok ? local.interpretation.items : local.reason).toBe('price_missing')
+    expect(focusInput(ask(message)).context).toBeUndefined()
+  })
+
+  it('still reads the whole store name, with its own name words and timing around it', () => {
+    for (const [message, id] of [
+      ['Can I afford the MacBook Pro?', 'macbook-pro-14'],
+      ['Is the MacBook Pro 14-inch worth it?', 'macbook-pro-14'],
+      ['Can I buy the everyday camera on Friday?', 'camera'],
+      ['AirPods 4 today?', 'airpods-4'],
+      ['Go back to the camera. Does it fit?', 'camera'],
+      ['What about the camera 2 weeks from now?', 'camera'],
+    ] as const)
+      expect(focusInput(ask(message)).context?.itemName).toBe(
+        PRODUCTS.find((p) => p.id === id)!.name,
+      )
+  })
+
+  it('keeps a count next to the item instead of reading one at the store price', () => {
+    const message = 'Can I afford two cameras?'
+    expect(focusInput(ask(message)).context).toBeUndefined()
+    const local = localInterpretation(ask(message), data)
+    expect(local.ok ? local.interpretation.items : local.reason).toBe('price_missing')
+    // Claude's reading keeps the quantity, at the store's price per item.
+    const both = validateInterpretation(raw([item('cameras', null, 2)]), ask(message), data)
+    expect(both.ok && both.interpretation.amountCents).toBe(2 * 119900)
+  })
+
+  it('treats "a camera bag" after the camera as a new item, not the camera again', () => {
+    const message = 'What about a camera bag?'
+    const context = { ...camera, itemName: 'Everyday camera', purchaseDate: TODAY }
+    expect(focusInput(ask(message, { context, items: [camera] })).context).toEqual(context)
+    const result = validateInterpretation(
+      raw([item('camera bag', null)], { refers_to_previous_item: true }),
+      ask(message, { context }),
+      data,
+    )
+    expect(result.ok ? result.interpretation.items : result.reason).toBe('price_missing')
+    const local = localInterpretation(ask(message, { context }), data)
+    expect(local.ok ? local.interpretation.items : local.reason).toBe('price_missing')
   })
 
   it('works the same in local mode', () => {
