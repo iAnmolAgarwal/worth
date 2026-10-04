@@ -16,4 +16,4 @@ export const claudeUses = (on: boolean): [string, string][] =>
 
 /** What reaches Channel3 when Worth looks for similar items. It applies with the assistant off too. */
 export const CHANNEL3_SHARED_DATA =
-  'A generic kind of item (such as “desk chair”) and a price limit rounded down to $25, sent from Worth’s server when you look at Spend less or ask for something cheaper, even when the assistant is off'
+  'A generic kind of item (such as “desk chair”) and a price limit rounded down to $25, even when the assistant is off'

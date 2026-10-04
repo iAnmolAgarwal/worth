@@ -1484,6 +1484,11 @@ textarea.input {
   width: 100%;
   padding: var(--s-5);
 }
+.alternatives h2:focus-visible {
+  /* Focus lands here after "More like this" and "Back" for screen readers; it is not a control. */
+  outline: none;
+  box-shadow: none;
+}
 .alternatives .caption + .caption {
   margin-top: var(--s-1);
 }
