@@ -263,7 +263,7 @@ export function FundsDialog({
   )
   // Only Maya's sample projection already counts these payments, so only it starts them ticked.
   // On any other plan each one stays unticked until the user says it has happened.
-  const projected = Boolean(fundsProjection)
+  const projected = Boolean(fundsProjection) && profile.userEdited === false
   const [paid, setPaid] = useState<string[]>(projected ? due.map((flow) => flow.id) : [])
   const [included, setIncluded] = useState<string[]>(projected ? unreflected.map((p) => p.id) : [])
   const [busy, setBusy] = useState(false)

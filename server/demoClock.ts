@@ -94,6 +94,14 @@ export function applyDemoClock(
       reset: true,
     }
   }
+  // A hand-edited plan holds the user's own numbers, which never run on the clock (re-judge N1).
+  // The presets restart the untouched sample persona, so only a moved day is refused.
+  if (data.profile.userEdited !== false)
+    throw new DemoClockError(
+      409,
+      'The demo clock moves only the untouched sample plan. Choose the video replay to start it again from Maya’s sample.',
+      'DEMO_CLOCK_SAMPLE_ONLY',
+    )
   const from = data.profile.snapshotDate
   if (input.date < from || input.date > addDays(from, DEMO_CLOCK_MAX_DAYS))
     throw new DemoClockError(
@@ -106,7 +114,8 @@ export function applyDemoClock(
 
 /**
  * The synthetic persona's projected balance at the start of `today`: the sample plan's own
- * forecast from its funds date through yesterday's close. Never computed for imported data.
+ * forecast from its funds date through yesterday's close. Never computed for imported data or a
+ * hand-edited plan.
  */
 export function fundsProjection(
   data: SessionData,
@@ -114,7 +123,12 @@ export function fundsProjection(
   today: string,
 ): { cents: number; from: string } | undefined {
   const { profile } = data
-  if (profile.source !== 'demo' || !profile.confirmed || profile.snapshotDate >= today)
+  if (
+    profile.source !== 'demo' ||
+    profile.userEdited !== false ||
+    !profile.confirmed ||
+    profile.snapshotDate >= today
+  )
     return undefined
   const days = daysBetween(profile.snapshotDate, today)
   if (days > DEMO_CLOCK_MAX_DAYS + 30) return undefined

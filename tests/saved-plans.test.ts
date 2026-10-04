@@ -531,6 +531,29 @@ describe('the demo clock is limited to the synthetic persona', () => {
     expect(own.body.profile.userEdited).toBe(true)
   })
 
+  // Re-judge N1: an edit made before the clock starts keeps the plan off the clock too.
+  it('refuses to move the clock over a sample plan edited first, and projects nothing for it', async () => {
+    const { agent } = setup()
+    const start = await state(agent)
+    const edited = await agent
+      .patch('/api/profile')
+      .set('X-Worth-Client', 'web')
+      .send({ profile: { ...start.profile, balanceCents: 900000 } })
+    expect(edited.body.profile.userEdited).toBe(true)
+    const moved = await post(agent, '/api/demo-clock', { date: '2026-11-20' })
+    expect(moved.status).toBe(409)
+    expect(moved.body.code).toBe('DEMO_CLOCK_SAMPLE_ONLY')
+    const after = await state(agent)
+    expect(after.today).toBe('2026-10-04')
+    expect(after.demoClock).toBeUndefined()
+    expect(after.fundsProjection).toBeUndefined()
+    // The video replay restarts the untouched sample, which the clock may move again.
+    await post(agent, '/api/demo-clock', { preset: 'video' })
+    const later = await post(agent, '/api/demo-clock', { date: '2026-10-23' })
+    expect(later.status).toBe(200)
+    expect(later.body.fundsProjection).toEqual({ cents: 284001, from: '2026-10-03' })
+  })
+
   it('keeps the user’s own choice about Claude through a replay', async () => {
     const { agent } = setup()
     await post(agent, '/api/consent', { aiConsent: false })

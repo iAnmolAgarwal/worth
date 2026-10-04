@@ -224,6 +224,16 @@ describe('a saved wait plan on return', () => {
     expect(posted).toEqual([{ balanceCents: 125000, paidFlowIds: [], reflectedPurchaseIds: [] }])
   })
 
+  it('starts unticked on a hand-edited sample plan, even with a projection', () => {
+    const sample = makeState()
+    const state: AppState = { ...sample, profile: { ...sample.profile, userEdited: true } }
+    render(<FundsDialog state={state} onClose={vi.fn()} onConfirmed={vi.fn()} />)
+    const dialog = screen.getByRole('dialog', { name: 'Confirm today’s funds' })
+    const boxes = within(dialog).getAllByRole('checkbox') as HTMLInputElement[]
+    expect(boxes.map((box) => box.checked)).toEqual([false])
+    expect(within(dialog).queryByText(/Ticked because/)).toBeNull()
+  })
+
   it('never offers checkout for an assessment-only item', async () => {
     const user = userEvent.setup()
     let state = makeState([
