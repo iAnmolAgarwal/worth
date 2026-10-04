@@ -92,8 +92,7 @@ and 47% of BNPL users say they paid late in the past year
 
 ![Saved on a return visit: the camera saved for Fri, Oct 23 now shows "Your plan suggests this may fit now — confirm today's funds"](docs/img/saved-return-visit.png)
 
-<!-- TODO(coordinator): after the chart merge, capture docs/img/chart.png and replace this image. -->
-![Placeholder for the balance chart screenshot, to be captured after the chart merge](docs/img/placeholder-chart.png)
+![The balance chart for spending $440.01 on a desk chair: the lowest balance each day as a step line down to the $300 cushion, thin lines on every payday and bill, and the apartment rent line opened into a card that explains how rent and the student loan bring the balance to exactly the cushion on Thu, Oct 22, just before payday](docs/img/chart.png)
 
 ## Try it
 
