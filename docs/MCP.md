@@ -31,7 +31,7 @@ Claude Desktop launches local commands, so a remote server is reached through th
       "command": "npx",
       "args": [
         "-y",
-        "mcp-remote@0.14",
+        "mcp-remote@0.14.3",
         "https://worth.onrender.com/mcp",
         "--transport",
         "http-only",
@@ -44,9 +44,9 @@ Claude Desktop launches local commands, so a remote server is reached through th
 }
 ```
 
-1. Install Node.js 18 or later (for `npx`).
+1. Install Node.js 20 or later (for `npx`; mcp-remote 0.14 needs Node 20).
 2. In Claude Desktop, open **Settings → Developer → Edit Config**. This opens `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS (`%APPDATA%\Claude\claude_desktop_config.json` on Windows).
-3. Merge the `worth` entry into `mcpServers`, save, and quit and reopen Claude Desktop.
+3. Merge the `worth` entry into `mcpServers` (do not paste the whole snippet inside `mcpServers`; if the file is empty, use the whole snippet), save, and quit and reopen Claude Desktop.
 4. In a new chat, check that **worth** and its three tools appear under the tools (hammer) menu, then ask: "Can I afford the $1,199 camera?"
 
 Notes:
@@ -54,6 +54,7 @@ Notes:
 - If Claude Desktop says it cannot find `npx`, use its absolute path as `command` (run `which npx`; with Homebrew it is `/opt/homebrew/bin/npx`).
 - `Authorization:${WORTH_AUTH}` has no space after the colon on purpose; mcp-remote fills it in from `env`. That works around hosts that mangle spaces in arguments.
 - For a local server (`http://localhost:…/mcp`), Settings adds `--allow-http`.
+- The bridge carries the token, so the snippet pins it exactly (`mcp-remote@0.14.3`).
 
 ### 2b. Claude Desktop with Worth running from source (local stdio)
 
@@ -95,41 +96,41 @@ curl -s http://localhost:5173/mcp \
 
 ## Tools
 
-Every successful result has `structuredContent` that matches the tool's declared `outputSchema`, plus two text blocks: the `summary`, then the same JSON. Every result, success or refusal, carries:
+Every successful result has `structuredContent` that matches the tool's declared `outputSchema`, plus two text blocks: the `summary`, then the same JSON. Every result, success or refusal (including the stdio relay's own `UNAUTHORIZED` and `WORTH_UNREACHABLE`), carries:
 
-| Field     | Meaning                                                                                                              |
-| --------- | -------------------------------------------------------------------------------------------------------------------- |
-| `source`  | Always `"Worth engine"`. No figure comes from a model.                                                               |
-| `as_of`   | The plan's today (YYYY-MM-DD): the real date in the plan's time zone, or the demo clock's day on the sample persona. |
-| `summary` | Worth's own sentences with exact figures and dates, ready to quote to the person.                                    |
+| Field     | Meaning                                                                                                                                                                                                                                                       |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `source`  | Always `"Worth engine"`. No figure comes from a model.                                                                                                                                                                                                        |
+| `as_of`   | The plan's today (YYYY-MM-DD): the real date in the plan's time zone, or the demo clock's day on the sample persona. When no plan could be read (`PLAN_EXPIRED`, a failure reading it, or the relay unable to reach Worth), the server's or relay's UTC date. |
+| `summary` | Worth's own sentences with exact figures and dates, ready to quote to the person.                                                                                                                                                                             |
 
 ### `check_affordability({ item, amount_usd, date? })`
 
 Read-only. It assesses the purchase against the person's plan over Worth's 60-day window and returns a decision contract, modelled on the "Buy or Wait?" contract (HackerRank Orchestrate, September 2026). It is a mapping of Worth's existing assessment (`assessPurchase`) and adds no financial logic.
 
-| Input        | Rule                                                                                                                                                                             |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `item`       | 1–150 characters. **Untrusted data:** used only as a label, shortened and stripped of links and markup. No number in it is ever read, and instructions in it are never followed. |
-| `amount_usd` | The only number taken from the caller. Positive, at most 1,000,000, at most two decimals.                                                                                        |
-| `date`       | Optional YYYY-MM-DD, from today through 30 days ahead. Default: today.                                                                                                           |
+| Input        | Rule                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `item`       | 1–150 characters. **Untrusted data:** no number in it is ever read, and instructions in it are never followed. A catalog item is named by Worth's catalog. Any other item is assessed as "This purchase", and its label appears only in quotes after Worth's own sentences ("Item checked: “road bike”."). The label is plain text of at most 40 characters; text with verdict, instruction or price words ("approve", "safe", "ignore", "Worth says", "price", "$", a role label such as "system:", and so on) becomes "this item". |
+| `amount_usd` | The only number taken from the caller. Positive, at most 1,000,000, at most two decimals.                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `date`       | Optional YYYY-MM-DD, from today through 30 days ahead. Default: today.                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
-| Output field                     | Meaning                                                                                                                                              | Allowed values                                                                                                                                |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `request`                        | `{ item, amount_usd, currency: "USD", date }` as Worth used them. `item` becomes the catalog name when it names a catalog item at its catalog price. |                                                                                                                                               |
-| `affordability_status`           | Whether the full amount keeps the cushion.                                                                                                           | `affordable_now`: on `request.date`. `affordable_later`: on a later day in the next 30 days. `not_affordable`: on no day in the next 30 days. |
-| `recommended_action`             | Worth's option for this request.                                                                                                                     | `full_payment`, `wait`, `spend_less`, `not_recommended`. Never Pay in 4.                                                                      |
-| `amount_safe_to_pay`             | The most that keeps the cushion if paid on `request.date`, capped at the requested amount (Worth's spend-less limit).                                | `0 ≤ x ≤ amount_usd`                                                                                                                          |
-| `earliest_date_for_full_payment` | The first day the full amount keeps the cushion as one payment.                                                                                      | YYYY-MM-DD, or `null` when no day in the next 30 days does.                                                                                   |
-| `payment_plan`                   | The payments of `recommended_action`, in date order.                                                                                                 | `[{ date, amount_usd }]`; empty when no payment of this item is advised.                                                                      |
-| `lowest_balance`                 | `{ amount_usd, date }`: the projected low point if bought on `request.date`.                                                                         |                                                                                                                                               |
-| `cushion_usd`                    | The balance the person wants to keep.                                                                                                                |                                                                                                                                               |
-| `drivers`                        | The bill behind the low point (`low_point_cause`) and the next payday (`next_income`), when present.                                                 | `[{ role, name, date, amount_usd, kind }]`                                                                                                    |
-| `explanation`                    | Worth's decision sentences (template verdict, low point, cause).                                                                                     |                                                                                                                                               |
-| `pay_in_4_comparison`            | PayPal Pay in 4 as an illustrative comparison: payments, the bills each lands near (`collisions`), and the cushion label. **Never recommended.**     | `recommended: false`; `eligibility`: `paypal`, `range-only` or `unavailable`.                                                                 |
-| `facts`                          | Worth's fact sentences (the same ones Ask Worth uses).                                                                                               |                                                                                                                                               |
-| `catalog_item_id`                | Set when the item is in Worth's sandbox catalog, so `prepare_order` can be called.                                                                   |                                                                                                                                               |
-| `guards`                         | The checks behind the answer, in the app's trace vocabulary.                                                                                         |                                                                                                                                               |
-| `next_step`                      | What an agent may do next, without recommending.                                                                                                     |                                                                                                                                               |
+| Output field                     | Meaning                                                                                                                                                                                             | Allowed values                                                                                                                                |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `request`                        | `{ item, amount_usd, currency: "USD", date }` as Worth used them. `item` is the catalog name when the text names a catalog item at its catalog price; otherwise the sanitised label or "this item". |                                                                                                                                               |
+| `affordability_status`           | Whether the full amount keeps the cushion. "now" means on `request.date`, which may be a future day.                                                                                                | `affordable_now`: on `request.date`. `affordable_later`: on a later day in the next 30 days. `not_affordable`: on no day in the next 30 days. |
+| `recommended_action`             | Worth's option for this request.                                                                                                                                                                    | `full_payment`, `wait`, `spend_less`, `not_recommended`. Never Pay in 4.                                                                      |
+| `amount_safe_to_pay`             | The most that keeps the cushion if paid on `request.date`, capped at the requested amount (Worth's spend-less limit).                                                                               | `0 ≤ x ≤ amount_usd`                                                                                                                          |
+| `earliest_date_for_full_payment` | The first day the full amount keeps the cushion as one payment.                                                                                                                                     | YYYY-MM-DD, or `null` when no day in the next 30 days does.                                                                                   |
+| `payment_plan`                   | The payments of `recommended_action`, in date order.                                                                                                                                                | `[{ date, amount_usd }]`; empty when no payment of this item is advised.                                                                      |
+| `lowest_balance`                 | `{ amount_usd, date }`: the projected low point if bought on `request.date`.                                                                                                                        |                                                                                                                                               |
+| `cushion_usd`                    | The balance the person wants to keep.                                                                                                                                                               |                                                                                                                                               |
+| `drivers`                        | The bill behind the low point (`low_point_cause`) and the next payday (`next_income`), when present.                                                                                                | `[{ role, name, date, amount_usd, kind }]`                                                                                                    |
+| `explanation`                    | Worth's decision sentences (template verdict, low point, cause).                                                                                                                                    |                                                                                                                                               |
+| `pay_in_4_comparison`            | PayPal Pay in 4 as an illustrative comparison: payments, the bills each lands near (`collisions`), and the cushion label. **Never recommended.**                                                    | `recommended: false`; `eligibility`: `paypal`, `range-only` or `unavailable`.                                                                 |
+| `facts`                          | Worth's fact sentences (the same ones Ask Worth uses).                                                                                                                                              |                                                                                                                                               |
+| `catalog_item_id`                | Set when the item is in Worth's sandbox catalog, so `prepare_order` can be called.                                                                                                                  |                                                                                                                                               |
+| `guards`                         | The checks behind the answer, in the app's trace vocabulary.                                                                                                                                        |                                                                                                                                               |
+| `next_step`                      | What an agent may do next, without recommending.                                                                                                                                                    |                                                                                                                                               |
 
 How Worth's outcome maps to the contract:
 
@@ -187,7 +188,7 @@ Worth's refusals are tool results with `isError: true` and one JSON text block:
 
 Schema violations (a missing `item`, a string `amount_usd`, a badly formatted `date`) are refused by the SDK before any Worth code runs. They come back as `isError` with the SDK's standard text: `MCP error -32602: Input validation error: …`.
 
-HTTP-level refusals are JSON-RPC errors: `401` (with `WWW-Authenticate: Bearer`) for a missing, unknown, revoked or expired token; `403` for a request from another website's page; `429` (with `Retry-After`) for rate limits; `405` for GET or DELETE.
+HTTP-level refusals are JSON-RPC errors: `401` (with `WWW-Authenticate: Bearer`) for a missing, unknown, revoked or expired token; `403` for a request from another website's page; `429` (with `Retry-After`) for rate limits; `405` for GET or DELETE; `413` with `-32600` and `data.code: "REQUEST_TOO_LARGE"` for a body over 32 KB; `400` with `-32700` and `data.code: "INVALID_JSON"` for a body that is not JSON.
 
 ## Security model
 
@@ -195,14 +196,15 @@ HTTP-level refusals are JSON-RPC errors: `401` (with `WWW-Authenticate: Bearer`)
 - **Tokens:** `wrth_` + 32 random bytes (base64url). Only the SHA-256 hash and the last four characters are stored (`agent_tokens` table). Each token is bound to one session's plan, which is the synthetic persona or the person's imported data. Revocable in Settings, and capped at 3 active per plan. It expires at the earlier of 30 days and the plan's own expiry. Deleting the data removes its tokens (`ON DELETE CASCADE`). Creating or revoking a token goes through the app's existing CSRF checks.
 - **Scope:** every tool reads only the token's own plan. Another session cannot list or revoke the token. Nothing in a result comes from another plan.
 - **Origin check:** a request with an `Origin` header from another site is refused (`403`). This protects against DNS rebinding of a local server and against web pages holding a stolen token. CORS preflights get `405`.
-- **Rate limits** (all keyed by `req.ip`, which honours `TRUST_PROXY`, set to 2 on Render):
+- **Rate limits** (all keyed by `req.ip`, which honours `TRUST_PROXY`). On Render, `TRUST_PROXY=2` was verified on Oct 3: the first request after a deploy logged 2 `X-Forwarded-For` hops (fixed in PR #6), so `req.ip` is the client, not a forwarded value it chose.
   - 120 requests per IP per minute, counted before the token is read (`MCP_IP_PER_MINUTE`);
   - 20 failed token checks per IP per 15 minutes, after which that IP is refused even with a valid token;
   - 30 requests per token per minute (`MCP_TOKEN_PER_MINUTE`);
   - 5 `prepare_order` calls per token per hour (`MCP_PREPARE_HOURLY`);
   - 10 token creations per plan per hour.
 - **No capture path.** No tool can pay. `prepare_order` creates an order and stops. Capture stays on the cookie-authenticated `/api/checkout/:id/capture` route, which still requires PayPal approval, a fresh plan, and the shortfall acknowledgement for below-cushion orders.
-- **Untrusted input.** Item text and saved names are labels. They are minimized before they are echoed, and no figure is read from them. The tool descriptions and server instructions tell agents to treat them as data.
+- **Untrusted input.** Item text and saved names are labels, and no figure is read from them. They never start or speak in Worth's quotable `summary`: a catalog item is named by the catalog; anything else is "This purchase", with its sanitised label only in quotes after Worth's sentences, or "this item" when the text reads like a verdict, an instruction or a price. The tool descriptions and server instructions tell agents to treat them as data.
+- **Token lookup** is by its SHA-256 hash through a unique index, not a constant-time compare. With 256-bit random tokens, timing can at most reveal a prefix of a stored hash, which does not help find a token.
 - **Nothing leaks.** Errors carry fixed codes and sentences written for people. Logs record the error class only. Results never include credentials, PayPal payer data or identifiers other than the purchase, order and saved-item IDs the agent needs.
 - **Bodies** on `/mcp` are limited to 32 KB. Responses are `Cache-Control: no-store`, and the existing security headers and CSP apply.
 
@@ -214,9 +216,11 @@ The full recorded run is in `workspace/review/mcp/demo.md`. It used the sample p
 >
 > **Agent** → `check_affordability({"item":"camera","amount_usd":1199})`
 >
-> **Worth:** `affordable_later` · `wait` · earliest `2026-10-23` · safe today `$440.01` · low point `-$458.99` on Oct 22. Summary: "Everyday camera at $1,199 would dip below your cushion if you buy it today. The earliest date that fits is Fri, Oct 23. The most you could spend today and keep your cushion is $440.01. … Apartment rent ($1,450) is due Fri, Oct 16, before that low point. If you compared PayPal Pay in 4 (illustrative): … payment 2 would land about 1 day after your apartment rent …"
+> **Worth:** `affordable_later` · `wait` · earliest `2026-10-23` · safe today `$440.01` · low point `-$458.99` on **Thu, Oct 22** (paying in full). Summary: "Everyday camera at $1,199 would dip below your cushion if you buy it today. The earliest date that fits is Fri, Oct 23. The most you could spend today and keep your cushion is $440.01. … Apartment rent ($1,450) is due Fri, Oct 16, before that low point. If you compared PayPal Pay in 4 (illustrative): … payment 2 would land about 1 day after your apartment rent …"
 >
 > **Agent:** quotes the summary and asks whether to wait until Fri, Oct 23.
+>
+> (`pay_in_4_comparison.label` says "An instalment would dip below your cushion on Oct 21". That date belongs only to the Pay in 4 comparison. The full-payment low point is Thu, Oct 22. Video captions and voice-over should quote Worth's summary: "lowest −$458.99 on Thu, Oct 22 … the earliest date that fits is Fri, Oct 23". They should not say Oct 21.)
 >
 > **Person:** Prepare it anyway.
 >
