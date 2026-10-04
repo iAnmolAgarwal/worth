@@ -581,6 +581,27 @@ describe('decision view', () => {
     onEditPlan: vi.fn(),
     onViewActivity: vi.fn(),
   }
+  it('says “bought on” with the plan’s own day, the demo clock’s under a replay', async () => {
+    const state = makeState()
+    const bought = {
+      ...purchase(state, { productId: 'camera', name: 'Everyday camera', amountCents: 119900 }),
+      status: 'completed' as const,
+      completedAt: '2026-10-04T16:00:00Z',
+      completedOn: '2026-10-23',
+    }
+    routeApi((_path, data) => compare(state, data))
+    render(
+      <Decision
+        {...props}
+        state={{ ...state, purchases: [bought] }}
+        request={{ productId: 'camera' }}
+      />,
+    )
+    const tile = await screen.findByRole('region', { name: 'Bought' })
+    expect(tile.textContent).toContain('Fri, Oct 23')
+    expect(tile.textContent).not.toContain('Oct 4')
+  })
+
   it('selects the engine’s recommendation, leads with the margin and draws one chart', async () => {
     const user = userEvent.setup()
     const state = makeState()

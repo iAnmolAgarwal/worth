@@ -11,7 +11,7 @@ import {
   Sparkles,
   TriangleAlert,
 } from 'lucide-react'
-import { confirmedSchedule, dateInTimezone } from '../shared/finance'
+import { confirmedSchedule } from '../shared/finance'
 import type { Alternative, ForecastPoint, OptionResult, Product } from '../shared/types'
 import { AlternativesPanel } from './Alternatives'
 import { BalanceChart } from './BalanceChart'
@@ -29,7 +29,7 @@ import {
   purchasePlans,
   useComparison,
 } from './engine'
-import { cx, dayLabel, fromMoney, fullDate, money, shortDate, signed } from './format'
+import { boughtOn, cx, dayLabel, fromMoney, fullDate, money, shortDate, signed } from './format'
 import { PayPalMessage } from './paypal'
 import type { PayPalSdkInstance } from './paypalSdk'
 import { Alert, Button, Dialog, Disc, Field, Pill, ReadAsChip, Ring, type Tone } from './ui'
@@ -693,13 +693,8 @@ export function Decision({
                 <div>
                   <h2>You bought this</h2>
                   <p>
-                    {product!.merchant} ·{' '}
-                    {dayLabel(
-                      bought.completedAt
-                        ? dateInTimezone(bought.completedAt, state.profile.timezone)
-                        : bought.assessmentDate,
-                    )}{' '}
-                    · {bought.mode === 'sandbox' ? 'PayPal sandbox' : 'simulated'}
+                    {product!.merchant} · {dayLabel(boughtOn(bought, state.profile.timezone))} ·{' '}
+                    {bought.mode === 'sandbox' ? 'PayPal sandbox' : 'simulated'}
                   </p>
                 </div>
               </div>

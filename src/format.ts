@@ -1,3 +1,6 @@
+import { dateInTimezone } from '../shared/finance'
+import type { Purchase } from '../shared/types'
+
 /** Money always shows cents (brief §7); chart ticks are the only exception. */
 export const money = (cents: number, decimals = true) =>
   new Intl.NumberFormat('en-US', {
@@ -39,3 +42,16 @@ export const displayName = (name: string) =>
   /[A-Z]{3}/.test(name) && name === name.toUpperCase()
     ? name.toLowerCase().replace(/\b\p{L}/gu, (letter) => letter.toUpperCase())
     : name
+
+/** The day a purchase completed, as the plan counts days (the demo clock's day under a replay). */
+export function boughtOn(
+  purchase: Pick<Purchase, 'completedOn' | 'completedAt' | 'assessmentDate'>,
+  timezone: string,
+) {
+  return (
+    purchase.completedOn ??
+    (purchase.completedAt
+      ? dateInTimezone(purchase.completedAt, timezone)
+      : purchase.assessmentDate)
+  )
+}

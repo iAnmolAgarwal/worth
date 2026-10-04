@@ -570,12 +570,19 @@ export function createApp(options: AppOptions = {}) {
           )
         return current
       }
+      const data = store.get(id)!
+      // The user's own calendar day, not the UTC date of the timestamp; on the synthetic persona
+      // under the demo clock, the clock's day, so "bought on" matches every other date shown.
+      const completedOn = current.archived
+        ? dateInTimezone(completedAt, data.profile.timezone)
+        : (demoToday(data) ?? dateInTimezone(completedAt, data.profile.timezone))
       const completed: StoredPurchase = {
         ...current,
         ...(purchase.merchantId ? { merchantId: purchase.merchantId } : {}),
         status: 'completed',
         captureId,
         completedAt,
+        completedOn,
         // Only a checkout PayPal could have offered Pay Later for raises "Confirm your plan".
         ...(current.mode === 'sandbox' && current.payLaterCapable === false && !current.paymentPlan
           ? { paymentPlan: { product: 'full' as const } }
@@ -587,7 +594,6 @@ export function createApp(options: AppOptions = {}) {
       store.putPurchase(id, completed)
       // A payment for a persona purchase set aside on import never enters the user's own plan.
       if (current.archived) return completed
-      const data = store.get(id)!
       if (
         !data.transactions.some(
           (t) => t.referenceId === captureId || t.id === `purchase-${current.id}`,
@@ -595,9 +601,7 @@ export function createApp(options: AppOptions = {}) {
       ) {
         data.transactions.unshift({
           id: `purchase-${current.id}`,
-          // The user's own calendar day, not the UTC date of the timestamp; on the synthetic
-          // persona under the demo clock, the clock's day.
-          date: demoToday(data) ?? dateInTimezone(completedAt, data.profile.timezone),
+          date: completedOn,
           name: current.name,
           amountCents: -current.amountCents,
           currency: 'USD',

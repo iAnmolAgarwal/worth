@@ -13,9 +13,8 @@ import {
 import type { Assessment, Product } from '../shared/types'
 import { api, ApiError } from './api'
 import type { AppState, Comparison, Purchase } from './contract'
-import { dateInTimezone } from '../shared/finance'
 import { firstBelow, lower } from './engine'
-import { cx, dayLabel, money, signed } from './format'
+import { boughtOn, cx, dayLabel, money, signed } from './format'
 import { PayPalButton, useEligibility, type SdkStatus } from './paypal'
 import type { PayPalSdkInstance, PayPalSessionCallbacks } from './paypalSdk'
 import { Alert, Button, Dialog } from './ui'
@@ -407,7 +406,7 @@ export function Checkout({
       icon: Check,
       tone: 'ok',
       title: `Paid ${money(purchase?.amountCents ?? product.priceCents)}`,
-      body: `${product.merchant} · ${dayLabel(purchase?.completedAt ? dateInTimezone(purchase.completedAt, state.profile.timezone) : state.today)} · ${mode === 'sandbox' ? 'PayPal sandbox' : 'simulated'}`,
+      body: `${product.merchant} · ${dayLabel(purchase?.completedAt ? boughtOn(purchase, state.profile.timezone) : state.today)} · ${mode === 'sandbox' ? 'PayPal sandbox' : 'simulated'}`,
     },
     declined: {
       icon: CircleAlert,

@@ -199,6 +199,11 @@ export interface Purchase {
   status: 'created' | 'pending' | 'completed' | 'cancelled' | 'failed' | 'unknown'
   createdAt: string
   completedAt?: string
+  /**
+   * The plan's calendar day the purchase completed on: the user's own date, or the demo clock's
+   * day for the sample persona under a replay. Shown as "bought on".
+   */
+  completedOn?: string
   orderId?: string
   captureId?: string
   profileVersion: number

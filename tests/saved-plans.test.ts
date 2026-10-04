@@ -425,8 +425,11 @@ describe('acceptance case 21: a saved wait plan, checked on return', () => {
     expect(paid.body.purchase.status).toBe('completed')
     const after = paid.body.state as AppState
     expect(after.saved!.find((i) => i.id === plan.body.item.id)!.status).toBe('bought')
-    // The demo clock dates the persona's purchase on the clock's day.
+    // The demo clock dates the persona's purchase on the clock's day, and "bought on" with it
+    // (pre-merge judge finding 6), though the real completion time is a day later.
     expect(after.transactions.find((t) => t.source === 'purchase')!.date).toBe('2026-10-03')
+    expect(paid.body.purchase.completedAt.slice(0, 10)).toBe('2026-10-04')
+    expect(paid.body.purchase.completedOn).toBe('2026-10-03')
   })
 })
 
