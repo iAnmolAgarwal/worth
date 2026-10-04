@@ -217,10 +217,13 @@ function ChartTile({
   c,
   k,
   payIn4,
+  scaleWith,
 }: {
   c: Comparison
   k: OptionKey
   payIn4?: Extract<PayIn4, { available: true }>
+  /** The Pay in 4 scenario, open or not, so opening the comparison never rescales the chart. */
+  scaleWith?: Extract<PayIn4, { available: true }>
 }) {
   const option = optionOf(c, k) ?? c.buyToday
   const cause = option.lowPointCause
@@ -229,53 +232,18 @@ function ChartTile({
   const title = chartTitle(c, k)
   return (
     <section className="tile" aria-labelledby="chart-title">
-      <div className="sec-head" style={{ alignItems: 'flex-start', flexWrap: 'wrap' }}>
-        <div>
-          <h2 className="h-section" id="chart-title">
-            {title}
-          </h2>
-          <div className="meta">
-            Your balance, {shortDate(c.window.start)} to {shortDate(c.window.end)}
-          </div>
-        </div>
-        <div className="legend" aria-hidden="true">
-          <span>
-            <i className="sw" />
-            Balance
-          </span>
-          <span>
-            <i className="sw dash" />
-            Cushion {money(c.cushionCents, c.cushionCents % 100 !== 0)}
-          </span>
-          <span>
-            <i className="sw zone" />
-            Below cushion
-          </span>
-          <span>
-            <svg width="10" height="9" viewBox="0 0 10 9">
-              <path d="M5 0l5 8H0z" fill="#0C6E11" />
-            </svg>
-            Payday
-          </span>
-          <span>
-            <svg width="9" height="9" viewBox="0 0 9 9">
-              <rect width="8" height="8" rx="1.5" fill="#003087" />
-            </svg>
-            Big bill
-          </span>
-          {payIn4 && (
-            <span>
-              <i className="sw p4" />
-              Pay in 4 from today · illustrative
-            </span>
-          )}
-        </div>
+      <h2 className="h-section" id="chart-title">
+        {title}
+      </h2>
+      <div className="meta">
+        Your lowest balance each day, {shortDate(c.window.start)} to {shortDate(c.window.end)}
       </div>
       <BalanceChart
         points={option.points}
         cushionCents={c.cushionCents}
         purchase={{ date: option.purchaseDate, amountCents: option.amountCents }}
         payIn4={payIn4}
+        scaleWith={scaleWith?.points}
         highlight={{
           billDate:
             cause && cause.kind !== 'spending' && cause.kind !== 'purchase'
@@ -291,7 +259,11 @@ function ChartTile({
       />
       <p className="meta" style={{ marginTop: 12, color: 'var(--c-text-strong)' }}>
         Lowest <b className="num">{signed(option.lowestBalanceCents)}</b> on{' '}
-        {dayLabel(option.lowestDate)}
+        {dayLabel(option.lowestDate)} (
+        {option.lowestBalanceCents === c.cushionCents
+          ? 'exactly your cushion'
+          : `${money(Math.abs(option.lowestBalanceCents - c.cushionCents))} ${above ? 'above' : 'below'} your cushion`}
+        )
         {cause && cause.date === option.lowestDate && payday
           ? `: ${lower(cause.name)} leaves before your paycheck lands that day.`
           : cause
@@ -878,7 +850,7 @@ export function Decision({
                 onSave={onSaveAlternative}
               />
             )}
-          <ChartTile c={c} k={selected} payIn4={p4Open ? p4 : undefined} />
+          <ChartTile c={c} k={selected} payIn4={p4Open ? p4 : undefined} scaleWith={p4} />
         </div>
         <aside className="rail decision-rail" aria-label="Item and reasons">
           <div className="tile">
