@@ -10,7 +10,7 @@
 // fixture-mode regression test. The API key is read from the env file and never printed.
 import Anthropic from '@anthropic-ai/sdk'
 import { config } from 'dotenv'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
@@ -129,21 +129,32 @@ for (let run = 1; run <= Number(values.runs); run++) {
 }
 
 if (values.record && runs[0]) {
+  const path = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'recorded.json')
+  // A run limited to some probes replaces only their recordings and keeps the rest.
+  let kept: Record<string, unknown> = {}
+  if (values.probes || values.split)
+    try {
+      kept = (JSON.parse(readFileSync(path, 'utf8')) as { probes: Record<string, unknown> }).probes
+    } catch {
+      kept = {}
+    }
   const fixture = {
     model: MODEL,
     today: EVAL_TODAY,
     recordedAt: new Date().toISOString(),
-    probes: Object.fromEntries(
-      runs[0].results.map((r) => [
-        r.id,
-        {
-          messages: r.turns.map((t) => t.message),
-          turns: r.turns.map((t) => t.responses) as Recorded[][],
-        },
-      ]),
-    ),
+    probes: {
+      ...kept,
+      ...Object.fromEntries(
+        runs[0].results.map((r) => [
+          r.id,
+          {
+            messages: r.turns.map((t) => t.message),
+            turns: r.turns.map((t) => t.responses) as Recorded[][],
+          },
+        ]),
+      ),
+    },
   }
-  const path = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'recorded.json')
   mkdirSync(dirname(path), { recursive: true })
   writeFileSync(path, JSON.stringify(fixture, null, 1) + '\n')
   console.log(`recorded fixtures for ${runs[0].results.length} probes`)

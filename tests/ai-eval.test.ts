@@ -67,4 +67,20 @@ describe('AI eval regression gate (recorded model responses)', () => {
     expect([TWO_DAYS, undefined]).toContain(reply('R1-days-from-now').assessment?.purchaseDate)
     expect([EVAL_TODAY, undefined]).toContain(reply('R3-past-reference').assessment?.purchaseDate)
   })
+
+  it('routes every request for something cheaper to find_alternatives (G-C3-2)', () => {
+    const cheaper = results.filter((r) => /^C[1-6]-(?!categorize)/.test(r.id))
+    expect(cheaper.map((r) => r.id)).toHaveLength(6)
+    for (const result of cheaper) {
+      const reply = result.turns[0]!.reply
+      expect(reply.toolCalls, result.id).toContain('find_alternatives')
+      expect(reply.intent, result.id).toBe('alternatives')
+      expect(reply.assessment, result.id).toBeUndefined()
+    }
+    const listed = cheaper.filter((r) => r.turns[0]!.reply.alternatives)
+    expect(listed.length).toBeGreaterThanOrEqual(4)
+    for (const result of listed)
+      for (const item of result.turns[0]!.reply.alternatives!.items)
+        expect(item.priceCents).toBeLessThanOrEqual(44001)
+  })
 })
