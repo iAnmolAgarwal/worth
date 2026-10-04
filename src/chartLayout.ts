@@ -683,13 +683,14 @@ export function chartModel(input: ChartInput) {
     { bottom: date, ctx: lenient },
     { bottom: '', ctx: lenient },
   ]
+  const fits = (attempt: (typeof tries)[number]) =>
+    placeLabels([{ ...lowSpec(attempt.bottom), required: false }], attempt.ctx).length > 0
+  // With Pay in 4 open, the comparison rows under the plot state this low with its date, so when
+  // no spot is clear of both lines the pill is left out rather than drawn across them.
   const fit =
-    tries.find(
-      (attempt) =>
-        placeLabels([{ ...lowSpec(attempt.bottom), required: false }], attempt.ctx).length,
-    ) ?? tries[0]!
-  const lowBottom = fit.bottom
-  const lowPlaced = placeLabels([lowSpec(lowBottom)], fit.ctx)
+    tries.slice(0, 2).find(fits) ?? (p4Values ? null : (tries.slice(2).find(fits) ?? tries[0]!))
+  const lowBottom = fit?.bottom ?? ''
+  const lowPlaced = fit ? placeLabels([lowSpec(lowBottom)], fit.ctx) : []
   // The purchase, in the lane above the plot.
   const buySpec = (text: string): LabelSpec => {
     const w = Math.ceil(textWidth(text, 12, 700)) + 4

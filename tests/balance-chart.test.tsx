@@ -164,7 +164,12 @@ describe('chart layout', () => {
         const { g, placed, rules, story, low, obstacles } = model
         const series = [model.values, ...(model.p4Values ? [model.p4Values] : [])]
         const lowBox = placed.find((box) => box.id === 'low')
-        expect(lowBox, state.name).toBeTruthy()
+        // Only on a phone with Pay in 4 open may the pill give way; the comparison rows (and
+        // the ring) still state that low.
+        if (!lowBox) {
+          expect(width < 480 && state.p4 && !!model.p4Low, state.name).toBe(true)
+          continue
+        }
         // The balance line is never covered. The illustrative Pay in 4 line and the purchase's
         // dotted line are clear too, except on a phone with both scenarios drawn, where no spot
         // clear of all of them exists and the pill may cross them (never a story line or a dot).
@@ -396,7 +401,7 @@ describe('BalanceChart', () => {
     )
     const key = document.querySelector('.bchart-key') as HTMLElement
     expect(within(key).getByText('Pay in full')).toBeTruthy()
-    expect(within(key).getByText('Pay in 4 · illustrative')).toBeTruthy()
+    expect(within(key).getByText('Pay in 4 from Oct 3 · illustrative')).toBeTruthy()
     const svg = screen.getByRole('img', { name: /^Projected balance/ })
     expect(svg.querySelector('.bchart-p4')).toBeTruthy()
     const dots = svg.querySelectorAll('.bchart-inst')

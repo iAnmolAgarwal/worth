@@ -3128,14 +3128,14 @@ textarea.input {
 /* Event rules: hairlines at rest, the two behind the answer at full strength. */
 .bchart-rule {
   stroke-width: 1;
-  stroke-opacity: 0.42;
+  stroke-opacity: 0.55;
   transition:
     stroke-opacity var(--d-hover) var(--ease-move),
     stroke-width var(--d-hover) var(--ease-move);
 }
 .bchart-rule.payday {
   stroke: var(--c-success);
-  stroke-opacity: 0.48;
+  stroke-opacity: 0.68;
 }
 .bchart-rule.bill {
   stroke: var(--c-navy);
@@ -3772,6 +3772,8 @@ textarea.input {
   color: var(--c-success);
 }
 .bchart-peek .act {
+  margin-left: auto;
+  white-space: nowrap;
   color: var(--c-text-2);
 }
 .bchart-pop .bc-name {

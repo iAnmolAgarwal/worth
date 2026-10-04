@@ -393,7 +393,9 @@ export function BalanceChart({
         {p4Values && (
           <span>
             <i className="k-p4" />
-            Pay in 4 · illustrative
+            {payIn4?.instalments[0]
+              ? `Pay in 4 from ${shortDate(payIn4.instalments[0].date)} · illustrative`
+              : 'Pay in 4 · illustrative'}
           </span>
         )}
         <span>
@@ -901,7 +903,9 @@ function Readout({
         ))}
         {p4 !== undefined && (
           <span className={`p4${p4 < cushionCents ? ' neg' : ''}`}>
-            {instalment ? `Pay in 4 payment ${instalment.number} of 4 · ` : 'With Pay in 4 · '}
+            {instalment
+              ? `Pay in 4: payment ${instalment.number} of 4 ${signed(-instalment.amountCents)}, lowest `
+              : 'With Pay in 4, lowest '}
             {signed(p4)}
           </span>
         )}
@@ -928,7 +932,7 @@ function Peek({ rules, points }: { rules: EventRule[]; points: ForecastPoint[] }
         </span>
         {!many && <b className={net > 0 ? 'pos' : undefined}>{signed(net, net > 0)}</b>}
         <span className="vs">balance after {signed(after)}</span>
-        <span className="act">· click for details</span>
+        <span className="act">Click for details</span>
       </div>
       <div className="r2">
         {rules.flatMap((rule) =>
