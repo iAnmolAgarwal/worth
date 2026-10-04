@@ -14,7 +14,8 @@
     "check": "npm run lint && npm run typecheck && npm test && npm run build",
     "format": "prettier --write src server shared tests eval *.ts *.json index.html",
     "format:check": "prettier --check src server shared tests eval *.ts *.json index.html",
-    "eval:live": "tsx eval/live.ts"
+    "eval:live": "tsx eval/live.ts",
+    "channel3:record": "tsx eval/channel3-record.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",

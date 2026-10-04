@@ -84,6 +84,39 @@ export interface Product {
   merchant: string
   tag?: string
 }
+/**
+ * A similar product from another store, found through Channel3. Discovery only: Worth does not sell
+ * it and never checks it out. Phase 5 saves this exact shape as a custom Saved item.
+ */
+export interface Alternative {
+  /** Channel3's product ID. */
+  id: string
+  title: string
+  /** The store's domain, such as "bestbuy.com". */
+  retailer: string
+  brand?: string
+  /** The lowest qualifying in-stock offer, in USD cents. */
+  priceCents: number
+  /** The retailer page (through Channel3's link), opened in a new tab. */
+  url: string
+  /** A Channel3-hosted product image; absent when none is hosted there. */
+  imageUrl?: string
+  availability: 'InStock'
+  source: 'channel3'
+}
+/**
+ * How alternatives were found. ok: a live Channel3 search. fixture: example results recorded
+ * earlier, shown while Channel3 is unavailable. off: nothing to show, so the panel stays hidden.
+ */
+export type AlternativesStatus = 'ok' | 'fixture' | 'off'
+export interface Alternatives {
+  status: AlternativesStatus
+  /** The generic description searched for; never a brand. */
+  query: string
+  /** The search's price ceiling: what fits today, rounded down to $25. */
+  maxPriceCents: number
+  items: Alternative[]
+}
 export interface PlanInstalment {
   date: string
   amountCents: number
@@ -326,6 +359,8 @@ export interface AppState {
     paypal: 'sandbox' | 'demo'
     paypalClientId?: string
     model?: string
+    /** Whether similar items from other stores can be shown (Channel3). */
+    alternatives?: AlternativesStatus
   }
 }
 export interface ChatMessage {
@@ -356,7 +391,13 @@ export interface PurchaseContext {
   purchaseDate?: string
 }
 export type ChatIntent =
-  'affordability' | 'subscriptions' | 'spending' | 'overview' | 'clarify' | 'off_topic'
+  | 'affordability'
+  | 'subscriptions'
+  | 'spending'
+  | 'overview'
+  | 'alternatives'
+  | 'clarify'
+  | 'off_topic'
 export interface ChatReply {
   /** Full plain-text answer: verdict or facts, plus any explanation. */
   message: string
@@ -380,6 +421,8 @@ export interface ChatReply {
   toolCalls: string[]
   /** A PayPal order Claude prepared for the user to approve. Capture stays a separate user action. */
   checkout?: CheckoutHandoff
+  /** Similar items under what fits today, from other stores. Shown only when some were found. */
+  alternatives?: Alternatives
 }
 /** What the UI needs to hand a prepared order to PayPal for approval. */
 export interface CheckoutHandoff {
