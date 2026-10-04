@@ -77,10 +77,24 @@ describe('AI eval regression gate (recorded model responses)', () => {
       expect(reply.intent, result.id).toBe('alternatives')
       expect(reply.assessment, result.id).toBeUndefined()
     }
+    // Evals never re-read prices, so recorded rows arrive without a price or link.
     const listed = cheaper.filter((r) => r.turns[0]!.reply.alternatives)
     expect(listed.length).toBeGreaterThanOrEqual(4)
-    for (const result of listed)
-      for (const item of result.turns[0]!.reply.alternatives!.items)
-        expect(item.priceCents).toBeLessThanOrEqual(44001)
+    for (const result of listed) {
+      const shown = result.turns[0]!.reply.alternatives!
+      expect(shown.maxPriceCents).toBeLessThanOrEqual(44001)
+      expect(JSON.stringify(shown.unverified ?? [])).not.toMatch(/priceCents|"url"/)
+    }
+  })
+
+  it('never searches other stores when "cheaper" is about paying, timing, options or a service', () => {
+    const negatives = results.filter((r) => r.id.startsWith('NC'))
+    expect(negatives).toHaveLength(4)
+    for (const result of negatives) {
+      const reply = result.turns[0]!.reply
+      expect(reply.intent, result.id).not.toBe('alternatives')
+      expect(reply.toolCalls, result.id).not.toContain('find_alternatives')
+      expect(reply.alternatives, result.id).toBeUndefined()
+    }
   })
 })

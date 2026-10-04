@@ -914,7 +914,14 @@ describe('finding something cheaper through Channel3 (G-C3-2)', () => {
     expect(findAlternatives).not.toHaveBeenCalled()
     expect(reply.intent).toBe('alternatives')
     expect(reply.alternatives).toBeUndefined()
-    expect(reply.message).toContain('Tell me what kind of item you’re looking for')
+    expect(reply.message).toContain(
+      'Tell me what kind of item you’d like under $440.01, such as headphones or a desk chair',
+    )
+    expect(reply.suggestions).toEqual([
+      'Find headphones under $440.01',
+      'Find desk chairs under $440.01',
+      'Find backpacks under $440.01',
+    ])
   })
   it('routes a cheaper request to the search even when the model reads it as a plan summary', async () => {
     const findAlternatives = search()
@@ -986,5 +993,90 @@ describe('finding something cheaper through Channel3 (G-C3-2)', () => {
       'Worth couldn’t find similar items from other stores right now.',
     )
     expect(fallbackReply(ask('Is there something cheaper?'), demo()).intent).toBe('alternatives')
+  })
+
+  it('names the limit and offers one-tap searches for “what can I buy under $300?”', async () => {
+    const findAlternatives = search()
+    const { provider } = model([find({ max_price_cents: 30000 })])
+    const reply = await provider.reply(ask('What can I buy under $300?'), demo(), {
+      findAlternatives,
+    })
+    expect(findAlternatives).not.toHaveBeenCalled()
+    expect(reply.message).toContain('Tell me what kind of item you’d like under $300')
+    expect(reply.suggestions[0]).toBe('Find headphones under $300')
+    const chip = await localReply(ask(reply.suggestions[0]!), demo(), undefined, {
+      findAlternatives,
+    })
+    expect(chip.intent).toBe('alternatives')
+    expect(findAlternatives).toHaveBeenCalledWith('over-ear headphones', 30000)
+  })
+})
+
+describe('questions that say “cheaper” but are not product searches (verdict finding 1)', () => {
+  const NOT_SEARCHES = [
+    'Is Pay in 4 cheaper than paying now?',
+    'Is it cheaper to wait?',
+    'Would it be cheaper to wait until next month?',
+    'Which option is cheapest for the chair?',
+    'I need a cheaper phone plan',
+    'Show me cheaper flights to Denver',
+  ]
+  it.each(NOT_SEARCHES)('keeps the model’s own answer to “%s”', async (message) => {
+    const findAlternatives = vi.fn()
+    const { provider, log } = model([final('overview')])
+    const reply = await provider.reply(
+      ask(message, { context: { amountCents: 119900, itemName: 'camera', purchaseDate: TODAY } }),
+      demo(),
+      { findAlternatives },
+    )
+    expect(reply.intent).not.toBe('alternatives')
+    expect(findAlternatives).not.toHaveBeenCalled()
+    expect(log).not.toHaveBeenCalledWith({ event: 'alternatives_override' })
+  })
+  it.each(NOT_SEARCHES)('never searches for “%s” in local mode', async (message) => {
+    const findAlternatives = vi.fn()
+    const reply = await localReply(ask(message), demo(), undefined, { findAlternatives })
+    expect(reply.intent).not.toBe('alternatives')
+    expect(findAlternatives).not.toHaveBeenCalled()
+  })
+  it('does not override another reading the model chose, even for a real cheaper request', async () => {
+    const findAlternatives = vi.fn()
+    const { provider } = model([readTool('list_commitments', { kind: 'bills' })])
+    const reply = await provider.reply(ask('Is there something cheaper?'), demo(), {
+      findAlternatives,
+    })
+    expect(reply.intent).toBe('subscriptions')
+    expect(findAlternatives).not.toHaveBeenCalled()
+  })
+  it('in local mode, assesses a priced item first and then lists cheaper ones', async () => {
+    const findAlternatives = vi.fn(async (query: string, max: number) => ({
+      status: 'ok' as const,
+      query,
+      maxPriceCents: max,
+      items: [],
+    }))
+    const reply = await localReply(
+      ask('Can I afford a $300 jacket? Or something cheaper?'),
+      demo(),
+      undefined,
+      { findAlternatives },
+    )
+    expect(reply.intent).toBe('affordability')
+    expect(reply.assessment?.amountCents).toBe(30000)
+    expect(findAlternatives).toHaveBeenCalledWith('jacket', 30000)
+  })
+  it('refuses the search when the model asks for one on a question about options or a service', async () => {
+    const findAlternatives = vi.fn()
+    const { provider, create } = model([
+      [tool('find_alternatives', { item: 'chair', max_price_cents: null, ...shown() })],
+      final('overview'),
+    ])
+    const reply = await provider.reply(ask('Which option is cheapest for the chair?'), demo(), {
+      findAlternatives,
+    })
+    const result = request(create, 1).messages.at(-1)!.content as { is_error?: boolean }[]
+    expect(result[0]!.is_error).toBe(true)
+    expect(findAlternatives).not.toHaveBeenCalled()
+    expect(reply.intent).not.toBe('alternatives')
   })
 })

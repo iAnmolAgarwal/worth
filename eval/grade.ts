@@ -242,6 +242,10 @@ export function gradeReply(reply: ChatReply, expect: Expectation, data: GradeDat
   }
   for (const tool of expect.tools ?? [])
     if (!reply.toolCalls.includes(tool)) misses.push(`model did not call ${tool}`)
+  if (expect.notIntents?.includes(reply.intent))
+    misses.push(`intent ${reply.intent} must not answer this message`)
+  if (expect.notIntents?.includes('alternatives') && reply.toolCalls.includes('find_alternatives'))
+    misses.push('searched other stores for a question that is not a product search')
   if (expect.intents && !expect.intents.includes(reply.intent))
     misses.push(`intent ${reply.intent}, expected ${expect.intents.join('/')}`)
   for (const text of expect.mustNotContain ?? [])

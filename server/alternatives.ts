@@ -1,10 +1,10 @@
 import { assessPurchase } from '../shared/finance.ts'
 import { PRODUCTS } from '../shared/seed.ts'
-import type { FinancialProfile, Product, Purchase } from '../shared/types.ts'
+import type { FinancialProfile, Purchase } from '../shared/types.ts'
 
 /**
  * What Worth searches other stores for. Catalog items use a fixed generic description, never the
- * demo store's name or a brand; anything else is reduced to a few plain words.
+ * demo store's name or a brand.
  */
 export const CATALOG_QUERIES: Record<string, string> = {
   camera: 'interchangeable lens camera',
@@ -12,90 +12,133 @@ export const CATALOG_QUERIES: Record<string, string> = {
   chair: 'desk chair',
   backpack: 'travel backpack',
 }
+/** A bare category that is a catalog item searches with that item's description. */
+const CATALOG_BY_NOUN: Record<string, string> = {
+  camera: CATALOG_QUERIES.camera!,
+  headphones: CATALOG_QUERIES.headphones!,
+  chair: CATALOG_QUERIES.chair!,
+  backpack: CATALOG_QUERIES.backpack!,
+}
 
-/** Widely known brand names, left out of searches built from the user's own words. */
-const BRANDS = new Set(
+/**
+ * The only words a search can be built from: plain kinds of product, each mapped to the phrase sent.
+ * Anything else the person wrote (names, brands, models, health or relationship details) is never
+ * sent; with no listed kind of product, nothing is searched for at all.
+ */
+const CATEGORIES: Record<string, string> = Object.fromEntries(
   (
-    'apple iphone ipad macbook airpods sony canon nikon fujifilm fuji panasonic lumix olympus leica ' +
-    'gopro dji samsung galaxy google pixel microsoft surface xbox playstation nintendo switch bose ' +
-    'sennheiser beats jbl sonos dyson lg dell hp lenovo asus acer razer logitech ikea herman miller ' +
-    'steelcase nike adidas puma reebok patagonia north face lululemon peloton kitchenaid vitamix ' +
-    'instant pot amazon kindle echo fitbit garmin oneplus xiaomi huawei tesla rolex gucci prada'
+    [
+      ['camera cameras', 'camera'],
+      ['lens lenses', 'camera lens'],
+      ['headphones headphone earbuds earphones headset', 'headphones'],
+      ['speaker speakers', 'speaker'],
+      ['chair chairs', 'chair'],
+      ['desk desks', 'desk'],
+      ['sofa sofas couch couches', 'sofa'],
+      ['table tables', 'table'],
+      ['lamp lamps', 'lamp'],
+      ['mattress mattresses', 'mattress'],
+      ['bookshelf bookshelves bookcase', 'bookshelf'],
+      ['backpack backpacks', 'backpack'],
+      ['bag bags', 'bag'],
+      ['suitcase suitcases luggage', 'suitcase'],
+      ['laptop laptops notebook', 'laptop'],
+      ['tablet tablets', 'tablet'],
+      ['phone phones smartphone smartphones', 'smartphone'],
+      ['monitor monitors', 'monitor'],
+      ['keyboard keyboards', 'keyboard'],
+      ['printer printers', 'printer'],
+      ['tv tvs television televisions', 'television'],
+      ['console consoles', 'game console'],
+      ['watch watches smartwatch', 'watch'],
+      ['jacket jackets coat coats', 'jacket'],
+      ['shoes sneakers boots trainers', 'shoes'],
+      ['sweater sweaters', 'sweater'],
+      ['jeans', 'jeans'],
+      ['bike bikes bicycle bicycles', 'bicycle'],
+      ['tent tents', 'tent'],
+      ['blender blenders', 'blender'],
+      ['kettle kettles', 'kettle'],
+      ['vacuum vacuums', 'vacuum cleaner'],
+      ['stroller strollers', 'stroller'],
+      ['ring rings', 'ring'],
+      ['necklace necklaces', 'necklace'],
+    ] as const
+  ).flatMap(([words, query]) => words.split(' ').map((word) => [word, query])),
+)
+/** Generic words that may stay in front of a kind of product: "office chair", "running shoes". */
+const MODIFIERS = new Set(
+  (
+    'office standing gaming ergonomic mirrorless digital instant wireless bluetooth over-ear ' +
+    'noise-cancelling running hiking walking winter rain leather wool travel electric smart ' +
+    'portable compact kids lounge dining coffee side floor desk carry-on camera laptop'
   ).split(' '),
 )
-const FILLER = new Set(
-  (
-    'a an the my me i it its this that these those what which new some any another other cheaper ' +
-    'cheapest cheap similar same kind sort type of for to buy get one thing things item items stuff ' +
-    'something anything under below less than more but keeps keep cushion today store instead'
-  ).split(' '),
+/** "phone plan", "phone case": the word names something else, so it is not that product. */
+const NOT_THE_PRODUCT = new Set(
+  'plan plans bill bills service contract insurance case cover repair charger strap battery subscription'.split(
+    ' ',
+  ),
 )
 
 /**
- * A short, generic search phrase from free text: lowercase letters only, no brands, model numbers,
- * prices or filler, at most four words. Undefined when nothing generic is left.
+ * The search phrase for free text, from the category allowlist only: the last listed kind of
+ * product, with one listed modifier in front of it. Undefined when no kind of product is named.
  */
-export function genericQuery(text: string | undefined): string | undefined {
+export function categoryOf(text: string | undefined): string | undefined {
   if (!text) return undefined
-  const words = text
+  const tokens = text
     .toLowerCase()
     .replace(/[’']s\b/g, '')
-    .split(/[^a-z0-9-]+/)
-    .filter((word) => word.length > 1 && !/\d/.test(word) && !BRANDS.has(word) && !FILLER.has(word))
-    .map((word) => word.replace(/^-+|-+$/g, ''))
+    .split(/[^a-z-]+/)
     .filter(Boolean)
-  const phrase = [...new Set(words)].slice(0, 4).join(' ')
-  return phrase.length >= 3 ? phrase : undefined
+  for (let i = tokens.length - 1; i >= 0; i--) {
+    const query = CATEGORIES[tokens[i]!]
+    if (!query || NOT_THE_PRODUCT.has(tokens[i + 1] ?? '')) continue
+    const before = tokens[i - 1]
+    const modifier = before && MODIFIERS.has(before) && !query.includes(before) ? before : ''
+    if (!modifier && CATALOG_BY_NOUN[query]) return CATALOG_BY_NOUN[query]
+    return modifier ? `${modifier} ${query}` : query
+  }
+  return undefined
 }
 
-const words = (text: string) => new Set(text.toLowerCase().match(/[a-z]{3,}/g) ?? [])
-/**
- * The catalog item a name refers to when every generic word in it belongs to that item's name:
- * "camera" and "a new camera" are the Everyday camera; "camera bag" is not.
- */
-export function catalogItem(name: string | undefined): Product | undefined {
-  const said = [...words(genericQuery(name)?.replace(/s\b/g, '') ?? '')]
-  if (!said.length) return undefined
-  return PRODUCTS.find((product) => {
-    const own = words(product.name.replace(/s\b/gi, ''))
-    return said.every((word) => own.has(word))
-  })
-}
-
-const NAMED =
-  /\b(?:cheaper|cheapest|less expensive|lower[- ]priced|more affordable|similar|another|budget)\s+([a-z][a-z -]{2,40}?)(?=\s+(?:than|under|below|for|that|which|to|i|with|from|in|at|on|but)\b|[?.!,]|$)/i
-/**
- * The kind of item a request for something cheaper names, read locally: a catalog item ("a
- * cheaper camera") or the words after "cheaper" or "similar". Undefined when none is named.
- */
-export function mentionedItem(message: string): string | undefined {
-  const said = words(message.replace(/s\b/gi, ''))
-  const product = PRODUCTS.find((p) =>
-    [...words(p.name.replace(/s\b/gi, ''))].some(
-      (word) => !NAME_ADJECTIVES.has(word) && said.has(word),
-    ),
-  )
-  if (product) return product.name
-  const named = message.match(NAMED)?.[1]
-  return genericQuery(named) ? named : undefined
-}
-const NAME_ADJECTIVES = new Set(['everyday', 'studio', 'desk', 'travel'])
-
-/** The search phrase for an item: the catalog's generic description, or the generic words. */
+/** The search phrase for an item: the catalog's description, or a listed category, or nothing. */
 export function queryFor(item: { productId?: string; itemName?: string }): string | undefined {
-  const product = item.productId
-    ? PRODUCTS.find((p) => p.id === item.productId)
-    : catalogItem(item.itemName)
-  if (product) return CATALOG_QUERIES[product.id]
-  return genericQuery(item.itemName)
+  if (item.productId) return CATALOG_QUERIES[item.productId]
+  const name = item.itemName?.trim()
+  const product = PRODUCTS.find((p) => p.name.toLowerCase() === name?.toLowerCase())
+  return product ? CATALOG_QUERIES[product.id] : categoryOf(name)
 }
 
-/**
- * The person asked for something cheaper or similar for less: "something cheaper", "what can I buy
- * under $300", "the cheapest thing that keeps my cushion", "similar but less", "a cheaper camera".
- */
+/** Words that ask for something cheaper or similar for less. */
 export const ALTERNATIVES_CUE =
-  /\b(?:cheaper|cheapest|less expensive|lower[- ]priced|more affordable|budget (?:version|option|alternative)s?|alternatives?|similar\b[^.?!]{0,30}\b(?:less|cheaper|under|lower)|what (?:else )?(?:can|could) i (?:buy|get|afford) (?:for |with )?(?:under|below|for less than|up to)|(?:anything|something|items?|things?) (?:under|below|for less than)\s*\$)/i
+  /\b(?:cheaper|cheapest|less expensive|lower[- ]priced|more affordable|budget (?:version|option|alternative)s?|alternatives?|similar\b[^.?!]{0,30}\b(?:less|cheaper|under|lower)|what (?:else )?(?:can|could) i (?:buy|get|afford) (?:for |with )?(?:under|below|for less than|up to)|(?:anything|something|items?|things?) (?:under|below|for less than)\s*\$|(?:find|show me|search for|look for|any)\b[^.?!]{0,40}\b(?:under|below|for less than)\s*\$)/i
+/**
+ * Questions that use "cheaper" about paying, timing or the plan, never about another product: "Is
+ * Pay in 4 cheaper than paying now?", "Is it cheaper to wait?", "Which option is cheapest?", "a
+ * cheaper phone plan".
+ */
+const NOT_ALTERNATIVES =
+  /\bpay\s*(?:in\s*(?:4|four)|later|over time)\b|\binstal+ments?\b|\bbnpl\b|\bfinanc\w*|\bwait(?:ing|ed)?\b|\blater\b|\bnext (?:week|month|year)\b|\bpay ?(?:check|day)s?\b|\boptions?\b|\bplans?\b|\bbills?\b|\bsubscriptions?\b|\b(?:cheaper|cheapest|less expensive)\s+(?:than|to|if|when|by)\b|\b(?:paying|buy(?:ing)?) (?:it )?now\b/i
+/** A question that uses "cheaper" about paying, timing, the options or a service. */
+export const notProductSearch = (message: string) => NOT_ALTERNATIVES.test(message)
+/** A thing to find: a product, or a general object such as "something" or "what can I buy". */
+const GENERIC_OBJECT =
+  /\b(?:something|anything|things?|items?|stuff|ones?|alternatives?|similar|what (?:else )?(?:can|could) i (?:buy|get|afford))\b/i
+
+/**
+ * The person asked for a cheaper or similar product: "something cheaper", "what can I buy under
+ * $300", "the cheapest thing that keeps my cushion", "similar but less", "a cheaper camera". Never
+ * questions about Pay in 4, waiting, the options or a plan, or a cheaper service like flights.
+ */
+export function wantsAlternatives(message: string) {
+  return (
+    ALTERNATIVES_CUE.test(message) &&
+    !NOT_ALTERNATIVES.test(message) &&
+    (categoryOf(message) !== undefined || GENERIC_OBJECT.test(message))
+  )
+}
 
 /**
  * The most that can be spent today while keeping the cushion: the Spend less amount. Zero while
@@ -105,3 +148,6 @@ export function roomToday(profile: FinancialProfile, purchases: Purchase[], toda
   const base = assessPurchase(profile, purchases, { amountCents: 0, today, findEarliest: false })
   return base.outcome === 'incomplete' ? 0 : base.maxAffordableCents
 }
+
+/** Categories offered as one-tap searches when a cheaper request names no kind of item. */
+export const SUGGESTED_CATEGORIES = ['Headphones', 'Desk chairs', 'Backpacks', 'Cameras']
