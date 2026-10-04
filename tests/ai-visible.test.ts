@@ -420,6 +420,13 @@ describe('one Claude sentence with engine placeholders only (C-13)', () => {
         'tight',
       ),
     ).toEqual({ ok: false, reason: 'contradicts_result' })
+    expect(
+      checkSentence(
+        'Pay in 4 keeps the {price} total, so the low point is still {p4_low_point}.',
+        values,
+        'tight',
+      ),
+    ).toEqual({ ok: false, reason: 'contradicts_result' })
     const own = checkSentence(
       'With Pay in 4 your lowest point would be {p4_low_point} around {p4_low_day}; {p4_collision}.',
       values,

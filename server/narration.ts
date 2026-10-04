@@ -776,6 +776,11 @@ export function checkSentence(
     /\{(?:low_point|low_day|gap|stress_low)\}/.test(sentence)
   )
     return { ok: false, reason: 'contradicts_result' }
+  // The instalment low point differs from the full-price one: never "still" or "the same".
+  if (
+    /\b(?:still|unchanged|same|again)\s+(?:[a-z']+\s+){0,2}\{p4_low_(?:point|day)\}/i.test(sentence)
+  )
+    return { ok: false, reason: 'contradicts_result' }
   // A tight result may still say what would fit: waiting, or spending less.
   const conditional = /\{(?:wait_day|max_spend)\}/.test(sentence)
   if (
