@@ -29,9 +29,11 @@ const isoDate = z
     return !Number.isNaN(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === value
   }, 'Use a valid calendar date')
 const option = z.enum(['buyToday', 'wait', 'spendLess'])
-// Labels must be plain text before they are shown or sent anywhere.
+// Labels must be plain text before they are shown or sent anywhere: no control characters,
+// zero-width marks or bidirectional overrides that could disguise a name.
 // oxlint-disable-next-line no-control-regex
-const plain = (value: string) => !/[\u0000-\u001F\u007F]/.test(value)
+const NOT_PLAIN = /[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/
+const plain = (value: string) => !NOT_PLAIN.test(value)
 const catalogSave = z
   .object({
     kind: z.literal('catalog'),

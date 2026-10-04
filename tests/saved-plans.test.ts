@@ -188,6 +188,12 @@ describe('saved items on the server', () => {
       { url: 'http://shop.example.com/camera' },
       { url: 'javascript:alert(1)' },
       { name: 'Bad\u0007name' },
+      // Pre-merge judge finding 10: C1 controls, zero-width marks and bidi overrides.
+      { name: 'x\u202Eevil' },
+      { name: 'x\u2066evil' },
+      { name: 'x\u200Bevil' },
+      { name: 'x\u0085evil' },
+      { retailer: 'Shop\u202E' },
       { amountCents: 0 },
       { amountCents: 12.5 },
       { waitDate: '2026-10-03' },
