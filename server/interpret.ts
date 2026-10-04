@@ -1,12 +1,15 @@
 import { z } from 'zod'
 import { addDays, getUpcomingFlows, money } from '../shared/finance.ts'
+import { PRODUCTS } from '../shared/seed.ts'
 import type {
   ChatMessage,
   FinancialProfile,
   Interpretation,
   InterpretedItem,
+  Product,
   Purchase,
   PurchaseContext,
+  RememberedItem,
   Transaction,
   PayIn4Eligibility,
 } from '../shared/types.ts'
@@ -27,6 +30,8 @@ export interface ChatInput {
   message: string
   history: ChatMessage[]
   context?: PurchaseContext
+  /** Items assessed earlier in this conversation, most recent last. */
+  items?: RememberedItem[]
 }
 export interface ChatData {
   profile: FinancialProfile
@@ -204,6 +209,188 @@ export function mentionsItem(message: string, itemName: string | undefined) {
   return words(itemName!).some((w) => !ITEM_STOP.has(w) && text.has(w))
 }
 
+// ---- Whole-name matching ------------------------------------------------------------
+// A catalog price, or a price remembered from earlier in the conversation, is used only when the
+// message names that item as a whole phrase. "The camera?" names the camera; "a camera bag",
+// "a Sony camera" and "a MacBook Air" name other things, so their price is asked for instead.
+
+const stemWord = (w: string) => w.replace(/'s$/, '').replace(/(?<=[a-z]{3})(?:es|s)$/, '')
+const PRICE_TOKEN = '<price>'
+const BOUNDARY = '<.>'
+/** A text's words in order (stemmed), with stated prices and punctuation kept as markers. */
+function phraseTokens(text: string): string[] {
+  return (
+    text
+      .toLowerCase()
+      .replace(/[’]/g, "'")
+      .replace(/(?:\$|\busd\s?)\s?\d[\d,]*(?:\.\d+)?\s?(?:k|m)?\b/g, ` ${PRICE_TOKEN} `)
+      .match(/<price>|[a-z0-9][a-z0-9']*|[.,!?;:()"]/g) ?? []
+  ).map((token) =>
+    token === PRICE_TOKEN
+      ? token
+      : /^[.,!?;:()"]$/.test(token)
+        ? BOUNDARY
+        : /^[a-z]/.test(token)
+          ? stemWord(token)
+          : token,
+  )
+}
+const stemmed = (list: string[]) => new Set(list.map(stemWord))
+/** Words that may come right before an item's name without changing which item it is. */
+const LEAD_OK = stemmed([
+  ...['a', 'an', 'the', 'this', 'that', 'these', 'those', 'my', 'your', 'our', 'their', 'his'],
+  ...['her', 'its', 'one', 'same', 'new', 'and', 'or', 'of', 'for', 'on', 'at', 'in', 'to'],
+  ...['with', 'about', 'than', 'vs', 'versus', 'from', 'into', 'between', 'like', 'not', 'no'],
+  ...['afford', 'buy', 'buying', 'get', 'getting', 'purchase', 'purchasing', 'order', 'grab'],
+  ...['want', 'need', 'eyeing', 'considering', 'consider', 'check', 'checking', 'save'],
+  ...['saving', 'pay', 'paying', 'split', 'splitting', 'finance', 'financing', 'return', 'go'],
+  ...['take', 'pick', 'choose', 'prefer', 'rather', 'try', 'is', 'was', 'are', 'if', 'but'],
+  ...['so', 'then', 'also', 'just', 'really', 'still', 'actually', 'maybe', 'instead', 'what'],
+  ...['how', 'which', 'back', 'i', 'me', 'we', 'you', 'it', 'either', 'both', 'do', 'does'],
+  ...['did', 'can', 'could', 'would', 'should', 'will', 'over', 'larkspur', 'store'],
+])
+/** Words that may come right after an item's name without making it part of another noun. */
+const FOLLOW_OK = stemmed([
+  ...['and', 'or', 'but', 'if', 'so', 'then', 'now', 'today', 'tonight', 'tomorrow', 'instead'],
+  ...['again', 'too', 'either', 'anyway', 'though', 'also', 'still', 'yet', 'right', 'really'],
+  ...['first', 'already', 'just', 'actually', 'is', 'are', 'was', 'were', 'be', 'would', 'will'],
+  ...['could', 'should', 'can', 'do', 'does', 'did', 'fit', 'fits', 'work', 'works', 'cost'],
+  ...['costs', 'worth', 'for', 'with', 'without', 'on', 'at', 'in', 'by', 'before', 'after'],
+  ...['until', 'till', 'from', 'via', 'using', 'through', 'over', 'under', 'this', 'that'],
+  ...['next', 'i', "i'm", 'you', 'it', 'we', 'me', 'my', 'vs', 'versus', 'than', 'as', 'like'],
+  ...['when', 'where', 'why', 'how', 'what', 'which', 'who', 'outright', 'upfront', 'there'],
+  ...['here', 'a', 'an', 'the', 'plus', 'price', 'pay', 'split', 'rn', 'asap', 'soon', 'later'],
+  ...['sometime', 'please', 'make', 'go', 'take', 'put', 'push', 'leave', 'end', 'look'],
+  ...['seem', 'sound', 'feel', 'hurt', 'affect', 'change', 'compare', 'compared', 'any'],
+  ...['together', 'each', 'both', 'all', 'combined', 'well', 'or', 'nor', 'instead'],
+  PRICE_TOKEN,
+])
+const COUNT_LEAD = new Set(['two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'])
+const TIME_UNIT = stemmed(['day', 'week', 'month', 'year', 'hour'])
+const MONTH_WORD = /^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*$/
+
+/**
+ * Each place a text names an item as a whole phrase: an anchor word widened over the item's own
+ * name words, with nothing attached before or after that would make it a different item.
+ * `counted` marks a phrase with a number in front ("two cameras").
+ */
+function phraseMentions(tokens: string[], anchors: Set<string>, nameWords: Set<string>) {
+  const found: { counted: boolean }[] = []
+  for (let i = 0; i < tokens.length; i++) {
+    if (!anchors.has(tokens[i]!)) continue
+    let start = i
+    let end = i
+    while (start > 0 && nameWords.has(tokens[start - 1]!)) start--
+    while (end < tokens.length - 1 && nameWords.has(tokens[end + 1]!)) end++
+    const before = tokens[start - 1]
+    const after = tokens[end + 1]
+    const counted = before !== undefined && (/^\d+$/.test(before) || COUNT_LEAD.has(before))
+    const leadOk = before === undefined || before === BOUNDARY || LEAD_OK.has(before) || counted
+    const followOk =
+      after === undefined ||
+      after === BOUNDARY ||
+      FOLLOW_OK.has(after) ||
+      TIMING_WORD.test(after) ||
+      MONTH_WORD.test(after) ||
+      // "the camera 2 weeks from now", but not "AirPods 3".
+      (/^\d+$/.test(after) && TIME_UNIT.has(tokens[end + 2] ?? ''))
+    if (leadOk && followOk) found.push({ counted })
+    i = end
+  }
+  return found
+}
+const STOP_STEMMED = stemmed([...ITEM_STOP])
+/**
+ * Whether a message names an item as a whole phrase ("is the camera still fine?"), not as part of
+ * another item's name ("a camera bag"). A counted mention ("two cameras") counts only on request.
+ */
+export function namesItem(
+  message: string,
+  itemName: string | undefined,
+  options: { counted?: boolean } = {},
+) {
+  if (isGeneric(itemName)) return false
+  const name = phraseTokens(itemName!).filter((t) => t !== BOUNDARY && t !== PRICE_TOKEN)
+  const anchors = new Set(name.filter((t) => !STOP_STEMMED.has(t) && !/^\d+$/.test(t)))
+  if (!anchors.size) return false
+  return phraseMentions(phraseTokens(message), anchors, new Set(name)).some(
+    (m) => options.counted || !m.counted,
+  )
+}
+const productWords = new Map(
+  PRODUCTS.map((product) => {
+    const anchors = new Set((product.aliases ?? []).flatMap(phraseTokens))
+    const name = new Set([...phraseTokens(product.name), ...anchors])
+    return [product.id, { anchors, name }] as const
+  }),
+)
+/**
+ * Demo-store items a text names as a whole phrase ("the camera", "a MacBook", "the MacBook
+ * Pro"). A counted mention ("two cameras") is included only on request, where the quantity is
+ * checked separately.
+ */
+export function catalogMentions(text: string, options: { counted?: boolean } = {}): Product[] {
+  const tokens = phraseTokens(text)
+  return PRODUCTS.filter((product) => {
+    const { anchors, name } = productWords.get(product.id)!
+    return phraseMentions(tokens, anchors, name).some((m) => options.counted || !m.counted)
+  })
+}
+/**
+ * The catalog item an interpreted item names, when the message names it too. Its price is the
+ * store's own, so it counts as grounded even though the user wrote no amount (judge fix #3).
+ * Both must name the item as a whole: "camera bag" or "Sony camera" is not the store's camera.
+ */
+export function catalogItemFor(name: string, message: string): Product | undefined {
+  const inName = catalogMentions(name, { counted: true })
+  const named = catalogMentions(message, { counted: true }).filter((product) =>
+    inName.includes(product),
+  )
+  return named.length === 1 ? named[0] : undefined
+}
+/** Whether a context is a catalog item at its catalog price, so its chip names the store price. */
+function catalogContext(context: PurchaseContext) {
+  return PRODUCTS.some(
+    (product) => product.name === context.itemName && product.priceCents === context.amountCents,
+  )
+}
+
+const rememberedSchema = z
+  .array(
+    z.object({
+      amountCents: z.number().int().min(1).max(100_000_000),
+      itemName: z.string().max(150).optional(),
+    }),
+  )
+  .max(12)
+/**
+ * Moves the conversation to the item a message returns to, without a new price: an item assessed
+ * earlier in the conversation (most recent first), or else a demo-store item at its catalog price.
+ * "Split the camera" after asking about headphones is about the camera again.
+ */
+export function focusInput(input: ChatInput): ChatInput {
+  const message = input.message
+  if (priceMentions(extractMoneyMentions(message)).length) return input
+  const context = validContext(input)
+  if (context && namesItem(message, context.itemName)) return input
+  const parsed = rememberedSchema.safeParse(input.items ?? [])
+  // A counted mention ("two cameras") keeps its quantity, so it never moves the conversation.
+  const remembered = (parsed.success ? parsed.data : [])
+    .filter((item) => namesItem(message, item.itemName))
+    .reverse()
+  const products = catalogMentions(message)
+  const target: PurchaseContext | undefined =
+    remembered.length &&
+    // Two different remembered items named at once stay a question for the user.
+    remembered.every((item) => sameItem(item.itemName, remembered[0]!.itemName))
+      ? { amountCents: remembered[0]!.amountCents, itemName: remembered[0]!.itemName }
+      : !remembered.length && products.length === 1
+        ? { amountCents: products[0]!.priceCents, itemName: products[0]!.name }
+        : undefined
+  if (!target) return input
+  return { ...input, context: target }
+}
+
 const NOT_ITEMS = new Set([
   ...ITEM_STOP,
   'another',
@@ -244,9 +431,27 @@ const NOT_ITEMS = new Set([
   'answer',
   'version',
   'model',
+  // Words that judge the purchase ("is that fine"), never an item.
+  'fine',
+  'okay',
+  'ok',
+  'good',
+  'bad',
+  'safe',
+  'smart',
+  'wise',
+  'possible',
+  'enough',
+  'realistic',
+  'reasonable',
+  'alright',
+  'doable',
 ])
 /** Whether the message names an item other than the one being discussed. */
 export function namesOtherItem(message: string, itemName: string | undefined) {
+  // The item's word used inside another name ("a camera bag", "a Sony camera") is another item.
+  if (mentionsItem(message, itemName) && !namesItem(message, itemName, { counted: true }))
+    return true
   const named = new Set<string>()
   const local = localItemName(message)
   if (local) named.add(local)
@@ -484,7 +689,7 @@ export function validateInterpretation(
   const groundable = groundableAmounts(mentions)
   const prices = priceMentions(mentions)
   const context = validContext(input)
-  const items = raw.items.filter((item) => item.name.trim() || item.amount_cents !== null)
+  let items = raw.items.filter((item) => item.name.trim() || item.amount_cents !== null)
   const stated = prices.map((m) => describe(m.cents)).join(', ')
   const pendingName = (name?: string) =>
     name ? groundedItemName(name, message, context) : undefined
@@ -535,10 +740,23 @@ export function validateInterpretation(
             : (pendingName(items[0]?.name) ?? 'Your purchase'),
         amountCents: context.amountCents,
         quantity: 1,
+        ...(catalogContext(context) ? { priceSource: 'catalog' as const } : {}),
       },
     ]
   } else {
-    if (!items.length || items.every((item) => item.amount_cents === null))
+    // A message that names one demo-store item, while Claude reported none, is about that item.
+    const named = !items.length && !prices.length ? catalogMentions(message) : []
+    if (named.length === 1)
+      items = [{ name: named[0]!.aliases![0]!, amount_cents: null, currency: 'USD', quantity: 1 }]
+    // A demo-store item named without a price is read at the store's price.
+    const catalog = items.map((item) =>
+      item.amount_cents === null || !groundable.some((m) => m.cents === item.amount_cents)
+        ? catalogItemFor(item.name, message)
+        : undefined,
+    )
+    const unpriced = (item: (typeof items)[number], index: number) =>
+      item.amount_cents === null && !catalog[index]
+    if (!items.length || items.every(unpriced))
       return prices.length
         ? {
             ok: false,
@@ -553,7 +771,18 @@ export function validateInterpretation(
             detail: 'The user did not state a price in US dollars. Ask for the total price.',
           }
     read = []
-    for (const item of items) {
+    for (const [index, item] of items.entries()) {
+      const product = catalog[index]
+      if (product && (item.amount_cents === null || item.amount_cents === product.priceCents)) {
+        read.push({
+          name: product.name,
+          amountCents: product.priceCents,
+          // A catalog price is per item, so only the count next to the item has to be written.
+          quantity: quantityStated(`${message} each`, item.quantity, item.name) ? item.quantity : 1,
+          priceSource: 'catalog',
+        })
+        continue
+      }
       if (item.amount_cents === null)
         return {
           ok: false,
@@ -677,6 +906,7 @@ export function localInterpretation(input: ChatInput, data: ChatData): Interpret
       detail: 'More than one amount was stated.',
     }
   let item: InterpretedItem
+  const products = catalogMentions(message)
   if (followUp) {
     item = {
       name:
@@ -685,6 +915,15 @@ export function localInterpretation(input: ChatInput, data: ChatData): Interpret
           : (named ?? 'Your purchase'),
       amountCents: context.amountCents,
       quantity: 1,
+      ...(catalogContext(context) ? { priceSource: 'catalog' as const } : {}),
+    }
+  } else if (!prices.length && products.length === 1) {
+    // A demo-store item named without a price is read at the store's price.
+    item = {
+      name: products[0]!.name,
+      amountCents: products[0]!.priceCents,
+      quantity: 1,
+      priceSource: 'catalog',
     }
   } else if (prices.length === 1) {
     const each = message.match(

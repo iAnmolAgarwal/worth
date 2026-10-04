@@ -180,7 +180,8 @@ function modelKey(title: string, brand: string | undefined) {
   return model ? `${(brand ?? '').toLowerCase()}|${model}` : title.toLowerCase()
 }
 /** The store's own page link: Channel3's buy link, or a page on the offer's own domain. */
-const storeLink = (url: unknown, retailer: string) =>
+/** A buy link Channel3 allows: its own redirect or the store's own domain, https, no credentials. */
+export const storeLink = (url: unknown, retailer: string) =>
   httpsUrl(
     url,
     (host) => host === 'buy.trychannel3.com' || host === retailer || host.endsWith(`.${retailer}`),

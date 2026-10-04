@@ -309,6 +309,27 @@ export function leadInText(lead: LeadIn, outcome: Assessment['outcome'] | undefi
   return LEAD_INS[lead] || undefined
 }
 
+const REFUSAL_LEADS = new Set<LeadIn>(['no_skipping', 'no_credit', 'no_cushion', 'not_yes'])
+export const isRefusal = (lead: LeadIn | undefined) => Boolean(lead && REFUSAL_LEADS.has(lead))
+/** A refusal on its own, for an answer with no facts after it (a clarifying question). */
+export function refusalLine(lead: LeadIn) {
+  return LEAD_INS[lead].split(/(?<=\.) /)[0]!
+}
+const BILL =
+  /\b(?:rent|bills?|utilit(?:y|ies)|insurance|loan|phone\s+plan|mortgage|car\s+payment|student\s+loan)\b/i
+const SKIP =
+  /\b(?:skip\w*|delay\w*|defer\w*|postpon\w*|late|miss(?:ing)?|hold\s+off\s+on|put\s+off)\b/i
+/**
+ * The refusal a message calls for, read from the user's own words: skipping or paying a bill late
+ * to make a purchase fit ("I could pay rent a week late"). It applies even when Claude chose none,
+ * or when the purchase itself still needs a question.
+ */
+export function refusalFor(message: string): LeadIn | undefined {
+  return message.split(/[.!?;]+/).some((clause) => BILL.test(clause) && SKIP.test(clause))
+    ? 'no_skipping'
+    : undefined
+}
+
 // ---- Follow-up chips ---------------------------------------------------------------
 
 // Chips are questions in the user's voice. Claude writes them before it sees any result,

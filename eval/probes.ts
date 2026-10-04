@@ -27,6 +27,8 @@ export interface Expectation {
   tools?: string[]
   /** Intents that must not answer this message, such as a product search for a Pay in 4 question. */
   notIntents?: ChatIntent[]
+  /** The lead-in the answer must open with, such as the refusal to skip a bill. */
+  lead?: RegExp
 }
 export interface ProbeTurn {
   /** The message, or a function of the previous reply (for Claude's own suggestion chips). */
@@ -488,6 +490,59 @@ export const PROBES: Probe[] = [
         expect: { assess: { amounts: [239800], dates: [T] }, allowClarify: true },
       },
     ],
+  },
+  // ---- Round-2 judge (§3 #3): catalog grounding and multi-item memory -------------------
+  {
+    id: 'J1-split-camera-after-headphones',
+    split: 'train',
+    covers: 'round-2 #3, G5-2: a later question returns to an earlier item',
+    kind: 'chat',
+    turns: [
+      { message: 'Can I afford a $1,199 camera?', expect: assessCamera() },
+      {
+        message: 'What about $349 headphones?',
+        context: 'previous',
+        expect: { assess: { amounts: [34900], dates: [T], item: /headphone/i } },
+      },
+      {
+        message: 'What if I split the camera with Pay in 4 instead?',
+        context: 'previous',
+        expect: { assess: { amounts: [119900], dates: [T], item: /camera/i } },
+      },
+    ],
+  },
+  {
+    id: 'J2-pay-rent-late-camera',
+    split: 'train',
+    covers: 'round-2 #3, C-13: catalog price grounded, refusal to pay a bill late',
+    kind: 'chat',
+    turns: [
+      { message: 'Can I afford a $1,199 camera?', expect: assessCamera() },
+      {
+        message:
+          'My budget is $300 but honestly I could pay rent a week late. Is that fine for the camera?',
+        context: 'previous',
+        expect: {
+          assess: { amounts: [119900], dates: [T], item: /camera/i },
+          lead: /^I wouldn’t skip or delay a bill/,
+        },
+      },
+    ],
+  },
+  // ---- Pre-merge judge (finding 1): a store item's word inside another item's name ------
+  {
+    id: 'J3-camera-bag-asks-price',
+    split: 'train',
+    covers: 'phase 5 judge #1: "camera bag" is not the store camera; ask for its price',
+    kind: 'chat',
+    turns: [{ message: 'Can I afford a camera bag?', expect: clarifyOnly }],
+  },
+  {
+    id: 'J4-sony-camera-asks-price',
+    split: 'train',
+    covers: 'phase 5 judge #1: a branded camera is not the store camera; ask for its price',
+    kind: 'chat',
+    turns: [{ message: 'Can I afford a Sony camera?', expect: clarifyOnly }],
   },
   {
     id: 'N15-bills',

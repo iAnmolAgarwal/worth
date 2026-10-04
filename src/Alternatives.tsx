@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { ArrowLeft, ExternalLink, Store } from 'lucide-react'
-import type { Alternative, Alternatives, UnverifiedAlternative } from '../shared/types'
+import type { Alternative, Alternatives, SavedItem, UnverifiedAlternative } from '../shared/types'
 import { api } from './api'
 import type { AppState } from './contract'
 import { cx, money } from './format'
@@ -45,6 +45,40 @@ export function useAlternatives(request: AlternativesRequest | null, version: nu
   }, [key, version])
   const current = result.key === `${key}|${version}`
   return { data: current ? result.data : undefined, loading: Boolean(key) && !current }
+}
+/** One price check per saved item per page load; a failure counts as no news. */
+const priceChecks = new Map<string, Promise<number | undefined>>()
+/**
+ * The lower price a saved Channel3 item has now, when it dropped since it was saved: one check per
+ * item per page load, through the server's free product read. Anything else shows nothing.
+ */
+export function usePriceDrop(item: Pick<SavedItem, 'id' | 'channel3Id' | 'amountCents'>) {
+  const [dropped, setDropped] = useState<number>()
+  const { id, channel3Id, amountCents } = item
+  useEffect(() => {
+    if (!channel3Id) return
+    let cancelled = false
+    const key = `${id}|${channel3Id}|${amountCents}`
+    let check = priceChecks.get(key)
+    if (!check) {
+      const query = new URLSearchParams({ id: channel3Id, savedPriceCents: String(amountCents) })
+      check = api<PriceCheck>(`/alternatives/price?${query}`)
+        .then((result) =>
+          result.status === 'dropped' && result.current ? result.current.priceCents : undefined,
+        )
+        .catch(() => undefined)
+      priceChecks.set(key, check)
+    }
+    void check.then((cents) => !cancelled && setDropped(cents))
+    return () => {
+      cancelled = true
+    }
+  }, [id, channel3Id, amountCents])
+  return dropped
+}
+interface PriceCheck {
+  status: 'dropped' | 'same' | 'higher' | 'unavailable'
+  current?: { priceCents: number }
 }
 const stringValues = (request: AlternativesRequest) =>
   Object.fromEntries(

@@ -381,3 +381,113 @@ describe('POST /api/chat for something cheaper', () => {
     expect(response.body.alternatives.items).toEqual([item])
   })
 })
+
+// Spec item 15: a Channel3 row's "Save for later" saves a custom item that keeps the product's ID,
+// so Saved can check its price again; it is never sold or checked out here.
+describe('saving a similar item for later', () => {
+  const post = (agent: ReturnType<typeof request.agent>, path: string, body: object) =>
+    agent.post(path).set('X-Worth-Client', 'web').send(body)
+  const row = {
+    kind: 'custom',
+    name: item.title,
+    amountCents: item.priceCents,
+    retailer: item.retailer,
+    url: item.url,
+    channel3Id: item.id,
+  }
+
+  it('saves the row as an assessment-only item whose price can be checked later', async () => {
+    const channel3 = fakeChannel3()
+    channel3.checkPrice.mockResolvedValue({ status: 'same' } as never)
+    const { app, agent } = setup(channel3)
+    await agent.get('/api/alternatives?productId=camera')
+    const remember = vi.spyOn(app.locals, 'rememberAlternative')
+    const saved = await post(agent, '/api/saved', row)
+    expect(saved.status).toBe(200)
+    expect(saved.body.item).toMatchObject({ ...row, status: 'active' })
+    expect(remember).toHaveBeenCalledWith(expect.any(String), item.id)
+    // Saving the same product again updates the one saved item.
+    const again = await post(agent, '/api/saved', { ...row, name: 'Renamed' })
+    expect(again.body.item.id).toBe(saved.body.item.id)
+    // Never checked out: it is not in the demo store.
+    const prepare = await post(agent, `/api/saved/${saved.body.item.id}/prepare`, {})
+    expect(prepare.body.code).toBe('NOT_IN_STORE')
+    const check = await agent.get(`/api/alternatives/price?id=${item.id}&savedPriceCents=32249`)
+    expect(check.status).toBe(200)
+    expect(channel3.checkPrice).toHaveBeenCalledWith(item.id, 32249)
+  })
+
+  it('keeps the price check after a restart, for a product the session saved', async () => {
+    const channel3 = fakeChannel3()
+    channel3.checkPrice.mockResolvedValue({ status: 'same' } as never)
+    const store = new Store(':memory:')
+    stores.push(store)
+    const make = () =>
+      createApp({ store, config, channel3, now: () => new Date('2026-10-03T16:00:00Z') })
+    const first = request.agent(make())
+    await first.get('/api/alternatives?productId=camera')
+    expect((await post(first, '/api/saved', row)).status).toBe(200)
+    const cookie = (await first.get('/api/state')).request.cookies
+    // A new server process has no record of what it showed; the saved item still counts.
+    const restarted = request(make())
+    const check = await restarted
+      .get(`/api/alternatives/price?id=${item.id}&savedPriceCents=32249`)
+      .set('Cookie', cookie)
+    expect(check.status).toBe(200)
+  })
+
+  it('never registers a product the session was not shown', async () => {
+    const channel3 = fakeChannel3()
+    const { app, agent } = setup(channel3)
+    const remember = vi.spyOn(app.locals, 'rememberAlternative')
+    const saved = await post(agent, '/api/saved', { ...row, channel3Id: 'SomeOtherId' })
+    expect(saved.status).toBe(200)
+    expect(saved.body.item.channel3Id).toBeUndefined()
+    expect(remember).not.toHaveBeenCalled()
+    const check = await agent.get('/api/alternatives/price?id=SomeOtherId&savedPriceCents=1')
+    expect(check.status).toBe(404)
+    expect(channel3.checkPrice).not.toHaveBeenCalled()
+    expect((await post(agent, '/api/saved', { ...row, channel3Id: '../x' })).status).toBe(400)
+    // Its link goes with it, so a stripped row keeps no link from an unchecked source.
+    expect(saved.body.item.url).toBeUndefined()
+  })
+
+  // Re-judge N2: a saved row keeps only a link Channel3 itself allows.
+  it('keeps Channel3’s own link rule for a saved row, and no credentials in any link', async () => {
+    const { agent } = setup()
+    await agent.get('/api/alternatives?productId=camera')
+    for (const url of [
+      'https://evil.example/phish',
+      'https://bestbuy.com.evil.example/x',
+      'https://user:pw@bestbuy.com/x',
+    ])
+      expect((await post(agent, '/api/saved', { ...row, url })).status).toBe(400)
+    for (const url of ['https://www.bestbuy.com/site/123', 'https://buy.trychannel3.com/DBouSIg'])
+      expect((await post(agent, '/api/saved', { ...row, url })).status).toBe(200)
+    const typed = { kind: 'custom', name: 'Road bike', amountCents: 64900 }
+    expect(
+      (await post(agent, '/api/saved', { ...typed, url: 'https://user:pw@shop.example/bike' }))
+        .status,
+    ).toBe(400)
+    expect(
+      (await post(agent, '/api/saved', { ...typed, url: 'https://shop.example/bike' })).status,
+    ).toBe(200)
+  })
+
+  // Re-judge N3: real listing titles save; hidden characters are still refused.
+  it('saves real titles with trademarks, dashes and accents, never hidden characters', async () => {
+    const { agent } = setup()
+    for (const name of [
+      'Sony™ Alpha a6400 – Mirrorless Camera Body®',
+      'Café Racer Helmet — Matte Noir',
+      'Bose QuietComfort® 45 Headphones – Triple Black',
+    ])
+      expect(
+        (await post(agent, '/api/saved', { kind: 'custom', name, amountCents: 10000 })).status,
+      ).toBe(200)
+    for (const name of ['x\u2060y', 'Camera\uFEFF Body', 'x\u200By'])
+      expect(
+        (await post(agent, '/api/saved', { kind: 'custom', name, amountCents: 10000 })).status,
+      ).toBe(400)
+  })
+})

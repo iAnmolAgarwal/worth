@@ -13,6 +13,7 @@ import { api } from './api'
 import { BalanceChart } from './BalanceChart'
 import type { AppState } from './contract'
 import { isActive } from './contract'
+import { DEMO_CLOCK_EDIT } from './copy'
 import { allPlans, cadenceLabel, flowIcon, kindLabel, runningPlans } from './engine'
 import { cx, dayLabel, money, shortDate, signed, displayName } from './format'
 import { Alert, Button, DateStepper, Disc, Field, Pill, Ring, Toggle } from './ui'
@@ -107,7 +108,9 @@ export function PlanWizard({
   const mutating = useRef(false)
   const completedPurchases = state.purchases.filter((p) => p.status === 'completed')
   const activeCheckout = state.purchases.some(isActive)
-  const locked = busy || activeCheckout
+  // The demo clock replays Maya's sample plan as it is; the server refuses edits while it runs.
+  const clockOn = Boolean(state.demoClock)
+  const locked = busy || activeCheckout || clockOn
   const current = STEPS[step]!
   const snapshotDate = () => {
     if (timezone.trim() === state.profile.timezone) return state.today
@@ -265,6 +268,7 @@ export function PlanWizard({
     if (!confirmed) return setError({ text: 'Confirm your plan below before saving.' })
     if (activeCheckout)
       return setError({ text: 'Finish or cancel your checkout before changing your plan.' })
+    if (clockOn) return setError({ text: DEMO_CLOCK_EDIT })
     let saved = false
     try {
       validateFunds()
@@ -363,6 +367,13 @@ export function PlanWizard({
           >
             {current.title}
           </h1>
+          {clockOn && !activeCheckout && (
+            <div style={{ marginBottom: 16 }}>
+              <Alert tone="info" icon={CircleAlert}>
+                {DEMO_CLOCK_EDIT}
+              </Alert>
+            </div>
+          )}
           {activeCheckout && (
             <div style={{ marginBottom: 16 }}>
               <Alert tone="warn" icon={CircleAlert} live>

@@ -257,6 +257,8 @@ export function gradeReply(reply: ChatReply, expect: Expectation, data: GradeDat
     misses.push('subscriptions answer lists other commitments')
   if (reply.intent === 'clarify' && !expect.allowClarify && !expect.intents?.includes('clarify'))
     misses.push('asked a question when none was needed')
+  if (expect.lead && !expect.lead.test(reply.lead ?? ''))
+    misses.push(`lead-in "${reply.lead ?? ''}" does not match ${expect.lead}`)
 
   const withFacts =
     reply.mode === 'anthropic' &&

@@ -1,6 +1,6 @@
 /** Everything that reaches Anthropic when Claude answers. Update it with any change to the chat tools. */
 export const CLAUDE_SHARED_DATA =
-  'your messages, recent chat history (including figures), the item, price and date you ask about, a forecast summary, 30-day spending totals by category, income and bill names with amounts and dates, minimized merchant labels, whether PayPal offers Pay in 4 for the price, whether Worth prepared a checkout for a catalog item and how it went, and, when you ask for something cheaper, the kind of item to look for and whether similar items were found (never their names, stores or prices)'
+  'your messages, recent chat history (including figures), the item, price and date you ask about, the items and prices you asked about earlier in the same conversation, a forecast summary, 30-day spending totals by category, income and bill names with amounts and dates, minimized merchant labels, whether PayPal offers Pay in 4 for the price, whether Worth prepared a checkout for a catalog item and how it went, and, when you ask for something cheaper, the kind of item to look for and whether similar items were found (never their names, stores or prices)'
 
 /** The short list shown wherever Claude's access is summarised; Ask and Settings use the same rows. */
 export const CLAUDE_USES: [string, string][] = [
@@ -17,3 +17,10 @@ export const claudeUses = (on: boolean): [string, string][] =>
 /** What reaches Channel3 when Worth looks for similar items. It applies with the assistant off too. */
 export const CHANNEL3_SHARED_DATA =
   'A generic kind of item (such as “desk chair”) and a price limit rounded down to $25, even when the assistant is off'
+/** A saved item the demo store doesn't sell (amendment A3): Worth assesses it, never checks it out. */
+export const ASSESSMENT_ONLY = 'Assessment only — not sold in the demo store'
+/** A saved wait plan whose day has come (C-17). */
+export const MAY_FIT_NOW = 'Your plan suggests this may fit now — confirm today’s funds'
+/** The plan editor while the demo clock runs (the server refuses the edit too). */
+export const DEMO_CLOCK_EDIT =
+  'The demo clock is replaying Maya’s sample plan as it is. Choose Back to today before editing a plan.'

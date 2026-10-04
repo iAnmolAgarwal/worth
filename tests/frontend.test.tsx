@@ -78,6 +78,19 @@ function makeState(source: 'demo' | 'import' = 'demo'): AppState {
     reviews: [],
     today: TODAY,
     products: PRODUCTS,
+    saved: seed.wishlist.map((productId, index) => {
+      const product = PRODUCTS.find((p) => p.id === productId)!
+      return {
+        id: `saved-${productId}`,
+        kind: 'catalog' as const,
+        productId,
+        name: product.name,
+        amountCents: product.priceCents,
+        createdAt: `${TODAY}T0${index}:00:00.000Z`,
+        status: 'active' as const,
+      }
+    }),
+    retention: { keep30: false, expiresAt: `${TODAY}T16:00:00.000Z` },
     config: { ai: 'anthropic', paypal: 'demo', model: 'test-provider' },
   }
 }
@@ -346,7 +359,7 @@ describe('queued prompts', () => {
 
 describe('Claude consent in chat', () => {
   const shared =
-    'your messages, recent chat history (including figures), the item, price and date you ask about, a forecast summary, 30-day spending totals by category, income and bill names with amounts and dates, minimized merchant labels, whether PayPal offers Pay in 4 for the price, whether Worth prepared a checkout for a catalog item and how it went, and, when you ask for something cheaper, the kind of item to look for and whether similar items were found (never their names, stores or prices)'
+    'your messages, recent chat history (including figures), the item, price and date you ask about, the items and prices you asked about earlier in the same conversation, a forecast summary, 30-day spending totals by category, income and bill names with amounts and dates, minimized merchant labels, whether PayPal offers Pay in 4 for the price, whether Worth prepared a checkout for a catalog item and how it went, and, when you ask for something cheaper, the kind of item to look for and whether similar items were found (never their names, stores or prices)'
   it('lets the untouched sample profile turn Claude off, keeping focus on the switch while it saves', async () => {
     const user = userEvent.setup()
     const state = makeState()
@@ -463,9 +476,7 @@ describe('Ask answers', () => {
     expect(picked.textContent).toContain('Picked for your question')
     expect(within(picked).getByText(/Apartment rent/)).toBeTruthy()
     expect(screen.queryByText('full text')).toBeNull()
-    expect(
-      screen.getByText('Worth’s assistant answered from your plan'),
-    ).toBeTruthy()
+    expect(screen.getByText('Worth’s assistant answered from your plan')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: /See the comparison/ }))
     expect(onOpenDecision).toHaveBeenCalledWith(
       { productId: 'camera' },
@@ -570,6 +581,27 @@ describe('decision view', () => {
     onEditPlan: vi.fn(),
     onViewActivity: vi.fn(),
   }
+  it('says “bought on” with the plan’s own day, the demo clock’s under a replay', async () => {
+    const state = makeState()
+    const bought = {
+      ...purchase(state, { productId: 'camera', name: 'Everyday camera', amountCents: 119900 }),
+      status: 'completed' as const,
+      completedAt: '2026-10-04T16:00:00Z',
+      completedOn: '2026-10-23',
+    }
+    routeApi((_path, data) => compare(state, data))
+    render(
+      <Decision
+        {...props}
+        state={{ ...state, purchases: [bought] }}
+        request={{ productId: 'camera' }}
+      />,
+    )
+    const tile = await screen.findByRole('region', { name: 'Bought' })
+    expect(tile.textContent).toContain('Fri, Oct 23')
+    expect(tile.textContent).not.toContain('Oct 4')
+  })
+
   it('selects the engine’s recommendation, leads with the margin and draws one chart', async () => {
     const user = userEvent.setup()
     const state = makeState()
@@ -585,8 +617,8 @@ describe('decision view', () => {
     expect(screen.getByRole('heading', { name: /If you spend/ })).toBeTruthy()
     await user.click(screen.getAllByRole('button', { name: /^Save for / })[0]!)
     expect(props.onSave).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'camera' }),
-      expect.stringMatching(/^2026-/),
+      { kind: 'catalog', productId: 'camera' },
+      { waitDate: expect.stringMatching(/^2026-/) },
     )
   })
 
@@ -629,6 +661,30 @@ describe('decision view', () => {
     render(<Decision {...props} state={state} request={{ productId: 'camera' }} />)
     await screen.findByText('Not available for this amount')
     expect(screen.queryByRole('button', { name: /Compare with PayPal Pay in 4/ })).toBeNull()
+  })
+
+  // Pre-merge judge finding 5: consent below the cushion is given on the checkout review itself.
+  it('starts the below-cushion consent unticked, even after “Buy today anyway”', async () => {
+    const user = userEvent.setup()
+    const state = makeState()
+    const camera = state.products.find((p) => p.id === 'camera')!
+    routeApi((path, data) => {
+      if (path === '/assess')
+        return assessPurchase(state.profile, [], { amountCents: 119900, today: TODAY })
+      if (path === '/compare') return compare(state, data)
+      throw new Error(`Unexpected API request: ${path}`)
+    })
+    render(<Checkout {...checkoutProps(state)} product={camera} acknowledge />)
+    const consent = (await screen.findByRole('checkbox', {
+      name: /I understand buying today takes me below my \$300\.00 cushion/,
+    })) as HTMLInputElement
+    expect(consent.checked).toBe(false)
+    expect(screen.getByText(/You chose to buy today anyway/)).toBeTruthy()
+    const start = screen.getByRole('button', { name: /Continue to PayPal|simulated checkout/ })
+    await user.click(screen.getByRole('checkbox', { name: /My money and bills are still/ }))
+    expect((start as HTMLButtonElement).disabled).toBe(true)
+    await user.click(consent)
+    expect((start as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('restates the breach before buying today anyway', async () => {
@@ -1255,9 +1311,19 @@ describe('iteration 2 fixes', () => {
   it('marks a bought item in Saved and drops it from Home’s Saved list', () => {
     const state = makeState()
     state.purchases = [purchase(state, { status: 'completed', completedAt: `${TODAY}T15:00:00Z` })]
+    // The server marks a saved item bought once its checkout completes.
+    state.saved = state.saved!.map((item) =>
+      item.productId === 'headphones' ? { ...item, status: 'bought' as const } : item,
+    )
     routeApi((_path, data) => compare(state, data))
     const { unmount } = render(
-      <Saved state={state} onOpen={vi.fn()} onUpdate={vi.fn()} onToast={vi.fn()} />,
+      <Saved
+        state={state}
+        onOpenDecision={vi.fn()}
+        onUpdate={vi.fn()}
+        onToast={vi.fn()}
+        onOpenCheckout={vi.fn()}
+      />,
     )
     expect(screen.getByText('Bought')).toBeTruthy()
     unmount()

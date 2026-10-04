@@ -83,6 +83,35 @@ export interface Product {
   color: string
   merchant: string
   tag?: string
+  /**
+   * Words that name this item in a question ("camera", "macbook"). A question that names exactly
+   * one catalog item and states no price is read at the catalog price.
+   */
+  aliases?: string[]
+}
+/** The option a saved item was saved under, from the comparison the user saw. */
+export type SavedOption = 'buyToday' | 'wait' | 'spendLess'
+/**
+ * An item kept for later, on the server, per session. `ready` is derived: a wait plan whose date
+ * has come. `bought` is derived from a completed purchase of the catalog item after it was saved.
+ */
+export interface SavedItem {
+  id: string
+  /** `catalog`: a demo-store item with a server price. `custom`: an assessment only. */
+  kind: 'catalog' | 'custom'
+  productId?: string
+  name: string
+  amountCents: number
+  option?: SavedOption
+  /** The day the wait plan suggested buying on. */
+  waitDate?: string
+  createdAt: string
+  status: 'active' | 'ready' | 'bought' | 'removed'
+  /** Where a custom item was found, such as a retailer listing; shown, never checked out. */
+  retailer?: string
+  url?: string
+  /** Channel3's product ID for an item saved from "Similar items", so its price can be re-checked. */
+  channel3Id?: string
 }
 /**
  * A similar product from another store, found through Channel3. Discovery only: Worth does not sell
@@ -172,6 +201,11 @@ export interface Purchase {
   status: 'created' | 'pending' | 'completed' | 'cancelled' | 'failed' | 'unknown'
   createdAt: string
   completedAt?: string
+  /**
+   * The plan's calendar day the purchase completed on: the user's own date, or the demo clock's
+   * day for the sample persona under a replay. Shown as "bought on".
+   */
+  completedOn?: string
   orderId?: string
   captureId?: string
   profileVersion: number
@@ -364,11 +398,26 @@ export interface AppState {
   purchases: Purchase[]
   /** Persistent prompts: plans to confirm and refunds to review. */
   reviews: PurchaseReview[]
+  /** Catalog product IDs in Saved, kept for older clients; `saved` has the full items. */
   wishlist: string[]
   products: Product[]
   today: string
   /** Imported foreign-currency payments; unresolved ones withhold any positive result. */
   foreignPayments?: ForeignPayment[]
+  /** Saved items and wait plans, newest first. Removed items are not listed. */
+  saved?: SavedItem[]
+  /** Opt-in 30-day retention (D-9 a); off means the 24-hour default. */
+  retention?: { keep30: boolean; expiresAt: string }
+  /**
+   * The labelled demo clock: set only on the synthetic persona, never on imported data. `today`
+   * above already follows it.
+   */
+  demoClock?: { today: string; preset?: 'video' }
+  /**
+   * Synthetic persona only, when its funds snapshot is older than today: the balance the sample
+   * plan projects for the start of today, offered when confirming today's funds.
+   */
+  fundsProjection?: { cents: number; from: string }
   config: {
     ai: 'anthropic' | 'demo'
     paypal: 'sandbox' | 'demo'
@@ -384,9 +433,11 @@ export interface ChatMessage {
 }
 export interface InterpretedItem {
   name: string
-  /** Unit price in USD cents, as the user stated or confirmed it. */
+  /** Unit price in USD cents, as the user stated or confirmed it, or the catalog price. */
   amountCents: number
   quantity: number
+  /** `catalog`: the user named a demo-store item without a price, so its catalog price was used. */
+  priceSource?: 'catalog'
 }
 /** How a purchase question was read. Every value is the user's stated or confirmed input. */
 export interface Interpretation {
@@ -404,6 +455,15 @@ export interface PurchaseContext {
   amountCents: number
   itemName?: string
   purchaseDate?: string
+}
+/** Earlier items in one conversation, so a later question can return to any of them. */
+export type RememberedItem = Pick<PurchaseContext, 'amountCents' | 'itemName'>
+/**
+ * An item Worth assessed, as the browser keeps it for the rest of the conversation. The tag is
+ * the server's signature for this session, so a price the browser edits or invents is ignored.
+ */
+export interface SignedItem extends RememberedItem {
+  tag: string
 }
 export type ChatIntent =
   | 'affordability'
@@ -438,6 +498,8 @@ export interface ChatReply {
   checkout?: CheckoutHandoff
   /** Similar items under what fits today, from other stores. Shown only when some were found. */
   alternatives?: Alternatives
+  /** The assessed item, signed for this session, to send back with later questions. */
+  remember?: SignedItem
 }
 /** What the UI needs to hand a prepared order to PayPal for approval. */
 export interface CheckoutHandoff {

@@ -1,6 +1,7 @@
 import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import {
   ArrowLeft,
+  Bookmark,
   CalendarCheck,
   CalendarDays,
   ChevronDown,
@@ -10,11 +11,13 @@ import {
   Sparkles,
   TriangleAlert,
 } from 'lucide-react'
-import { confirmedSchedule, dateInTimezone } from '../shared/finance'
+import { confirmedSchedule } from '../shared/finance'
 import type { Alternative, ForecastPoint, OptionResult, Product } from '../shared/types'
 import { AlternativesPanel } from './Alternatives'
 import { BalanceChart } from './BalanceChart'
-import type { AppState, Comparison, PayIn4 } from './contract'
+import type { AppState, Comparison, PayIn4, SavePlan, SaveTarget } from './contract'
+import { ASSESSMENT_ONLY } from './copy'
+import { countedHold, ReservationNote } from './Reservation'
 import {
   billOn,
   firstBelow,
@@ -26,7 +29,7 @@ import {
   purchasePlans,
   useComparison,
 } from './engine'
-import { cx, dayLabel, fromMoney, fullDate, money, shortDate, signed } from './format'
+import { boughtOn, cx, dayLabel, fromMoney, fullDate, money, shortDate, signed } from './format'
 import { PayPalMessage } from './paypal'
 import type { PayPalSdkInstance } from './paypalSdk'
 import { Alert, Button, Dialog, Disc, Field, Pill, ReadAsChip, Ring, type Tone } from './ui'
@@ -507,7 +510,7 @@ export function Decision({
   backLabel: string
   onBack: () => void
   onBuy: (product: Product, acknowledgeShortfall: boolean) => void
-  onSave: (product: Product, waitDate?: string) => void
+  onSave: (target: SaveTarget, plan: SavePlan) => void
   /** Saves a similar item from another store for later; the row's button shows only when set. */
   onSaveAlternative?: (item: Alternative) => void
   /** Kept for callers; missing inputs now link to their exact fix. */
@@ -590,13 +593,53 @@ export function Decision({
           ? {
               label: `Save for ${dayLabel(c.wait.date)}`,
               note: 'Keeps it in Saved with this date. Nothing is bought.',
-              run: () => onSave(product, c.wait.date ?? undefined),
+              run: () =>
+                onSave({ kind: 'catalog', productId: product.id }, { waitDate: c.wait.date! }),
             }
           : {
               label: 'Save for later',
               note: 'Keeps it in Saved. Nothing is bought.',
-              run: () => onSave(product),
+              run: () =>
+                onSave(
+                  { kind: 'catalog', productId: product.id },
+                  c.recommendation ? { option: c.recommendation } : {},
+                ),
             })
+  // An open checkout for another item is already in these numbers; say so (fix #9).
+  const hold = countedHold(state, {
+    productId: product?.id,
+    itemName: c.itemName,
+    amountCents: c.amountCents,
+  })
+  // An item the store doesn't sell can still be saved, as an assessment only (A3).
+  const custom = !product && {
+    label:
+      c.recommendation === 'wait' && c.wait.date
+        ? `Save for ${dayLabel(c.wait.date)}`
+        : 'Save for later',
+    run: () =>
+      onSave(
+        { kind: 'custom', name: c.itemName, amountCents: c.amountCents },
+        c.recommendation === 'wait' && c.wait.date
+          ? { waitDate: c.wait.date }
+          : c.recommendation
+            ? { option: c.recommendation }
+            : {},
+      ),
+  }
+  const customActions = (notes: boolean) =>
+    custom && (
+      <>
+        <Button block variant="secondary" icon={Bookmark} onClick={custom.run}>
+          {custom.label}
+        </Button>
+        {notes && (
+          <p className="caption" style={{ textAlign: 'center' }}>
+            {ASSESSMENT_ONLY}. Nothing is bought.
+          </p>
+        )}
+      </>
+    )
   const anyway = product && !pending && c.recommendation !== 'buyToday' && c.recommendation !== null
   const breach = firstBelow(c.buyToday.points, c.cushionCents)
   const actions = (notes: boolean) => (
@@ -650,13 +693,8 @@ export function Decision({
                 <div>
                   <h2>You bought this</h2>
                   <p>
-                    {product!.merchant} ·{' '}
-                    {dayLabel(
-                      bought.completedAt
-                        ? dateInTimezone(bought.completedAt, state.profile.timezone)
-                        : bought.assessmentDate,
-                    )}{' '}
-                    · {bought.mode === 'sandbox' ? 'PayPal sandbox' : 'simulated'}
+                    {product!.merchant} · {dayLabel(boughtOn(bought, state.profile.timezone))} ·{' '}
+                    {bought.mode === 'sandbox' ? 'PayPal sandbox' : 'simulated'}
                   </p>
                 </div>
               </div>
@@ -728,7 +766,7 @@ export function Decision({
       </Frame>
     )
   return (
-    <Frame actions={product ? actions(false) : undefined}>
+    <Frame actions={product ? actions(false) : customActions(false) || undefined}>
       <div className="grid">
         <div className="stack">
           <div className="stack tight decision-head">
@@ -769,6 +807,15 @@ export function Decision({
             <p className="lead">
               <AnswerDetail c={c} />
             </p>
+            {hold && (
+              <ReservationNote
+                purchase={hold}
+                onReview={(open) => {
+                  const held = state.products.find((item) => item.id === open.productId)
+                  if (held) onBuy(held, false)
+                }}
+              />
+            )}
             {c.recommendation === null && (
               <Alert tone="warn" icon={CircleAlert}>
                 <b>Fix these first:</b>
@@ -845,6 +892,7 @@ export function Decision({
               </div>
             </div>
             {product && <div className="rail-actions">{actions(true)}</div>}
+            {custom && <div className="rail-actions">{customActions(true)}</div>}
           </div>
           <WhyThisAnswer explanation={explanation} />
           <Fold id="inputs" title="What went into this">

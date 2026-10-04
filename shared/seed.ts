@@ -18,6 +18,7 @@ export const PRODUCTS: Product[] = [
     color: '#ebe6da',
     merchant: DEMO_MERCHANT,
     tag: 'On your radar',
+    aliases: ['headphones'],
   },
   {
     id: 'camera',
@@ -29,6 +30,7 @@ export const PRODUCTS: Product[] = [
     color: '#e9ece7',
     merchant: DEMO_MERCHANT,
     tag: 'A bigger little dream',
+    aliases: ['camera'],
   },
   {
     id: 'chair',
@@ -39,6 +41,7 @@ export const PRODUCTS: Product[] = [
     image: '/images/chair.jpg',
     color: '#e8e1d9',
     merchant: DEMO_MERCHANT,
+    aliases: ['chair'],
   },
   {
     id: 'backpack',
@@ -50,6 +53,31 @@ export const PRODUCTS: Product[] = [
     image: '/images/weekend.jpg',
     color: '#eee9dd',
     merchant: DEMO_MERCHANT,
+    aliases: ['backpack'],
+  },
+  // Real products, sold here only by the sandbox store (scope amendment A3). Their photos show
+  // no brand mark; see docs/DESIGN-SOURCES.md.
+  {
+    id: 'macbook-pro-14',
+    name: 'MacBook Pro 14-inch',
+    description: 'A 14-inch laptop with room for photo and video editing, listed at its US price.',
+    priceCents: 249900,
+    category: 'Computers',
+    image: '/images/laptop.jpg',
+    color: '#f3df90',
+    merchant: DEMO_MERCHANT,
+    aliases: ['macbook'],
+  },
+  {
+    id: 'airpods-4',
+    name: 'AirPods 4',
+    description: 'Wireless earbuds with a charging case, listed at their US price.',
+    priceCents: 12900,
+    category: 'Audio',
+    image: '/images/earbuds.jpg',
+    color: '#efc84a',
+    merchant: DEMO_MERCHANT,
+    aliases: ['airpods'],
   },
 ]
 

@@ -26,13 +26,14 @@ import { CSV_IMPORT_LIMITS, CSV_SIZE_MESSAGE, utf8Bytes } from '../shared/limits
 import type {
   AppState,
   Assessment,
+  ChatReply,
   FinancialProfile,
   PayIn4Eligibility,
   Product,
   Purchase,
   Transaction,
 } from '../shared/types.ts'
-import { ACTIVE, Store, publicPurchase } from './store.ts'
+import { ACTIVE, RETENTION_MS, SESSION_DAY_MS, Store, publicPurchase } from './store.ts'
 import type { SessionData, StoredPurchase } from './store.ts'
 import {
   approvalLink,
@@ -43,7 +44,7 @@ import {
   validateOrder,
 } from './paypal.ts'
 import type { PayPalGateway, PayPalOrder } from './paypal.ts'
-import { decideAgentCheckout } from './agentCheckout.ts'
+import { checkoutGuards, decideAgentCheckout } from './agentCheckout.ts'
 import type { PrepareCheckoutRequest, PrepareCheckoutResult } from './agentCheckout.ts'
 import { categoryCandidates, createChatProvider, fallbackCategories, localReply } from './chat.ts'
 import type { ChatActions, ChatProvider } from './chat.ts'
@@ -51,11 +52,34 @@ import { allowedOrigins, loadConfig } from './config.ts'
 import type { AppConfig } from './config.ts'
 import { WindowLimiter } from './limits.ts'
 import { contentSecurityPolicy } from './csp.ts'
+import { itemSigner } from './remember.ts'
 import { confirmPlan, confirmRefund, PlanError, recordRefund } from './plans.ts'
 import { queryFor, roomToday } from './alternatives.ts'
 import { createChannel3, loadFixtures } from './channel3.ts'
 import type { Channel3Client } from './channel3.ts'
-import type { Alternatives, ChatReply } from '../shared/types.ts'
+import type { Alternatives } from '../shared/types.ts'
+import {
+  addSaved,
+  ASSESSMENT_ONLY,
+  confirmFunds,
+  fundsSchema,
+  migratePlanned,
+  plannedSchema,
+  publicSaved,
+  removeSaved,
+  saveSchema,
+  SavedError,
+  savedOf,
+  toggleCatalog,
+  wishlistOf,
+} from './saved.ts'
+import {
+  applyDemoClock,
+  DemoClockError,
+  demoClockSchema,
+  demoToday,
+  fundsProjection,
+} from './demoClock.ts'
 
 export type { AppConfig } from './config.ts'
 export interface AppOptions {
@@ -191,6 +215,25 @@ const chatSchema = z
       .max(16)
       .default([]),
     context: assessmentSchema.optional(),
+    /**
+     * Items assessed earlier in this conversation, so a later question can return to one. Only
+     * items this session's replies signed are used; any other entry is dropped.
+     */
+    items: z
+      .array(
+        z
+          .object({
+            amountCents: cents.min(1),
+            itemName: z.string().max(150).optional(),
+            tag: z
+              .string()
+              .regex(/^[A-Za-z0-9_-]{43}$/)
+              .optional(),
+          })
+          .strict(),
+      )
+      .max(12)
+      .optional(),
     sessionKey: z
       .string()
       .regex(/^[a-f0-9]{20}$/)
@@ -282,6 +325,8 @@ export function createApp(options: AppOptions = {}) {
       fixtures: loadFixtures(),
       now: () => now().getTime(),
     })
+  // Signs the items each conversation assessed (see remember.ts).
+  const signer = itemSigner()
   const app = express()
   app.disable('x-powered-by')
   // Behind a proxy, req.ip must be the client address the proxy appended, not the proxy itself.
@@ -356,6 +401,13 @@ export function createApp(options: AppOptions = {}) {
     }).formatToParts(now())
     return `${parts.find((p) => p.type === 'year')!.value}-${parts.find((p) => p.type === 'month')!.value}-${parts.find((p) => p.type === 'day')!.value}`
   }
+  /**
+   * The session's today: the labelled demo clock's day on the synthetic persona, otherwise the
+   * real date in the plan's time zone. Imported data never follows the demo clock.
+   */
+  function sessionToday(data: SessionData) {
+    return demoToday(data) ?? today(data.profile.timezone)
+  }
   /** The browser's IANA time zone, sent on every API call; anything unsupported is ignored. */
   function viewerTimezone(req: Request) {
     return normalizeTimezone(req.get('X-Worth-Timezone'))
@@ -363,7 +415,8 @@ export function createApp(options: AppOptions = {}) {
   /** Keeps an untouched synthetic persona dated today for the viewer, so it never goes stale. */
   function followViewerDay(id: string, viewer: string | undefined) {
     const data = store.get(id)
-    if (!data) return
+    // A pinned demo clock holds the persona on its own day.
+    if (!data || data.demoClock) return
     const timezone = viewer ?? data.profile.timezone
     const rebased = rebaseDemoState(data, today(timezone), timezone)
     if (rebased) store.save(id, rebased)
@@ -385,14 +438,31 @@ export function createApp(options: AppOptions = {}) {
     const data = store.get(id)
     if (!data)
       throw new HttpError(401, 'Session expired. Reload to begin again.', 'SESSION_EXPIRED')
+    // An older session's catalog wishlist becomes saved items once, with stable IDs.
+    if (!data.saved) {
+      savedOf(data, now())
+      store.save(id, data)
+    }
     const purchases = livePurchases(id).map(publicPurchase)
+    const day = sessionToday(data)
+    const saved = publicSaved(data.saved, day, purchases)
+    const projection = fundsProjection(data, purchases, day)
+    const { saved: _saved, createdAt: _created, keep30: _keep, demoClock, ...rest } = data
     return {
-      ...data,
+      ...rest,
       sessionKey: createHash('sha256').update(id).digest('hex').slice(0, 20),
       purchases,
       reviews: purchaseReviews(purchases),
       products: PRODUCTS,
-      today: today(data.profile.timezone),
+      saved,
+      wishlist: wishlistOf(saved),
+      retention: {
+        keep30: Boolean(data.keep30),
+        expiresAt: new Date(store.expiry(id) ?? now().getTime()).toISOString(),
+      },
+      ...(demoClock && data.profile.source === 'demo' ? { demoClock } : {}),
+      ...(projection ? { fundsProjection: projection } : {}),
+      today: day,
       config: {
         ai: chat ? 'anthropic' : 'demo',
         paypal: paypal ? 'sandbox' : 'demo',
@@ -419,10 +489,14 @@ export function createApp(options: AppOptions = {}) {
       )
     const timezone = viewerTimezone(req) ?? DEMO_TIMEZONE
     const seed = createDemoState(today(timezone), timezone)
-    const id = store.create(
-      { profile: seed.profile, transactions: seed.transactions, wishlist: seed.wishlist },
-      time,
-    )
+    const data: SessionData = {
+      profile: seed.profile,
+      transactions: seed.transactions,
+      wishlist: seed.wishlist,
+      createdAt: time,
+    }
+    savedOf(data, now())
+    const id = store.create(data, time)
     res.cookie(cookieName, id, {
       httpOnly: true,
       sameSite: 'lax',
@@ -460,17 +534,12 @@ export function createApp(options: AppOptions = {}) {
     return purchase
   }
   function assessmentFor(id: string, amountCents: number, itemName: string, excludeId?: string) {
-    const profile = store.get(id)!.profile
+    const data = store.get(id)!
+    const day = sessionToday(data)
     return assessPurchase(
-      profile,
+      data.profile,
       livePurchases(id).filter((p) => p.id !== excludeId),
-      {
-        amountCents,
-        itemName,
-        today: today(profile.timezone),
-        purchaseDate: today(profile.timezone),
-        findEarliest: false,
-      },
+      { amountCents, itemName, today: day, purchaseDate: day, findEarliest: false },
     )
   }
   function assertAssessment(assessment: Assessment, acknowledged: boolean) {
@@ -501,12 +570,19 @@ export function createApp(options: AppOptions = {}) {
           )
         return current
       }
+      const data = store.get(id)!
+      // The user's own calendar day, not the UTC date of the timestamp; on the synthetic persona
+      // under the demo clock, the clock's day, so "bought on" matches every other date shown.
+      const completedOn = current.archived
+        ? dateInTimezone(completedAt, data.profile.timezone)
+        : (demoToday(data) ?? dateInTimezone(completedAt, data.profile.timezone))
       const completed: StoredPurchase = {
         ...current,
         ...(purchase.merchantId ? { merchantId: purchase.merchantId } : {}),
         status: 'completed',
         captureId,
         completedAt,
+        completedOn,
         // Only a checkout PayPal could have offered Pay Later for raises "Confirm your plan".
         ...(current.mode === 'sandbox' && current.payLaterCapable === false && !current.paymentPlan
           ? { paymentPlan: { product: 'full' as const } }
@@ -518,7 +594,6 @@ export function createApp(options: AppOptions = {}) {
       store.putPurchase(id, completed)
       // A payment for a persona purchase set aside on import never enters the user's own plan.
       if (current.archived) return completed
-      const data = store.get(id)!
       if (
         !data.transactions.some(
           (t) => t.referenceId === captureId || t.id === `purchase-${current.id}`,
@@ -526,8 +601,7 @@ export function createApp(options: AppOptions = {}) {
       ) {
         data.transactions.unshift({
           id: `purchase-${current.id}`,
-          // The user's own calendar day, not the UTC date of the timestamp.
-          date: dateInTimezone(completedAt, data.profile.timezone),
+          date: completedOn,
           name: current.name,
           amountCents: -current.amountCents,
           currency: 'USD',
@@ -761,7 +835,7 @@ export function createApp(options: AppOptions = {}) {
     const decision = decideAgentCheckout({
       profile: data.profile,
       purchases: livePurchases(id),
-      today: today(data.profile.timezone),
+      today: sessionToday(data),
       product,
       request,
       message,
@@ -1060,7 +1134,11 @@ export function createApp(options: AppOptions = {}) {
       .strict()
       .parse(req.query)
     const id = sessionId(res)
-    if (!wasShown(id, input.id))
+    // Shown this session, or saved from Similar items (which outlives a server restart).
+    const saved = (dataFor(res).saved ?? []).some(
+      (item) => item.channel3Id === input.id && item.status !== 'removed',
+    )
+    if (!wasShown(id, input.id) && !saved)
       throw new HttpError(404, 'Check prices only for items Worth showed you.', 'NOT_FOUND')
     const time = now().getTime()
     if (!priceChecksPerSession.take(id, time) || !priceChecksPerIp.take(req.ip ?? 'local', time))
@@ -1095,7 +1173,7 @@ export function createApp(options: AppOptions = {}) {
         String(req.params.refundId),
         input,
         now(),
-        today(dataFor(res).profile.timezone),
+        sessionToday(dataFor(res)),
       ),
     )
     res.json(state(id))
@@ -1106,6 +1184,14 @@ export function createApp(options: AppOptions = {}) {
     const id = sessionId(res)
     noActive(id)
     const data = dataFor(res)
+    // The demo clock replays the sample persona as it is: a hand-edited plan is the user's own
+    // numbers, which never run on the clock (pre-merge judge finding 4).
+    if (demoToday(data))
+      throw new HttpError(
+        409,
+        'The demo clock is replaying Maya’s sample plan as it is. Choose Back to today before editing a plan.',
+        'DEMO_CLOCK_RUNNING',
+      )
     if (input.version !== data.profile.version)
       throw new HttpError(
         409,
@@ -1165,11 +1251,140 @@ export function createApp(options: AppOptions = {}) {
     if (!PRODUCTS.some((p) => p.id === productId))
       throw new HttpError(404, 'Product not found.', 'NOT_FOUND')
     const data = dataFor(res)
-    data.wishlist = data.wishlist.includes(productId)
-      ? data.wishlist.filter((id) => id !== productId)
-      : [...data.wishlist, productId]
+    toggleCatalog(data, productId, sessionToday(data), now())
     store.save(sessionId(res), data)
     res.json(state(sessionId(res)))
+  })
+  /** Saves an item for later: a catalog item, or any item Ask Worth assessed (C-17, A3). */
+  app.post('/api/saved', (req, res) => {
+    const parsed = saveSchema.parse(req.body)
+    const id = sessionId(res)
+    // A Channel3 product ID (and its link) is kept only for a product this session was shown, so a
+    // saved item can never make Worth read an arbitrary product (spec item 15).
+    const input =
+      parsed.kind === 'custom' && parsed.channel3Id && !wasShown(id, parsed.channel3Id)
+        ? { ...parsed, channel3Id: undefined, url: undefined }
+        : parsed
+    const data = dataFor(res)
+    const item = addSaved(data, input, sessionToday(data), now())
+    store.save(id, data)
+    // Registers the saved row, so its price can be checked later at /api/alternatives/price.
+    if (item.channel3Id) app.locals.rememberAlternative(id, item.channel3Id)
+    res.json({ item, state: state(id) })
+  })
+  app.post('/api/saved/migrate', (req, res) => {
+    const { planned } = plannedSchema.parse(req.body)
+    const id = sessionId(res)
+    const data = dataFor(res)
+    const moved = migratePlanned(data, planned, sessionToday(data), now())
+    store.save(id, data)
+    res.json({ moved, state: state(id) })
+  })
+  app.post('/api/saved/:id/remove', (req, res) => {
+    z.object({}).strict().parse(req.body)
+    const id = sessionId(res)
+    const data = dataFor(res)
+    removeSaved(data, String(req.params.id).slice(0, 100), now())
+    store.save(id, data)
+    res.json(state(id))
+  })
+  /**
+   * The button path for a saved plan on return: the same guards as Claude's prepare_checkout
+   * (funds confirmed today, a fresh assessment for the plan's option, the catalog price, one
+   * active checkout), then the same checkout path as the Buy button. Custom items never check out.
+   */
+  app.post('/api/saved/:id/prepare', async (req, res) => {
+    z.object({}).strict().parse(req.body)
+    const id = sessionId(res)
+    const data = dataFor(res)
+    const item = savedOf(data, now()).find(
+      (saved) => saved.id === String(req.params.id) && saved.status !== 'removed',
+    )
+    if (!item) throw new HttpError(404, 'Saved item not found.', 'NOT_FOUND')
+    const product = item.kind === 'catalog' && PRODUCTS.find((p) => p.id === item.productId)
+    if (!product) throw new HttpError(409, `${ASSESSMENT_ONLY}.`, 'NOT_IN_STORE')
+    const decision = checkoutGuards({
+      profile: data.profile,
+      purchases: livePurchases(id),
+      today: sessionToday(data),
+      product,
+      request: { option: item.option === 'wait' ? 'wait' : 'buyToday' },
+      proceedDespiteShortfall: false,
+    })
+    if (!decision.ok) throw new HttpError(409, decision.message, decision.code)
+    const purchase = await startCheckout(id, product, {
+      acknowledgeShortfall: false,
+      preparedBy: 'user',
+      assessed: { profileVersion: decision.profileVersion, today: decision.today },
+    })
+    res.json({
+      purchase: publicPurchase(purchase),
+      orderId: purchase.orderId,
+      approvalUrl: purchase.approvalUrl,
+      mode: purchase.mode,
+      state: state(id),
+    })
+  })
+  /** Confirms today's available funds, the step a saved plan asks for before a fresh check. */
+  app.post('/api/funds/confirm', (req, res) => {
+    const input = fundsSchema.parse(req.body)
+    const id = sessionId(res)
+    noActive(id)
+    const data = dataFor(res)
+    const day = sessionToday(data)
+    const purchases = livePurchases(id)
+    data.profile = confirmFunds(data.profile, input, {
+      today: day,
+      now: now(),
+      completed: purchases.filter((p) => p.status === 'completed').map((p) => p.id),
+      projectionCents: fundsProjection(data, purchases, day)?.cents,
+    })
+    store.save(id, data)
+    res.json(state(id))
+  })
+  /** D-9 (a): keep this device's plan for 30 days, or return to the 24-hour default. */
+  app.post('/api/retention', (req, res) => {
+    const { keep30 } = z.object({ keep30: z.boolean() }).strict().parse(req.body)
+    const id = sessionId(res)
+    const data = dataFor(res)
+    const time = now().getTime()
+    // Turning retention off never extends a session: it ends within 24 hours, or sooner if it
+    // was never kept longer (a session that never opted in keeps its own expiry).
+    const expires = keep30
+      ? time + RETENTION_MS
+      : Math.min(store.expiry(id) ?? time + SESSION_DAY_MS, time + SESSION_DAY_MS)
+    const lifetime = Math.max(0, expires - time)
+    data.keep30 = keep30
+    store.atomic(() => {
+      store.save(id, data)
+      store.setExpiry(id, expires)
+    })
+    res.cookie(cookieName, id, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: config.production,
+      maxAge: lifetime,
+      path: '/',
+    })
+    res.json(state(id))
+  })
+  /**
+   * The labelled demo clock, synthetic persona only: the video replay preset, a later day for a
+   * return visit, or back to today. Persona purchases are set aside when the persona restarts.
+   */
+  app.post('/api/demo-clock', (req, res) => {
+    const input = demoClockSchema.parse(req.body)
+    const id = sessionId(res)
+    noActive(id)
+    const current = dataFor(res)
+    const { data, reset } = applyDemoClock(current, input, today(current.profile.timezone))
+    store.atomic(() => {
+      if (reset)
+        for (const purchase of store.purchases(id))
+          if (!purchase.archived) store.putPurchase(id, { ...purchase, archived: true })
+      store.save(id, data)
+    })
+    res.json(state(id))
   })
   function mergeTransactions(existing: Transaction[], incoming: Transaction[]) {
     return [...new Map([...existing, ...incoming].map((t) => [t.id, t])).values()]
@@ -1220,6 +1435,8 @@ export function createApp(options: AppOptions = {}) {
     if (merged.length > config.maxTransactions)
       throw new HttpError(400, transactionLimitMessage(merged.length), 'TOO_MANY_TRANSACTIONS')
     const switching = data.profile.source === 'demo'
+    // Imported data is real: it never follows the demo clock.
+    delete data.demoClock
     if (switching) {
       data.profile = {
         ...data.profile,
@@ -1408,8 +1625,14 @@ export function createApp(options: AppOptions = {}) {
     }
   }
   app.post('/api/chat', async (req, res) => {
-    const input = chatSchema.parse(req.body)
-    const current = state(sessionId(res))
+    const parsed = chatSchema.parse(req.body)
+    const session = sessionId(res)
+    // A remembered item counts only with this session's signature, so its price is one Worth read.
+    const { items: sent, ...rest } = parsed
+    const items = signer.verify(session, sent)
+    const input = { ...rest, ...(items.length ? { items } : {}) }
+    const reply = (answer: ChatReply) => res.json(signer.sign(session, answer))
+    const current = state(session)
     if (input.sessionKey && input.sessionKey !== current.sessionKey)
       throw new HttpError(
         409,
@@ -1422,22 +1645,22 @@ export function createApp(options: AppOptions = {}) {
       transactions: current.transactions,
       today: current.today,
     }
-    const id = sessionId(res)
+    const id = session
     const actions = chatActions(req, id, input)
     // Local answers still search other stores for something cheaper; nothing goes to Claude.
     /** Answers that list similar items record them as shown to this session. */
-    const shown = (reply: ChatReply) => {
-      rememberShown(id, reply.alternatives)
-      return reply
+    const shown = (answer: ChatReply) => {
+      rememberShown(id, answer.alternatives)
+      return answer
     }
     const local = async (reason?: string) => shown(await localReply(input, data, reason, actions))
     if (!mayUseExternalAi(current.profile))
-      return res.json(
+      return reply(
         await local(
           'AI sharing is off. This is a local calculation, not an AI response; your financial context was not sent to Claude.',
         ),
       )
-    if (!chat) return res.json(await local())
+    if (!chat) return reply(await local())
     if (chatBusy.has(id))
       throw new HttpError(
         429,
@@ -1446,18 +1669,18 @@ export function createApp(options: AppOptions = {}) {
       )
     const limited = claudeLimit(req)
     if (limited)
-      return res.json(
+      return reply(
         await local(
           `${CLAUDE_LIMIT_REASON[limited]}, so this answer uses local calculations, not an AI response.`,
         ),
       )
     chatBusy.add(id)
     try {
-      return res.json(shown(await chat.reply(input, data, actions)))
+      return reply(shown(await chat.reply(input, data, actions)))
     } catch (error) {
       // Error class only: never the message text, financial data, or credentials.
       console.warn('Worth chat used local fallback:', error instanceof Error ? error.name : 'Error')
-      return res.json(
+      return reply(
         await local(
           'Claude is temporarily unavailable. This answer uses local calculations, not an AI response.',
         ),
@@ -1526,7 +1749,7 @@ export function createApp(options: AppOptions = {}) {
       }
       const data = dataFor(res)
       if (
-        purchase.assessmentDate !== today(data.profile.timezone) ||
+        purchase.assessmentDate !== sessionToday(data) ||
         purchase.profileVersion !== data.profile.version
       )
         throw new HttpError(
@@ -1698,7 +1921,11 @@ export function createApp(options: AppOptions = {}) {
       return void res
         .status(400)
         .json({ error: error.issues[0]?.message ?? 'Invalid request.', code: 'INVALID_INPUT' })
-    if (error instanceof PlanError)
+    if (
+      error instanceof PlanError ||
+      error instanceof SavedError ||
+      error instanceof DemoClockError
+    )
       return void res.status(error.status).json({ error: error.message, code: error.code })
     if (error instanceof HttpError)
       return void res.status(error.status).json({

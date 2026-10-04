@@ -13,9 +13,8 @@ import {
 import type { Assessment, Product } from '../shared/types'
 import { api, ApiError } from './api'
 import type { AppState, Comparison, Purchase } from './contract'
-import { dateInTimezone } from '../shared/finance'
 import { firstBelow, lower } from './engine'
-import { cx, dayLabel, money, signed } from './format'
+import { boughtOn, cx, dayLabel, money, signed } from './format'
 import { PayPalButton, useEligibility, type SdkStatus } from './paypal'
 import type { PayPalSdkInstance, PayPalSessionCallbacks } from './paypalSdk'
 import { Alert, Button, Dialog } from './ui'
@@ -106,6 +105,7 @@ export function Checkout({
   purchaseId?: string
   returnedApproved?: boolean
   returnedCancelled?: boolean
+  /** The user came from "Buy today anyway"; the consent box still starts unticked. */
   acknowledge?: boolean
   instance?: PayPalSdkInstance
   sdkStatus?: SdkStatus
@@ -125,7 +125,9 @@ export function Checkout({
   const [assessment, setAssessment] = useState<Assessment>()
   const [room, setRoom] = useState<Comparison>()
   const [fundsOk, setFundsOk] = useState(false)
-  const [ack, setAck] = useState(acknowledge)
+  // Consent below the cushion is always ticked here, on this review's own figures, even after
+  // "Buy today anyway" (pre-merge judge finding 5).
+  const [ack, setAck] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState(
@@ -329,6 +331,7 @@ export function Checkout({
       const latest = (await api<AppState>(`/checkout/${purchase.id}/cancel`, {})) as AppState
       onUpdate(latest)
       setLocalPurchase(latest.purchases.find((p) => p.id === purchase.id))
+      setNotice('')
     } catch (failure) {
       setError((failure as Error).message)
     } finally {
@@ -403,7 +406,7 @@ export function Checkout({
       icon: Check,
       tone: 'ok',
       title: `Paid ${money(purchase?.amountCents ?? product.priceCents)}`,
-      body: `${product.merchant} · ${dayLabel(purchase?.completedAt ? dateInTimezone(purchase.completedAt, state.profile.timezone) : state.today)} · ${mode === 'sandbox' ? 'PayPal sandbox' : 'simulated'}`,
+      body: `${product.merchant} · ${dayLabel(purchase?.completedAt ? boughtOn(purchase, state.profile.timezone) : state.today)} · ${mode === 'sandbox' ? 'PayPal sandbox' : 'simulated'}`,
     },
     declined: {
       icon: CircleAlert,
@@ -436,6 +439,13 @@ export function Checkout({
     },
   }
   const c = content[view]
+  // Every status line follows the order's status: a note about leaving PayPal belongs only to a
+  // checkout still waiting for approval, never under "Checkout cancelled" or a payment (fix #9).
+  const statusNote =
+    view === 'approve' || view === 'waiting'
+      ? notice ||
+        (purchase?.lastError?.code === 'PAYPAL_CANCELLED' ? purchase.lastError.message : '')
+      : ''
 
   const footer = (
     <>
@@ -564,7 +574,7 @@ export function Checkout({
         <div role="status" aria-live="polite" className="sr">
           {c.title}
         </div>
-        {notice && <p className="meta strong">{notice}</p>}
+        {statusNote && <p className="meta strong">{statusNote}</p>}
         {view === 'approved' && shortfall && (
           <Alert tone="bad" icon={CircleAlert} live>
             <b>
@@ -605,6 +615,11 @@ export function Checkout({
               />
               <span>My money and bills are still as entered today.</span>
             </label>
+            {tight && acknowledge && (
+              <p className="caption" style={{ margin: '8px 0 0' }}>
+                You chose to buy today anyway. These are today’s figures; tick below to confirm.
+              </p>
+            )}
             {tight && (
               <label className="check">
                 <input
