@@ -486,8 +486,8 @@ export type Placeholders = Record<string, Placeholder>
 export function purchasePlaceholders(a: Assessment, data: ChatData): Placeholders {
   if (a.outcome === 'incomplete') return {}
   const out: Placeholders = {
-    item: { value: chatLabel(a.itemName), about: 'the item', date: a.purchaseDate },
-    price: { value: money(a.amountCents), about: 'its total price', date: a.purchaseDate },
+    item: { value: chatLabel(a.itemName), about: 'the item' },
+    price: { value: money(a.amountCents), about: 'its total price' },
     buy_day: {
       value: dateLabel(a.purchaseDate, a.today),
       about: 'the day they would buy it',
@@ -534,6 +534,14 @@ export function purchasePlaceholders(a: Assessment, data: ChatData): Placeholder
       date: cause.date,
     }
   }
+  // The first payday after that bill, so "before the next payday" can name the right one.
+  const payday = cause && a.drivers.find((d) => d.kind === 'income' && d.date > cause.date)
+  if (payday)
+    out.cause_payday = {
+      value: day(payday.date, a.today),
+      about: 'the first payday after that bill',
+      date: payday.date,
+    }
   const income = a.drivers.find((d) => d.kind === 'income' && d.date >= a.purchaseDate)
   if (income) {
     out.income_name = {
@@ -793,10 +801,13 @@ export function checkSentence(
   if (wrongValue(sentence, values)) return reject('wrong_value')
   if (misordered(sentence, values)) return reject('contradicts_result')
   // A tight result may still say what would fit: waiting, or spending less.
-  const conditional = /\{(?:wait_day|max_spend)\}/.test(sentence)
+  const conditional = /\{(?:wait_day|max_spend)\}|\bwait\w*/i.test(sentence)
+  // A fitting result may still say what higher everyday spending would do.
+  const stressed =
+    /\{stress_low\}/.test(sentence) && /\b(?:if|higher|ran|runs|running)\b/i.test(sentence)
   if (
     (outcome === 'tight' && POSITIVE.test(prose) && !conditional) ||
-    (outcome === 'fits' && NEGATIVE.test(prose))
+    (outcome === 'fits' && NEGATIVE.test(prose) && !stressed)
   )
     return reject('contradicts_result')
   return { ok: true, text: fill(sentence, values) }
@@ -837,7 +848,9 @@ function payIn4Problem(sentence: string, values: Placeholders): SentenceRejectio
     )
       return 'pay_in_4'
     if (
-      /\b(?:still|unchanged|identical|match\w*|equal\w*|too|also|again|same\s+as)\b/i.test(sentence)
+      /\b(?:still|unchanged|identical|match\w*|equal\w*|too|also|again|same\s+as)\b(?:\s+[A-Za-z']+){0,4}\s+\{p4_low_point\}|\{p4_low_point\}(?:\s+[A-Za-z']+){0,2}\s+(?:too|also|again)\b/i.test(
+        sentence,
+      )
     )
       return 'contradicts_result'
   }

@@ -672,6 +672,21 @@ describe('the sentence check rejects what the judge found (F3)', () => {
   // Sentences Claude wrote in the live eval that are sound; they must keep passing.
   it.each([
     [
+      'Splitting the {item} keeps the same {price} total, and the payments still land around {cause_bill}, so the low point of {p4_low_point} on {p4_low_day} stays below the {cushion} cushion.',
+      camera,
+      'tight',
+    ],
+    [
+      'Even after {cause_bill} is paid, the balance stays above the {cushion}, but if everyday spending runs higher, the low point could drop to {stress_low}, below that cushion.',
+      book,
+      'fits',
+    ],
+    [
+      '{cause_bill} on {cause_day} lands before {cause_payday}, so the {item} leaves less than your {cushion} cushion.',
+      camera,
+      'tight',
+    ],
+    [
       '{income_name} on {income_day} helps cover {cause_bill} on {cause_day}, so the balance keeps your {cushion} cushion.',
       book,
       'fits',

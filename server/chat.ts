@@ -1063,7 +1063,7 @@ function sentenceRequest(values: Placeholders, shown: string[] = []) {
     .map(([name, value]) => `{${name}} (${value.value})`)
   const order =
     dated.length > 1
-      ? `\nIn time order: ${dated.join(', then ')}. Keep every before and after true to this order, and name a payday only with its placeholder.`
+      ? `\nIn time order: ${dated.join(', then ')}. Keep every before and after true to this order, and name a payday only with its placeholder ({cause_payday} is the first payday after {cause_bill}).`
       : ''
   const seen = shown.length
     ? `\nThe person already sees these facts: ${shown.map((text) => JSON.stringify(text)).join(' ')}\nDo not repeat them. Connect them instead: what causes the result, or what would change it.`
