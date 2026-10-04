@@ -448,6 +448,13 @@ export interface Interpretation {
   /** Echo of the date, e.g. "today" or "Fri, Oct 16". */
   dateLabel: string
   dateSource: 'stated' | 'context' | 'default'
+  /** The user's own timing words that set the date, when there were any. */
+  datePhrase?: string
+  /**
+   * Where the amount came from: the user's own words, the demo store's price, or the item already
+   * discussed earlier in this conversation.
+   */
+  amountSource?: 'stated' | 'catalog' | 'context'
   option: 'check' | 'earliest_date' | 'max_price'
   source: 'ai' | 'local'
 }
@@ -500,6 +507,79 @@ export interface ChatReply {
   alternatives?: Alternatives
   /** The assessed item, signed for this session, to send back with later questions. */
   remember?: SignedItem
+  /**
+   * PayPal Pay in 4 for the assessed amount, from the engine: the inline schedule when the person
+   * asked about Pay in 4, otherwise one neutral row. Never a recommendation.
+   */
+  payIn4?: PayIn4Chat
+  /**
+   * One sentence under the verdict. Claude writes it with engine placeholders only and the server
+   * fills in the values; a template replaces it whenever the check fails (scope C-13).
+   */
+  explanation?: string
+  /** How Ask Worth read the question, which tool ran, what it chose and what the server checked. */
+  trace?: AnswerTrace
+}
+/** One illustrative Pay in 4 payment as Ask Worth shows it. */
+export interface PayIn4ChatPayment {
+  number: number
+  date: string
+  amountCents: number
+  nearestBill: NearbyBill | null
+  belowCushion: boolean
+}
+export interface PayIn4Chat {
+  /** True when the person asked about Pay in 4 or paying later, so the schedule opens inline. */
+  asked: boolean
+  totalCents: number
+  eligibility: PayIn4Eligibility
+  payments: PayIn4ChatPayment[]
+  /** The engine's one-line result for the instalment scenario. */
+  label: string
+  /** The lowest projected balance with the Pay in 4 payments instead of paying in full. */
+  lowestCents: number
+  lowestDate: string
+  /** Plans already running inside the window, and what they still take. */
+  stacking: { activePlans: number; totalCents: number; message: string } | null
+}
+/** Why Claude picked a fact, from a fixed set. */
+export type FactReason =
+  'answers_question' | 'explains_result' | 'shows_timing' | 'shows_risk' | 'adds_context'
+/** A server check behind an answer, in the order it ran. */
+export interface TraceGuard {
+  id: string
+  label: string
+  passed: boolean
+}
+export interface AnswerTrace {
+  /** Who read the question: Claude, or Worth's own rules when Claude was not used. */
+  reader: 'claude' | 'local'
+  read?: {
+    item: string
+    amountCents: number
+    /** your_words: the user's own figure; catalog: the store price; earlier: an item from earlier in this chat. */
+    source: 'your_words' | 'catalog' | 'earlier'
+    store?: string
+  }
+  date?: {
+    phrase?: string
+    date: string
+    label: string
+    source: 'stated' | 'context' | 'default'
+  }
+  /** Each tool call in order, with what the server did with it. */
+  tools: { name: string; outcome: 'ran' | 'corrected' | 'refused' | 'asked' }[]
+  /** The facts shown, each with the reason Claude gave for picking it. */
+  facts: { id: string; reason?: FactReason }[]
+  guards: TraceGuard[]
+  /** The sentence under the verdict: Claude's placeholder text, or the template that replaced it. */
+  sentence?: {
+    source: 'claude' | 'template'
+    /** The text with placeholders, before Worth filled in any value. */
+    raw: string
+    /** Why Claude's sentence was not used, when the template replaced it. */
+    rejected?: string
+  }
 }
 /** What the UI needs to hand a prepared order to PayPal for approval. */
 export interface CheckoutHandoff {

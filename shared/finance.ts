@@ -678,12 +678,9 @@ function evaluate(
   missing: boolean,
   outflows: ScenarioOutflow[],
   purchaseDate: string,
+  days: number = COMPARISON_WINDOW_DAYS,
 ): OptionResult {
-  const points = forecast(profile, purchases, {
-    today,
-    outflows,
-    days: COMPARISON_WINDOW_DAYS,
-  })
+  const points = forecast(profile, purchases, { today, outflows, days })
   const cushion = cushionOf(profile)
   const lowest = lowestPoint(points)
   return {
@@ -754,9 +751,10 @@ function obligations(
   profile: FinancialProfile,
   purchases: Purchase[],
   today: string,
+  days: number = COMPARISON_WINDOW_DAYS,
 ): Omit<NearbyBill, 'daysFromInstalment'>[] {
   return [
-    ...getUpcomingFlows(profile, today, COMPARISON_WINDOW_DAYS)
+    ...getUpcomingFlows(profile, today, days)
       .filter(({ flow }) => flow.kind !== 'income')
       .map(({ flow, date }) => ({
         name: flow.name,
@@ -802,9 +800,10 @@ function activePlanPayments(
   profile: FinancialProfile,
   purchases: Purchase[],
   today: string,
+  days: number = COMPARISON_WINDOW_DAYS,
 ): ActivePlanPayment[] {
   return [
-    ...getUpcomingFlows(profile, today, COMPARISON_WINDOW_DAYS)
+    ...getUpcomingFlows(profile, today, days)
       .filter(({ flow }) => flow.kind === 'installment')
       .map(({ flow, date }) => ({
         planId: flow.planId ?? flow.id,
@@ -850,10 +849,14 @@ function payIn4Comparison(
   amountCents: number,
   itemName: string,
   eligible: boolean,
+  /** The first payment's day: the purchase date. The window still runs from today. */
+  start: string = today,
 ): PayIn4Comparison {
   if (!eligible || !payIn4InRange(amountCents))
     return { available: false, reason: PAY_IN_4_UNAVAILABLE }
-  const schedule = payIn4Schedule(amountCents, today)
+  const schedule = payIn4Schedule(amountCents, start)
+  // A later start stretches the window so the last payment still has its full stretch after it.
+  const days = COMPARISON_WINDOW_DAYS + Math.max(0, daysBetween(today, start))
   const option = evaluate(
     profile,
     purchases,
@@ -864,10 +867,11 @@ function payIn4Comparison(
       name: `${itemName} · Pay in 4 payment ${index + 1} of ${schedule.length}`,
       ...item,
     })),
-    today,
+    start,
+    days,
   )
   const cushion = cushionOf(profile)
-  const nearby = obligations(profile, purchases, today)
+  const nearby = obligations(profile, purchases, today, days)
   const instalments: InstalmentDetail[] = schedule.map((item, index) => {
     // Each payment is judged until the next one, so a dip a few days after rent still shows on it.
     const until = schedule[index + 1]?.date ?? option.points.at(-1)!.date
@@ -907,7 +911,7 @@ function payIn4Comparison(
             : 'Instalment scenario stays above your cushion',
     instalments,
     stacking: stackingWarning(
-      activePlanPayments(profile, purchases, today),
+      activePlanPayments(profile, purchases, today, days),
       schedule.map((item, index) => ({
         planId: 'proposed',
         name: `${itemName} · Pay in 4 payment ${index + 1} of ${schedule.length}`,
@@ -916,6 +920,56 @@ function payIn4Comparison(
       })),
     ),
   }
+}
+
+/**
+ * The Pay in 4 scenario on its own, as the comparison computes it: the illustrative schedule, each
+ * payment's nearest bill, the cushion check and any plans already running. For Ask Worth, which
+ * shows it only on request and never recommends it.
+ */
+export function payIn4Scenario(
+  profile: FinancialProfile,
+  purchases: Purchase[],
+  options: { amountCents: number; itemName?: string; today: string; start?: string },
+): PayIn4Comparison {
+  const missing = missingInputs(profile, purchases, options.today).length > 0
+  return payIn4Comparison(
+    profile,
+    purchases,
+    options.today,
+    missing,
+    options.amountCents,
+    options.itemName?.trim() || 'Your purchase',
+    true,
+    options.start ?? options.today,
+  )
+}
+
+/** A payment of a plan already running that lands within NEARBY_BILL_DAYS of a bill. */
+export interface PlanCollision {
+  payment: ActivePlanPayment
+  bill: NearbyBill
+}
+/**
+ * Payments of instalment plans already running, within `days`, that land next to a bill or
+ * subscription. Other plans' payments are not counted as bills here.
+ */
+export function planCollisions(
+  profile: FinancialProfile,
+  purchases: Purchase[],
+  today: string,
+  days = 30,
+): PlanCollision[] {
+  const end = addDays(today, days)
+  const bills = obligations(profile, purchases, today).filter(
+    (bill) => bill.kind !== 'installment' && bill.kind !== 'purchase',
+  )
+  return activePlanPayments(profile, purchases, today)
+    .filter((payment) => payment.date <= end)
+    .flatMap((payment) => {
+      const bill = nearestBill(payment.date, bills)
+      return bill ? [{ payment, bill }] : []
+    })
 }
 
 /**

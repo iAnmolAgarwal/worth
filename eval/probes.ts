@@ -29,6 +29,19 @@ export interface Expectation {
   notIntents?: ChatIntent[]
   /** The lead-in the answer must open with, such as the refusal to skip a bill. */
   lead?: RegExp
+  /**
+   * How Pay in 4 must show when the answer assesses: the inline schedule (asked), one neutral row
+   * (not asked), unavailable (asked, out of range) or nothing.
+   */
+  payIn4?: 'strip' | 'row' | 'unavailable' | 'none'
+  /** What the answer's trace must show. */
+  trace?: {
+    read?: 'your_words' | 'catalog' | 'earlier'
+    /** The date came from the user's own timing words. */
+    datePhrase?: boolean
+    /** A server check that must have stopped the answer, such as `currency`. */
+    failedGuard?: string
+  }
 }
 export interface ProbeTurn {
   /** The message, or a function of the previous reply (for Claude's own suggestion chips). */
@@ -668,5 +681,189 @@ export const PROBES: Probe[] = [
     covers: 'channel3 verdict #1: a service, not a product',
     kind: 'chat',
     turns: [{ message: 'I need a cheaper phone plan', expect: notCheaper() }],
+  },
+  // ---- AI-visible phase (round-2 judge #2): Pay in 4 answered in chat -----------------
+  {
+    id: 'PF1-thesis-fresh',
+    split: 'test',
+    covers: 'round-2 #2: the thesis question asked fresh',
+    kind: 'chat',
+    turns: [
+      {
+        message:
+          'If I put the $1,199 camera on PayPal Pay in 4, which bills would the payments land next to?',
+        expect: { ...assessCamera(), payIn4: 'strip', notIntents: ['alternatives'] },
+      },
+    ],
+  },
+  {
+    id: 'PF2-cheaper-than-now',
+    split: 'train',
+    covers: 'carried-in note: "Is Pay in 4 cheaper than paying now?" gets the Pay in 4 answer',
+    kind: 'chat',
+    turns: [
+      {
+        message: 'Is Pay in 4 cheaper than paying now?',
+        context: camera,
+        expect: {
+          assess: { amounts: [119900], dates: [T], item: /camera/i },
+          payIn4: 'strip',
+          notIntents: ['alternatives', 'clarify'],
+          trace: { read: 'earlier' },
+        },
+      },
+    ],
+  },
+  {
+    id: 'PF3-which-bills-follow-up',
+    split: 'train',
+    covers: 'round-2 #2: Pay in 4 as a follow-up',
+    kind: 'chat',
+    turns: [
+      { message: 'Can I afford a $1,199 camera?', expect: { ...assessCamera(), payIn4: 'row' } },
+      {
+        message: 'Which bills would my Pay in 4 payments land next to?',
+        context: 'previous',
+        expect: {
+          assess: { amounts: [119900], dates: [T], item: /camera/i },
+          payIn4: 'strip',
+          trace: { read: 'earlier' },
+        },
+      },
+    ],
+  },
+  {
+    id: 'PF4-after-item-switch',
+    split: 'test',
+    covers: 'round-2 #2: Pay in 4 after switching items',
+    kind: 'chat',
+    turns: [
+      { message: 'Can I afford a $1,199 camera?', expect: assessCamera() },
+      {
+        message: 'What about $349 headphones?',
+        context: 'previous',
+        expect: { assess: { amounts: [34900], dates: [T], item: /headphone/i }, payIn4: 'row' },
+      },
+      {
+        message: 'And if I used Pay in 4 for the camera instead?',
+        context: 'previous',
+        expect: {
+          assess: { amounts: [119900], dates: [T], item: /camera/i },
+          allowClarify: true,
+          payIn4: 'strip',
+        },
+      },
+    ],
+  },
+  {
+    id: 'PF5-pay-later-out-of-range',
+    split: 'train',
+    covers: '§9 case 14: Pay in 4 above $2,000 is not available',
+    kind: 'chat',
+    turns: [
+      {
+        message: 'Could I pay later with Pay in 4 for a $2,400 TV?',
+        expect: {
+          assess: { amounts: [240000], dates: [T], item: /tv/i },
+          allowClarify: true,
+          payIn4: 'unavailable',
+        },
+      },
+    ],
+  },
+  {
+    id: 'PF6-small-amount-remainder',
+    split: 'train',
+    covers: '§9 case 14: $10.03 is $2.53 then 3 × $2.50',
+    kind: 'chat',
+    turns: [
+      {
+        message: 'How would Pay in 4 work for a $10.03 phone case?',
+        expect: {
+          assess: { amounts: [1003], dates: [T], item: /case/i },
+          allowClarify: true,
+          payIn4: 'strip',
+        },
+      },
+    ],
+  },
+  // ---- AI-visible judge F1: Pay in 4 for a later purchase date ------------------------
+  {
+    id: 'PF7-later-day-follow-up',
+    split: 'train',
+    covers: 'ai-visible judge F1: the schedule starts on the later purchase date',
+    kind: 'chat',
+    turns: [
+      { message: 'Can I afford a $1,199 camera?', expect: assessCamera() },
+      {
+        message: 'What if I buy it on Oct 23 with Pay in 4 instead?',
+        context: 'previous',
+        expect: {
+          assess: { amounts: [119900], dates: ['2026-10-23'], item: /camera/i },
+          allowClarify: true,
+          payIn4: 'strip',
+        },
+      },
+    ],
+  },
+  {
+    id: 'PF8-later-day-fresh',
+    split: 'test',
+    covers: 'ai-visible judge F1: a fresh later-day Pay in 4 question',
+    kind: 'chat',
+    turns: [
+      {
+        message:
+          'If I buy the $1,199 camera on Oct 23 with Pay in 4, which bills would the payments land next to?',
+        expect: {
+          assess: { amounts: [119900], dates: ['2026-10-23'], item: /camera/i },
+          allowClarify: true,
+          payIn4: 'strip',
+        },
+      },
+    ],
+  },
+  // ---- AI-visible phase (round-2 judge #5): the trace ----------------------------------
+  {
+    id: 'T1-trace-catalog-price',
+    split: 'train',
+    covers: 'round-2 #5: the trace names the store price as the source',
+    kind: 'chat',
+    turns: [
+      {
+        message: 'Can I afford the Everyday camera?',
+        expect: { ...assessCamera(), payIn4: 'row', trace: { read: 'catalog' } },
+      },
+    ],
+  },
+  {
+    id: 'T2-trace-date-phrase',
+    split: 'test',
+    covers: 'round-2 #5: the trace shows the date phrase and the date it became',
+    kind: 'chat',
+    turns: [
+      {
+        message: 'Can I buy $349 headphones on October 16?',
+        expect: {
+          assess: { amounts: [34900], dates: ['2026-10-16'], item: /headphone/i },
+          allowClarify: true,
+          // The neutral row now starts on the purchase date (judge F1).
+          payIn4: 'row',
+          trace: { read: 'your_words', datePhrase: true },
+        },
+      },
+    ],
+  },
+  {
+    id: 'T3-trace-currency-stop',
+    split: 'train',
+    covers: 'round-2 #5: the trace shows the check that made Worth ask',
+    kind: 'chat',
+    turns: [
+      {
+        message: 'Can I afford a 500 euro jacket?',
+        expect: { ...clarifyOnly, trace: { failedGuard: 'currency' } },
+      },
+    ],
   },
 ]

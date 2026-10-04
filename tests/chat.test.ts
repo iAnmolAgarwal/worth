@@ -472,7 +472,7 @@ describe('conversation context (C-14, AI-4, UX-1)', () => {
       ask('What subscriptions are coming up?', { context: camera }),
       demo(),
     )
-    expect(create).toHaveBeenCalledTimes(1)
+    expect(create).toHaveBeenCalledTimes(2)
     expect(reply.intent).toBe('subscriptions')
     expect(reply.assessment).toBeUndefined()
     expect(reply.message).toContain('Gym membership, $35 on Oct 10')
@@ -522,7 +522,7 @@ describe('Claude picks engine facts; the server writes them (C-13)', () => {
       }),
     ])
     const reply = await provider.reply(ask('Can I afford a $1,199 camera?'), demo())
-    expect(create).toHaveBeenCalledTimes(1)
+    expect(create).toHaveBeenCalledTimes(2)
     expect(reply.lead).toBe('Here’s what matters for this purchase:')
     expect(reply.points).toEqual([
       {
@@ -535,8 +535,13 @@ describe('Claude picks engine facts; the server writes them (C-13)', () => {
       },
       { id: 'spend_less', text: 'Up to $440.01 would keep your cushion if you buy today.' },
     ])
+    // The engine's template sentence follows the verdict when Claude wrote none.
+    expect(reply.explanation).toBe(
+      'Apartment rent ($1,450) on Fri, Oct 16 is the largest bill due before your balance reaches its low point on Thu, Oct 22.',
+    )
     expect(reply.message.split('\n\n')).toEqual([
       reply.verdict,
+      reply.explanation,
       [reply.lead, ...reply.points!.map((p) => p.text)].join(' '),
       expect.stringContaining('projected low point to -$458.99 on Oct 22'),
     ])
@@ -649,12 +654,16 @@ describe('request shape and reliability (C-14)', () => {
     expect(params.output_config).toMatchObject({ effort: 'low' })
   })
 
-  it('answers in one request when the tool call succeeds', async () => {
+  it('answers in one tool request, then asks once for the sentence', async () => {
     const { provider, create } = model([
       readTool('get_plan_summary', { points: ['room_today', 'cause'], lead_in: 'room' }),
     ])
     const reply = await provider.reply(ask('How much can I comfortably spend?'), demo())
-    expect(create).toHaveBeenCalledTimes(1)
+    expect(create).toHaveBeenCalledTimes(2)
+    // The sentence request continues the answered round with tools closed.
+    expect(request(create, 1).tool_choice).toEqual({ type: 'none' })
+    expect(request(create, 1).messages.at(-2)!.role).toBe('assistant')
+    expect(JSON.stringify(request(create, 1).messages.at(-1))).toContain('{cause_bill}')
     expect(reply.intent).toBe('overview')
     expect(reply.points).toEqual([
       { id: 'room_today', text: 'Up to $440.01 today would keep your $300 cushion.' },
@@ -863,7 +872,7 @@ describe('finding something cheaper through Channel3 (G-C3-2)', () => {
       { findAlternatives },
     )
     expect(request(create, 0).tools.map((t) => t.name)).toContain('find_alternatives')
-    expect(create).toHaveBeenCalledTimes(1)
+    expect(create).toHaveBeenCalledTimes(2)
     expect(findAlternatives).toHaveBeenCalledWith('interchangeable lens camera', 44001)
     expect(reply.intent).toBe('alternatives')
     expect(reply.toolCalls).toEqual(['find_alternatives'])
@@ -871,7 +880,7 @@ describe('finding something cheaper through Channel3 (G-C3-2)', () => {
     expect(reply.points?.[0]?.id).toBe('room_today')
     // The room Claude picked as a fact is not repeated in the search sentence.
     expect(reply.message).toBe(
-      'Up to $440.01 today would keep your $300 cushion.\n\nHere are similar items under $425 from other stores, found through Channel3. Prices may change, and Worth doesn’t sell these items.',
+      'Apartment rent on Fri, Oct 16 is the largest bill before your lowest point, which is what limits your room today.\n\nUp to $440.01 today would keep your $300 cushion.\n\nHere are similar items under $425 from other stores, found through Channel3. Prices may change, and Worth doesn’t sell these items.',
     )
     const plain = model([readTool('get_plan_summary')])
     await plain.provider.reply(ask('How much can I spend?'), demo())

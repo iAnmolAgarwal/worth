@@ -91,10 +91,18 @@ export function judgeItems(results: ProbeResult[]): JudgeItem[] {
                   scheduled: a.drivers.map(
                     (d) => `${d.name} ${d.kind} ${money(d.amountCents)} ${d.date}`,
                   ),
+                  pay_in_4_scenario: reply.payIn4?.payments.length
+                    ? `${reply.payIn4.label} (engine label). With Pay in 4 instead of paying in full, the lowest balance would be ${money(reply.payIn4.lowestCents)} on ${reply.payIn4.lowestDate}; low_point above is for paying in full.`
+                    : undefined,
+                  pay_in_4: reply.payIn4?.payments.map(
+                    (p) =>
+                      `payment ${p.number} ${money(p.amountCents)} ${p.date}${p.nearestBill ? `, ${p.nearestBill.daysFromInstalment} days to ${p.nearestBill.name} (${p.nearestBill.date})` : ''}${p.belowCushion ? ', below cushion' : ''}`,
+                  ),
                 }
               : { outcome: 'no purchase was assessed' },
             shown: {
               verdict: reply.verdict ?? null,
+              explanation: reply.explanation ?? null,
               lead_in: reply.lead ?? null,
               picked_points: (reply.points ?? []).map((p) => p.text),
               message: a ? null : reply.message,

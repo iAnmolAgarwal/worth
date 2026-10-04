@@ -32,6 +32,7 @@ import type {
   SaveTarget,
 } from './contract'
 import { SimilarItems } from './Alternatives'
+import { PayIn4Row, PayIn4Strip, TraceDetails } from './AskTrace'
 import { ASSESSMENT_ONLY, claudeUses } from './copy'
 import { optionStatus, type DecisionRequest, type Explanation } from './Decision'
 import { claudeOn, envLabel, fits, missingFix, useComparison } from './engine'
@@ -112,7 +113,7 @@ export const claudeAllowed = claudeOn
 
 function traceText(reply: ChatReply, state: AppState) {
   // One caption for every answer, so the source reads the same each time.
-  if (reply.mode === 'anthropic') return 'Worth’s assistant answered from your plan'
+  if (reply.mode === 'anthropic') return 'Claude read your question · every number is Worth’s'
   return claudeAllowed(state)
     ? 'Worth’s own calculation · assistant unavailable for this answer'
     : 'Worth’s own calculation · assistant off'
@@ -122,7 +123,38 @@ function traceText(reply: ChatReply, state: AppState) {
 function paragraphs(reply: ChatReply) {
   const chosen =
     reply.points && [reply.lead, ...reply.points.map((p) => p.text)].filter(Boolean).join(' ')
-  return reply.message.split('\n\n').filter((paragraph) => paragraph !== chosen)
+  return reply.message
+    .split('\n\n')
+    .filter((paragraph) => paragraph !== chosen && paragraph !== reply.explanation)
+}
+
+/**
+ * The one sentence under the answer. Claude's own words are marked where they appear (judge F5);
+ * the engine's template sentence carries no mark.
+ */
+function Explanation({ reply }: { reply: ChatReply }) {
+  if (!reply.explanation) return null
+  const claude = reply.trace?.sentence?.source === 'claude'
+  return (
+    <p className="explain">
+      {claude && (
+        <span className="claude-note">
+          <Sparkles className="ico" aria-hidden="true" />
+          Claude’s note · Worth’s numbers
+        </span>
+      )}
+      {minus(reply.explanation)}
+    </p>
+  )
+}
+
+/** The comparison an assessed answer opens: the store item, or the amount and name as read. */
+function requestFor(reply: ChatReply, state: AppState): DecisionRequest {
+  const assessment = reply.assessment!
+  const amountCents = reply.interpretation?.amountCents ?? assessment.amountCents
+  const name = reply.interpretation ? itemLabel(reply.interpretation) : assessment.itemName
+  const product = matchProduct(state.products, name, amountCents)
+  return product ? { productId: product.id } : { amountCents, itemName: name.slice(0, 150) }
 }
 
 const status = (option: OptionResult) => {
@@ -219,9 +251,7 @@ function VerdictTile({
   const amountCents = reply.interpretation?.amountCents ?? assessment.amountCents
   const name = reply.interpretation ? itemLabel(reply.interpretation) : assessment.itemName
   const product = matchProduct(state.products, name, amountCents)
-  const request: DecisionRequest = product
-    ? { productId: product.id }
-    : { amountCents, itemName: name.slice(0, 150) }
+  const request = requestFor(reply, state)
   const { comparison } = useComparison(
     assessment.outcome === 'incomplete' ? null : request,
     state.profile.version,
@@ -256,6 +286,7 @@ function VerdictTile({
       aria-label="Purchase assessment"
     >
       <p className="verdict">{minus(reply.verdict ?? paragraphs(reply)[0] ?? '')}</p>
+      <Explanation reply={reply} />
       {stale && (
         <div style={{ marginTop: 12 }}>
           <Alert tone="warn" icon={CircleAlert}>
@@ -275,6 +306,9 @@ function VerdictTile({
           <span className="sk" style={{ width: '60%' }} />
         </div>
       ) : null}
+      {reply.payIn4 && !reply.payIn4.asked && (
+        <PayIn4Row p4={reply.payIn4} onCompare={() => onOpen(request)} />
+      )}
       {hold && (
         <div style={{ marginTop: 'var(--s-2)' }}>
           <ReservationNote purchase={hold} onReview={(p) => onOpenCheckout(p.id)} />
@@ -460,7 +494,7 @@ export function ClaudeSwitch({
     state.config.ai !== 'anthropic'
       ? 'The assistant isn’t connected here, so answers use Worth’s own calculation.'
       : claudeOn(state)
-        ? 'On: the assistant explains answers from your plan totals. Every number is Worth’s.'
+        ? 'On: Claude reads your question, picks which of Worth’s facts to show and adds one checked sentence. Every number is Worth’s.'
         : 'Off: answers still work, using Worth’s own calculation.'
   const noteId = useId()
   async function change(next: boolean) {
@@ -963,6 +997,10 @@ function Answer({
   const stale =
     Boolean(assessment) &&
     (assessment!.profileVersion !== state.profile.version || assessment!.today !== state.today)
+  // The strip already shows the schedule Claude picked, so the list doesn't repeat it.
+  const picked = (reply.points ?? []).filter(
+    (point) => !(point.id === 'pay_in_4_schedule' && reply.payIn4?.payments.length),
+  )
   const explanation: Explanation = {
     lead: reply.lead,
     points: reply.points?.map((point) => point.text) ?? [],
@@ -1022,9 +1060,25 @@ function Answer({
           onOpenCheckout={(purchaseId) => onOpenCheckout(purchaseId)}
         />
       ) : (
-        paragraphs(reply).map((text, index) => <p key={index}>{text}</p>)
+        <>
+          {paragraphs(reply).map((text, index) => (
+            <p key={index}>{text}</p>
+          ))}
+          <Explanation reply={reply} />
+        </>
       )}
-      {!!reply.points?.length && (
+      {assessment && reply.payIn4?.asked && (
+        <PayIn4Strip
+          p4={reply.payIn4}
+          today={assessment.today}
+          onCompare={
+            assessment.outcome !== 'incomplete'
+              ? () => onOpenDecision(requestFor(reply, state), explanation)
+              : undefined
+          }
+        />
+      )}
+      {!!picked.length && (
         <section className="picked" aria-label="Picked for your question">
           <span className="claude">
             <Sparkles className="ico" aria-hidden="true" />
@@ -1032,11 +1086,11 @@ function Answer({
           </span>
           {reply.lead && <p style={{ marginTop: 8 }}>{reply.lead}</p>}
           <ul>
-            {(allFacts ? reply.points : reply.points.slice(0, 2)).map((point) => (
+            {(allFacts ? picked : picked.slice(0, 2)).map((point) => (
               <li key={point.id}>{minus(point.text)}</li>
             ))}
           </ul>
-          {reply.points.length > 2 && (
+          {picked.length > 2 && (
             <button
               type="button"
               className="link"
@@ -1044,7 +1098,7 @@ function Answer({
               onClick={() => setAllFacts(!allFacts)}
               style={{ fontSize: 'var(--fs-meta)' }}
             >
-              {allFacts ? 'Less' : `More (${reply.points.length - 2})`}
+              {allFacts ? 'Less' : `More (${picked.length - 2})`}
             </button>
           )}
         </section>
@@ -1062,10 +1116,14 @@ function Answer({
           {fix.label} <ArrowRight size={16} aria-hidden="true" />
         </button>
       )}
-      <div className="trace">
-        <ListChecks className="ico" aria-hidden="true" />
-        {entry.trace ?? traceText(reply, state)}
-      </div>
+      {reply.trace ? (
+        <TraceDetails trace={reply.trace} answeredBy={entry.trace ?? traceText(reply, state)} />
+      ) : (
+        <div className="trace">
+          <ListChecks className="ico" aria-hidden="true" />
+          {entry.trace ?? traceText(reply, state)}
+        </div>
+      )}
       {last && matchingSuggestions(reply).length > 0 && (
         // Desktop shows these in the rail; the thread keeps them only on mobile.
         <div className="chips show-m">

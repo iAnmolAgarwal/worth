@@ -102,4 +102,44 @@ describe('AI eval regression gate (recorded model responses)', () => {
       expect(reply.alternatives, result.id).toBeUndefined()
     }
   })
+
+  it('answers Pay in 4 in chat with the engine’s schedule, never a search (round-2 #2)', () => {
+    const reply = (id: string, turn = 0) => results.find((r) => r.id === id)!.turns[turn]!.reply
+    for (const [id, turn] of [
+      ['PF1-thesis-fresh', 0],
+      ['PF2-cheaper-than-now', 0],
+      ['PF3-which-bills-follow-up', 1],
+      ['PF4-after-item-switch', 2],
+      ['NC1-pay-in-4-cheaper', 0],
+    ] as const) {
+      const answer = reply(id, turn)
+      expect(answer.intent, id).toBe('affordability')
+      expect(answer.payIn4?.asked, id).toBe(true)
+      expect(
+        answer.payIn4?.payments.map((p) => p.amountCents),
+        id,
+      ).toEqual([29975, 29975, 29975, 29975])
+      expect(answer.payIn4?.payments[1]?.nearestBill?.name, id).toBe('Apartment rent')
+    }
+    expect(reply('PF5-pay-later-out-of-range').payIn4).toMatchObject({ eligibility: 'unavailable' })
+    expect(reply('PF6-small-amount-remainder').payIn4?.payments.map((p) => p.amountCents)).toEqual([
+      253, 250, 250, 250,
+    ])
+    // Not asked: one neutral row, never the schedule.
+    expect(reply('PF3-which-bills-follow-up').payIn4?.asked).toBe(false)
+  })
+
+  it('traces every answer and meets the expectations of the trace probes (round-2 #5)', () => {
+    for (const result of results.filter((r) => r.kind === 'chat'))
+      for (const turn of result.turns) expect(turn.reply.trace, result.id).toBeDefined()
+    for (const id of ['T1-trace-catalog-price', 'T2-trace-date-phrase', 'T3-trace-currency-stop'])
+      expect(results.find((r) => r.id === id)!.turns[0]!.grade.misses, id).toEqual([])
+    // Claude wrote most sentences on the answers recorded with a sentence request.
+    const recorded = results.filter((r) => /^(?:PF|T)\d/.test(r.id))
+    const summary = summarize(recorded)
+    expect(summary.withSentence).toBeGreaterThan(8)
+    // §9 case 20's 80% is measured live over the full suite; on these 14 recorded answers the
+    // stricter check (judge F3) keeps a floor, so a regression in the check or prompt still shows.
+    expect(summary.explained / summary.withSentence).toBeGreaterThanOrEqual(0.7)
+  })
 })

@@ -1,5 +1,14 @@
-import { addDays, assessPurchase, getUpcomingFlows, money } from '../shared/finance.ts'
-import type { Assessment, Interpretation } from '../shared/types.ts'
+import { collisionLine, mainCollision, PAY_IN_4_SPACING } from '../shared/collision.ts'
+import {
+  addDays,
+  assessPurchase,
+  getUpcomingFlows,
+  money,
+  payIn4InRange,
+  payIn4Scenario,
+  withoutOwnHold,
+} from '../shared/finance.ts'
+import type { Assessment, Interpretation, PayIn4Chat, PayIn4Comparison } from '../shared/types.ts'
 import { dateLabel, shortLabel } from './dates.ts'
 import type { ChatData } from './interpret.ts'
 import { chatLabel } from './labels.ts'
@@ -146,6 +155,8 @@ export const PURCHASE_FACTS = [
   'stress',
   'bills_before',
   'pay_in_4',
+  'pay_in_4_schedule',
+  'pay_in_4_stacking',
 ] as const
 export const PLAN_FACTS = ['room_today', 'low_point', 'cause', 'income'] as const
 export const COMMITMENT_FACTS = ['total', 'next', 'largest', 'other_total'] as const
@@ -223,7 +234,111 @@ export function purchaseFacts(a: Assessment, data: ChatData): FactCatalog {
       data.payIn4 === 'unavailable'
         ? `PayPal Pay in 4 is not available for ${money(a.amountCents)}.`
         : `You can compare PayPal Pay in 4 for ${money(a.amountCents)} in the comparison view. It is shown for comparison only; PayPal decides availability and terms at checkout.`
+  const scenario = data.payIn4 && data.payIn4 !== 'unavailable' ? payIn4For(a, data) : undefined
+  if (scenario?.available) {
+    facts.pay_in_4_schedule = payIn4ScheduleText(scenario, a.today)
+    facts.pay_in_4_stacking = scenario.stacking
+      ? scenario.stacking.message
+      : 'You have no other instalment plans with payments in this window.'
+  }
   return facts
+}
+
+// ---- Pay in 4 in chat ----------------------------------------------------------------
+//
+// The engine's own scenario, as the comparison computes it. Every sentence is neutral: Pay in 4
+// is never recommended, and every collision is "about", because PayPal sets the exact dates.
+
+/** The engine's Pay in 4 scenario for an assessed amount, starting on its purchase date. */
+export function payIn4For(a: Assessment, data: ChatData): PayIn4Comparison {
+  return payIn4Scenario(
+    data.profile,
+    withoutOwnHold(data.purchases, { itemName: a.itemName, amountCents: a.amountCents }),
+    // The first payment is on the purchase date, so a later day gets its own schedule.
+    { amountCents: a.amountCents, itemName: a.itemName, today: a.today, start: a.purchaseDate },
+  )
+}
+type Scenario = Extract<PayIn4Comparison, { available: true }>
+/** "4 payments of $299.75" or "4 payments: $2.53, then 3 of $2.50". */
+function paymentsText(scenario: Scenario) {
+  const [first, ...rest] = scenario.instalments
+  return rest.every((p) => p.amountCents === first!.amountCents)
+    ? `4 payments of ${money(first!.amountCents)}`
+    : `4 payments: ${money(first!.amountCents)}, then ${rest.length} of ${money(rest[0]!.amountCents)}`
+}
+/** Each payment that lands near a bill: "payment 2 would land about 1 day after your rent". */
+export function collisionsText(scenario: Scenario) {
+  return labelled(scenario)
+    .filter((p) => p.nearestBill)
+    .map(collisionLine)
+}
+/** The scenario's payments with each nearby bill's name made safe for chat. */
+function labelled(scenario: Scenario) {
+  return scenario.instalments.map((p) => ({
+    ...p,
+    nearestBill: p.nearestBill && { ...p.nearestBill, name: chatLabel(p.nearestBill.name) },
+  }))
+}
+function payIn4ScheduleText(scenario: Scenario, today: string) {
+  const collisions = collisionsText(scenario)
+  const start = scenario.instalments[0]!.date
+  return [
+    `PayPal Pay in 4 would be ${paymentsText(scenario)}, ${PAY_IN_4_SPACING} starting ${start === today ? 'today' : `on ${dateLabel(start, today)}`}. The total stays ${money(scenario.amountCents)} and PayPal charges no interest.`,
+    collisions.length
+      ? `${capitalize(collisions.join('; '))}.`
+      : 'No payment would land within 3 days of a bill.',
+    `${scenario.label}.`,
+    'The schedule is illustrative; PayPal sets the exact dates.',
+  ].join(' ')
+}
+/**
+ * Pay in 4 for an answer: the schedule when the person asked about it, otherwise one neutral row
+ * for a purchase PayPal's range covers. Out of range, an answer that asked shows it is unavailable.
+ */
+export function payIn4Chat(a: Assessment, data: ChatData, asked: boolean): PayIn4Chat | undefined {
+  if (a.outcome === 'incomplete') return undefined
+  const eligibility = asked ? (data.payIn4 ?? 'range-only') : 'range-only'
+  if (!payIn4InRange(a.amountCents) || eligibility === 'unavailable')
+    return asked
+      ? {
+          asked,
+          totalCents: a.amountCents,
+          eligibility: 'unavailable',
+          payments: [],
+          label: `PayPal Pay in 4 is not available for ${money(a.amountCents)}`,
+          lowestCents: a.lowestBalanceCents,
+          lowestDate: a.lowestDate,
+          stacking: null,
+        }
+      : undefined
+  const scenario = payIn4For(a, data)
+  if (!scenario.available) return undefined
+  return {
+    asked,
+    totalCents: a.amountCents,
+    eligibility,
+    payments: labelled(scenario).map((p) => ({
+      number: p.number,
+      date: p.date,
+      amountCents: p.amountCents,
+      nearestBill: p.nearestBill,
+      belowCushion: p.belowCushion,
+    })),
+    label: scenario.label,
+    lowestCents: scenario.lowestBalanceCents,
+    lowestDate: scenario.lowestDate,
+    stacking: scenario.stacking && {
+      activePlans: scenario.stacking.activePlans,
+      totalCents: scenario.stacking.totalCents,
+      message: scenario.stacking.message,
+    },
+  }
+}
+/** The engine's Pay in 4 sentence for the answer's text, when the person asked. */
+export function payIn4Text(a: Assessment, data: ChatData) {
+  if (!data.payIn4 || a.outcome === 'incomplete') return undefined
+  const facts = purchaseFacts(a, data)
+  return facts.pay_in_4_schedule ?? facts.pay_in_4
 }
 
 /** Facts about the plan before any new purchase. */
@@ -351,4 +466,469 @@ export function chipAllowed(text: string) {
     !CHIP_VERDICT.test(chip) &&
     !CHIP_NUMBER.test(chip)
   )
+}
+
+// ---- One Claude sentence (C-13) ------------------------------------------------------
+//
+// After the engine answers, Claude may add one sentence on why the result is what it is. It names
+// every figure, date, count and name through a placeholder; the server checks the sentence and
+// fills in the engine's values. Any failed check shows the engine's template sentence instead.
+
+export interface Placeholder {
+  value: string
+  about: string
+  /** The day the value belongs to, so "before" and "after" in Claude's sentence can be checked. */
+  date?: string
+}
+export type Placeholders = Record<string, Placeholder>
+
+/** Placeholders for an assessed purchase. */
+export function purchasePlaceholders(a: Assessment, data: ChatData): Placeholders {
+  if (a.outcome === 'incomplete') return {}
+  const out: Placeholders = {
+    item: { value: chatLabel(a.itemName), about: 'the item' },
+    price: { value: money(a.amountCents), about: 'its total price' },
+    buy_day: {
+      value: dateLabel(a.purchaseDate, a.today),
+      about: 'the day they would buy it',
+      date: a.purchaseDate,
+    },
+    cushion: { value: money(a.cushionCents), about: 'the cushion they keep' },
+    low_point: {
+      value: money(a.lowestBalanceCents),
+      about: 'the lowest projected balance',
+      date: a.lowestDate,
+    },
+    low_day: {
+      value: day(a.lowestDate, a.today),
+      about: 'the day of that low point',
+      date: a.lowestDate,
+    },
+    gap: {
+      value: money(Math.abs(a.lowestBalanceCents - a.cushionCents)),
+      about: `how far the low point is ${a.lowestBalanceCents < a.cushionCents ? 'below' : 'above'} the cushion`,
+    },
+    stress_low: {
+      value: money(a.stressLowestCents),
+      about: 'the low point if everyday spending runs 20% higher',
+    },
+  }
+  // From the purchase date on: for a later day, earlier bills and income never explain it.
+  const cause = a.drivers
+    .filter((d) => d.kind !== 'income' && d.date >= a.purchaseDate && d.date <= a.lowestDate)
+    .sort((x, y) => y.amountCents - x.amountCents)[0]
+  if (cause) {
+    out.cause_bill = {
+      value: chatLabel(cause.name),
+      about: 'the largest bill before the low point',
+      date: cause.date,
+    }
+    out.cause_amount = {
+      value: money(cause.amountCents),
+      about: 'that bill’s amount',
+      date: cause.date,
+    }
+    out.cause_day = {
+      value: day(cause.date, a.today),
+      about: 'the day that bill is due',
+      date: cause.date,
+    }
+  }
+  // The first payday after that bill, so "before the next payday" can name the right one.
+  const payday = cause && a.drivers.find((d) => d.kind === 'income' && d.date > cause.date)
+  if (payday)
+    out.cause_payday = {
+      value: day(payday.date, a.today),
+      about: 'the first payday after that bill',
+      date: payday.date,
+    }
+  const income = a.drivers.find((d) => d.kind === 'income' && d.date >= a.purchaseDate)
+  if (income) {
+    out.income_name = {
+      value: chatLabel(income.name),
+      about: 'the next income, which arrives on {income_day}',
+      date: income.date,
+    }
+    out.income_day = {
+      value: day(income.date, a.today),
+      about: 'the day it arrives',
+      date: income.date,
+    }
+  }
+  const after = a.drivers.find((d) => d.kind === 'income' && d.date >= a.lowestDate)
+  if (after && after.date !== income?.date)
+    out.payday_after_low = {
+      value: day(after.date, a.today),
+      about: 'the first payday on or after the low point',
+      date: after.date,
+    }
+  if (a.outcome === 'tight' && a.earliestDate && a.earliestDate > a.purchaseDate)
+    out.wait_day = {
+      value: day(a.earliestDate, a.today),
+      about: 'the earliest day that fits',
+      date: a.earliestDate,
+    }
+  if (a.maxAffordableCents > 0)
+    out.max_spend = {
+      value: money(a.maxAffordableCents),
+      about: 'the most that keeps the cushion on that day',
+    }
+  if (data.payIn4 && data.payIn4 !== 'unavailable') {
+    const scenario = payIn4For(a, data)
+    if (scenario.available) {
+      // Asked about Pay in 4, the full-price low point and the instalment one are kept apart.
+      for (const key of ['low_point', 'low_day', 'gap'] as const)
+        out[key] = { ...out[key]!, about: `${out[key]!.about}, if paid in full` }
+      out.p4_payment = {
+        value: money(scenario.instalments.at(-1)!.amountCents),
+        about: 'one illustrative PayPal Pay in 4 payment',
+      }
+      out.p4_low_point = {
+        value: money(scenario.lowestBalanceCents),
+        about: 'the lowest projected balance with the Pay in 4 payments instead',
+        date: scenario.lowestDate,
+      }
+      out.p4_low_day = {
+        value: day(scenario.lowestDate, a.today),
+        about: 'the day of that Pay in 4 low point',
+        date: scenario.lowestDate,
+      }
+      const main = mainCollision(labelled(scenario))
+      if (main)
+        out.p4_collision = {
+          value: collisionLine(main),
+          about: 'the first Pay in 4 payment that lands near a bill (a whole phrase)',
+        }
+      if (scenario.stacking)
+        out.p4_existing = {
+          value: money(scenario.stacking.totalCents),
+          about: 'what instalment plans already running take in this window',
+        }
+    }
+  }
+  return out
+}
+/** Placeholders for the plan before any purchase (room to spend and cheaper searches). */
+export function planPlaceholders(data: ChatData): Placeholders {
+  const base = baseline(data)
+  if (base.outcome === 'incomplete') return {}
+  const out: Placeholders = {
+    room_today: { value: money(base.maxAffordableCents), about: 'what fits today' },
+    cushion: { value: money(base.cushionCents), about: 'the cushion they keep' },
+    low_point: {
+      value: money(base.baselineLowestCents),
+      about: 'the lowest projected balance',
+      date: base.lowestDate,
+    },
+    low_day: {
+      value: day(base.lowestDate, data.today),
+      about: 'the day of that low point',
+      date: base.lowestDate,
+    },
+  }
+  const cause = base.drivers
+    .filter((d) => d.kind !== 'income' && d.date >= base.today && d.date <= base.lowestDate)
+    .sort((x, y) => y.amountCents - x.amountCents)[0]
+  if (cause) {
+    out.cause_bill = {
+      value: chatLabel(cause.name),
+      about: 'the largest bill before the low point',
+      date: cause.date,
+    }
+    out.cause_day = {
+      value: day(cause.date, data.today),
+      about: 'the day that bill is due',
+      date: cause.date,
+    }
+  }
+  const income = base.drivers.find((d) => d.kind === 'income' && d.date >= base.today)
+  if (income) {
+    out.income_name = {
+      value: chatLabel(income.name),
+      about: 'the next income, which arrives on {income_day}',
+      date: income.date,
+    }
+    out.income_day = {
+      value: day(income.date, data.today),
+      about: 'the day it arrives',
+      date: income.date,
+    }
+  }
+  return out
+}
+export function commitmentPlaceholders(data: ChatData, kind: CommitmentKind): Placeholders {
+  const value = commitments(data, kind)
+  if (!value.events.length) return {}
+  const next = value.events[0]!
+  const largest = [...value.events].sort((a, b) => b.amountCents - a.amountCents)[0]!
+  return {
+    count: { value: String(value.events.length), about: 'how many are due in the next 30 days' },
+    total: { value: money(value.totalCents), about: 'their total' },
+    next_name: { value: next.name, about: 'the next one due', date: next.date },
+    next_day: { value: day(next.date, data.today), about: 'the day it is due', date: next.date },
+    next_amount: { value: money(next.amountCents), about: 'its amount', date: next.date },
+    largest_name: { value: largest.name, about: 'the largest one' },
+    largest_amount: { value: money(largest.amountCents), about: 'its amount' },
+  }
+}
+export function spendingPlaceholders(data: ChatData): Placeholders {
+  const value = spending(data)
+  if (!value.transactionCount) return {}
+  const top = value.categories[0]
+  return {
+    total: { value: money(value.totalCents), about: 'spending over the last 30 days' },
+    count: { value: String(value.transactionCount), about: 'how many purchases' },
+    daily_average: {
+      value: money(Math.round(value.totalCents / 30)),
+      about: 'the daily average',
+    },
+    plan_daily: {
+      value: money(data.profile.dailySpendCents),
+      about: 'the everyday spending the plan assumes',
+    },
+    ...(top
+      ? {
+          top_category: { value: top.name, about: 'the largest category' },
+          top_amount: { value: money(top.amountCents), about: 'its total' },
+        }
+      : {}),
+  }
+}
+
+/** The engine's own sentence for an answer, used whenever Claude's does not pass. */
+export function templateSentence(
+  kind: 'purchase' | 'plan' | 'commitments' | 'spending',
+  values: Placeholders,
+  outcome?: Assessment['outcome'],
+): string | undefined {
+  const has = (...keys: string[]) => keys.every((key) => key in values)
+  if (kind === 'purchase') {
+    // Asked about Pay in 4, the sentence names where its payments land.
+    if (outcome !== 'incomplete' && has('p4_collision'))
+      return 'With PayPal Pay in 4, {p4_collision}.'
+    if (outcome === 'fits' && has('low_point', 'low_day', 'cushion'))
+      return 'Even at its lowest, {low_point} on {low_day}, your balance keeps your {cushion} cushion.'
+    if (outcome === 'tight' && has('cause_bill', 'cause_amount', 'cause_day', 'low_day'))
+      return '{cause_bill} ({cause_amount}) on {cause_day} is the largest bill due before your balance reaches its low point on {low_day}.'
+    if (outcome === 'tight' && has('low_day'))
+      return 'Everyday spending is what brings your balance down to its low point on {low_day}.'
+    return undefined
+  }
+  if (kind === 'plan')
+    return has('cause_bill', 'cause_day')
+      ? '{cause_bill} on {cause_day} is the largest bill before your lowest point, which is what limits your room today.'
+      : has('low_day')
+        ? 'Your balance reaches its lowest point on {low_day}, which is what limits your room today.'
+        : undefined
+  if (kind === 'commitments')
+    return has('next_name', 'next_day')
+      ? '{next_name} on {next_day} is the next one due.'
+      : undefined
+  return has('top_category', 'top_amount')
+    ? '{top_category} was your largest category, at {top_amount}.'
+    : undefined
+}
+
+export type SentenceRejection =
+  | 'no_sentence'
+  | 'length'
+  | 'not_one_sentence'
+  | 'not_plain'
+  | 'unknown_placeholder'
+  | 'wrong_value'
+  | 'free_number'
+  | 'free_date'
+  | 'advice'
+  | 'pay_in_4'
+  | 'contradicts_result'
+const PLACEHOLDER = /\{([a-z0-9_]+)\}/g
+/** PayPal's product name, which holds a digit; the time unit after "pay in 4 days" still counts. */
+const PAY_IN_4_NAME = /\bpay\s+in\s+4\b/gi
+const NUMBER_WORD =
+  /\b(?:zero|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundreds?|thousands?|millions?|billions?|dozens?|half|halves|quarters?|double|twice|triple|percent|pct|dollars?|bucks|grand|cents?|usd|eur\w*|gbp|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|\w+teenth|\w+tieth|few|couple|several|numerous|handful)\b/i
+const DATE_WORD =
+  /\b(?:today|tonight|tomorrow|yesterday|weekends?|weekdays?|weeks?|months?|years?|fortnight|days?|nights?|hours?|mornings?|afternoons?|evenings?|noon|midnight|soon|shortly|later|earlier|lately|recently|ago|momentarily|holidays?|halloween|christmas|xmas|thanksgiving|easter|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:rs(?:day)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\b/i
+/** Advice and judgement: Worth states the engine's result and never recommends or rates options. */
+const ADVICE =
+  /\b(?:skip\w*|delay\w*|defer\w*|postpon\w*|pa(?:y|ying|id)\s+(?:[a-z']+\s+){0,3}late|late\s+(?:fee|payment)s?|miss(?:ing)?|borrow\w*|loans?|credit|financ\w*|overdraft|recommend\w*|suggest\w*|advis\w*|should|ought|smart\w*|wise\w*|better|best|ideal\w*|easier|easy|safer|prefer\w*|worth\s+it|go\s+with|opt\s+for|works?\s+out|good|great|fine|nice|ok(?:ay)?|no\s+(?:issue|problem|worries|concern)s?|doable|manageable|dip\w*\s+into|tap\w*\s+into|use\s+(?:your|the)\s+cushion)\b|\b(?:use|using|try|consider|choose|pick|switch\s+to|split\w*)\b[^.]{0,40}\b(?:pay\s+in\s+4|pay\s+later|instal+ments?|bnpl)\b/i
+/** A sentence about Pay in 4 or paying later. */
+const PAY_IN_4_MENTION =
+  /\bpay\s+in\s+4\b|\bpay(?:ing)?\s+later\b|\bsplit\w*|\bspread\w*|\binstal+ments?\b|\bbnpl\b|\bpaypal\b/i
+const POSITIVE =
+  /\b(?:fits?|fitting|afford\w*|safe(?:ly)?|comfortabl\w*|go\s+ahead|easily|plenty|covered|stays?\s+above|keeps?\s+your\s+cushion|in\s+good\s+shape|remains?\s+(?:above|over))\b/i
+const NEGATIVE =
+  /\b(?:dips?|dipping|below|under|short(?:fall)?|overdrawn|negative|too\s+much|too\s+little|tight|risky|breaks?)\b|\b(?:not|never|cannot|can['’]?t|won['’]?t|\w+n['’]t)\b(?:\s+[A-Za-z']+){0,2}\s+(?:fit|afford|enough|keep|hold|cover|stay|make|leave)\w*/i
+
+/**
+ * Checks Claude's sentence and fills in the engine's values (scope C-13). The sentence must be one
+ * plain sentence: ASCII words and punctuation around placeholders this answer offers, so every
+ * figure, date and name is the engine's. On top of that structure it may not give advice, rate Pay
+ * in 4 or the options, use a value in the wrong place, or contradict the engine's outcome.
+ */
+export function checkSentence(
+  raw: string | null | undefined,
+  values: Placeholders,
+  outcome?: Assessment['outcome'],
+): { ok: true; text: string } | { ok: false; reason: SentenceRejection } {
+  const reject = (reason: SentenceRejection) => ({ ok: false as const, reason })
+  if (!raw?.trim()) return reject('no_sentence')
+  if (/[\r\n]/.test(raw.trim())) return reject('not_one_sentence')
+  const sentence = raw
+    .normalize('NFKC')
+    .replace(/[ \t]+/g, ' ')
+    .trim()
+  if (sentence.length < 12 || sentence.length > 240) return reject('length')
+  const names = [...sentence.matchAll(PLACEHOLDER)].map((m) => m[1]!)
+  if (names.some((name) => !(name in values)) || /[{}]/.test(sentence.replace(PLACEHOLDER, '')))
+    return reject('unknown_placeholder')
+  const prose = sentence.replace(PLACEHOLDER, ' ')
+  // Structure first: plain ASCII words and a few punctuation marks, nothing else.
+  const plain = prose.replace(PAY_IN_4_NAME, 'PayPal')
+  if (/[^A-Za-z ,;:'’\-–—().!]/.test(plain)) return reject('not_plain')
+  if (/\b[A-Z]{2,}\b/.test(plain.replace(/\bPayPal\b/g, ''))) return reject('free_number')
+  if (!/[.!]$/.test(sentence) || /[.!?]\s+\S/.test(prose.slice(0, -1)))
+    return reject('not_one_sentence')
+  if ((prose.match(/[;:]/g) ?? []).length > 1) return reject('not_one_sentence')
+  if (ADVICE.test(prose)) return reject('advice')
+  if (NUMBER_WORD.test(plain)) return reject('free_number')
+  // "Today" is the engine's own day when the answer is about today (room to spend, a purchase
+  // today); about a later day it would be a free date.
+  const aboutToday = values.buy_day ? values.buy_day.value === 'today' : true
+  const dated = aboutToday ? plain.replace(/\b(?:today|right\s+now|now)\b/gi, ' ') : plain
+  if (DATE_WORD.test(dated)) return reject('free_date')
+  const payIn4 = payIn4Problem(sentence, values)
+  if (payIn4) return reject(payIn4)
+  if (wrongValue(sentence, values)) return reject('wrong_value')
+  if (misordered(sentence, values)) return reject('contradicts_result')
+  // A tight result may still say what would fit: waiting, or spending less.
+  const conditional = /\{(?:wait_day|max_spend)\}|\bwait\w*|\bonly\s+(?:once|after|when)\b/i.test(
+    sentence,
+  )
+  // A fitting result may still say what higher everyday spending would do.
+  const stressed =
+    /\{stress_low\}/.test(sentence) && /\b(?:if|higher|ran|runs|running)\b/i.test(sentence)
+  if (
+    (outcome === 'tight' && POSITIVE.test(prose) && !conditional) ||
+    (outcome === 'fits' && NEGATIVE.test(prose) && !stressed)
+  )
+    return reject('contradicts_result')
+  return { ok: true, text: fill(sentence, values) }
+}
+/**
+ * Pay in 4 may be named only when the person asked about it (the answer then offers p4
+ * placeholders), only next to one of those engine values, only as "no interest" and "not
+ * cheaper", and its low point only as "the lowest balance would be …", never as unchanged.
+ */
+function payIn4Problem(sentence: string, values: Placeholders): SentenceRejection | undefined {
+  const asked = Object.keys(values).some((name) => name.startsWith('p4_'))
+  const usesValue = /\{p4_[a-z_]+\}/.test(sentence)
+  if (!PAY_IN_4_MENTION.test(sentence) && !usesValue) return undefined
+  // Unasked, Pay in 4 is never named; asked, it may be named in the neutral terms below.
+  if (!asked) return 'pay_in_4'
+  if (
+    /\binterest\b/i.test(sentence) &&
+    !/\b(?:no|without)\s+interest\b|\binterest[-\s]free\b/i.test(sentence)
+  )
+    return 'pay_in_4'
+  // Pay in 4 never improves anything: no lifting, softening or helping verbs about it.
+  if (
+    /\b(?:lifts?|lifting|raises?|improves?|helps?|helping|softens?|eases?|easing)\b/i.test(sentence)
+  )
+    return 'pay_in_4'
+  if (
+    /\bcheaper\b/i.test(sentence.replace(PLACEHOLDER, 'it')) &&
+    !/\b(?:not|no|isn['’]t|never|doesn['’]t|does\s+not|won['’]t)\b(?:\s+[A-Za-z']+){0,3}\s+cheaper\b/i.test(
+      sentence.replace(PLACEHOLDER, 'it'),
+    )
+  )
+    return 'pay_in_4'
+  // The full-price low point belongs to paying in full, never to the instalments.
+  if (/\{(?:low_point|low_day|gap|stress_low)\}/.test(sentence)) return 'contradicts_result'
+  if (/\{p4_low_point\}/.test(sentence)) {
+    if (
+      !/\b(?:lowest\s+(?:balance|point)|low\s+point)(?:\s+with\s+pay\s+in\s+4)?\s+(?:would\s+be|is|of)\s+\{p4_low_point\}/i.test(
+        sentence,
+      )
+    )
+      return 'pay_in_4'
+    if (
+      /\b(?:still|unchanged|identical|match\w*|equal\w*|too|also|again|same\s+as)\b(?:\s+[A-Za-z']+){0,4}\s+\{p4_low_point\}|\{p4_low_point\}(?:\s+[A-Za-z']+){0,2}\s+(?:too|also|again)\b/i.test(
+        sentence,
+      )
+    )
+      return 'contradicts_result'
+  }
+  return undefined
+}
+/** A value placed where it doesn't belong: a day for another event, a price as a limit, a gap's direction. */
+function wrongValue(sentence: string, values: Placeholders) {
+  // "{income_name} arrives on {low_day}": a day must belong to the value it is attached to.
+  for (const m of sentence.matchAll(
+    /\{([a-z0-9_]+)\}(\s+(?:arrives?|arriving|lands?|landing|is\s+due|due|comes?|hits?|is\s+paid|gets?\s+paid|clears?))?\s+(?:on|by|around)\s+\{([a-z0-9_]+_day)\}/g,
+  )) {
+    const owner = values[m[1]!]?.date
+    const day = values[m[3]!]?.date
+    if (owner && day && owner !== day) return true
+  }
+  // "Your cushion is {low_point}" or "the {low_point} cushion".
+  if (/\bcushion\s+(?:is|of|at|sits\s+at|stands\s+at|would\s+be)\s+\{(?!cushion\})/i.test(sentence))
+    return true
+  if (/\{(?!cushion\})[a-z0-9_]+\}\s+cushion\b/i.test(sentence)) return true
+  // "The most you can spend is {price}": only the engine's limits are limits.
+  for (const m of sentence.matchAll(
+    /\b(?:the\s+most\s+(?:you\s+)?(?:can|could)\s+(?:spend|afford)\s+(?:is|would\s+be)|at\s+most|up\s+to|(?:limit|maximum|max)\s+(?:is|of|would\s+be))\s+\{([a-z0-9_]+)\}/gi,
+  ))
+    if (!['max_spend', 'room_today'].includes(m[1]!)) return true
+  // The room above the cushion and the stressed balance are different values ("trim the {gap} of
+  // room to {stress_low}" mislabels one as the other).
+  if (/\{gap\}/.test(sentence) && /\{stress_low\}/.test(sentence)) return true
+  // "{gap} over your cushion" when the low point is below it, and the reverse.
+  const gap = values.gap?.about ?? ''
+  if (
+    /below/.test(gap) &&
+    /\{gap\}\s+(?:over|above|more\s+than|to\s+spare|ahead|extra)/i.test(sentence)
+  )
+    return true
+  if (/above/.test(gap) && /\{gap\}\s+(?:under|below|short|less\s+than)/i.test(sentence))
+    return true
+  return false
+}
+/**
+ * Whether "before" or "after" in the sentence puts two dated values in the wrong order, as in
+ * "{cause_bill} on {cause_day}, before {income_name}" when the income arrives first.
+ */
+const PAYDAY_WORDS =
+  /\b(before|after|until|ahead\s+of)\s+(?:your\s+|the\s+|a\s+)?(?:next\s+)?(?:paycheck|pay\s*day|income|salary)\b(?!\s+(?:after|on|that|of)\b|,?\s+\{)/gi
+function misordered(sentence: string, values: Placeholders) {
+  // "before your next paycheck" written in words means the next income placeholder's day.
+  const income = values.income_name?.date
+  const matches = [
+    ...[
+      ...sentence.matchAll(
+        /\b(before|after|until|ahead\s+of|followed\s+by)\s+(?:[a-z']+\s+){0,3}\{([a-z0-9_]+)\}/gi,
+      ),
+    ].map((m) => ({ index: m.index, word: m[1]!, date: values[m[2]!]?.date })),
+    ...[...sentence.matchAll(PAYDAY_WORDS)].map((m) => ({
+      index: m.index,
+      word: m[1]!,
+      date: income,
+    })),
+  ]
+  for (const m of matches) {
+    const later = m.date
+    const earlier = [...sentence.slice(0, m.index).matchAll(PLACEHOLDER)]
+      .map((p) => values[p[1]!]?.date)
+      .filter(Boolean)
+      .at(-1)
+    if (!later || !earlier) continue
+    const word = m.word.toLowerCase()
+    const forward = !/^after/.test(word)
+    if (forward ? earlier > later : earlier < later) return true
+  }
+  return false
+}
+/** The sentence with each placeholder replaced by the engine's value. */
+export function fill(sentence: string, values: Placeholders) {
+  const text = sentence.replace(PLACEHOLDER, (_, name: string) => values[name]?.value ?? '')
+  return capitalize(text)
 }

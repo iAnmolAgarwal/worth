@@ -1,4 +1,10 @@
-import { addDays, assessPurchase, getUpcomingFlows } from '../shared/finance.ts'
+import {
+  addDays,
+  assessPurchase,
+  getUpcomingFlows,
+  payIn4Scenario,
+  payIn4Schedule,
+} from '../shared/finance.ts'
 import type { Assessment, ChatReply, FinancialProfile, Transaction } from '../shared/types.ts'
 import type { Expectation } from './probes.ts'
 
@@ -22,6 +28,10 @@ export interface Grade {
   selected: boolean
   /** Whether the answer had engine facts Claude could choose from. */
   withFacts: boolean
+  /** Whether the answer had a sentence under it from Claude (not the template). */
+  explained: boolean
+  /** Whether the answer had a sentence slot at all (an on-topic Claude answer with facts). */
+  withSentence: boolean
 }
 
 const GENERIC_ITEM = /^(?:your purchase|purchase|item|it|this)$/i
@@ -79,6 +89,22 @@ function allowedAmounts(data: GradeData, a: Assessment | undefined, reply: ChatR
       .add(a.stressLowestCents)
       .add(a.maxAffordableCents)
     for (const item of reply.interpretation?.items ?? []) allowed.add(item.amountCents)
+    // Pay in 4: each illustrative payment, the instalment scenario's low point, and what plans
+    // already running take in 60 days.
+    const p4 = payIn4Scenario(data.profile, [], {
+      amountCents: a.amountCents,
+      today: data.today,
+      start: a.purchaseDate,
+    })
+    if (p4.available)
+      allowed.add(p4.lowestBalanceCents).add(Math.abs(p4.lowestBalanceCents - a.cushionCents))
+    for (const payment of payIn4Schedule(a.amountCents, a.purchaseDate))
+      allowed.add(payment.amountCents)
+    allowed.add(
+      getUpcomingFlows(data.profile, data.today, 60)
+        .filter(({ flow }) => flow.kind === 'installment')
+        .reduce((sum, { flow }) => sum + flow.amountCents, 0),
+    )
   }
   // Similar items from other stores: the search ceiling, each listed price, and a stated limit.
   if (reply.alternatives) {
@@ -98,7 +124,12 @@ function checkFacts(reply: ChatReply, data: GradeData, a: Assessment | undefined
     today: data.today,
     findEarliest: false,
   })
-  const shown = [reply.verdict ?? '', reply.lead ?? '', ...(reply.points ?? []).map((p) => p.text)]
+  const shown = [
+    reply.verdict ?? '',
+    reply.explanation ?? '',
+    reply.lead ?? '',
+    ...(reply.points ?? []).map((p) => p.text),
+  ]
   const text = [...shown, reply.message].join('\n')
   const allowed = allowedAmounts(data, a, reply)
   for (const figure of new Set(text.match(MONEY) ?? []))
@@ -260,6 +291,64 @@ export function gradeReply(reply: ChatReply, expect: Expectation, data: GradeDat
   if (expect.lead && !expect.lead.test(reply.lead ?? ''))
     misses.push(`lead-in "${reply.lead ?? ''}" does not match ${expect.lead}`)
 
+  // Pay in 4: shown as expected, with the engine's schedule and real nearby bills, never advised.
+  const p4 = reply.payIn4
+  if (a && expect.payIn4) {
+    const shownAs = !p4 ? 'none' : !p4.asked ? 'row' : p4.payments.length ? 'strip' : 'unavailable'
+    if (shownAs !== expect.payIn4)
+      misses.push(`Pay in 4 shown as ${shownAs}, expected ${expect.payIn4}`)
+  }
+  if (p4 && a) {
+    if (p4.totalCents !== a.amountCents) unsafe.push('Pay in 4 total differs from the assessment')
+    // The schedule starts on the purchase date the answer assessed, never on another day.
+    const schedule = p4.payments.length ? payIn4Schedule(a.amountCents, a.purchaseDate) : []
+    for (const [i, payment] of p4.payments.entries()) {
+      const expected = schedule[i]
+      if (
+        !expected ||
+        payment.amountCents !== expected.amountCents ||
+        payment.date !== expected.date
+      )
+        unsafe.push(`Pay in 4 payment ${payment.number} differs from the engine's schedule`)
+      const bill = payment.nearestBill
+      if (bill) {
+        const near = getUpcomingFlows(data.profile, data.today, 120).some(
+          ({ flow, date }) =>
+            flow.kind !== 'income' &&
+            date === addDays(payment.date, bill.daysFromInstalment) &&
+            Math.abs(bill.daysFromInstalment) <= 3,
+        )
+        if (!near)
+          contradictions.push(`Pay in 4 payment ${payment.number}: no bill on the named day`)
+      }
+    }
+  }
+  // The trace: present on every answer, and Claude's sentence names values only by placeholder.
+  const trace = reply.trace
+  if (!trace) misses.push('no trace')
+  else {
+    if (
+      trace.read &&
+      reply.interpretation &&
+      trace.read.amountCents !== reply.interpretation.amountCents
+    )
+      unsafe.push('trace amount differs from the reading')
+    const raw = trace.sentence?.source === 'claude' ? trace.sentence.raw : ''
+    if (/[\p{N}\p{Sc}]/u.test(raw.replace(/\{[a-z0-9_]+\}/g, '').replace(/\bPay\s+in\s+4\b/gi, '')))
+      contradictions.push(`Claude's sentence has a figure outside placeholders: "${raw}"`)
+    if (expect.trace?.read && a && trace.read?.source !== expect.trace.read)
+      misses.push(
+        `trace reads the amount from ${trace.read?.source ?? 'nothing'}, expected ${expect.trace.read}`,
+      )
+    if (expect.trace?.datePhrase && a && !(trace.date?.source === 'stated' && trace.date.phrase))
+      misses.push('trace has no date phrase')
+    if (
+      expect.trace?.failedGuard &&
+      !trace.guards.some((g) => g.id === expect.trace!.failedGuard && !g.passed)
+    )
+      misses.push(`trace does not show the ${expect.trace.failedGuard} check stopping the answer`)
+  }
+
   const withFacts =
     reply.mode === 'anthropic' &&
     ((a !== undefined && a.outcome !== 'incomplete') ||
@@ -270,6 +359,8 @@ export function gradeReply(reply: ChatReply, expect: Expectation, data: GradeDat
     misses,
     selected: Boolean(reply.points?.length),
     withFacts,
+    explained: reply.trace?.sentence?.source === 'claude',
+    withSentence: reply.mode === 'anthropic' && Boolean(reply.trace?.sentence),
   }
 }
 

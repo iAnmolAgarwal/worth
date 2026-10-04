@@ -4,11 +4,13 @@ import {
   ArrowUp,
   Bookmark,
   CalendarCheck,
+  CalendarClock,
   CircleAlert,
   ReceiptText,
   RefreshCw,
 } from 'lucide-react'
-import { getUpcomingFlows } from '../shared/finance'
+import { mainCollision, nearPhrase, planLabel } from '../shared/collision'
+import { getUpcomingFlows, planCollisions } from '../shared/finance'
 import type { Product, SavedItem } from '../shared/types'
 import type { AppState, Purchase } from './contract'
 import { isActive } from './contract'
@@ -191,6 +193,46 @@ function HeroTile({
           <span className="num">{signed(income.flow.amountCents, true)}</span>
         </div>
       )}
+    </section>
+  )
+}
+
+/**
+ * The engine's collision on Home: a payment of a plan already running that lands next to a bill,
+ * such as the laptop's Pay in 4 payment the day before rent (judge #7). It names, never advises.
+ */
+function CollisionInsight({ state, onShowPlan }: { state: AppState; onShowPlan: () => void }) {
+  if (!state.profile.confirmed) return null
+  const found = planCollisions(state.profile, state.purchases, state.today).map((c, number) => ({
+    ...c,
+    number,
+    nearestBill: c.bill,
+  }))
+  const main = mainCollision(found)
+  if (!main) return null
+  const { payment, bill } = main
+  return (
+    <section className="tile notice" aria-label="Pay in 4 payment next to a bill">
+      <div className="row plain">
+        <Disc icon={CalendarClock} kind="plan" />
+        <div className="body">
+          <div className="t">
+            Your {planLabel(payment.name)} Pay in 4 payment lands{' '}
+            {nearPhrase(bill.daysFromInstalment, displayName(bill.name), bill.kind)}
+          </div>
+          <div className="s">
+            <span className="soft">
+              {money(payment.amountCents)} on {dayLabel(payment.date)} · {displayName(bill.name)}{' '}
+              {money(bill.amountCents)} on {dayLabel(bill.date)}
+            </span>
+          </div>
+        </div>
+      </div>
+      <div className="actions">
+        <Button variant="secondary" onClick={onShowPlan}>
+          See your plan
+        </Button>
+      </div>
     </section>
   )
 }
@@ -510,6 +552,8 @@ export function Home({
                 ))}
               </div>
             </section>
+            {/* Under the starters, so the camera starter stays above the fold at 390 (round-2 #10). */}
+            <CollisionInsight state={state} onShowPlan={() => onNavigate('plan')} />
             <ComingUp state={state} onShowAll={() => onNavigate('plan')} />
           </div>
           <aside className="rail" aria-label="Saved and your plan">

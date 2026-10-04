@@ -1,7 +1,7 @@
 {
  "model": "claude-sonnet-5-5",
  "today": "2026-10-03",
- "recordedAt": "2026-10-04T04:05:48.093Z",
+ "recordedAt": "2026-10-04T06:58:28.633Z",
  "probes": {
   "P1-camera-today": {
    "messages": [
@@ -3465,6 +3465,1272 @@
        "inference_geo": "global"
       },
       "ms": 3564
+     }
+    ]
+   ]
+  },
+  "PF1-thesis-fresh": {
+   "messages": [
+    "If I put the $1,199 camera on PayPal Pay in 4, which bills would the payments land next to?"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01SwtqcgYs4zr2fpZ8cBhFbW",
+        "name": "interpret_purchase",
+        "input": {
+         "items": [
+          {
+           "name": "camera",
+           "amount_cents": 119900,
+           "currency": "USD",
+           "quantity": 1
+          }
+         ],
+         "combine": "single",
+         "refers_to_previous_item": false,
+         "date_phrase": null,
+         "date": null,
+         "option": "check",
+         "points": [
+          "pay_in_4_schedule",
+          "pay_in_4_stacking",
+          "low_point"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "Can I afford it if I pay now?",
+          "When is the earliest I could buy it?",
+          "Is there a cheaper camera?"
+         ],
+         "point_reasons": "answers_question,adds_context,explains_result"
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 176,
+       "cache_creation_input_tokens": 6535,
+       "cache_read_input_tokens": 0,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 6535,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 375,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 4508
+     },
+     {
+      "content": [
+       {
+        "type": "text",
+        "text": "{\"note\":\"The {cause_bill} of {cause_amount} on {cause_day} lands between the {item}'s Pay in 4 payments, and with {p4_existing} in existing instalments already due, the balance stays tight.\"}"
+       }
+      ],
+      "stop_reason": "end_turn",
+      "usage": {
+       "input_tokens": 2150,
+       "cache_creation_input_tokens": 6457,
+       "cache_read_input_tokens": 0,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 6457,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 76,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 1998
+     }
+    ]
+   ]
+  },
+  "PF2-cheaper-than-now": {
+   "messages": [
+    "Is Pay in 4 cheaper than paying now?"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01AhzQbwF9rAcCS6Qhrfh8M9",
+        "name": "interpret_purchase",
+        "input": {
+         "items": [],
+         "combine": "single",
+         "refers_to_previous_item": true,
+         "date_phrase": null,
+         "date": null,
+         "option": "check",
+         "points": [
+          "pay_in_4_schedule",
+          "pay_in_4",
+          "pay_in_4_stacking"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "Can I afford it a bit later?",
+          "What could I buy for less?",
+          "What's my lowest balance coming up?"
+         ],
+         "point_reasons": "answers_question,explains_result,adds_context"
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 182,
+       "cache_creation_input_tokens": 6535,
+       "cache_read_input_tokens": 0,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 6535,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 343,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 4231
+     },
+     {
+      "content": [
+       {
+        "type": "text",
+        "text": "{\"note\":\"Pay in 4 isn't cheaper: the total stays {price}, and what drives the result is {cause_bill} of {cause_amount} on {cause_day}, which pulls the balance down around {low_day}.\"}"
+       }
+      ],
+      "stop_reason": "end_turn",
+      "usage": {
+       "input_tokens": 2134,
+       "cache_creation_input_tokens": 6457,
+       "cache_read_input_tokens": 0,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 6457,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 76,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 2044
+     }
+    ]
+   ]
+  },
+  "PF3-which-bills-follow-up": {
+   "messages": [
+    "Can I afford a $1,199 camera?",
+    "Which bills would my Pay in 4 payments land next to?"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_011SRiuAmt8ci6WviLuEu6Cn",
+        "name": "interpret_purchase",
+        "input": {
+         "items": [
+          {
+           "name": "camera",
+           "amount_cents": 119900,
+           "currency": "USD",
+           "quantity": 1
+          }
+         ],
+         "combine": "single",
+         "refers_to_previous_item": false,
+         "date_phrase": null,
+         "date": null,
+         "option": "check",
+         "points": [
+          "low_point",
+          "cause",
+          "wait"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "When could I buy it?",
+          "Is there a cheaper camera?",
+          "How much could I spend on it?"
+         ],
+         "point_reasons": "answers_question,explains_result,shows_timing"
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 156,
+       "cache_creation_input_tokens": 6535,
+       "cache_read_input_tokens": 0,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 6535,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 352,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 3955
+     },
+     {
+      "content": [
+       {
+        "type": "text",
+        "text": "{\"note\":\"Even with {income_name} arriving on {income_day}, the {price} {item} bought {buy_day} comes before the {cause_bill} payment, and the next paycheck after the low point is what restores the balance.\"}"
+       }
+      ],
+      "stop_reason": "end_turn",
+      "usage": {
+       "input_tokens": 1729,
+       "cache_creation_input_tokens": 6457,
+       "cache_read_input_tokens": 0,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 6457,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 74,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 2195
+     }
+    ],
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_015vDJHGKakKQoqTSH8f2iCb",
+        "name": "interpret_purchase",
+        "input": {
+         "items": [],
+         "combine": "single",
+         "refers_to_previous_item": true,
+         "date_phrase": null,
+         "date": null,
+         "option": "check",
+         "points": [
+          "pay_in_4_schedule",
+          "pay_in_4_stacking",
+          "low_point"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "When could I buy the camera?",
+          "Show me cheaper cameras",
+          "What bills are coming up?"
+         ],
+         "point_reasons": "answers_question,adds_context,shows_risk"
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 506,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6535,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 337,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 3143
+     },
+     {
+      "content": [
+       {
+        "type": "text",
+        "text": "{\"note\":\"The {item} payments would stack on top of the {p4_existing} already committed in this window, and {cause_bill} on {cause_day} is what pulls the balance furthest down.\"}"
+       }
+      ],
+      "stop_reason": "end_turn",
+      "usage": {
+       "input_tokens": 2438,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6457,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 63,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 1589
+     }
+    ]
+   ]
+  },
+  "PF4-after-item-switch": {
+   "messages": [
+    "Can I afford a $1,199 camera?",
+    "What about $349 headphones?",
+    "And if I used Pay in 4 for the camera instead?"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_012A4hhZeSpp3CowfCX7SY3A",
+        "name": "interpret_purchase",
+        "input": {
+         "items": [
+          {
+           "name": "camera",
+           "amount_cents": 119900,
+           "currency": "USD",
+           "quantity": 1
+          }
+         ],
+         "combine": "single",
+         "refers_to_previous_item": false,
+         "date_phrase": null,
+         "date": null,
+         "option": "check",
+         "points": [
+          "low_point",
+          "cause",
+          "wait"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "When could I buy it?",
+          "Is there a cheaper camera?",
+          "How much could I spend on it?"
+         ],
+         "point_reasons": "answers_question,explains_result,shows_timing"
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 156,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6535,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 352,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 3085
+     },
+     {
+      "content": [
+       {
+        "type": "text",
+        "text": "{\"note\":\"Even with {income_name} arriving on {income_day}, the {price} {item} bought {buy_day} leaves too little before the next payday on {payday_after_low}, which is why waiting until {wait_day} fits.\"}"
+       }
+      ],
+      "stop_reason": "end_turn",
+      "usage": {
+       "input_tokens": 1729,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6457,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 77,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 1943
+     }
+    ],
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01G72Lx3XVQfs7Nvx6XfoVFU",
+        "name": "interpret_purchase",
+        "input": {
+         "items": [
+          {
+           "name": "headphones",
+           "amount_cents": 34900,
+           "currency": "USD",
+           "quantity": 1
+          }
+         ],
+         "combine": "single",
+         "refers_to_previous_item": false,
+         "date_phrase": null,
+         "date": null,
+         "option": "check",
+         "points": [
+          "low_point",
+          "cause",
+          "wait"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "Can I afford them next week?",
+          "What could I buy for less?",
+          "What bills are coming up?"
+         ],
+         "point_reasons": "answers_question,explains_result,shows_timing"
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 505,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6535,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 351,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 3072
+     },
+     {
+      "content": [
+       {
+        "type": "text",
+        "text": "{\"note\":\"The {item} fits because {income_name} arrives on {income_day}, which covers the bills before {cause_day}, though higher everyday spending could pull the low point down to {stress_low}.\"}"
+       }
+      ],
+      "stop_reason": "end_turn",
+      "usage": {
+       "input_tokens": 1917,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6457,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 67,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 1607
+     }
+    ],
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01NnEAtpCfYPHa2DKmjHVWAT",
+        "name": "interpret_purchase",
+        "input": {
+         "items": [],
+         "combine": "single",
+         "refers_to_previous_item": true,
+         "date_phrase": null,
+         "date": null,
+         "option": "check",
+         "points": [
+          "pay_in_4_schedule",
+          "pay_in_4_stacking",
+          "low_point"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "When could I buy the camera?",
+          "What about cheaper cameras?",
+          "How much room do I have?"
+         ],
+         "point_reasons": "answers_question, shows_risk, explains_result"
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 752,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6535,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 336,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 3165
+     },
+     {
+      "content": [
+       {
+        "type": "text",
+        "text": "{\"note\":\"Splitting the {item} keeps the same {price} total, and the {p4_payment} payments still land around {cause_bill} while {p4_existing} of existing instalments press on the balance, so it doesn't escape the squeeze.\"}"
+       }
+      ],
+      "stop_reason": "end_turn",
+      "usage": {
+       "input_tokens": 2683,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6457,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 81,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 1825
+     }
+    ]
+   ]
+  },
+  "PF5-pay-later-out-of-range": {
+   "messages": [
+    "Could I pay later with Pay in 4 for a $2,400 TV?"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01He2WjgfByXzvroD3bc4JnH",
+        "name": "interpret_purchase",
+        "input": {
+         "items": [
+          {
+           "name": "TV",
+           "amount_cents": 240000,
+           "currency": "USD",
+           "quantity": 1
+          }
+         ],
+         "combine": "single",
+         "refers_to_previous_item": false,
+         "date_phrase": null,
+         "date": null,
+         "option": "check",
+         "points": [
+          "pay_in_4_schedule",
+          "low_point",
+          "pay_in_4_stacking"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "When could I buy it?",
+          "What's the most I could spend on a TV?",
+          "Show me cheaper TVs"
+         ],
+         "point_reasons": "answers_question,explains_result,shows_risk"
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 166,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6535,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 371,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 3272
+     },
+     {
+      "content": [
+       {
+        "type": "text",
+        "text": "{\"note\":\"The {price} {item} is far larger than what your balance can absorb once {cause_bill} of {cause_amount} is due on {cause_day}, and {income_name} on {income_day} is too small to offset it.\"}"
+       }
+      ],
+      "stop_reason": "end_turn",
+      "usage": {
+       "input_tokens": 1656,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6457,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 74,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 1727
+     }
+    ]
+   ]
+  },
+  "PF6-small-amount-remainder": {
+   "messages": [
+    "How would Pay in 4 work for a $10.03 phone case?"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01V9xNLTZqqmZzGF5MvsGTa4",
+        "name": "interpret_purchase",
+        "input": {
+         "items": [
+          {
+           "name": "phone case",
+           "amount_cents": 1003,
+           "currency": "USD",
+           "quantity": 1
+          }
+         ],
+         "combine": "single",
+         "refers_to_previous_item": false,
+         "date_phrase": null,
+         "date": null,
+         "option": "check",
+         "points": [
+          "pay_in_4_schedule",
+          "pay_in_4",
+          "pay_in_4_stacking"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "Can I afford it if I pay now?",
+          "What else is coming up soon?",
+          "Is there a cheaper phone case?"
+         ],
+         "point_reasons": "answers_question,explains_result,shows_risk"
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 163,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6535,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 378,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 3300
+     },
+     {
+      "content": [
+       {
+        "type": "text",
+        "text": "{\"note\":\"The {item} is small next to {cause_bill} of {cause_amount} on {cause_day}, so the {low_point} low on {low_day} stays well above the {cushion} cushion.\"}"
+       }
+      ],
+      "stop_reason": "end_turn",
+      "usage": {
+       "input_tokens": 2039,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6457,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 67,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 1400
+     }
+    ]
+   ]
+  },
+  "T1-trace-catalog-price": {
+   "messages": [
+    "Can I afford the Everyday camera?"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01UGBCQSaNBX9dYf63Q5Suqm",
+        "name": "interpret_purchase",
+        "input": {
+         "items": [],
+         "combine": "single",
+         "refers_to_previous_item": true,
+         "date_phrase": null,
+         "date": null,
+         "option": "check",
+         "points": [
+          "low_point",
+          "cause",
+          "wait"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "When could I buy it?",
+          "What could I spend on it?",
+          "Show me something cheaper"
+         ],
+         "point_reasons": "answers_question,explains_result,shows_timing"
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 178,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6535,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 317,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 3039
+     },
+     {
+      "content": [
+       {
+        "type": "text",
+        "text": "{\"note\":\"Even after {income_name} arrives on {income_day}, the {price} {item} plus {cause_bill} leaves too little before the next payday, so only a smaller purchase, up to {max_spend}, fits {buy_day}.\"}"
+       }
+      ],
+      "stop_reason": "end_turn",
+      "usage": {
+       "input_tokens": 1719,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6457,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 81,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 1824
+     }
+    ]
+   ]
+  },
+  "T2-trace-date-phrase": {
+   "messages": [
+    "Can I buy $349 headphones on October 16?"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01J9w3Xx3Dzx1SrTtHynjbXo",
+        "name": "interpret_purchase",
+        "input": {
+         "items": [
+          {
+           "name": "headphones",
+           "amount_cents": 34900,
+           "currency": "USD",
+           "quantity": 1
+          }
+         ],
+         "combine": "single",
+         "refers_to_previous_item": false,
+         "date_phrase": "October 16",
+         "date": "2026-10-16",
+         "option": "check",
+         "points": [
+          "low_point",
+          "cause",
+          "income"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "Could I buy them earlier?",
+          "What could I get for less?",
+          "How much room do I have?"
+         ],
+         "point_reasons": "answers_question,explains_result,shows_timing"
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 158,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6535,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 356,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 3279
+     },
+     {
+      "content": [
+       {
+        "type": "text",
+        "text": "{\"note\":\"The {income_name} arriving on {income_day} helps cover {cause_bill} on {cause_day}, so {price} for {item} still leaves the balance clear of the {cushion}, though higher everyday spending could change that.\"}"
+       }
+      ],
+      "stop_reason": "end_turn",
+      "usage": {
+       "input_tokens": 1643,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6457,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 79,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 1567
+     }
+    ]
+   ]
+  },
+  "T3-trace-currency-stop": {
+   "messages": [
+    "Can I afford a 500 euro jacket?"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_019pPDR4aeN8TRny38grX6x4",
+        "name": "interpret_purchase",
+        "input": {
+         "items": [
+          {
+           "name": "jacket",
+           "amount_cents": 50000,
+           "currency": "EUR",
+           "quantity": 1
+          }
+         ],
+         "combine": "single",
+         "refers_to_previous_item": false,
+         "date_phrase": null,
+         "date": null,
+         "option": "check",
+         "points": [
+          "low_point",
+          "cause",
+          "income"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "When could I buy it?",
+          "What's the most I could spend on it?",
+          "Is there something cheaper?"
+         ],
+         "point_reasons": "answers_question,explains_result,shows_timing"
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 157,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6535,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 353,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 3042
+     }
+    ]
+   ]
+  },
+  "PF7-later-day-follow-up": {
+   "messages": [
+    "Can I afford a $1,199 camera?",
+    "What if I buy it on Oct 23 with Pay in 4 instead?"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_013sDoJzgipStpXAhewwegcH",
+        "name": "interpret_purchase",
+        "input": {
+         "items": [
+          {
+           "name": "camera",
+           "amount_cents": 119900,
+           "currency": "USD",
+           "quantity": 1
+          }
+         ],
+         "combine": "single",
+         "refers_to_previous_item": false,
+         "date_phrase": null,
+         "date": null,
+         "option": "check",
+         "points": [
+          "low_point",
+          "cause",
+          "wait"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "When could I buy it?",
+          "Is there a cheaper camera?",
+          "How much could I spend?"
+         ],
+         "point_reasons": "answers_question,explains_result,shows_timing"
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 156,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6535,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 350,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 3064
+     },
+     {
+      "content": [
+       {
+        "type": "text",
+        "text": "{\"note\":\"Even after {income_name} arrives on {income_day}, that income doesn't cover the {price} {item} on top of {cause_bill}, so the balance only recovers by the payday that follows.\"}"
+       }
+      ],
+      "stop_reason": "end_turn",
+      "usage": {
+       "input_tokens": 1727,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6457,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 68,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 1671
+     }
+    ],
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01D5cgnash2NuxGkKm6uX7tC",
+        "name": "interpret_purchase",
+        "input": {
+         "items": [],
+         "combine": "single",
+         "refers_to_previous_item": true,
+         "date_phrase": "Oct 23",
+         "date": "2026-10-23",
+         "option": "check",
+         "points": [
+          "pay_in_4_schedule",
+          "low_point",
+          "pay_in_4_stacking"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "Can I afford it a bit later?",
+          "What could I buy for less?",
+          "What bills are coming up?"
+         ],
+         "point_reasons": "answers_question,explains_result,adds_context"
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 510,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6535,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 345,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 3352
+     },
+     {
+      "content": [
+       {
+        "type": "text",
+        "text": "{\"note\":\"By {buy_day}, {cause_bill} on {cause_day} has been paid and {income_name} has arrived, so the {item} leaves the balance {gap} above your {cushion}.\"}"
+       }
+      ],
+      "stop_reason": "end_turn",
+      "usage": {
+       "input_tokens": 2360,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6457,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 68,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 1842
+     }
+    ]
+   ]
+  },
+  "PF8-later-day-fresh": {
+   "messages": [
+    "If I buy the $1,199 camera on Oct 23 with Pay in 4, which bills would the payments land next to?"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01HmzQ6yU25Rz2j9nat2dAKy",
+        "name": "interpret_purchase",
+        "input": {
+         "items": [
+          {
+           "name": "camera",
+           "amount_cents": 119900,
+           "currency": "USD",
+           "quantity": 1
+          }
+         ],
+         "combine": "single",
+         "refers_to_previous_item": false,
+         "date_phrase": "on Oct 23",
+         "date": "2026-10-23",
+         "option": "check",
+         "points": [
+          "pay_in_4_schedule",
+          "pay_in_4_stacking",
+          "low_point"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "Can I afford it if I wait?",
+          "Is there a cheaper camera?",
+          "What is the most I could spend?"
+         ],
+         "point_reasons": "answers_question,adds_context,shows_risk"
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 180,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6535,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 382,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 3422
+     },
+     {
+      "content": [
+       {
+        "type": "text",
+        "text": "{\"note\":\"The low point on {low_day} comes mainly from {cause_bill} at {cause_amount} on {cause_day}, and {income_name} arriving {income_day} keeps the {item} purchase comfortably above the {cushion} cushion.\"}"
+       }
+      ],
+      "stop_reason": "end_turn",
+      "usage": {
+       "input_tokens": 2071,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6457,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 85,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 1978
      }
     ]
    ]
