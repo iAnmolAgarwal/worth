@@ -21,3 +21,6 @@ export const CHANNEL3_SHARED_DATA =
 export const ASSESSMENT_ONLY = 'Assessment only — not sold in the demo store'
 /** A saved wait plan whose day has come (C-17). */
 export const MAY_FIT_NOW = 'Your plan suggests this may fit now — confirm today’s funds'
+/** The plan editor while the demo clock runs (the server refuses the edit too). */
+export const DEMO_CLOCK_EDIT =
+  'The demo clock is replaying Maya’s sample plan as it is. Choose Back to today before editing a plan.'

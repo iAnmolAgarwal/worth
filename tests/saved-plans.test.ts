@@ -460,6 +460,35 @@ describe('the demo clock is limited to the synthetic persona', () => {
     expect(today.body.profile.snapshotDate).toBe('2026-10-04')
   })
 
+  // Pre-merge judge finding 4: hand-typed numbers are the user's own, never run on the clock.
+  it('refuses a hand edit of the sample plan while the clock runs', async () => {
+    const { agent } = setup()
+    await post(agent, '/api/demo-clock', { preset: 'video' })
+    const moved = (await post(agent, '/api/demo-clock', { date: '2026-11-20' })).body as AppState
+    const patch = (profile: FinancialProfile) =>
+      agent.patch('/api/profile').set('X-Worth-Client', 'web').send({ profile })
+    const edit = await patch({
+      ...moved.profile,
+      balanceCents: 900000,
+      snapshotDate: '2026-11-20',
+      confirmed: true,
+    })
+    expect(edit.status).toBe(409)
+    expect(edit.body.code).toBe('DEMO_CLOCK_RUNNING')
+    const after = await state(agent)
+    expect(after.profile).toMatchObject({ balanceCents: moved.profile.balanceCents })
+    expect(after.profile.userEdited).toBeFalsy()
+    // Back on today, the plan is editable, and a future funds date is refused as before.
+    const today = (await post(agent, '/api/demo-clock', { preset: 'today' })).body as AppState
+    expect((await patch({ ...today.profile, snapshotDate: '2026-11-20' })).body.code).toBe(
+      'INVALID_SNAPSHOT',
+    )
+    const own = await patch({ ...today.profile, balanceCents: 900000 })
+    expect(own.status).toBe(200)
+    expect(own.body.demoClock).toBeUndefined()
+    expect(own.body.profile.userEdited).toBe(true)
+  })
+
   it('keeps the user’s own choice about Claude through a replay', async () => {
     const { agent } = setup()
     await post(agent, '/api/consent', { aiConsent: false })

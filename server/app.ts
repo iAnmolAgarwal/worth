@@ -1176,6 +1176,14 @@ export function createApp(options: AppOptions = {}) {
     const id = sessionId(res)
     noActive(id)
     const data = dataFor(res)
+    // The demo clock replays the sample persona as it is: a hand-edited plan is the user's own
+    // numbers, which never run on the clock (pre-merge judge finding 4).
+    if (demoToday(data))
+      throw new HttpError(
+        409,
+        'The demo clock is replaying Maya’s sample plan as it is. Choose Back to today before editing a plan.',
+        'DEMO_CLOCK_RUNNING',
+      )
     if (input.version !== data.profile.version)
       throw new HttpError(
         409,
@@ -1191,7 +1199,7 @@ export function createApp(options: AppOptions = {}) {
         'Only completed purchases can be included in your balance snapshot.',
         'INVALID_SNAPSHOT',
       )
-    if (input.snapshotDate > (demoToday(data) ?? today(input.timezone)))
+    if (input.snapshotDate > today(input.timezone))
       throw new HttpError(400, 'The balance snapshot cannot be in the future.', 'INVALID_SNAPSHOT')
     if (input.flows.some((flow) => flow.paidOn && flow.paidOn > input.snapshotDate))
       throw new HttpError(
