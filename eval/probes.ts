@@ -787,6 +787,42 @@ export const PROBES: Probe[] = [
       },
     ],
   },
+  // ---- AI-visible judge F1: Pay in 4 for a later purchase date ------------------------
+  {
+    id: 'PF7-later-day-follow-up',
+    split: 'train',
+    covers: 'ai-visible judge F1: the schedule starts on the later purchase date',
+    kind: 'chat',
+    turns: [
+      { message: 'Can I afford a $1,199 camera?', expect: assessCamera() },
+      {
+        message: 'What if I buy it on Oct 23 with Pay in 4 instead?',
+        context: 'previous',
+        expect: {
+          assess: { amounts: [119900], dates: ['2026-10-23'], item: /camera/i },
+          allowClarify: true,
+          payIn4: 'strip',
+        },
+      },
+    ],
+  },
+  {
+    id: 'PF8-later-day-fresh',
+    split: 'test',
+    covers: 'ai-visible judge F1: a fresh later-day Pay in 4 question',
+    kind: 'chat',
+    turns: [
+      {
+        message:
+          'If I buy the $1,199 camera on Oct 23 with Pay in 4, which bills would the payments land next to?',
+        expect: {
+          assess: { amounts: [119900], dates: ['2026-10-23'], item: /camera/i },
+          allowClarify: true,
+          payIn4: 'strip',
+        },
+      },
+    ],
+  },
   // ---- AI-visible phase (round-2 judge #5): the trace ----------------------------------
   {
     id: 'T1-trace-catalog-price',
@@ -811,7 +847,8 @@ export const PROBES: Probe[] = [
         expect: {
           assess: { amounts: [34900], dates: ['2026-10-16'], item: /headphone/i },
           allowClarify: true,
-          payIn4: 'none',
+          // The neutral row now starts on the purchase date (judge F1).
+          payIn4: 'row',
           trace: { read: 'your_words', datePhrase: true },
         },
       },

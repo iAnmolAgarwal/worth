@@ -1,7 +1,7 @@
 {
  "model": "claude-sonnet-5-5",
  "today": "2026-10-03",
- "recordedAt": "2026-10-04T06:08:18.536Z",
+ "recordedAt": "2026-10-04T06:58:28.633Z",
  "probes": {
   "P1-camera-today": {
    "messages": [
@@ -3479,7 +3479,7 @@
       "content": [
        {
         "type": "tool_use",
-        "id": "toolu_013ismyv244UQGJpaiMndydN",
+        "id": "toolu_01SwtqcgYs4zr2fpZ8cBhFbW",
         "name": "interpret_purchase",
         "input": {
          "items": [
@@ -3502,11 +3502,11 @@
          ],
          "lead_in": "none",
          "follow_ups": [
-          "Can I afford it paying now?",
-          "Is there something cheaper?",
-          "When is the earliest I could buy it?"
+          "Can I afford it if I pay now?",
+          "When is the earliest I could buy it?",
+          "Is there a cheaper camera?"
          ],
-         "point_reasons": "answers_question,adds_context,shows_risk"
+         "point_reasons": "answers_question,adds_context,explains_result"
         },
         "caller": {
          "type": "direct"
@@ -3516,45 +3516,45 @@
       "stop_reason": "tool_use",
       "usage": {
        "input_tokens": 176,
-       "cache_creation_input_tokens": 0,
-       "cache_read_input_tokens": 6535,
+       "cache_creation_input_tokens": 6535,
+       "cache_read_input_tokens": 0,
        "cache_creation": {
-        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 6535,
         "ephemeral_1h_input_tokens": 0
        },
-       "output_tokens": 372,
+       "output_tokens": 375,
        "output_tokens_details": {
         "thinking_tokens": 0
        },
        "service_tier": "standard",
        "inference_geo": "global"
       },
-      "ms": 4027
+      "ms": 4508
      },
      {
       "content": [
        {
         "type": "text",
-        "text": "{\"note\":\"Pay in 4 keeps the same {price} total, and {p4_collision}, so the payments crowd bills already due before {cause_bill} pushes the balance toward {p4_low_point} on {p4_low_day}.\"}"
+        "text": "{\"note\":\"The {cause_bill} of {cause_amount} on {cause_day} lands between the {item}'s Pay in 4 payments, and with {p4_existing} in existing instalments already due, the balance stays tight.\"}"
        }
       ],
       "stop_reason": "end_turn",
       "usage": {
-       "input_tokens": 1715,
-       "cache_creation_input_tokens": 0,
-       "cache_read_input_tokens": 6457,
+       "input_tokens": 2150,
+       "cache_creation_input_tokens": 6457,
+       "cache_read_input_tokens": 0,
        "cache_creation": {
-        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 6457,
         "ephemeral_1h_input_tokens": 0
        },
-       "output_tokens": 79,
+       "output_tokens": 76,
        "output_tokens_details": {
         "thinking_tokens": 0
        },
        "service_tier": "standard",
        "inference_geo": "global"
       },
-      "ms": 1941
+      "ms": 1998
      }
     ]
    ]
@@ -3569,7 +3569,7 @@
       "content": [
        {
         "type": "tool_use",
-        "id": "toolu_016y2ymh64Q4Zccgq99CUk8F",
+        "id": "toolu_01AhzQbwF9rAcCS6Qhrfh8M9",
         "name": "interpret_purchase",
         "input": {
          "items": [],
@@ -3585,9 +3585,9 @@
          ],
          "lead_in": "none",
          "follow_ups": [
-          "Can I afford it later this month?",
-          "Show me cheaper cameras",
-          "What is my plan's room right now?"
+          "Can I afford it a bit later?",
+          "What could I buy for less?",
+          "What's my lowest balance coming up?"
          ],
          "point_reasons": "answers_question,explains_result,adds_context"
         },
@@ -3599,45 +3599,45 @@
       "stop_reason": "tool_use",
       "usage": {
        "input_tokens": 182,
-       "cache_creation_input_tokens": 0,
-       "cache_read_input_tokens": 6535,
+       "cache_creation_input_tokens": 6535,
+       "cache_read_input_tokens": 0,
        "cache_creation": {
-        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 6535,
         "ephemeral_1h_input_tokens": 0
        },
-       "output_tokens": 342,
+       "output_tokens": 343,
        "output_tokens_details": {
         "thinking_tokens": 0
        },
        "service_tier": "standard",
        "inference_geo": "global"
       },
-      "ms": 3929
+      "ms": 4231
      },
      {
       "content": [
        {
         "type": "text",
-        "text": "{\"note\":\"Pay in 4 has the same {price} total as paying now with no interest, so it isn't cheaper; it only spreads the payments, and {cause_bill} still lands on {cause_day}.\"}"
+        "text": "{\"note\":\"Pay in 4 isn't cheaper: the total stays {price}, and what drives the result is {cause_bill} of {cause_amount} on {cause_day}, which pulls the balance down around {low_day}.\"}"
        }
       ],
       "stop_reason": "end_turn",
       "usage": {
-       "input_tokens": 1687,
-       "cache_creation_input_tokens": 0,
-       "cache_read_input_tokens": 6457,
+       "input_tokens": 2134,
+       "cache_creation_input_tokens": 6457,
+       "cache_read_input_tokens": 0,
        "cache_creation": {
-        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 6457,
         "ephemeral_1h_input_tokens": 0
        },
-       "output_tokens": 69,
+       "output_tokens": 76,
        "output_tokens_details": {
         "thinking_tokens": 0
        },
        "service_tier": "standard",
        "inference_geo": "global"
       },
-      "ms": 1856
+      "ms": 2044
      }
     ]
    ]
@@ -3653,7 +3653,7 @@
       "content": [
        {
         "type": "tool_use",
-        "id": "toolu_01RZe3pFJUnGL9ZNyNYzvP79",
+        "id": "toolu_011SRiuAmt8ci6WviLuEu6Cn",
         "name": "interpret_purchase",
         "input": {
          "items": [
@@ -3676,9 +3676,9 @@
          ],
          "lead_in": "none",
          "follow_ups": [
-          "Is there a cheaper camera?",
           "When could I buy it?",
-          "How much room do I have?"
+          "Is there a cheaper camera?",
+          "How much could I spend on it?"
          ],
          "point_reasons": "answers_question,explains_result,shows_timing"
         },
@@ -3690,45 +3690,45 @@
       "stop_reason": "tool_use",
       "usage": {
        "input_tokens": 156,
-       "cache_creation_input_tokens": 0,
-       "cache_read_input_tokens": 6535,
+       "cache_creation_input_tokens": 6535,
+       "cache_read_input_tokens": 0,
        "cache_creation": {
-        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 6535,
         "ephemeral_1h_input_tokens": 0
        },
-       "output_tokens": 350,
+       "output_tokens": 352,
        "output_tokens_details": {
         "thinking_tokens": 0
        },
        "service_tier": "standard",
        "inference_geo": "global"
       },
-      "ms": 3880
+      "ms": 3955
      },
      {
       "content": [
        {
         "type": "text",
-        "text": "{\"note\":\"Buying the {item} for {price} {buy_day} drops your balance to {low_point} on {low_day}, mainly because {cause_bill} of {cause_amount} is due on {cause_day}, leaving you {gap} under your {cushion} cushion.\"}"
+        "text": "{\"note\":\"Even with {income_name} arriving on {income_day}, the {price} {item} bought {buy_day} comes before the {cause_bill} payment, and the next paycheck after the low point is what restores the balance.\"}"
        }
       ],
       "stop_reason": "end_turn",
       "usage": {
-       "input_tokens": 1470,
-       "cache_creation_input_tokens": 0,
-       "cache_read_input_tokens": 6457,
+       "input_tokens": 1729,
+       "cache_creation_input_tokens": 6457,
+       "cache_read_input_tokens": 0,
        "cache_creation": {
-        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 6457,
         "ephemeral_1h_input_tokens": 0
        },
-       "output_tokens": 91,
+       "output_tokens": 74,
        "output_tokens_details": {
         "thinking_tokens": 0
        },
        "service_tier": "standard",
        "inference_geo": "global"
       },
-      "ms": 1997
+      "ms": 2195
      }
     ],
     [
@@ -3736,7 +3736,7 @@
       "content": [
        {
         "type": "tool_use",
-        "id": "toolu_01CNEEUtXzHtkPctgNxu1fqB",
+        "id": "toolu_015vDJHGKakKQoqTSH8f2iCb",
         "name": "interpret_purchase",
         "input": {
          "items": [],
@@ -3756,7 +3756,7 @@
           "Show me cheaper cameras",
           "What bills are coming up?"
          ],
-         "point_reasons": "answers_question, adds_context, shows_risk"
+         "point_reasons": "answers_question,adds_context,shows_risk"
         },
         "caller": {
          "type": "direct"
@@ -3765,7 +3765,7 @@
       ],
       "stop_reason": "tool_use",
       "usage": {
-       "input_tokens": 520,
+       "input_tokens": 506,
        "cache_creation_input_tokens": 0,
        "cache_read_input_tokens": 6535,
        "cache_creation": {
@@ -3779,32 +3779,32 @@
        "service_tier": "standard",
        "inference_geo": "global"
       },
-      "ms": 3069
+      "ms": 3143
      },
      {
       "content": [
        {
         "type": "text",
-        "text": "{\"note\":\"Splitting the {item} into payments spreads the cost, but {p4_collision}, so the payments still sit close to the {cause_bill} of {cause_amount} and the low point stays near {p4_low_day}.\"}"
+        "text": "{\"note\":\"The {item} payments would stack on top of the {p4_existing} already committed in this window, and {cause_bill} on {cause_day} is what pulls the balance furthest down.\"}"
        }
       ],
       "stop_reason": "end_turn",
       "usage": {
-       "input_tokens": 2020,
+       "input_tokens": 2438,
        "cache_creation_input_tokens": 0,
        "cache_read_input_tokens": 6457,
        "cache_creation": {
         "ephemeral_5m_input_tokens": 0,
         "ephemeral_1h_input_tokens": 0
        },
-       "output_tokens": 76,
+       "output_tokens": 63,
        "output_tokens_details": {
         "thinking_tokens": 0
        },
        "service_tier": "standard",
        "inference_geo": "global"
       },
-      "ms": 1747
+      "ms": 1589
      }
     ]
    ]
@@ -3821,7 +3821,7 @@
       "content": [
        {
         "type": "tool_use",
-        "id": "toolu_01TjnoYcCRhUQ9oReivHuD3P",
+        "id": "toolu_012A4hhZeSpp3CowfCX7SY3A",
         "name": "interpret_purchase",
         "input": {
          "items": [
@@ -3871,32 +3871,32 @@
        "service_tier": "standard",
        "inference_geo": "global"
       },
-      "ms": 2967
+      "ms": 3085
      },
      {
       "content": [
        {
         "type": "text",
-        "text": "{\"note\":\"Buying the {item} for {price} {buy_day} would push your balance to {low_point} on {low_day}, because {cause_bill} of {cause_amount} is due on {cause_day}, leaving you {gap} under your {cushion} cushion.\"}"
+        "text": "{\"note\":\"Even with {income_name} arriving on {income_day}, the {price} {item} bought {buy_day} leaves too little before the next payday on {payday_after_low}, which is why waiting until {wait_day} fits.\"}"
        }
       ],
       "stop_reason": "end_turn",
       "usage": {
-       "input_tokens": 1472,
+       "input_tokens": 1729,
        "cache_creation_input_tokens": 0,
        "cache_read_input_tokens": 6457,
        "cache_creation": {
         "ephemeral_5m_input_tokens": 0,
         "ephemeral_1h_input_tokens": 0
        },
-       "output_tokens": 88,
+       "output_tokens": 77,
        "output_tokens_details": {
         "thinking_tokens": 0
        },
        "service_tier": "standard",
        "inference_geo": "global"
       },
-      "ms": 1631
+      "ms": 1943
      }
     ],
     [
@@ -3904,7 +3904,7 @@
       "content": [
        {
         "type": "tool_use",
-        "id": "toolu_018gX3Qx9i7wGfaWNHZU5yo6",
+        "id": "toolu_01G72Lx3XVQfs7Nvx6XfoVFU",
         "name": "interpret_purchase",
         "input": {
          "items": [
@@ -3927,8 +3927,8 @@
          ],
          "lead_in": "none",
          "follow_ups": [
-          "Can I afford them later?",
-          "Show me cheaper headphones",
+          "Can I afford them next week?",
+          "What could I buy for less?",
           "What bills are coming up?"
          ],
          "point_reasons": "answers_question,explains_result,shows_timing"
@@ -3940,46 +3940,46 @@
       ],
       "stop_reason": "tool_use",
       "usage": {
-       "input_tokens": 507,
+       "input_tokens": 505,
        "cache_creation_input_tokens": 0,
        "cache_read_input_tokens": 6535,
        "cache_creation": {
         "ephemeral_5m_input_tokens": 0,
         "ephemeral_1h_input_tokens": 0
        },
-       "output_tokens": 352,
+       "output_tokens": 351,
        "output_tokens_details": {
         "thinking_tokens": 0
        },
        "service_tier": "standard",
        "inference_geo": "global"
       },
-      "ms": 3177
+      "ms": 3072
      },
      {
       "content": [
        {
         "type": "text",
-        "text": "{\"note\":\"After {cause_bill} of {cause_amount} is due on {cause_day}, your balance bottoms out at {low_point} on {low_day}, which stays {gap} above your {cushion} cushion.\"}"
+        "text": "{\"note\":\"The {item} fits because {income_name} arrives on {income_day}, which covers the bills before {cause_day}, though higher everyday spending could pull the low point down to {stress_low}.\"}"
        }
       ],
       "stop_reason": "end_turn",
       "usage": {
-       "input_tokens": 1713,
+       "input_tokens": 1917,
        "cache_creation_input_tokens": 0,
        "cache_read_input_tokens": 6457,
        "cache_creation": {
         "ephemeral_5m_input_tokens": 0,
         "ephemeral_1h_input_tokens": 0
        },
-       "output_tokens": 73,
+       "output_tokens": 67,
        "output_tokens_details": {
         "thinking_tokens": 0
        },
        "service_tier": "standard",
        "inference_geo": "global"
       },
-      "ms": 1541
+      "ms": 1607
      }
     ],
     [
@@ -3987,17 +3987,10 @@
       "content": [
        {
         "type": "tool_use",
-        "id": "toolu_01MNs5CmpHyeuabjJK578YSZ",
+        "id": "toolu_01NnEAtpCfYPHa2DKmjHVWAT",
         "name": "interpret_purchase",
         "input": {
-         "items": [
-          {
-           "name": "camera",
-           "amount_cents": 119900,
-           "currency": "USD",
-           "quantity": 1
-          }
-         ],
+         "items": [],
          "combine": "single",
          "refers_to_previous_item": true,
          "date_phrase": null,
@@ -4014,7 +4007,7 @@
           "What about cheaper cameras?",
           "How much room do I have?"
          ],
-         "point_reasons": "answers_question,adds_context,explains_result"
+         "point_reasons": "answers_question, shows_risk, explains_result"
         },
         "caller": {
          "type": "direct"
@@ -4023,46 +4016,46 @@
       ],
       "stop_reason": "tool_use",
       "usage": {
-       "input_tokens": 754,
+       "input_tokens": 752,
        "cache_creation_input_tokens": 0,
        "cache_read_input_tokens": 6535,
        "cache_creation": {
         "ephemeral_5m_input_tokens": 0,
         "ephemeral_1h_input_tokens": 0
        },
-       "output_tokens": 366,
+       "output_tokens": 336,
        "output_tokens_details": {
         "thinking_tokens": 0
        },
        "service_tier": "standard",
        "inference_geo": "global"
       },
-      "ms": 3223
+      "ms": 3165
      },
      {
       "content": [
        {
         "type": "text",
-        "text": "{\"note\":\"Even split into payments, the {item} still costs {price} in total, and {p4_collision}, so the low point of {p4_low_point} on {p4_low_day} falls near the {cushion} cushion.\"}"
+        "text": "{\"note\":\"Splitting the {item} keeps the same {price} total, and the {p4_payment} payments still land around {cause_bill} while {p4_existing} of existing instalments press on the balance, so it doesn't escape the squeeze.\"}"
        }
       ],
       "stop_reason": "end_turn",
       "usage": {
-       "input_tokens": 2287,
+       "input_tokens": 2683,
        "cache_creation_input_tokens": 0,
        "cache_read_input_tokens": 6457,
        "cache_creation": {
         "ephemeral_5m_input_tokens": 0,
         "ephemeral_1h_input_tokens": 0
        },
-       "output_tokens": 72,
+       "output_tokens": 81,
        "output_tokens_details": {
         "thinking_tokens": 0
        },
        "service_tier": "standard",
        "inference_geo": "global"
       },
-      "ms": 1685
+      "ms": 1825
      }
     ]
    ]
@@ -4077,7 +4070,7 @@
       "content": [
        {
         "type": "tool_use",
-        "id": "toolu_01X9JHziCG3xuvfj3frL7Zss",
+        "id": "toolu_01He2WjgfByXzvroD3bc4JnH",
         "name": "interpret_purchase",
         "input": {
          "items": [
@@ -4101,7 +4094,7 @@
          "lead_in": "none",
          "follow_ups": [
           "When could I buy it?",
-          "How much could I spend on a TV?",
+          "What's the most I could spend on a TV?",
           "Show me cheaper TVs"
          ],
          "point_reasons": "answers_question,explains_result,shows_risk"
@@ -4120,39 +4113,39 @@
         "ephemeral_5m_input_tokens": 0,
         "ephemeral_1h_input_tokens": 0
        },
-       "output_tokens": 369,
+       "output_tokens": 371,
        "output_tokens_details": {
         "thinking_tokens": 0
        },
        "service_tier": "standard",
        "inference_geo": "global"
       },
-      "ms": 3067
+      "ms": 3272
      },
      {
       "content": [
        {
         "type": "text",
-        "text": "{\"note\":\"Even with {income_name} arriving {income_day}, the {price} {item} plus bills like {cause_bill} ({cause_amount}, due {cause_day}) would leave the balance {gap} below your {cushion} cushion at {low_day}.\"}"
+        "text": "{\"note\":\"The {price} {item} is far larger than what your balance can absorb once {cause_bill} of {cause_amount} is due on {cause_day}, and {income_name} on {income_day} is too small to offset it.\"}"
        }
       ],
       "stop_reason": "end_turn",
       "usage": {
-       "input_tokens": 1472,
+       "input_tokens": 1656,
        "cache_creation_input_tokens": 0,
        "cache_read_input_tokens": 6457,
        "cache_creation": {
         "ephemeral_5m_input_tokens": 0,
         "ephemeral_1h_input_tokens": 0
        },
-       "output_tokens": 88,
+       "output_tokens": 74,
        "output_tokens_details": {
         "thinking_tokens": 0
        },
        "service_tier": "standard",
        "inference_geo": "global"
       },
-      "ms": 1872
+      "ms": 1727
      }
     ]
    ]
@@ -4167,7 +4160,7 @@
       "content": [
        {
         "type": "tool_use",
-        "id": "toolu_01MgofKv9oWjHNE2QE5sw36Q",
+        "id": "toolu_01V9xNLTZqqmZzGF5MvsGTa4",
         "name": "interpret_purchase",
         "input": {
          "items": [
@@ -4190,11 +4183,11 @@
          ],
          "lead_in": "none",
          "follow_ups": [
-          "Can I afford it paying now?",
-          "What else is coming up?",
-          "How much room do I have?"
+          "Can I afford it if I pay now?",
+          "What else is coming up soon?",
+          "Is there a cheaper phone case?"
          ],
-         "point_reasons": "answers_question,explains_result,adds_context"
+         "point_reasons": "answers_question,explains_result,shows_risk"
         },
         "caller": {
          "type": "direct"
@@ -4210,39 +4203,39 @@
         "ephemeral_5m_input_tokens": 0,
         "ephemeral_1h_input_tokens": 0
        },
-       "output_tokens": 368,
+       "output_tokens": 378,
        "output_tokens_details": {
         "thinking_tokens": 0
        },
        "service_tier": "standard",
        "inference_geo": "global"
       },
-      "ms": 3150
+      "ms": 3300
      },
      {
       "content": [
        {
         "type": "text",
-        "text": "{\"note\":\"Even after {cause_bill} of {cause_amount} on {cause_day}, your balance bottoms out at {low_point} on {low_day}, well above your {cushion}, so a {price} {item} barely registers.\"}"
+        "text": "{\"note\":\"The {item} is small next to {cause_bill} of {cause_amount} on {cause_day}, so the {low_point} low on {low_day} stays well above the {cushion} cushion.\"}"
        }
       ],
       "stop_reason": "end_turn",
       "usage": {
-       "input_tokens": 1595,
+       "input_tokens": 2039,
        "cache_creation_input_tokens": 0,
        "cache_read_input_tokens": 6457,
        "cache_creation": {
         "ephemeral_5m_input_tokens": 0,
         "ephemeral_1h_input_tokens": 0
        },
-       "output_tokens": 77,
+       "output_tokens": 67,
        "output_tokens_details": {
         "thinking_tokens": 0
        },
        "service_tier": "standard",
        "inference_geo": "global"
       },
-      "ms": 1724
+      "ms": 1400
      }
     ]
    ]
@@ -4257,17 +4250,10 @@
       "content": [
        {
         "type": "tool_use",
-        "id": "toolu_01VAvvvDPU22yhr7ijufeKED",
+        "id": "toolu_01UGBCQSaNBX9dYf63Q5Suqm",
         "name": "interpret_purchase",
         "input": {
-         "items": [
-          {
-           "name": "Everyday camera",
-           "amount_cents": 119900,
-           "currency": "USD",
-           "quantity": 1
-          }
-         ],
+         "items": [],
          "combine": "single",
          "refers_to_previous_item": true,
          "date_phrase": null,
@@ -4281,8 +4267,8 @@
          "lead_in": "none",
          "follow_ups": [
           "When could I buy it?",
-          "Is there something cheaper?",
-          "How much room do I have?"
+          "What could I spend on it?",
+          "Show me something cheaper"
          ],
          "point_reasons": "answers_question,explains_result,shows_timing"
         },
@@ -4300,39 +4286,39 @@
         "ephemeral_5m_input_tokens": 0,
         "ephemeral_1h_input_tokens": 0
        },
-       "output_tokens": 352,
+       "output_tokens": 317,
        "output_tokens_details": {
         "thinking_tokens": 0
        },
        "service_tier": "standard",
        "inference_geo": "global"
       },
-      "ms": 3061
+      "ms": 3039
      },
      {
       "content": [
        {
         "type": "text",
-        "text": "{\"note\":\"Buying the {item} for {price} {buy_day} would drop your balance to {low_point} on {low_day}, mainly because {cause_bill} of {cause_amount} is due on {cause_day}, leaving you {gap} short of {cushion}.\"}"
+        "text": "{\"note\":\"Even after {income_name} arrives on {income_day}, the {price} {item} plus {cause_bill} leaves too little before the next payday, so only a smaller purchase, up to {max_spend}, fits {buy_day}.\"}"
        }
       ],
       "stop_reason": "end_turn",
       "usage": {
-       "input_tokens": 1501,
+       "input_tokens": 1719,
        "cache_creation_input_tokens": 0,
        "cache_read_input_tokens": 6457,
        "cache_creation": {
         "ephemeral_5m_input_tokens": 0,
         "ephemeral_1h_input_tokens": 0
        },
-       "output_tokens": 89,
+       "output_tokens": 81,
        "output_tokens_details": {
         "thinking_tokens": 0
        },
        "service_tier": "standard",
        "inference_geo": "global"
       },
-      "ms": 1646
+      "ms": 1824
      }
     ]
    ]
@@ -4347,7 +4333,7 @@
       "content": [
        {
         "type": "tool_use",
-        "id": "toolu_01U4cnbcnjbwzWAmkUvnkCYu",
+        "id": "toolu_01J9w3Xx3Dzx1SrTtHynjbXo",
         "name": "interpret_purchase",
         "input": {
          "items": [
@@ -4370,9 +4356,9 @@
          ],
          "lead_in": "none",
          "follow_ups": [
-          "What if I wait a bit longer?",
-          "Show me cheaper headphones",
-          "What's my plan room right now?"
+          "Could I buy them earlier?",
+          "What could I get for less?",
+          "How much room do I have?"
          ],
          "point_reasons": "answers_question,explains_result,shows_timing"
         },
@@ -4390,39 +4376,39 @@
         "ephemeral_5m_input_tokens": 0,
         "ephemeral_1h_input_tokens": 0
        },
-       "output_tokens": 362,
+       "output_tokens": 356,
        "output_tokens_details": {
         "thinking_tokens": 0
        },
        "service_tier": "standard",
        "inference_geo": "global"
       },
-      "ms": 3115
+      "ms": 3279
      },
      {
       "content": [
        {
         "type": "text",
-        "text": "{\"note\":\"After {cause_bill} of {cause_amount} is paid on {cause_day}, your balance bottoms out at {low_point} on {low_day}, still {gap} above your {cushion} cushion.\"}"
+        "text": "{\"note\":\"The {income_name} arriving on {income_day} helps cover {cause_bill} on {cause_day}, so {price} for {item} still leaves the balance clear of the {cushion}, though higher everyday spending could change that.\"}"
        }
       ],
       "stop_reason": "end_turn",
       "usage": {
-       "input_tokens": 1400,
+       "input_tokens": 1643,
        "cache_creation_input_tokens": 0,
        "cache_read_input_tokens": 6457,
        "cache_creation": {
         "ephemeral_5m_input_tokens": 0,
         "ephemeral_1h_input_tokens": 0
        },
-       "output_tokens": 72,
+       "output_tokens": 79,
        "output_tokens_details": {
         "thinking_tokens": 0
        },
        "service_tier": "standard",
        "inference_geo": "global"
       },
-      "ms": 1735
+      "ms": 1567
      }
     ]
    ]
@@ -4437,7 +4423,7 @@
       "content": [
        {
         "type": "tool_use",
-        "id": "toolu_01RmJsDTTzyFW5mH3L4t254x",
+        "id": "toolu_019pPDR4aeN8TRny38grX6x4",
         "name": "interpret_purchase",
         "input": {
          "items": [
@@ -4462,7 +4448,7 @@
          "follow_ups": [
           "When could I buy it?",
           "What's the most I could spend on it?",
-          "Show me something cheaper"
+          "Is there something cheaper?"
          ],
          "point_reasons": "answers_question,explains_result,shows_timing"
         },
@@ -4480,14 +4466,271 @@
         "ephemeral_5m_input_tokens": 0,
         "ephemeral_1h_input_tokens": 0
        },
-       "output_tokens": 352,
+       "output_tokens": 353,
        "output_tokens_details": {
         "thinking_tokens": 0
        },
        "service_tier": "standard",
        "inference_geo": "global"
       },
-      "ms": 2951
+      "ms": 3042
+     }
+    ]
+   ]
+  },
+  "PF7-later-day-follow-up": {
+   "messages": [
+    "Can I afford a $1,199 camera?",
+    "What if I buy it on Oct 23 with Pay in 4 instead?"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_013sDoJzgipStpXAhewwegcH",
+        "name": "interpret_purchase",
+        "input": {
+         "items": [
+          {
+           "name": "camera",
+           "amount_cents": 119900,
+           "currency": "USD",
+           "quantity": 1
+          }
+         ],
+         "combine": "single",
+         "refers_to_previous_item": false,
+         "date_phrase": null,
+         "date": null,
+         "option": "check",
+         "points": [
+          "low_point",
+          "cause",
+          "wait"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "When could I buy it?",
+          "Is there a cheaper camera?",
+          "How much could I spend?"
+         ],
+         "point_reasons": "answers_question,explains_result,shows_timing"
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 156,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6535,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 350,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 3064
+     },
+     {
+      "content": [
+       {
+        "type": "text",
+        "text": "{\"note\":\"Even after {income_name} arrives on {income_day}, that income doesn't cover the {price} {item} on top of {cause_bill}, so the balance only recovers by the payday that follows.\"}"
+       }
+      ],
+      "stop_reason": "end_turn",
+      "usage": {
+       "input_tokens": 1727,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6457,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 68,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 1671
+     }
+    ],
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01D5cgnash2NuxGkKm6uX7tC",
+        "name": "interpret_purchase",
+        "input": {
+         "items": [],
+         "combine": "single",
+         "refers_to_previous_item": true,
+         "date_phrase": "Oct 23",
+         "date": "2026-10-23",
+         "option": "check",
+         "points": [
+          "pay_in_4_schedule",
+          "low_point",
+          "pay_in_4_stacking"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "Can I afford it a bit later?",
+          "What could I buy for less?",
+          "What bills are coming up?"
+         ],
+         "point_reasons": "answers_question,explains_result,adds_context"
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 510,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6535,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 345,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 3352
+     },
+     {
+      "content": [
+       {
+        "type": "text",
+        "text": "{\"note\":\"By {buy_day}, {cause_bill} on {cause_day} has been paid and {income_name} has arrived, so the {item} leaves the balance {gap} above your {cushion}.\"}"
+       }
+      ],
+      "stop_reason": "end_turn",
+      "usage": {
+       "input_tokens": 2360,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6457,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 68,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 1842
+     }
+    ]
+   ]
+  },
+  "PF8-later-day-fresh": {
+   "messages": [
+    "If I buy the $1,199 camera on Oct 23 with Pay in 4, which bills would the payments land next to?"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01HmzQ6yU25Rz2j9nat2dAKy",
+        "name": "interpret_purchase",
+        "input": {
+         "items": [
+          {
+           "name": "camera",
+           "amount_cents": 119900,
+           "currency": "USD",
+           "quantity": 1
+          }
+         ],
+         "combine": "single",
+         "refers_to_previous_item": false,
+         "date_phrase": "on Oct 23",
+         "date": "2026-10-23",
+         "option": "check",
+         "points": [
+          "pay_in_4_schedule",
+          "pay_in_4_stacking",
+          "low_point"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "Can I afford it if I wait?",
+          "Is there a cheaper camera?",
+          "What is the most I could spend?"
+         ],
+         "point_reasons": "answers_question,adds_context,shows_risk"
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 180,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6535,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 382,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 3422
+     },
+     {
+      "content": [
+       {
+        "type": "text",
+        "text": "{\"note\":\"The low point on {low_day} comes mainly from {cause_bill} at {cause_amount} on {cause_day}, and {income_name} arriving {income_day} keeps the {item} purchase comfortably above the {cushion} cushion.\"}"
+       }
+      ],
+      "stop_reason": "end_turn",
+      "usage": {
+       "input_tokens": 2071,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 6457,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 85,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 1978
      }
     ]
    ]

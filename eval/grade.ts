@@ -1,8 +1,8 @@
 import {
   addDays,
   assessPurchase,
-  compareOptions,
   getUpcomingFlows,
+  payIn4Scenario,
   payIn4Schedule,
 } from '../shared/finance.ts'
 import type { Assessment, ChatReply, FinancialProfile, Transaction } from '../shared/types.ts'
@@ -91,14 +91,14 @@ function allowedAmounts(data: GradeData, a: Assessment | undefined, reply: ChatR
     for (const item of reply.interpretation?.items ?? []) allowed.add(item.amountCents)
     // Pay in 4: each illustrative payment, the instalment scenario's low point, and what plans
     // already running take in 60 days.
-    const p4 = compareOptions(data.profile, [], {
+    const p4 = payIn4Scenario(data.profile, [], {
       amountCents: a.amountCents,
       today: data.today,
-      payIn4Eligible: true,
-    }).payIn4
+      start: a.purchaseDate,
+    })
     if (p4.available)
       allowed.add(p4.lowestBalanceCents).add(Math.abs(p4.lowestBalanceCents - a.cushionCents))
-    for (const payment of payIn4Schedule(a.amountCents, data.today))
+    for (const payment of payIn4Schedule(a.amountCents, a.purchaseDate))
       allowed.add(payment.amountCents)
     allowed.add(
       getUpcomingFlows(data.profile, data.today, 60)
@@ -300,7 +300,8 @@ export function gradeReply(reply: ChatReply, expect: Expectation, data: GradeDat
   }
   if (p4 && a) {
     if (p4.totalCents !== a.amountCents) unsafe.push('Pay in 4 total differs from the assessment')
-    const schedule = p4.payments.length ? payIn4Schedule(a.amountCents, data.today) : []
+    // The schedule starts on the purchase date the answer assessed, never on another day.
+    const schedule = p4.payments.length ? payIn4Schedule(a.amountCents, a.purchaseDate) : []
     for (const [i, payment] of p4.payments.entries()) {
       const expected = schedule[i]
       if (
@@ -311,7 +312,7 @@ export function gradeReply(reply: ChatReply, expect: Expectation, data: GradeDat
         unsafe.push(`Pay in 4 payment ${payment.number} differs from the engine's schedule`)
       const bill = payment.nearestBill
       if (bill) {
-        const near = getUpcomingFlows(data.profile, data.today, 60).some(
+        const near = getUpcomingFlows(data.profile, data.today, 120).some(
           ({ flow, date }) =>
             flow.kind !== 'income' &&
             date === addDays(payment.date, bill.daysFromInstalment) &&
