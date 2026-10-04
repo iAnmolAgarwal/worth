@@ -110,6 +110,8 @@ export interface SavedItem {
   /** Where a custom item was found, such as a retailer listing; shown, never checked out. */
   retailer?: string
   url?: string
+  /** Channel3's product ID for an item saved from "Similar items", so its price can be re-checked. */
+  channel3Id?: string
 }
 /**
  * A similar product from another store, found through Channel3. Discovery only: Worth does not sell

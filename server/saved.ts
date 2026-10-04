@@ -56,9 +56,14 @@ const customSave = z
     retailer: z.string().trim().min(1).max(80).refine(plain, 'Use a plain-text name').optional(),
     url: z
       .string()
-      .max(500)
+      .max(2000)
       .url()
       .refine((value) => value.startsWith('https://'), 'Use an https link')
+      .optional(),
+    /** Channel3's product ID, for a row saved from "Similar items" (its price can be re-checked). */
+    channel3Id: z
+      .string()
+      .regex(/^[A-Za-z0-9_-]{1,64}$/)
       .optional(),
   })
   .strict()
@@ -179,6 +184,7 @@ export function addSaved(data: SessionData, input: SaveInput, today: string, now
       status: 'active',
       ...(input.retailer ? { retailer: input.retailer } : {}),
       ...(input.url ? { url: input.url } : {}),
+      ...(input.channel3Id ? { channel3Id: input.channel3Id } : {}),
       ...plan,
     }
   const same = items.find(
@@ -187,9 +193,11 @@ export function addSaved(data: SessionData, input: SaveInput, today: string, now
       existing.kind === item.kind &&
       (item.kind === 'catalog'
         ? existing.productId === item.productId
-        : existing.name.toLowerCase() === item.name.toLowerCase() &&
-          existing.amountCents === item.amountCents &&
-          existing.url === item.url),
+        : item.channel3Id
+          ? existing.channel3Id === item.channel3Id
+          : existing.name.toLowerCase() === item.name.toLowerCase() &&
+            existing.amountCents === item.amountCents &&
+            existing.url === item.url),
   )
   if (same) {
     // Saving again replaces the plan: a later "Save for later" clears an earlier date.

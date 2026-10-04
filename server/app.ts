@@ -1134,7 +1134,11 @@ export function createApp(options: AppOptions = {}) {
       .strict()
       .parse(req.query)
     const id = sessionId(res)
-    if (!wasShown(id, input.id))
+    // Shown this session, or saved from Similar items (which outlives a server restart).
+    const saved = (dataFor(res).saved ?? []).some(
+      (item) => item.channel3Id === input.id && item.status !== 'removed',
+    )
+    if (!wasShown(id, input.id) && !saved)
       throw new HttpError(404, 'Check prices only for items Worth showed you.', 'NOT_FOUND')
     const time = now().getTime()
     if (!priceChecksPerSession.take(id, time) || !priceChecksPerIp.take(req.ip ?? 'local', time))
@@ -1253,11 +1257,19 @@ export function createApp(options: AppOptions = {}) {
   })
   /** Saves an item for later: a catalog item, or any item Ask Worth assessed (C-17, A3). */
   app.post('/api/saved', (req, res) => {
-    const input = saveSchema.parse(req.body)
+    const parsed = saveSchema.parse(req.body)
     const id = sessionId(res)
+    // A Channel3 product ID is kept only for a product this session was shown, so a saved item
+    // can never make Worth read an arbitrary product (spec item 15).
+    const input =
+      parsed.kind === 'custom' && parsed.channel3Id && !wasShown(id, parsed.channel3Id)
+        ? { ...parsed, channel3Id: undefined }
+        : parsed
     const data = dataFor(res)
     const item = addSaved(data, input, sessionToday(data), now())
     store.save(id, data)
+    // Registers the saved row, so its price can be checked later at /api/alternatives/price.
+    if (item.channel3Id) app.locals.rememberAlternative(id, item.channel3Id)
     res.json({ item, state: state(id) })
   })
   app.post('/api/saved/migrate', (req, res) => {
