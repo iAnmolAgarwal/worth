@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { StrictMode, type ReactNode } from 'react'
+import { StrictMode } from 'react'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import Anthropic from '@anthropic-ai/sdk'
@@ -22,22 +22,6 @@ vi.mock('../src/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/api')>()
   return { ...actual, api: vi.fn() }
 })
-vi.mock('recharts', () => {
-  const Pass = ({ children }: { children?: ReactNode }) => <>{children}</>
-  const Nothing = () => null
-  return {
-    ResponsiveContainer: Pass,
-    ComposedChart: ({ children }: { children?: ReactNode }) => <svg>{children}</svg>,
-    Area: Nothing,
-    Line: Nothing,
-    ReferenceArea: Nothing,
-    ReferenceDot: Nothing,
-    ReferenceLine: Nothing,
-    XAxis: Nothing,
-    YAxis: Nothing,
-  }
-})
-
 const TODAY = '2026-10-03'
 const apiMock = vi.mocked(api)
 function makeState(): AppState {
