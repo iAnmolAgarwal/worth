@@ -3027,6 +3027,11 @@ textarea.input {
   top: 48px;
 }
 
+/* `hidden` always hides, even on components that set their own display (judge F2: the trace's
+   list is a flex .kvlist, which overrode the browser's [hidden] rule). */
+[hidden] {
+  display: none !important;
+}
 /* ---------- Ask Worth: the sentence under the verdict, Pay in 4 and the trace ---------- */
 .explain {
   margin: var(--s-2) 0 0;
@@ -3034,6 +3039,20 @@ textarea.input {
   line-height: var(--lh-body);
   color: var(--c-text-strong);
   text-wrap: pretty;
+}
+.claude-note {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 2px;
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  font-weight: var(--fw-semibold);
+  color: var(--c-text-2);
+}
+.claude-note .ico {
+  width: 16px;
+  height: 16px;
 }
 .p4-row {
   margin: var(--s-3) 0 0;
