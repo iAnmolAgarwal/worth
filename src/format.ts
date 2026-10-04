@@ -34,3 +34,8 @@ export const currencyAmount = (hundredths: number, currency: string) => {
   }
 }
 export const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
+/** Names imported in capitals ("NORTHWIND LOGISTICS PAYROLL") read as "Northwind Logistics Payroll". */
+export const displayName = (name: string) =>
+  /[A-Z]{3}/.test(name) && name === name.toUpperCase()
+    ? name.toLowerCase().replace(/\b\p{L}/gu, (letter) => letter.toUpperCase())
+    : name

@@ -19,7 +19,7 @@ import { api } from './api'
 import type { AppState, Purchase } from './contract'
 import { isActive } from './contract'
 import { ForeignPayments } from './ForeignPayments'
-import { monthLabel, money, shortDate, signed } from './format'
+import { monthLabel, money, shortDate, signed, displayName } from './format'
 import { Button, Dialog, Disc, EmptyState, Field, Pill } from './ui'
 
 type Filter = 'all' | 'expense' | 'income' | 'refund' | 'transfer'
@@ -179,7 +179,7 @@ export function Activity({
       >
         <Disc icon={iconFor(t)} kind={t.kind === 'income' ? 'income' : undefined} />
         <div className="body">
-          <div className="t">{t.name}</div>
+          <div className="t">{displayName(t.name)}</div>
           <div className="s">
             {shortDate(t.date)} ·{' '}
             {t.source === 'purchase'

@@ -21,7 +21,7 @@ import {
   purchasePlans,
   useComparison,
 } from './engine'
-import { dayLabel, daysFrom, money, signed } from './format'
+import { dayLabel, daysFrom, money, signed, displayName } from './format'
 import { Button, Disc, Pill, SkeletonRow } from './ui'
 
 export const HOME_SUGGESTIONS = [
@@ -196,10 +196,12 @@ function ComingUp({ state, onShowAll }: { state: AppState; onShowAll: () => void
   const upcoming = [...getUpcomingFlows(state.profile, state.today, 30), ...bought].sort(
     (a, b) => a.date.localeCompare(b.date) || b.flow.amountCents - a.flow.amountCents,
   )
-  // Five rows at most; the rest live behind "Show all".
-  const shown = upcoming.slice(0, 5)
-  const soon = shown.filter(({ date }) => daysFrom(state.today, date) <= 14)
-  const later = shown.filter(({ date }) => daysFrom(state.today, date) > 14)
+  // Everything in the next two weeks shows, so a big bill like rent is never hidden; later
+  // items fill up to five rows and the rest are counted.
+  const soon = upcoming.filter(({ date }) => daysFrom(state.today, date) <= 14)
+  const laterAll = upcoming.filter(({ date }) => daysFrom(state.today, date) > 14)
+  const later = laterAll.slice(0, Math.max(0, 5 - soon.length))
+  const hidden = laterAll.length - later.length
   const sameMonth = later.every(({ date }) => date.slice(0, 7) === state.today.slice(0, 7))
   const row = ({ flow, date }: (typeof upcoming)[number]) => {
     const plan =
@@ -217,7 +219,7 @@ function ComingUp({ state, onShowAll }: { state: AppState; onShowAll: () => void
           }
         />
         <div className="body">
-          <div className="t">{flow.name}</div>
+          <div className="t">{displayName(flow.name)}</div>
           <div className="s">
             {dayLabel(date)}{' '}
             <span className="soft">
@@ -271,6 +273,11 @@ function ComingUp({ state, onShowAll }: { state: AppState; onShowAll: () => void
           </h3>
           <div className="rows">{later.map(row)}</div>
         </>
+      )}
+      {hidden > 0 && (
+        <button type="button" className="link" onClick={onShowAll} style={{ marginTop: 8 }}>
+          And {hidden} more in the next 30 days
+        </button>
       )}
     </section>
   )

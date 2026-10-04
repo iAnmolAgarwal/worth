@@ -14,7 +14,7 @@ import { BalanceChart } from './BalanceChart'
 import type { AppState } from './contract'
 import { isActive } from './contract'
 import { allPlans, cadenceLabel, flowIcon, kindLabel, runningPlans } from './engine'
-import { cx, dayLabel, money, shortDate, signed } from './format'
+import { cx, dayLabel, money, shortDate, signed, displayName } from './format'
 import { Alert, Button, DateStepper, Disc, Field, Pill, Ring, Toggle } from './ui'
 
 type FlowDraft = Omit<ScheduledFlow, 'amountCents'> & { amount: string }
@@ -311,13 +311,12 @@ export function PlanWizard({
             onBlur={() => set(formatAmount(value))}
           />
         ) : (
+          // A text field with a decimal keypad: screen readers hear the amount as typed, not a
+          // floating-point value such as 3.2899999.
           <input
             className="input num"
-            type="number"
+            type="text"
             inputMode="decimal"
-            min="0"
-            max="1000000"
-            step="0.01"
             value={value}
             aria-invalid={Boolean(fieldError(label))}
             disabled={locked}
@@ -706,7 +705,7 @@ function FlowCard({
         <Disc icon={flowIcon(flow)} kind={flow.kind === 'income' ? 'income' : undefined} />
         <div className="body">
           <div className="t" style={{ fontSize: 'var(--fs-body)' }}>
-            {flow.name || 'New item'}
+            {displayName(flow.name) || 'New item'}
           </div>
           <div className="s">
             <span className="soft">
@@ -1331,7 +1330,7 @@ export function PlanPage({
                         kind={flow.kind === 'income' ? 'income' : undefined}
                       />
                       <div className="body">
-                        <div className="t">{flow.name}</div>
+                        <div className="t">{displayName(flow.name)}</div>
                         <div className="s">
                           Next {dayLabel(flow.nextDate)}{' '}
                           <span className="soft">· {cadenceLabel(flow)}</span>
