@@ -2,14 +2,29 @@ import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { randomBytes } from 'node:crypto'
-import type { FinancialProfile, ForeignPayment, Purchase, Transaction } from '../shared/types.ts'
+import type {
+  FinancialProfile,
+  ForeignPayment,
+  Purchase,
+  SavedItem,
+  Transaction,
+} from '../shared/types.ts'
 
 export interface SessionData {
   profile: FinancialProfile
   transactions: Transaction[]
+  /** Older sessions only: catalog IDs saved before saved items moved to `saved`. */
   wishlist: string[]
   /** Imported foreign-currency payments without a USD conversion, and how each was resolved. */
   foreignPayments?: ForeignPayment[]
+  /** Saved items and wait plans. Stored statuses are active, bought or removed. */
+  saved?: SavedItem[]
+  /** When the session began (ms); older sessions without it count from their first read. */
+  createdAt?: number
+  /** Opt-in 30-day retention (D-9 a). Absent: the 24-hour default. */
+  keep30?: boolean
+  /** The labelled demo clock. Only the synthetic persona may carry one. */
+  demoClock?: { today: string; preset?: 'video' }
 }
 export interface StoredPurchase extends Purchase {
   approvalUrl?: string
@@ -23,6 +38,9 @@ export interface StoredPurchase extends Purchase {
 }
 export const ACTIVE = new Set(['created', 'pending', 'unknown'])
 const DAY = 24 * 60 * 60 * 1000
+export const SESSION_DAY_MS = DAY
+/** Opt-in retention: the plan is kept on this device for 30 days, then deleted. */
+export const RETENTION_MS = 30 * DAY
 
 export class Store {
   readonly db: DatabaseSync
@@ -52,6 +70,16 @@ export class Store {
       .prepare('INSERT INTO sessions VALUES (?, ?, ?)')
       .run(id, JSON.stringify(data), now + DAY)
     return id
+  }
+  /** When a session expires (ms), or undefined when it does not exist. */
+  expiry(id: string): number | undefined {
+    const row = this.db.prepare('SELECT expires FROM sessions WHERE id=?').get(id) as
+      { expires: number } | undefined
+    return row?.expires
+  }
+  /** Moves a session's expiry, for opt-in retention. */
+  setExpiry(id: string, expires: number) {
+    this.db.prepare('UPDATE sessions SET expires=? WHERE id=?').run(expires, id)
   }
   /** Live sessions, counted through the expiry index. */
   count(now = Date.now()) {

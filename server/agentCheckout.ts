@@ -124,7 +124,7 @@ function refuse(code: PrepareRefusal, message: string): CheckoutDecision {
  * (or the user's explicit decision to go ahead), the catalog price, and no other active checkout.
  */
 export function decideAgentCheckout(input: CheckoutDecisionInput): CheckoutDecision {
-  const { profile, purchases, today, product, request, message } = input
+  const { product, message } = input
   if (!asksToCheckOut(message))
     return refuse(
       'NOT_REQUESTED',
@@ -140,6 +140,28 @@ export function decideAgentCheckout(input: CheckoutDecisionInput): CheckoutDecis
       'ITEM_NOT_DISCUSSED',
       `Say which catalog item you want, such as the ${product.name.toLowerCase()}, before Worth prepares an order.`,
     )
+  return checkoutGuards({
+    ...input,
+    product,
+    proceedDespiteShortfall: input.request.proceedDespiteShortfall && explicitlyProceeds(message),
+  })
+}
+
+/**
+ * The plan guards every prepared order passes, from Claude's tool or the "Buy with PayPal" button
+ * on a saved plan: no other active checkout, funds confirmed today, a complete plan, and a fresh
+ * assessment for the chosen option. Going ahead below the cushion needs an explicit decision.
+ */
+export function checkoutGuards(input: {
+  profile: FinancialProfile
+  purchases: Purchase[]
+  today: string
+  product: Product
+  request: Pick<PrepareCheckoutRequest, 'option'>
+  /** The user's own explicit decision to go ahead although the purchase dips below the cushion. */
+  proceedDespiteShortfall: boolean
+}): CheckoutDecision {
+  const { profile, purchases, today, product, request } = input
   if (purchases.some((p) => ['created', 'pending', 'unknown'].includes(p.status)))
     return refuse(
       'CHECKOUT_ACTIVE',
@@ -178,11 +200,7 @@ export function decideAgentCheckout(input: CheckoutDecisionInput): CheckoutDecis
   if (!fits) {
     // Going ahead below the cushion needs both Claude's reading and the user's own unqualified
     // words. Even then the order is stored unacknowledged, and capture asks the user again.
-    if (
-      request.option !== 'buyToday' ||
-      !request.proceedDespiteShortfall ||
-      !explicitlyProceeds(message)
-    )
+    if (request.option !== 'buyToday' || !input.proceedDespiteShortfall)
       return refuse(
         'SHORTFALL_NOT_CONFIRMED',
         'Buying this today dips below your cushion. Worth prepares the order only if you say you want to go ahead anyway.',
