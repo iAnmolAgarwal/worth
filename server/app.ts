@@ -302,6 +302,11 @@ export function createApp(options: AppOptions = {}) {
   const sessionLimiter = new WindowLimiter(config.sessionIpHourlyLimit, 60 * 60_000)
   const claudePerIp = new WindowLimiter(config.claudeIpHourlyLimit, 60 * 60_000)
   const claudeDaily = new WindowLimiter(config.claudeDailyLimit, DAY, 1)
+  const channel3PerIp = new WindowLimiter(config.channel3IpHourlyLimit, 60 * 60_000)
+  /** Each client's share of the day's live Channel3 searches; cached results never count. */
+  const liveSearches = (req: Request) => ({
+    allowLive: () => channel3PerIp.take(req.ip ?? 'local', now().getTime()),
+  })
   /** Spends one Claude request from the client's hourly and the server's daily allowance. */
   function claudeLimit(req: Request): keyof typeof CLAUDE_LIMIT_REASON | undefined {
     const time = now().getTime()
@@ -1003,9 +1008,24 @@ export function createApp(options: AppOptions = {}) {
       return res.json({ status: 'off', query: '', maxPriceCents: 0, items: [] })
     res.json(
       input.similarTo
-        ? await channel3.similar(input.similarTo, ceiling)
-        : await channel3.search(query!, ceiling),
+        ? await channel3.similar(input.similarTo, ceiling, liveSearches(req))
+        : await channel3.search(query!, ceiling, liveSearches(req)),
     )
+  })
+  /**
+   * Whether a saved Channel3 product is cheaper now than when it was saved, read with Channel3's
+   * free product endpoint (no search credits). For Phase 5's Saved list: "price dropped to $X".
+   */
+  app.get('/api/alternatives/price', async (req, res) => {
+    const input = z
+      .object({
+        id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+        savedPriceCents: z.coerce.number().int().min(1).max(100_000_000),
+      })
+      .strict()
+      .parse(req.query)
+    sessionId(res)
+    res.json(await channel3.checkPrice(input.id, input.savedPriceCents))
   })
   /** Saves a purchase's new cash effect and moves the plan version, so older answers expire. */
   function savePurchase(id: string, purchase: StoredPurchase) {
@@ -1337,12 +1357,13 @@ export function createApp(options: AppOptions = {}) {
     res.json(state(id))
   })
   /** What Claude's tools may ask the server to do for this session, each behind its own guard. */
-  function chatActions(id: string, input: z.infer<typeof chatSchema>): ChatActions {
+  function chatActions(req: Request, id: string, input: z.infer<typeof chatSchema>): ChatActions {
     return {
       payIn4Eligibility,
       prepareCheckout: (request) =>
         prepareCheckout(id, input.message, input.context?.itemName, request),
-      findAlternatives: (query, maxPriceCents) => channel3.search(query, maxPriceCents),
+      findAlternatives: (query, maxPriceCents) =>
+        channel3.search(query, maxPriceCents, liveSearches(req)),
     }
   }
   app.post('/api/chat', async (req, res) => {
@@ -1361,7 +1382,7 @@ export function createApp(options: AppOptions = {}) {
       today: current.today,
     }
     const id = sessionId(res)
-    const actions = chatActions(id, input)
+    const actions = chatActions(req, id, input)
     // Local answers still search other stores for something cheaper; nothing goes to Claude.
     const local = (reason?: string) => localReply(input, data, reason, actions)
     if (!mayUseExternalAi(current.profile))

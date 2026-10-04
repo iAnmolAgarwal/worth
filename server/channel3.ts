@@ -1,5 +1,10 @@
 import { readFileSync } from 'node:fs'
-import type { Alternative, Alternatives, AlternativesStatus } from '../shared/types.ts'
+import type {
+  Alternative,
+  Alternatives,
+  AlternativesStatus,
+  UnverifiedAlternative,
+} from '../shared/types.ts'
 
 /**
  * Channel3 product search for "Similar items that fit today". Every call is made here, on the
@@ -8,6 +13,11 @@ import type { Alternative, Alternatives, AlternativesStatus } from '../shared/ty
  * Channel3 is told only a generic kind of item and a price band, never who is asking or why.
  * Results are cached per query and $25 price bucket, and a recorded set of example results is
  * served whenever Channel3 cannot answer (no credits, rate limited, timed out, down).
+ *
+ * Channel3 asks that prices and offer links are never served from a cache without refreshing
+ * them. Recorded rows, and cached rows older than 15 minutes, are re-read with the free
+ * GET /v1/products/{id} before they are shown; a row that cannot be re-read is shown without its
+ * price or link.
  */
 
 export const CHANNEL3_API = 'https://api.trychannel3.com'
@@ -24,6 +34,10 @@ const TIMEOUT_MS = 4000
 /** How long live calls pause after a failure, before Channel3 is tried again. */
 const BACKOFF_MS = { auth: 6 * 60 * 60_000, rate: 60_000, other: 30_000 }
 const DAY_MS = 24 * 60 * 60_000
+/** Offers younger than this are shown as found; older ones are re-read before display. */
+const FRESH_MS = 15 * 60_000
+const PRODUCT_BACKOFF_MS = 30_000
+const KNOWN_MAX = 5000
 
 /** The search's price ceiling: the amount rounded down to $25. */
 export const priceBucket = (cents: number) =>
@@ -80,11 +94,34 @@ export interface Channel3Options {
   /** Operational log: status codes and timings only, never the key. */
   log?: (event: Record<string, unknown>) => void
 }
+export interface SearchOptions {
+  /**
+   * Asked only when a live, uncached search would run, so one client cannot spend the whole day's
+   * searches; false serves the recorded examples instead.
+   */
+  allowLive?: () => boolean
+}
+/** The current price of a product someone saved, read with the free product endpoint. */
+export interface PriceCheck {
+  status: 'dropped' | 'same' | 'higher' | 'unavailable'
+  /** Present unless unavailable: the cheapest in-stock, new, USD offer now. */
+  current?: Pick<Alternative, 'priceCents' | 'url' | 'retailer'>
+  /** How much lower than the saved price, when it dropped. */
+  droppedByCents?: number
+}
 export interface Channel3Client {
   /** Products like `query` priced at or below the bucketed ceiling. */
-  search(query: string, maxPriceCents: number): Promise<Alternatives>
-  /** Products like a known Channel3 product, priced at or below the bucketed ceiling. */
-  similar(productId: string, maxPriceCents: number): Promise<Alternatives>
+  search(query: string, maxPriceCents: number, options?: SearchOptions): Promise<Alternatives>
+  /**
+   * Products like a Channel3 product this server has shown, priced at or below the bucketed
+   * ceiling. Any other ID returns nothing without a call.
+   */
+  similar(productId: string, maxPriceCents: number, options?: SearchOptions): Promise<Alternatives>
+  /**
+   * For Saved items (Phase 5): whether a saved Channel3 product's price has dropped since it was
+   * saved. Uses the free product endpoint; never spends search credits.
+   */
+  checkPrice(productId: string, savedPriceCents: number): Promise<PriceCheck>
   /** ok: live searches run. fixture: recorded examples are being served. off: hidden. */
   health(): AlternativesStatus
 }
@@ -133,32 +170,53 @@ const retailerName = (domain: unknown) => {
   return /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/.test(text) && text.length <= 80 ? text : undefined
 }
 
+/** The model of a product, for spotting the same item listed twice: "rode|nth-100". */
+function modelKey(title: string, brand: string | undefined) {
+  const brandWords = new Set((brand ?? '').toLowerCase().split(/\s+/))
+  const model = title
+    .toLowerCase()
+    .split(/[^a-z0-9-]+/)
+    .find((word) => /\d/.test(word) && /[a-z]/.test(word) && !brandWords.has(word))
+  return model ? `${(brand ?? '').toLowerCase()}|${model}` : title.toLowerCase()
+}
+/** The store's own page link: Channel3's buy link, or a page on the offer's own domain. */
+const storeLink = (url: unknown, retailer: string) =>
+  httpsUrl(
+    url,
+    (host) => host === 'buy.trychannel3.com' || host === retailer || host.endsWith(`.${retailer}`),
+  )
+
 /**
- * Turns a search response into at most four alternatives. Each keeps its cheapest in-stock, new,
- * USD offer inside the price band; products without one, without a usable link, or whose other
- * offers cost over three times as much, are dropped.
+ * Turns a search response into at most `limit` alternatives. Each keeps its cheapest in-stock,
+ * new, USD offer inside the price band; products without one, without a usable link, whose other
+ * offers cost over three times as much, or that repeat a model already listed, are dropped.
  */
 export function parseProducts(
   raw: RawSearch,
   band: { minPriceCents: number; maxPriceCents: number },
+  limit = MAX_ALTERNATIVES,
 ): Alternative[] {
   const items: Alternative[] = []
-  const titles = new Set<string>()
+  const seen = new Set<string>()
   for (const product of Array.isArray(raw?.products) ? raw.products : []) {
     const id = typeof product?.id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(product.id)
     const title = clean(product?.title, 120)
-    if (!id || !title || titles.has(title.toLowerCase())) continue
+    const brand = clean(product?.brands?.[0]?.name, 60)
+    if (!id || !title) continue
+    const keys = [title.toLowerCase(), modelKey(title, brand)]
+    if (keys.some((key) => seen.has(key))) continue
     let best: Pick<Alternative, 'priceCents' | 'url' | 'retailer'> | undefined
     for (const offer of Array.isArray(product.offers) ? product.offers : []) {
       const price = offer?.price?.price
       if (typeof price !== 'number' || !Number.isFinite(price)) continue
       const cents = Math.round(price * 100)
       const retailer = retailerName(offer.domain)
-      const url = httpsUrl(offer.url)
+      const url = retailer ? storeLink(offer.url, retailer) : undefined
       if (
         offer.price?.currency !== 'USD' ||
         offer.availability !== 'InStock' ||
-        (offer.condition != null && offer.condition !== 'new') ||
+        // Unknown condition is not shown as new.
+        offer.condition !== 'new' ||
         cents < band.minPriceCents ||
         cents > band.maxPriceCents ||
         !retailer ||
@@ -180,8 +238,7 @@ export function parseProducts(
       .flatMap((image) => [image?.cleaned_url, image?.url])
       .map((url) => httpsUrl(url, onChannel3Cdn))
       .find(Boolean)
-    const brand = clean(product.brands?.[0]?.name, 60)
-    titles.add(title.toLowerCase())
+    for (const key of keys) seen.add(key)
     items.push({
       id: product.id as string,
       title,
@@ -193,10 +250,21 @@ export function parseProducts(
       availability: 'InStock',
       source: 'channel3',
     })
-    if (items.length === MAX_ALTERNATIVES) break
+    if (items.length === limit) break
   }
   return items
 }
+
+/** A row whose price and link could not be re-read: shown as an example, never as current. */
+const unverifiedRow = ({ id, title, retailer, brand, imageUrl }: Alternative) =>
+  ({
+    id,
+    title,
+    retailer,
+    ...(brand ? { brand } : {}),
+    ...(imageUrl ? { imageUrl } : {}),
+    source: 'channel3',
+  }) satisfies UnverifiedAlternative
 
 /** The request for one search: a generic query (or source product) inside a price band, US only. */
 export function requestBody(
@@ -235,18 +303,41 @@ export function createChannel3(options: Channel3Options = {}): Channel3Client {
   const dailyLimit = options.dailyLimit ?? 300
   const fixtures = options.fixtures?.searches ?? []
   const log = options.log ?? ((event) => console.warn('Worth Channel3:', JSON.stringify(event)))
-  const cache = new Map<string, { value: Alternatives; until: number }>()
-  const inFlight = new Map<string, Promise<Alternatives>>()
+  type Band = { minPriceCents: number; maxPriceCents: number }
+  /** A search as found: its rows and when they were read. */
+  type Found = {
+    status: AlternativesStatus
+    query: string
+    band: Band
+    rows: Alternative[]
+    at: number
+  }
+  const cache = new Map<string, { value: Found; until: number }>()
+  const inFlight = new Map<string, Promise<Found>>()
+  /** Product reads: the product, null when Channel3 no longer has it. */
+  const products = new Map<string, { value: RawProduct | null; until: number }>()
+  /** Products this server has shown; only these can seed a similar-products search. */
+  const known = new Set<string>()
   let blockedUntil = 0
+  let productsBlockedUntil = 0
   let day = { start: 0, count: 0 }
   const live = mode === 'live' && Boolean(options.apiKey)
 
-  type Band = { minPriceCents: number; maxPriceCents: number }
+  function remember(rows: { id: string }[]) {
+    for (const { id } of rows) {
+      known.delete(id)
+      known.add(id)
+    }
+    while (known.size > KNOWN_MAX) known.delete(known.values().next().value!)
+  }
+  for (const recorded of fixtures)
+    remember(parseProducts(recorded.response, { minPriceCents: 0, maxPriceCents: 1e9 }, 50))
+
   /**
    * Recorded results for a query: the same query first, then one for the same kind of thing (its
    * last word, such as "camera"), so a search phrased differently still shows examples.
    */
-  function fixtureFor(kind: FixtureSearch['kind'], query: string, band: Band): Alternatives {
+  function fixtureFor(kind: FixtureSearch['kind'], query: string, band: Band): Found {
     const said = new Set(query.toLowerCase().split(/\s+/))
     const head = (recorded: FixtureSearch) => recorded.query.toLowerCase().split(/\s+/).at(-1)!
     const candidates = fixtures.filter((recorded) => recorded.kind === kind)
@@ -254,11 +345,11 @@ export function createChannel3(options: Channel3Options = {}): Channel3Client {
       ...candidates.filter((r) => r.query === query),
       ...(kind === 'search' ? candidates.filter((r) => said.has(head(r))) : []),
     ]) {
-      const items = parseProducts(recorded.response, band)
-      if (items.length)
-        return { status: 'fixture', query, maxPriceCents: band.maxPriceCents, items }
+      // A few spare rows, since some may have changed by the time they are re-read.
+      const rows = parseProducts(recorded.response, band, MAX_ALTERNATIVES + 2)
+      if (rows.length) return { status: 'fixture', query, band, rows, at: 0 }
     }
-    return { status: 'off', query, maxPriceCents: band.maxPriceCents, items: [] }
+    return { status: 'off', query, band, rows: [], at: 0 }
   }
   function underDailyLimit() {
     const time = now()
@@ -267,23 +358,92 @@ export function createChannel3(options: Channel3Options = {}): Channel3Client {
     day.count++
     return true
   }
-  async function call(path: string, body: unknown): Promise<RawSearch> {
+  async function request(path: string, init: RequestInit = {}): Promise<Response> {
     const started = now()
     let response: Response
     try {
       response = await fetcher(`${CHANNEL3_API}${path}`, {
-        method: 'POST',
+        ...init,
         headers: { 'x-api-key': options.apiKey!, 'content-type': 'application/json' },
-        body: JSON.stringify(body),
         signal: AbortSignal.timeout(timeoutMs),
       })
     } catch (error) {
       const timeout = error instanceof Error && /timeout|abort/i.test(error.name)
       throw new Channel3Error(undefined, timeout ? 'timeout' : 'network')
     }
-    log({ event: 'channel3_call', path, status: response.status, ms: now() - started })
+    log({
+      event: 'channel3_call',
+      path: path.replace(/\/v1\/products\/.*/, '/v1/products/{id}'),
+      status: response.status,
+      ms: now() - started,
+    })
+    return response
+  }
+  async function call(path: string, body: unknown): Promise<RawSearch> {
+    const response = await request(path, { method: 'POST', body: JSON.stringify(body) })
     if (!response.ok) throw new Channel3Error(response.status, `HTTP ${response.status}`)
     return (await response.json()) as RawSearch
+  }
+  /** One product, re-read with the free endpoint; undefined when it could not be read now. */
+  async function product(id: string): Promise<RawProduct | null | undefined> {
+    if (!options.apiKey || mode === 'off') return undefined
+    const cached = products.get(id)
+    if (cached && cached.until > now()) return cached.value
+    if (now() < productsBlockedUntil) return undefined
+    try {
+      const response = await request(
+        `/v1/products/${encodeURIComponent(id)}?country=US&currency=USD`,
+      )
+      if (response.status === 404) {
+        products.set(id, { value: null, until: now() + FRESH_MS })
+        return null
+      }
+      if (!response.ok) throw new Channel3Error(response.status, `HTTP ${response.status}`)
+      const value = (await response.json()) as RawProduct
+      products.delete(id)
+      products.set(id, { value, until: now() + FRESH_MS })
+      while (products.size > CACHE_MAX) products.delete(products.keys().next().value!)
+      return value
+    } catch (error) {
+      productsBlockedUntil = now() + PRODUCT_BACKOFF_MS
+      log({
+        event: 'channel3_product_unavailable',
+        status: error instanceof Channel3Error ? (error.status ?? error.message) : 'error',
+      })
+      return undefined
+    }
+  }
+  /**
+   * What is shown: rows read within 15 minutes as they are; older or recorded rows re-read first.
+   * A re-read row keeps its current price and link (or is dropped if it no longer fits); a row that
+   * cannot be re-read is listed without them.
+   */
+  async function present(found: Found): Promise<Alternatives> {
+    const base = {
+      status: found.status,
+      query: found.query,
+      maxPriceCents: found.band.maxPriceCents,
+    }
+    if (found.status === 'off') return { ...base, items: [] }
+    if (found.status === 'ok' && now() - found.at < FRESH_MS) {
+      remember(found.rows)
+      return { ...base, items: found.rows.slice(0, MAX_ALTERNATIVES) }
+    }
+    const checked = await Promise.all(
+      found.rows.map(async (row) => {
+        const fresh = await product(row.id)
+        if (fresh === undefined) return { unverified: unverifiedRow(row) }
+        const item = fresh ? parseProducts({ products: [fresh] }, found.band, 1)[0] : undefined
+        return item ? { item: { ...item, id: row.id } } : {}
+      }),
+    )
+    const items = checked.flatMap((c) => (c.item ? [c.item] : [])).slice(0, MAX_ALTERNATIVES)
+    const unverified = checked
+      .flatMap((c) => (c.unverified ? [c.unverified] : []))
+      .slice(0, MAX_ALTERNATIVES - items.length)
+    remember([...items, ...unverified])
+    if (!items.length && !unverified.length) return { ...base, status: 'off', items: [] }
+    return { ...base, items, ...(unverified.length ? { unverified } : {}) }
   }
   function backOff(error: unknown) {
     const status = error instanceof Channel3Error ? error.status : undefined
@@ -300,31 +460,36 @@ export function createChannel3(options: Channel3Options = {}): Channel3Client {
       retryInMs: wait,
     })
   }
-  async function run(
+  async function find(
     kind: FixtureSearch['kind'],
     query: string,
     maxPriceCents: number,
-    body: (band: Band) => unknown,
-  ): Promise<Alternatives> {
+    searchOptions: SearchOptions,
+  ): Promise<Found> {
     const bucket = priceBucket(maxPriceCents)
     const band = { minPriceCents: priceFloor(bucket), maxPriceCents: bucket }
-    const none: Alternatives = { status: 'off', query, maxPriceCents: bucket, items: [] }
-    if (mode === 'off' || bucket < PRICE_BUCKET_CENTS) return none
+    if (mode === 'off' || bucket < PRICE_BUCKET_CENTS)
+      return { status: 'off', query, band, rows: [], at: 0 }
     if (!live || now() < blockedUntil) return fixtureFor(kind, query, band)
     const key = `${kind}:${query}:${bucket}`
     const cached = cache.get(key)
     if (cached && cached.until > now()) return cached.value
     const pending = inFlight.get(key)
     if (pending) return pending
+    if (searchOptions.allowLive && !searchOptions.allowLive()) return fixtureFor(kind, query, band)
     if (!underDailyLimit()) return fixtureFor(kind, query, band)
-    const promise = (async () => {
+    const promise = (async (): Promise<Found> => {
       try {
-        const raw = await call(kind === 'search' ? '/v1/search' : '/v1/similar', body(band))
-        const value: Alternatives = {
+        const raw = await call(
+          kind === 'search' ? '/v1/search' : '/v1/similar',
+          requestBody(kind, query, band),
+        )
+        const value: Found = {
           status: 'ok',
           query,
-          maxPriceCents: bucket,
-          items: parseProducts(raw, band),
+          band,
+          rows: parseProducts(raw, band),
+          at: now(),
         }
         cache.delete(key)
         cache.set(key, { value, until: now() + CACHE_TTL_MS })
@@ -341,10 +506,33 @@ export function createChannel3(options: Channel3Options = {}): Channel3Client {
     return promise
   }
   return {
-    search: (query, maxPriceCents) =>
-      run('search', query, maxPriceCents, (band) => requestBody('search', query, band)),
-    similar: (productId, maxPriceCents) =>
-      run('similar', productId, maxPriceCents, (band) => requestBody('similar', productId, band)),
+    search: async (query, maxPriceCents, searchOptions = {}) =>
+      present(await find('search', query, maxPriceCents, searchOptions)),
+    async similar(productId, maxPriceCents, searchOptions = {}) {
+      if (!known.has(productId))
+        return {
+          status: 'off',
+          query: productId,
+          maxPriceCents: priceBucket(maxPriceCents),
+          items: [],
+        }
+      return present(await find('similar', productId, maxPriceCents, searchOptions))
+    },
+    async checkPrice(productId, savedPriceCents) {
+      const fresh = await product(productId)
+      const current = fresh
+        ? parseProducts({ products: [fresh] }, { minPriceCents: 1, maxPriceCents: 1e9 }, 1)[0]
+        : undefined
+      if (!current) return { status: 'unavailable' }
+      const { priceCents, url, retailer } = current
+      const status =
+        priceCents < savedPriceCents ? 'dropped' : priceCents > savedPriceCents ? 'higher' : 'same'
+      return {
+        status,
+        current: { priceCents, url, retailer },
+        ...(status === 'dropped' ? { droppedByCents: savedPriceCents - priceCents } : {}),
+      }
+    },
     health() {
       if (mode === 'off') return 'off'
       if (live && now() >= blockedUntil) return 'ok'

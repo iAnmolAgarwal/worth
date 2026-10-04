@@ -41,6 +41,7 @@ function fakeChannel3(status: Alternatives['status'] = 'ok') {
   return {
     search: vi.fn(async (query: string, max: number) => result(query, max)),
     similar: vi.fn(async (id: string, max: number) => result(id, max)),
+    checkPrice: vi.fn(async () => ({ status: 'unavailable' as const })),
     health: vi.fn(() => status),
   } satisfies Channel3Client
 }
@@ -63,7 +64,11 @@ describe('GET /api/alternatives', () => {
     const response = await agent.get('/api/alternatives?productId=camera')
     expect(response.status).toBe(200)
     expect(response.headers['cache-control']).toBe('no-store')
-    expect(channel3.search).toHaveBeenCalledWith('interchangeable lens camera', 44001)
+    expect(channel3.search).toHaveBeenCalledWith(
+      'interchangeable lens camera',
+      44001,
+      expect.anything(),
+    )
     expect(response.body).toEqual({
       status: 'ok',
       query: 'interchangeable lens camera',
@@ -77,7 +82,7 @@ describe('GET /api/alternatives', () => {
     const { agent } = setup(channel3)
     await agent.get('/api/alternatives?productId=chair&maxPriceCents=20000')
     await agent.get('/api/alternatives?productId=chair&maxPriceCents=900000')
-    expect(channel3.search.mock.calls).toEqual([
+    expect(channel3.search.mock.calls.map(([query, max]) => [query, max])).toEqual([
       ['desk chair', 20000],
       ['desk chair', 44001],
     ])
@@ -96,13 +101,22 @@ describe('GET /api/alternatives', () => {
     const empty = await agent.get('/api/alternatives').query({ itemName: 'Sony 4K' })
     expect(empty.body).toEqual({ status: 'off', query: '', maxPriceCents: 0, items: [] })
     expect(channel3.search).toHaveBeenCalledTimes(2)
+    // Names, health details and anything outside the category allowlist never leave the server.
+    await agent.get('/api/alternatives').query({ itemName: 'engagement ring for Sarah' })
+    for (const itemName of ['meds for my HIV', 'gift for Priya Sharma'])
+      expect((await agent.get('/api/alternatives').query({ itemName })).body.status).toBe('off')
+    expect(channel3.search.mock.calls.map(([query]) => query)).toEqual([
+      'over-ear headphones',
+      'office chair',
+      'ring',
+    ])
   })
   it('finds similar products for a Channel3 product ID', async () => {
     const channel3 = fakeChannel3()
     const { agent } = setup(channel3)
     const response = await agent.get('/api/alternatives?similarTo=DBouSIg')
     expect(response.status).toBe(200)
-    expect(channel3.similar).toHaveBeenCalledWith('DBouSIg', 44001)
+    expect(channel3.similar).toHaveBeenCalledWith('DBouSIg', 44001, expect.anything())
   })
   it.each([
     ['', 400],
@@ -152,11 +166,55 @@ describe('GET /api/alternatives', () => {
       channel3: 'ok',
     })
     const response = await agent.get('/api/alternatives?productId=camera')
+    // Product reads fail too, so the recorded rows appear without a price or link.
     expect(response.body.status).toBe('fixture')
-    expect(response.body.items.length).toBeGreaterThan(0)
+    expect(response.body.items).toEqual([])
+    expect(response.body.unverified.length).toBeGreaterThan(0)
+    expect(JSON.stringify(response.body.unverified)).not.toMatch(/priceCents|"url"/)
     expect(JSON.stringify(response.body)).not.toContain('c3-test-key')
     expect((await agent.get('/api/health')).body.channel3).toBe('fixture')
     expect((await agent.get('/api/state')).body.config.alternatives).toBe('fixture')
+  })
+  it('gives each client a share of the day’s live searches; cached answers stay free', async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ products: [] }), { status: 200 }))
+    const channel3 = createChannel3({
+      apiKey: 'c3-test-key',
+      fixtures: loadFixtures(),
+      fetch: fetch as unknown as typeof globalThis.fetch,
+      log: () => {},
+    })
+    const { agent } = setup(channel3, { channel3IpHourlyLimit: 2 })
+    await agent.get('/api/alternatives').query({ itemName: 'desk lamp' })
+    await agent.get('/api/alternatives').query({ itemName: 'desk lamp' })
+    await agent.get('/api/alternatives').query({ itemName: 'office chair' })
+    const third = await agent.get('/api/alternatives').query({ itemName: 'standing desk' })
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(third.body.status).not.toBe('ok')
+  })
+  it('finds similar products only for products the server has shown', async () => {
+    const fetch = vi.fn(async () => new Response('{}', { status: 200 }))
+    const channel3 = createChannel3({
+      apiKey: 'c3-test-key',
+      fetch: fetch as unknown as typeof globalThis.fetch,
+      log: () => {},
+    })
+    const { agent } = setup(channel3)
+    const response = await agent.get('/api/alternatives?similarTo=AnyIdAtAll')
+    expect(response.body.status).toBe('off')
+    expect(fetch).not.toHaveBeenCalled()
+  })
+  it('checks whether a saved product’s price dropped, for the Saved list', async () => {
+    const channel3 = fakeChannel3()
+    channel3.checkPrice.mockResolvedValue({
+      status: 'dropped',
+      current: { priceCents: 30000, url: 'https://buy.trychannel3.com/x', retailer: 'bestbuy.com' },
+      droppedByCents: 2249,
+    } as never)
+    const { agent } = setup(channel3)
+    const response = await agent.get('/api/alternatives/price?id=DBouSIg&savedPriceCents=32249')
+    expect(response.body).toMatchObject({ status: 'dropped', droppedByCents: 2249 })
+    expect(channel3.checkPrice).toHaveBeenCalledWith('DBouSIg', 32249)
+    expect((await agent.get('/api/alternatives/price?id=../x&savedPriceCents=1')).status).toBe(400)
   })
   it('reports off and hides the panel without a key', async () => {
     const { agent } = setup(createChannel3({ fixtures: loadFixtures() }))
@@ -200,7 +258,11 @@ describe('POST /api/chat for something cheaper', () => {
       maxPriceCents: 42500,
       items: [item],
     })
-    expect(channel3.search).toHaveBeenCalledWith('interchangeable lens camera', 44001)
+    expect(channel3.search).toHaveBeenCalledWith(
+      'interchangeable lens camera',
+      44001,
+      expect.anything(),
+    )
   })
   it('gives the model the find_alternatives tool, backed by the same search', async () => {
     const channel3 = fakeChannel3()
@@ -244,7 +306,7 @@ describe('POST /api/chat for something cheaper', () => {
       .send({ message: 'Any cheaper desk chairs?', history: [] })
     expect(response.body.mode).toBe('anthropic')
     expect(response.body.toolCalls).toEqual(['find_alternatives'])
-    expect(channel3.search).toHaveBeenCalledWith('desk chair', 44001)
+    expect(channel3.search).toHaveBeenCalledWith('desk chair', 44001, expect.anything())
     expect(response.body.alternatives.items).toEqual([item])
   })
 })

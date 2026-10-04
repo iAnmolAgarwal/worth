@@ -109,13 +109,28 @@ export interface Alternative {
  * earlier, shown while Channel3 is unavailable. off: nothing to show, so the panel stays hidden.
  */
 export type AlternativesStatus = 'ok' | 'fixture' | 'off'
+/**
+ * A recorded or older result whose price and link could not be re-read from Channel3 just now. It is
+ * listed as an example only, without a price or a link, so nothing stale is shown as current.
+ */
+export interface UnverifiedAlternative {
+  id: string
+  title: string
+  retailer: string
+  brand?: string
+  imageUrl?: string
+  source: 'channel3'
+}
 export interface Alternatives {
   status: AlternativesStatus
   /** The generic description searched for; never a brand. */
   query: string
   /** The search's price ceiling: what fits today, rounded down to $25. */
   maxPriceCents: number
+  /** Rows with a current price and link: found just now, or re-read from Channel3 before display. */
   items: Alternative[]
+  /** Example rows that could not be re-read, shown without a price or link. */
+  unverified?: UnverifiedAlternative[]
 }
 export interface PlanInstalment {
   date: string

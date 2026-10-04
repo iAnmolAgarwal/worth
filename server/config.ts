@@ -38,6 +38,8 @@ export interface AppConfig {
   channel3Mode?: 'live' | 'fixture' | 'off'
   /** Live Channel3 searches per day across the server, then recorded example results. */
   channel3DailyLimit: number
+  /** Live Channel3 searches per client IP per hour; cached results do not count. */
+  channel3IpHourlyLimit: number
 }
 
 export class ConfigError extends Error {
@@ -124,6 +126,7 @@ export function loadConfig(env: Env = process.env, overrides: Partial<AppConfig>
     channel3ApiKey: setting(env, 'CHANNEL3_API_KEY'),
     channel3Mode: channel3Mode(env),
     channel3DailyLimit: wholeNumber(env, 'CHANNEL3_DAILY_LIMIT', 300),
+    channel3IpHourlyLimit: wholeNumber(env, 'CHANNEL3_IP_HOURLY_LIMIT', 20, 1),
     ...overrides,
   }
   config.origin = publicOrigin(config.origin, config.production)
