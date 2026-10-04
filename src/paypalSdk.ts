@@ -65,6 +65,7 @@ declare module 'react' {
       'paypal-message': PayPalElement & {
         amount?: string
         'currency-code'?: string
+        'offer-types'?: string
         'auto-bootstrap'?: boolean | string
         'logo-position'?: string
         'text-color'?: string
