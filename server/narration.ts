@@ -562,9 +562,22 @@ export function purchasePlaceholders(a: Assessment, data: ChatData): Placeholder
   if (data.payIn4 && data.payIn4 !== 'unavailable') {
     const scenario = payIn4For(a, data)
     if (scenario.available) {
+      // Asked about Pay in 4, the full-price low point and the instalment one are kept apart.
+      for (const key of ['low_point', 'low_day', 'gap'] as const)
+        out[key] = { ...out[key]!, about: `${out[key]!.about}, if paid in full` }
       out.p4_payment = {
         value: money(scenario.instalments.at(-1)!.amountCents),
         about: 'one illustrative PayPal Pay in 4 payment',
+      }
+      out.p4_low_point = {
+        value: money(scenario.lowestBalanceCents),
+        about: 'the lowest projected balance with the Pay in 4 payments instead',
+        date: scenario.lowestDate,
+      }
+      out.p4_low_day = {
+        value: day(scenario.lowestDate, a.today),
+        about: 'the day of that Pay in 4 low point',
+        date: scenario.lowestDate,
       }
       const main = mainCollision(labelled(scenario))
       if (main)
@@ -749,6 +762,12 @@ export function checkSentence(
     return { ok: false, reason: 'free_number' }
   if (DATE_WORD.test(words)) return { ok: false, reason: 'free_date' }
   if (misordered(sentence, values)) return { ok: false, reason: 'contradicts_result' }
+  // A sentence about Pay in 4 may not borrow the full-price low point for the instalments.
+  if (
+    /\{p4_|pay\s+in\s+4|split|instal+ments?/i.test(sentence) &&
+    /\{(?:low_point|low_day|gap|stress_low)\}/.test(sentence)
+  )
+    return { ok: false, reason: 'contradicts_result' }
   // A tight result may still say what would fit: waiting, or spending less.
   const conditional = /\{(?:wait_day|max_spend)\}/.test(sentence)
   if (
@@ -762,17 +781,31 @@ export function checkSentence(
  * Whether "before" or "after" in the sentence puts two dated values in the wrong order, as in
  * "{cause_bill} on {cause_day}, before {income_name}" when the income arrives first.
  */
+const PAYDAY_WORDS =
+  /\b(before|after|until|ahead\s+of)\s+(?:your\s+|the\s+|a\s+)?(?:next\s+)?(?:paycheck|pay\s*day|income|salary)\b/gi
 function misordered(sentence: string, values: Placeholders) {
-  for (const m of sentence.matchAll(
-    /\b(before|after|until|ahead\s+of|followed\s+by)\s+(?:[a-z']+\s+){0,3}\{([a-z0-9_]+)\}/gi,
-  )) {
-    const later = values[m[2]!]?.date
+  // "before your next paycheck" written in words means the next income placeholder's day.
+  const income = values.income_name?.date
+  const matches = [
+    ...[
+      ...sentence.matchAll(
+        /\b(before|after|until|ahead\s+of|followed\s+by)\s+(?:[a-z']+\s+){0,3}\{([a-z0-9_]+)\}/gi,
+      ),
+    ].map((m) => ({ index: m.index, word: m[1]!, date: values[m[2]!]?.date })),
+    ...[...sentence.matchAll(PAYDAY_WORDS)].map((m) => ({
+      index: m.index,
+      word: m[1]!,
+      date: income,
+    })),
+  ]
+  for (const m of matches) {
+    const later = m.date
     const earlier = [...sentence.slice(0, m.index).matchAll(PLACEHOLDER)]
       .map((p) => values[p[1]!]?.date)
       .filter(Boolean)
       .at(-1)
     if (!later || !earlier) continue
-    const word = m[1]!.toLowerCase()
+    const word = m.word.toLowerCase()
     const forward = !/^after/.test(word)
     if (forward ? earlier > later : earlier < later) return true
   }

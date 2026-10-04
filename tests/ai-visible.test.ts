@@ -366,6 +366,11 @@ describe('one Claude sentence with engine placeholders only (C-13)', () => {
     ['a credit suggestion', 'A credit card could cover {item}.', 'advice'],
     ['two sentences', 'It is {cause_bill}. That comes first.', 'not_one_sentence'],
     [
+      'a payday in words in the wrong order',
+      '{cause_bill} on {cause_day} lands before your next paycheck.',
+      'contradicts_result',
+    ],
+    [
       'days in the wrong order',
       '{cause_bill} on {cause_day} lands before {income_name} can cover it.',
       'contradicts_result',
@@ -398,6 +403,29 @@ describe('one Claude sentence with engine placeholders only (C-13)', () => {
       ok: true,
       text: 'Pay in 4 keeps the same $1,199 total with no interest; payment 2 would land about 1 day after your apartment rent.',
     })
+  })
+
+  it('keeps the full-price low point out of a sentence about Pay in 4', () => {
+    const data = { ...demo(), payIn4: 'paypal' as const }
+    const a = assessPurchase(data.profile, [], {
+      amountCents: 119900,
+      itemName: 'camera',
+      today: TODAY,
+    })
+    const values = purchasePlaceholders(a, data)
+    expect(
+      checkSentence(
+        'Splitting it, {p4_collision}, so you still fall to {low_point}.',
+        values,
+        'tight',
+      ),
+    ).toEqual({ ok: false, reason: 'contradicts_result' })
+    const own = checkSentence(
+      'With Pay in 4 your lowest point would be {p4_low_point} around {p4_low_day}; {p4_collision}.',
+      values,
+      'tight',
+    )
+    expect(own.ok).toBe(true)
   })
 
   it('accepts what would fit for a tight result', () => {

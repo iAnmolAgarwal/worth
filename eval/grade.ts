@@ -1,4 +1,10 @@
-import { addDays, assessPurchase, getUpcomingFlows, payIn4Schedule } from '../shared/finance.ts'
+import {
+  addDays,
+  assessPurchase,
+  compareOptions,
+  getUpcomingFlows,
+  payIn4Schedule,
+} from '../shared/finance.ts'
 import type { Assessment, ChatReply, FinancialProfile, Transaction } from '../shared/types.ts'
 import type { Expectation } from './probes.ts'
 
@@ -83,7 +89,15 @@ function allowedAmounts(data: GradeData, a: Assessment | undefined, reply: ChatR
       .add(a.stressLowestCents)
       .add(a.maxAffordableCents)
     for (const item of reply.interpretation?.items ?? []) allowed.add(item.amountCents)
-    // Pay in 4: each illustrative payment, and what plans already running take in 60 days.
+    // Pay in 4: each illustrative payment, the instalment scenario's low point, and what plans
+    // already running take in 60 days.
+    const p4 = compareOptions(data.profile, [], {
+      amountCents: a.amountCents,
+      today: data.today,
+      payIn4Eligible: true,
+    }).payIn4
+    if (p4.available)
+      allowed.add(p4.lowestBalanceCents).add(Math.abs(p4.lowestBalanceCents - a.cushionCents))
     for (const payment of payIn4Schedule(a.amountCents, data.today))
       allowed.add(payment.amountCents)
     allowed.add(
