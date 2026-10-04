@@ -3343,6 +3343,131 @@
      }
     ]
    ]
+  },
+  "J3-camera-bag-asks-price": {
+   "messages": [
+    "Can I afford a camera bag?"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_014PyS467KoWWWi67kejTTok",
+        "name": "interpret_purchase",
+        "input": {
+         "items": [
+          {
+           "name": "camera bag",
+           "amount_cents": null,
+           "currency": "USD",
+           "quantity": 1
+          }
+         ],
+         "combine": "single",
+         "refers_to_previous_item": false,
+         "date_phrase": null,
+         "date": null,
+         "option": "check",
+         "points": [
+          "low_point",
+          "cause"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "How much could I spend on a camera bag?",
+          "When could I buy a camera bag?"
+         ]
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 153,
+       "cache_creation_input_tokens": 4423,
+       "cache_read_input_tokens": 0,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 4423,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 307,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 3641
+     }
+    ]
+   ]
+  },
+  "J4-sony-camera-asks-price": {
+   "messages": [
+    "Can I afford a Sony camera?"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01RSR3EAxCcdw4e1Y6JMkEo7",
+        "name": "interpret_purchase",
+        "input": {
+         "items": [
+          {
+           "name": "Sony camera",
+           "amount_cents": null,
+           "currency": "USD",
+           "quantity": 1
+          }
+         ],
+         "combine": "single",
+         "refers_to_previous_item": false,
+         "date_phrase": null,
+         "date": null,
+         "option": "check",
+         "points": [
+          "low_point",
+          "cause",
+          "wait"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "How much could I spend on it?",
+          "When is the earliest I could buy it?"
+         ]
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 154,
+       "cache_creation_input_tokens": 4423,
+       "cache_read_input_tokens": 0,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 4423,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 308,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 3564
+     }
+    ]
+   ]
   }
  }
 }

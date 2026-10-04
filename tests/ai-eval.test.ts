@@ -58,6 +58,11 @@ describe('AI eval regression gate (recorded model responses)', () => {
     expect([55000, undefined]).toContain(reply('P3-two-items').assessment?.amountCents)
     for (const id of ['N2-euros-word', 'N3-yen', 'P5-euro-symbol'])
       expect(reply(id).assessment).toBeUndefined()
+    // A store item's word inside another item's name never borrows the store price.
+    for (const id of ['J3-camera-bag-asks-price', 'J4-sony-camera-asks-price']) {
+      expect(reply(id).assessment).toBeUndefined()
+      expect(reply(id).intent).toBe('clarify')
+    }
     expect([undefined, '2026-10-29', '2026-10-30', '2026-10-31']).toContain(
       reply('N4-end-of-month').assessment?.purchaseDate,
     )

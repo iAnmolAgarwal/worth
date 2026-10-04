@@ -529,6 +529,21 @@ export const PROBES: Probe[] = [
       },
     ],
   },
+  // ---- Pre-merge judge (finding 1): a store item's word inside another item's name ------
+  {
+    id: 'J3-camera-bag-asks-price',
+    split: 'train',
+    covers: 'phase 5 judge #1: "camera bag" is not the store camera; ask for its price',
+    kind: 'chat',
+    turns: [{ message: 'Can I afford a camera bag?', expect: clarifyOnly }],
+  },
+  {
+    id: 'J4-sony-camera-asks-price',
+    split: 'train',
+    covers: 'phase 5 judge #1: a branded camera is not the store camera; ask for its price',
+    kind: 'chat',
+    turns: [{ message: 'Can I afford a Sony camera?', expect: clarifyOnly }],
+  },
   {
     id: 'N15-bills',
     split: 'train',
