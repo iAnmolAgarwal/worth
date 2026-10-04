@@ -1444,14 +1444,7 @@ textarea.input {
   padding: 0;
   gap: var(--s-1);
 }
-.alt-item {
-  display: flex;
-  align-items: center;
-  gap: var(--s-2);
-}
 .alt-item > .row {
-  flex: 1;
-  min-width: 0;
   align-items: center;
 }
 .alt-item .body > span {
@@ -1465,6 +1458,16 @@ textarea.input {
 }
 .alt-item > .row:hover .t {
   text-decoration: underline;
+}
+.alt-actions {
+  display: flex;
+  gap: var(--s-4);
+  padding-left: calc(48px + var(--s-4));
+  margin-top: calc(-1 * var(--s-2));
+}
+.alt-actions .link {
+  min-height: 44px;
+  font-size: var(--fs-meta);
 }
 .alt-thumb {
   display: grid;

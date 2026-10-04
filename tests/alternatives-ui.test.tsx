@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import type { ReactNode } from 'react'
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AlternativesPanel } from '../src/Alternatives'
 import { Ask } from '../src/Ask'
 import { Decision } from '../src/Decision'
+import { Settings } from '../src/Saved'
 import { api } from '../src/api'
 import { compareOptions } from '../shared/finance'
 import { createDemoState, PRODUCTS } from '../shared/seed'
@@ -126,7 +127,10 @@ describe('Similar items that fit today', () => {
     expect(first.textContent).toContain('Interchangeable Lens Camera Body')
     expect(first.textContent).toContain('bestbuy.com')
     expect(first.textContent).toContain('$322.49')
-    expect(first.textContent).toContain('Opens the store’s page in a new tab.')
+    // One accessible name: title, store and price as shown, then where the link opens.
+    expect(first.textContent).toBe(
+      'Interchangeable Lens Camera Bodybestbuy.com$322.49, opens in a new tab',
+    )
     expect(first.querySelector('img')!.getAttribute('src')).toBe(
       'https://cdn.trychannel3.com/c6db56cb',
     )
@@ -138,7 +142,14 @@ describe('Similar items that fit today', () => {
       within(panel).getByText(/Worth doesn’t sell these items and can’t check them out/),
     ).toBeTruthy()
     // Discovery only: no checkout, no PayPal, never the demo store.
-    expect(within(panel).queryByRole('button')).toBeNull()
+    expect(
+      within(panel)
+        .getAllByRole('button')
+        .map((b) => b.getAttribute('aria-label')),
+    ).toEqual([
+      'More like Interchangeable Lens Camera Body',
+      'More like Mirrorless Digital Camera Body',
+    ])
     expect(panel.textContent).not.toMatch(/PayPal|Larkspur|Buy/)
     expect(within(panel).queryByText('Example results')).toBeNull()
   })
@@ -169,7 +180,7 @@ describe('Similar items that fit today', () => {
     render(<AlternativesPanel state={makeState('fixture')} request={{ productId: 'camera' }} />)
     expect(await screen.findByText('Example results')).toBeTruthy()
     expect(
-      screen.getByText(/example results recorded earlier, while Channel3 is unavailable/),
+      screen.getByText(/example results from an earlier search, prices checked just now/),
     ).toBeTruthy()
   })
   it('blurs photos, titles and store names in capture mode', async () => {
@@ -216,6 +227,9 @@ describe('where the similar items appear', () => {
     await user.click(within(group).getAllByRole('radio')[2]!)
     expect(await screen.findByRole('region', { name: 'Similar items that fit today' })).toBeTruthy()
     expect(apiMock).toHaveBeenCalledWith('/alternatives?productId=camera')
+    // Beside other stores' items, the buy action names the demo store's own product.
+    expect(screen.getAllByRole('button', { name: 'Buy the everyday camera anyway' }).length).toBe(2)
+    expect(screen.queryByRole('button', { name: 'Buy today anyway' })).toBeNull()
   })
   it('never offers them when the item fits today', async () => {
     const state = makeState()
@@ -249,5 +263,70 @@ describe('where the similar items appear', () => {
     const panel = await screen.findByRole('region', { name: 'Similar items that fit today' })
     expect(within(panel).getAllByRole('link')).toHaveLength(2)
     expect(screen.getByText('Up to $440.01 fits today and keeps your $300 cushion.')).toBeTruthy()
+  })
+
+  it('lists rows Channel3 could not re-check without a price or a link', async () => {
+    const example: Alternatives = {
+      ...found('fixture'),
+      items: [],
+      unverified: [{ id: 'X1', title: 'Desk Chair', retailer: 'target.com', source: 'channel3' }],
+    }
+    route(makeState(), () => example)
+    render(<AlternativesPanel state={makeState('fixture')} request={{ productId: 'chair' }} />)
+    const panel = await screen.findByRole('region', { name: 'Similar items that fit today' })
+    expect(within(panel).queryAllByRole('link')).toHaveLength(0)
+    expect(within(panel).getByText('Price not checked')).toBeTruthy()
+    expect(panel.querySelector('.alt-item')!.textContent).not.toContain('$')
+    expect(within(panel).getByText(/couldn’t confirm some prices and links/)).toBeTruthy()
+  })
+  it('shows a store icon when a product photo fails to load', async () => {
+    route(makeState())
+    render(<AlternativesPanel state={makeState()} request={{ productId: 'camera' }} />)
+    const panel = await screen.findByRole('region', { name: 'Similar items that fit today' })
+    fireEvent.error(panel.querySelector('img')!)
+    expect(panel.querySelector('img')).toBeNull()
+    expect(panel.querySelectorAll('.alt-thumb')).toHaveLength(2)
+  })
+  it('shows More like this from Channel3, under the same limit, and goes back', async () => {
+    const user = userEvent.setup()
+    const similar: Alternatives = {
+      ...found(),
+      query: 'DBouSIg',
+      items: [{ ...found().items[1]!, id: 'S2', title: 'Compact Mirrorless Body' }],
+    }
+    route(makeState(), () =>
+      apiMock.mock.calls.at(-1)![0].includes('similarTo') ? similar : found(),
+    )
+    render(<AlternativesPanel state={makeState()} request={{ productId: 'camera' }} />)
+    await user.click(
+      await screen.findByRole('button', { name: 'More like Interchangeable Lens Camera Body' }),
+    )
+    const more = await screen.findByRole('region', { name: 'More like this' })
+    expect(apiMock).toHaveBeenCalledWith('/alternatives?similarTo=DBouSIg')
+    expect(within(more).getByText('Compact Mirrorless Body')).toBeTruthy()
+    expect(
+      within(more).getByText(/Like the Interchangeable Lens Camera Body · under \$425.00/),
+    ).toBeTruthy()
+    await waitFor(() => expect(document.activeElement?.textContent).toBe('More like this'))
+    await user.click(within(more).getByRole('button', { name: 'Back' }))
+    expect(await screen.findByRole('region', { name: 'Similar items that fit today' })).toBeTruthy()
+  })
+
+  it('names Channel3 in Settings and privacy, and says it applies with the assistant off', () => {
+    render(
+      <Settings
+        state={makeState()}
+        onUpdate={vi.fn()}
+        onReset={vi.fn()}
+        onEditPlan={vi.fn()}
+        onImport={vi.fn()}
+      />,
+    )
+    const section = screen.getByRole('region', { name: 'Similar items (Channel3)' })
+    expect(section.textContent).toContain(
+      'A generic kind of item (such as “desk chair”) and a price limit rounded down to $25',
+    )
+    expect(section.textContent).toContain('even when the assistant is off')
+    expect(within(section).getByText('Never')).toBeTruthy()
   })
 })

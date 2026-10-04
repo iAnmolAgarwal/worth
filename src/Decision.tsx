@@ -613,7 +613,10 @@ export function Decision({
       )}
       {anyway && (
         <Button variant="text" onClick={() => setConfirmBuy(true)}>
-          Buy today anyway
+          {/* Next to other stores' items, the action names the demo store's own product. */}
+          {selected === 'spendLess'
+            ? `Buy the ${product!.name.toLowerCase()} anyway`
+            : 'Buy today anyway'}
         </Button>
       )}
     </>

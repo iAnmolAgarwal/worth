@@ -13,3 +13,7 @@ export const CLAUDE_USES: [string, string][] = [
 /** The rows as they stand: with Claude off, nothing is sent. */
 export const claudeUses = (on: boolean): [string, string][] =>
   CLAUDE_USES.map(([label, value]) => [label, on || value === 'Never' ? value : 'Not sent'])
+
+/** What reaches Channel3 when Worth looks for similar items. It applies with the assistant off too. */
+export const CHANNEL3_SHARED_DATA =
+  'A generic kind of item (such as “desk chair”) and a price limit rounded down to $25, sent from Worth’s server when you look at Spend less or ask for something cheaper, even when the assistant is off'
