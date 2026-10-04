@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { useState, type ReactNode } from 'react'
+import { useState } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -32,22 +32,6 @@ vi.mock('../src/paypalSdk', () => ({ loadPayPalSdk: vi.fn() }))
 vi.mock('../src/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/api')>()
   return { ...actual, api: vi.fn() }
-})
-// Chart layout is a browser rendering concern; the chart's accessible label stays under test.
-vi.mock('recharts', () => {
-  const Pass = ({ children }: { children?: ReactNode }) => <>{children}</>
-  const Nothing = () => null
-  return {
-    ResponsiveContainer: Pass,
-    ComposedChart: ({ children }: { children?: ReactNode }) => <svg>{children}</svg>,
-    Area: Nothing,
-    Line: Nothing,
-    ReferenceArea: Nothing,
-    ReferenceDot: Nothing,
-    ReferenceLine: Nothing,
-    XAxis: Nothing,
-    YAxis: Nothing,
-  }
 })
 
 const TODAY = '2026-10-03'
@@ -1358,7 +1342,7 @@ describe('iteration 4 fixes', () => {
     expect(document.activeElement).toBe(chip)
   })
 
-  it('leads the decision with the verdict and makes the timing strip one tab stop', async () => {
+  it('leads the decision with the verdict and makes the bill and payday lines one tab stop', async () => {
     const user = userEvent.setup()
     const state = makeState()
     routeApi((_path, data) => compare(state, data))
@@ -1376,12 +1360,12 @@ describe('iteration 4 fixes', () => {
     expect(
       await screen.findByRole('heading', { level: 1, name: /^Wait until \w{3}, \w{3} \d+$/ }),
     ).toBeTruthy()
-    const strip = screen.getByRole('list', { name: /Paydays and big bills/ })
-    const marks = within(strip).getAllByRole('listitem')
-    expect(marks.filter((mark) => mark.tabIndex === 0)).toHaveLength(1)
-    marks[0]!.focus()
+    const group = screen.getByRole('group', { name: /Paydays and big bills/ })
+    const lines = within(group).getAllByRole('button')
+    expect(lines.filter((line) => line.tabIndex === 0)).toHaveLength(1)
+    lines[0]!.focus()
     await user.keyboard('{ArrowRight}')
-    expect(document.activeElement).toBe(marks[1])
-    expect(marks[1]!.tabIndex).toBe(0)
+    expect(document.activeElement).toBe(lines[1])
+    expect(lines[1]!.tabIndex).toBe(0)
   })
 })
