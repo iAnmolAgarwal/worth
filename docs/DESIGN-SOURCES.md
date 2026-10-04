@@ -4,7 +4,7 @@ Verified on 2026-10-03. No gallery screenshot, third-party application interface
 
 ## Direction
 
-Worth borrows the frame of PayPal's logged-in web and iOS app so it reads as a familiar extension of PayPal: the navy top bar, the warm canvas with a white right rail, one solid blue balance tile, flat white tiles with hairline borders, navy icon discs, pill buttons, and the floating pill tab bar on mobile. Colour, spacing, radius and motion values are PayPal's own, measured from logged-in captures or taken from PPUI tokens. The build reference is the design mock and brief in the hackathon workspace (`design/mock/index.html`, `design/brief.md`).
+Worth borrows the frame of PayPal's logged-in web and iOS app so it reads as a familiar extension of PayPal: the navy top bar, the warm canvas with a white right rail, one solid blue balance tile, flat white tiles with hairline borders, navy icon discs, pill buttons, and the floating pill tab bar on mobile. Colour, spacing, radius and motion values are PayPal's own, measured from logged-in captures or taken from PPUI tokens.
 
 Worth keeps its own wordmark and a "Sample data" pill on every screen, so it is never mistaken for PayPal itself.
 
@@ -12,7 +12,7 @@ Worth keeps its own wordmark and a "Sample data" pill on every screen, so it is 
 
 The four original product photographs come from Unsplash under the [Unsplash License](https://unsplash.com/license). It permits download, modification, distribution and commercial use, without permission or attribution (attribution is given anyway). Photos may not be sold unmodified or compiled into a competing image service; neither applies here.
 
-Each image was checked at 2–6× zoom for brand marks before inclusion (scope C-29), cropped square and resized to 1000 × 1000. No other edits were made. The source set and its full audit, including rejected candidates, is `design/assets/LICENSES.md` in the hackathon workspace.
+Each image was checked at 2–6× zoom for brand marks before inclusion, cropped square and resized to 1000 × 1000. No other edits were made.
 
 | Local file | Product (demo store) | Photographer | Source page | Brand-mark check |
 | --- | --- | --- | --- | --- |
@@ -23,9 +23,9 @@ Each image was checked at 2–6× zoom for brand marks before inclusion (scope C
 
 The files keep the paths the catalog in `shared/seed.ts` already uses, so the server needs no change. `weekend.jpg` now holds the backpack photo; the earlier coastline placeholder is gone.
 
-### Real-brand catalog items (Phase 5, scope amendment A3)
+### Real-brand catalog items
 
-The user decided that the demo store may list real products under Larkspur Supply (demo store); the store never presents itself as the brand. Round-2 judge item G5-1 asked that these photos show no brand mark, so video and Devpost frames stay clean. Both photos come from Unsplash under the [Unsplash License](https://unsplash.com/license) (free photos, not Unsplash+), were viewed in full before inclusion, and were downloaded on 2026-10-04.
+The demo store lists two real products under its own name, Larkspur Supply (demo store); it never presents itself as the brand, and their photos show no brand mark. Both photos come from Unsplash under the [Unsplash License](https://unsplash.com/license) (free photos, not Unsplash+), were viewed in full before inclusion, and were downloaded on 2026-10-04.
 
 | Local file | Product (demo store) | Photographer | Source page | Edits | Brand-mark check |
 | --- | --- | --- | --- | --- | --- |
