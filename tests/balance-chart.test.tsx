@@ -4,18 +4,25 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it } from 'vitest'
 import { BalanceChart } from '../src/BalanceChart'
 import {
+  chartModel,
   eventRules,
   geometry,
+  hitsLine,
+  hitTargets,
+  leaderEnd,
+  leaderHitsLine,
+  LEADER_MIN,
+  MIN_TARGET,
   overlaps,
-  placeLabels,
-  placePopover,
-  ringCandidates,
+  ruleBox,
   stepPath,
-  type Box,
+  storyRules,
+  type ChartInput,
 } from '../src/chartLayout'
 import { compareOptions } from '../shared/finance'
 import { createDemoState, PRODUCTS } from '../shared/seed'
-import type { Comparison } from '../shared/types'
+import type { Comparison, OptionResult } from '../shared/types'
+import { dayLabel } from '../src/format'
 
 const TODAY = '2026-10-03'
 
@@ -32,6 +39,56 @@ function comparison(productId: string): Comparison {
 
 afterEach(cleanup)
 
+/** The props Decision passes for one option, with the Pay in 4 comparison open or closed. */
+function decisionInput(
+  c: Comparison,
+  option: OptionResult,
+  width: number,
+  p4Open: boolean,
+): ChartInput {
+  const cause = option.lowPointCause
+  const p4 = c.payIn4.available ? c.payIn4 : undefined
+  return {
+    points: option.points,
+    cushionCents: c.cushionCents,
+    width,
+    purchase: { date: option.purchaseDate, amountCents: option.amountCents },
+    payIn4: p4Open && p4 ? { points: p4.points, instalments: p4.instalments } : undefined,
+    scaleWith: p4?.points,
+    highlight: {
+      billDate:
+        cause && cause.kind !== 'spending' && cause.kind !== 'purchase' ? cause.date : undefined,
+      paydayDate: option.points.find(
+        (point) =>
+          point.date >= option.lowestDate && point.events.some((event) => event.kind === 'income'),
+      )?.date,
+    },
+  }
+}
+
+/** Every Decision state the demo can show (3 options, Pay in 4 open or not) for both products. */
+function decisionStates() {
+  return ['chair', 'camera'].flatMap((product) => {
+    const c = comparison(product)
+    const options: [string, OptionResult][] = [
+      ['buy today', c.buyToday],
+      ['spend less', c.spendLess],
+      ...(c.wait.date ? [['wait', c.wait] as [string, OptionResult]] : []),
+    ]
+    return options.flatMap(([name, option]) =>
+      [false, true].map((p4) => ({
+        name: `${product} ${name}${p4 ? ' + Pay in 4' : ''}`,
+        c,
+        option,
+        p4,
+      })),
+    )
+  })
+}
+
+/** Frame widths measured live: Decision at 1440 and 390, Plan's review step at 1440. */
+const WIDTHS = [662, 316, 590]
+
 describe('chart layout', () => {
   const c = comparison('chair')
   const points = c.spendLess.points
@@ -44,86 +101,139 @@ describe('chart layout', () => {
     expect(path.replace(/^M[\d.,-]+/, '')).toMatch(/^([HV][\d.-]+)+$/)
   })
 
-  it.each([880, 340])(
-    'gives every payday and big bill a rule whose hit areas never overlap (%ipx)',
-    (width) => {
-      const g = geometry(width, width < 480 ? 236 : 284, points.length, values, c.cushionCents)
-      const rules = eventRules(points, g, 12)
-      expect(rules.some((rule) => rule.kind === 'payday')).toBe(true)
-      expect(rules.some((rule) => rule.kind === 'bill')).toBe(true)
-      for (const [index, rule] of rules.entries()) {
-        expect(rule.hit.left).toBeLessThanOrEqual(rule.x)
-        expect(rule.hit.right).toBeGreaterThanOrEqual(rule.x)
-        const next = rules[index + 1]
-        if (next) expect(rule.hit.right).toBeLessThanOrEqual(next.hit.left + 0.001)
-      }
-      // Rent drops the balance where its day begins; the paycheck lifts it where its day ends.
-      const rent = rules.find((rule) => rule.events.some((e) => e.name === 'Apartment rent'))!
-      expect(rent.x).toBeLessThan(g.x(rent.index))
-      const pay = rules.find((rule) => rule.kind === 'payday')!
-      expect(pay.x).toBeGreaterThan(g.x(pay.index))
-    },
-  )
-
-  it.each([880, 340])(
-    'places labels without overlapping each other or the line (%ipx)',
-    (width) => {
-      const g = geometry(width, width < 480 ? 236 : 284, points.length, values, c.cushionCents)
-      const low = values.indexOf(Math.min(...values))
-      const lx = g.x(low)
-      const ly = g.y(values[low]!)
-      const placed = placeLabels(
-        [
-          {
-            id: 'low',
-            w: 120,
-            h: 36,
-            required: true,
-            candidates: ringCandidates(lx, ly, 120, 36, [10, 24, 40, 60]),
-          },
-          {
-            id: 'buy',
-            w: 140,
-            h: 18,
-            required: true,
-            lane: true,
-            candidates: [{ x: g.x(0) + 6, y: 4, cost: 0 }],
-          },
-          { id: 'extra', w: 110, h: 20, candidates: ringCandidates(lx, ly, 110, 20) },
-        ],
-        {
-          g,
-          values: [values],
-          obstacles: [{ x: lx - 8, y: ly - 8, w: 16, h: 16 }],
-          bounds: { x: g.plot.x, y: 0, w: g.plot.w, h: g.plot.y + g.plot.h },
-        },
-      )
-      expect(placed.map((box) => box.id)).toContain('low')
-      for (const a of placed)
-        for (const b of placed) if (a !== b) expect(overlaps(a, b)).toBe(false)
-      const lowBox = placed.find((box) => box.id === 'low')!
-      expect(overlaps(lowBox, { x: lx - 8, y: ly - 8, w: 16, h: 16 })).toBe(false)
-    },
-  )
-
-  it('puts a rule card beside its rule, clear of the low point, or docks it under the chart', () => {
+  it('puts a bill on the drop it causes and a paycheck on the rise after its day', () => {
     const g = geometry(880, 284, points.length, values, c.cushionCents)
-    const avoid: Box[] = [{ x: 600, y: 200, w: 120, h: 40 }]
-    const card = { w: 280, h: 160 }
-    const beside = placePopover({ x: 200 }, card, g, avoid)
-    expect(beside.side).toBe('right')
-    if (beside.side !== 'below') {
-      const box = { x: beside.left, y: beside.top, ...card }
-      expect(box.x).toBeGreaterThan(200)
-      expect(avoid.some((other) => overlaps(box, other))).toBe(false)
+    const rules = eventRules(points, g)
+    expect(rules.some((rule) => rule.kind === 'payday')).toBe(true)
+    const rent = rules.find((rule) => rule.events.some((e) => e.name === 'Apartment rent'))!
+    expect(rent.x).toBeLessThan(g.x(rent.index))
+    const pay = rules.find((rule) => rule.kind === 'payday')!
+    expect(pay.x).toBeGreaterThan(g.x(pay.index))
+  })
+
+  it.each(WIDTHS)(
+    'gives every line a pointer target at least 24px wide, merging close lines (%ipx)',
+    (width) => {
+      for (const state of decisionStates()) {
+        const model = chartModel(decisionInput(state.c, state.option, width, state.p4))!
+        const { rules, targets } = model
+        // Every rule belongs to exactly one target, in order.
+        expect(targets.flatMap((target) => target.rules)).toEqual(rules.map((_, i) => i))
+        targets.forEach((target, i) => {
+          expect(target.right - target.left).toBeGreaterThanOrEqual(MIN_TARGET)
+          for (const rule of target.rules) {
+            expect(rules[rule]!.x).toBeGreaterThanOrEqual(target.left)
+            expect(rules[rule]!.x).toBeLessThanOrEqual(target.right)
+          }
+          expect(target.rules).toContain(target.primary)
+          const next = targets[i + 1]
+          if (next) expect(target.right).toBeLessThanOrEqual(next.left + 0.001)
+        })
+      }
+    },
+  )
+
+  it('merges lines one day apart and opens the cluster on its story line', () => {
+    const rules = [100, 110, 160, 230, 236, 241].map((x, index) => ({
+      index,
+      date: `2026-10-${10 + index}`,
+      x,
+      kind: 'bill' as const,
+      events: [
+        {
+          id: `${index}`,
+          name: `Bill ${index}`,
+          amountCents: -(index + 1) * 10_000,
+          kind: 'bill' as const,
+        },
+      ],
+    }))
+    const targets = hitTargets(rules as never, { left: 0, right: 400 }, [0])
+    expect(targets.map((target) => target.rules)).toEqual([[0, 1], [2], [3, 4, 5]])
+    // The story line leads its cluster; otherwise the largest movement does.
+    expect(targets[0]!.primary).toBe(0)
+    expect(targets[2]!.primary).toBe(5)
+    expect(targets[1]!.right - targets[1]!.left).toBeGreaterThanOrEqual(24)
+  })
+
+  it.each(WIDTHS)(
+    'keeps the low-point label off the line, the story lines and every mark in all Decision states (%ipx)',
+    (width) => {
+      for (const state of decisionStates()) {
+        const model = chartModel(decisionInput(state.c, state.option, width, state.p4))!
+        const { g, placed, rules, story, low, obstacles } = model
+        const series = [model.values, ...(model.p4Values ? [model.p4Values] : [])]
+        const lowBox = placed.find((box) => box.id === 'low')
+        expect(lowBox, state.name).toBeTruthy()
+        // The balance line is never covered. The illustrative Pay in 4 line and the purchase's
+        // dotted line are clear too, except on a phone with both scenarios drawn, where no spot
+        // clear of all of them exists and the pill may cross them (never a story line or a dot).
+        const strict = width >= 480 || !state.p4
+        expect(hitsLine(lowBox!, model.values, g, 1), state.name).toBe(false)
+        if (strict) {
+          for (const values of series)
+            expect(hitsLine(lowBox!, values, g, 1), state.name).toBe(false)
+          for (const line of model.buyLine) expect(overlaps(lowBox!, line), state.name).toBe(false)
+        }
+        for (const index of [story.bill, story.payday])
+          if (index !== undefined)
+            expect(overlaps(lowBox!, ruleBox(rules[index]!, g.plot)), state.name).toBe(false)
+        for (const obstacle of obstacles)
+          expect(overlaps(lowBox!, obstacle), state.name).toBe(false)
+        // A leader, when drawn, never crosses the line either.
+        const end = leaderEnd(lowBox!, low)
+        if (Math.hypot(end.x - low.x, end.y - low.y) > LEADER_MIN)
+          for (const values of strict ? series : [model.values])
+            expect(leaderHitsLine(low, end, values, g), state.name).toBe(false)
+        // Labels never overlap each other, and all stay in the frame.
+        for (const a of placed) {
+          expect(a.x, state.name).toBeGreaterThanOrEqual(g.plot.x)
+          expect(a.x + a.w, state.name).toBeLessThanOrEqual(g.width)
+          for (const b of placed) if (a !== b) expect(overlaps(a, b), state.name).toBe(false)
+        }
+      }
+    },
+  )
+
+  it('clears the line on the recommended camera Wait answer, with and without Pay in 4', () => {
+    const camera = comparison('camera')
+    if (!camera.wait.date) throw new Error('Expected a wait date')
+    for (const p4 of [false, true]) {
+      const model = chartModel(decisionInput(camera, camera.wait, 662, p4))!
+      const lowBox = model.placed.find((box) => box.id === 'low')!
+      expect(hitsLine(lowBox, model.values, model.g, 1)).toBe(false)
+      if (model.p4Values) expect(hitsLine(lowBox, model.p4Values, model.g, 1)).toBe(false)
+      expect(overlaps(lowBox, ruleBox(model.rules[model.story.payday!]!, model.g.plot))).toBe(false)
+      expect(overlaps(lowBox, ruleBox(model.rules[model.story.bill!]!, model.g.plot))).toBe(false)
     }
-    // Near the right edge it flips to the left of the rule.
-    const flipped = placePopover({ x: 820 }, card, g, [])
-    expect(flipped.side).toBe('left')
-    if (flipped.side !== 'below') expect(flipped.left + card.w).toBeLessThan(820)
-    // With no clear side it docks under the chart instead of covering anything.
-    const blocked = placePopover({ x: 440 }, card, g, [{ x: 0, y: 0, w: 880, h: 284 }])
-    expect(blocked.side).toBe('below')
+  })
+
+  it('finds the bill behind the low even when the low falls on a payday (Plan)', () => {
+    const plain = c.spendLess.points
+    const g = geometry(
+      662,
+      284,
+      plain.length,
+      plain.map((p) => p.minimumCents),
+      c.cushionCents,
+    )
+    const rules = eventRules(plain, g)
+    const lowIndex = plain.findIndex((point) => point.date === c.spendLess.lowestDate)
+    const story = storyRules(rules, lowIndex)
+    expect(rules[story.bill!]!.events.map((e) => e.name)).toContain('Apartment rent')
+    expect(rules[story.payday!]!.index).toBe(lowIndex)
+  })
+
+  it('names the bill behind the answer in the label lane when there is room', () => {
+    const model = chartModel(decisionInput(c, c.spendLess, 662, false))!
+    expect(model.storyText).toBe('Apartment rent −$1,450.00')
+    expect(model.placed.find((box) => box.id === 'story')).toBeTruthy()
+  })
+
+  it('drops the empty label lane when there is nothing to label', () => {
+    const quiet = points.map((point) => ({ ...point, events: [] }))
+    const model = chartModel({ points: quiet, cushionCents: c.cushionCents, width: 662 })!
+    expect(model.g.plot.y).toBeLessThan(20)
   })
 })
 
@@ -161,42 +271,96 @@ describe('BalanceChart', () => {
     expect(table.textContent).toContain('at your cushion')
   })
 
-  it('opens a bill line on click and says what it means, then closes with Escape', async () => {
+  const lineButton = (name: RegExp) =>
+    within(screen.getByRole('group', { name: /Paydays and big bills/ }))
+      .getAllByRole('button')
+      .find((button) => name.test(button.getAttribute('aria-label') ?? ''))!
+
+  it('opens a bill line on click, docks the card under the plot and closes with Escape', async () => {
     const user = userEvent.setup()
-    render(chart())
-    const rent = screen.getByRole('button', { name: /^Fri, Oct 16: Apartment rent/ })
+    const { container } = render(chart())
+    const rent = lineButton(/Fri, Oct 16: Apartment rent/)
     await user.click(rent)
     const card = screen.getByRole('dialog', { name: 'Bill · Fri, Oct 16' })
     expect(card.textContent).toContain('−$1,450.00')
     expect(card.textContent).toContain('Balance after this day')
+    // The sentence names the big bill between the rent and the low, as the lines show it.
     expect(card.textContent).toContain(
-      'Apartment rent leaves $690.00 at day’s end. Spending and smaller bills bring it to $300.00 by Thu, Oct 22, just before payday.',
+      'Apartment rent leaves $690.00 at day’s end. Spending and your student loan (−$210.00) bring it to $300.00 by Thu, Oct 22, just before payday.',
     )
+    // The card sits under the plot, never over the step it explains.
+    const frame = container.querySelector('.bchart-frame')!
+    expect(frame.contains(card)).toBe(false)
+    expect(frame.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(rent.getAttribute('aria-expanded')).toBe('true')
     fireEvent.keyDown(card, { key: 'Escape' })
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(document.activeElement).toBe(rent)
   })
 
-  it('opens a line with Enter, moves between lines with the arrow keys and announces them', async () => {
+  it('shares one target between lines a day apart and lets the card pick the day', async () => {
+    const user = userEvent.setup()
+    render(chart())
+    // At this width Oct 15 (Pay in 4) and Oct 16 (rent) are 8 px apart: one 24 px+ target.
+    const cluster = lineButton(/Thu, Oct 15: .*Fri, Oct 16: Apartment rent/)
+    await user.click(cluster)
+    // It opens on the story line, rent, and offers both days.
+    expect(screen.getByRole('dialog', { name: 'Bill · Fri, Oct 16' })).toBeTruthy()
+    const days = within(screen.getByRole('group', { name: 'Lines on nearby days' })).getAllByRole(
+      'button',
+    )
+    expect(days.map((day) => day.textContent)).toEqual(['Oct 15', 'Oct 16'])
+    expect(days[1]!.getAttribute('aria-pressed')).toBe('true')
+    await user.click(days[0]!)
+    expect(screen.getByRole('dialog', { name: 'Bill · Thu, Oct 15' }).textContent).toContain(
+      'Laptop · Pay in 4',
+    )
+  })
+
+  it('moves between lines with the arrow keys and announces each move once', async () => {
     const user = userEvent.setup()
     render(chart())
     const lines = within(screen.getByRole('group', { name: /Paydays and big bills/ })).getAllByRole(
       'button',
     )
+    const live = document.querySelector('[aria-live="polite"]')!
     lines[0]!.focus()
-    await user.keyboard('{Enter}')
-    expect(screen.getByRole('dialog')).toBeTruthy()
-    expect(document.activeElement).toBe(screen.getByRole('dialog'))
+    // On the lines, focus moves and the focused button announces itself; nothing else speaks.
     await user.keyboard('{ArrowRight}')
     expect(document.activeElement).toBe(lines[1])
-    expect(screen.getByRole('dialog').getAttribute('aria-label')).toContain(
-      lines[1]!.getAttribute('aria-label')!.split(':')[0]!,
-    )
-    const live = document.querySelector('[aria-live="polite"]')!
-    expect(live.textContent).toBe(lines[1]!.getAttribute('aria-label'))
+    expect(live.textContent).toBe('')
+    await user.keyboard('{Enter}')
+    const card = screen.getByRole('dialog')
+    expect(document.activeElement).toBe(card)
+    const before = card.getAttribute('aria-label')
+    // Inside the card focus stays put, so the live region says where it went, once.
+    await user.keyboard('{ArrowRight}')
+    expect(document.activeElement).toBe(screen.getByRole('dialog'))
+    expect(screen.getByRole('dialog').getAttribute('aria-label')).not.toBe(before)
+    expect(live.textContent).toMatch(/^\w{3}, \w{3} \d+: /)
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('summarises a hovered line in the readout slot instead of opening a card', () => {
+    const { container } = render(chart())
+    const rent = lineButton(/Fri, Oct 16: Apartment rent/)
+    fireEvent.pointerOver(rent, { pointerType: 'mouse' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    const peek = container.querySelector('.bchart-foot .bchart-peek')!
+    expect(peek.textContent).toContain('Apartment rent −$1,450.00')
+    expect(peek.textContent).toContain('balance after $690.00')
+    fireEvent.pointerOut(rent, { pointerType: 'mouse' })
+    expect(container.querySelector('.bchart-peek')).toBeNull()
+  })
+
+  it('draws the bill behind the low at full strength on Plan, where no highlight is passed', () => {
+    const { container } = render(chart({ highlight: undefined, purchase: undefined }))
+    const story = [...container.querySelectorAll('.bchart-rules .bchart-rule.story')]
+    expect(story.map((line) => line.classList.contains('bill'))).toEqual([true, false])
+    expect(container.querySelector('.bchart-storylabel')!.textContent).toBe(
+      'Apartment rent −$1,450.00',
+    )
   })
 
   it('scrubs day by day from the keyboard and announces each day', async () => {
@@ -253,6 +417,17 @@ describe('BalanceChart', () => {
     expect(document.querySelector('.bchart-compare')!.textContent).toMatch(
       /Pay in 4lowest \$[\d,.]+ on \w{3}, \w{3} \d+, \$[\d,.]+ below your cushion/,
     )
+    // Scrubbing onto an instalment day keeps its numbered badge clear of the beacon.
+    const scrubber = screen.getByRole('slider', { name: /Balance by day/ })
+    act(() => scrubber.focus())
+    await user.keyboard('{Home}')
+    const second = camera.payIn4.instalments[1]!
+    const steps = camera.buyToday.points.findIndex((point) => point.date === second.date)
+    for (let i = 0; i < steps; i++) await user.keyboard('{ArrowRight}')
+    expect(scrubber.getAttribute('aria-valuetext')).toBe(dayLabel(second.date))
+    expect(svg.querySelector('.bchart-scrub circle.p4')).toBeNull()
+    await user.keyboard('{ArrowRight}')
+    expect(svg.querySelector('.bchart-scrub circle.p4')).toBeTruthy()
     await user.click(screen.getByText('View as table'))
     expect(screen.getByRole('columnheader', { name: 'With Pay in 4' })).toBeTruthy()
     expect(screen.getByRole('table').textContent).toContain('payment 2 of 4')

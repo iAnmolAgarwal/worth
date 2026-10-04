@@ -3128,13 +3128,14 @@ textarea.input {
 /* Event rules: hairlines at rest, the two behind the answer at full strength. */
 .bchart-rule {
   stroke-width: 1;
-  stroke-opacity: 0.28;
+  stroke-opacity: 0.42;
   transition:
     stroke-opacity var(--d-hover) var(--ease-move),
     stroke-width var(--d-hover) var(--ease-move);
 }
 .bchart-rule.payday {
   stroke: var(--c-success);
+  stroke-opacity: 0.48;
 }
 .bchart-rule.bill {
   stroke: var(--c-navy);
@@ -3143,6 +3144,12 @@ textarea.input {
 .bchart-rule.story {
   stroke-width: 1.5;
   stroke-opacity: 0.9;
+}
+/* The bill behind the answer, named in the label lane on its own line. */
+.bchart-storylabel text {
+  font-size: 12px;
+  font-weight: var(--fw-bold);
+  fill: var(--c-navy);
 }
 .bchart-rule.on {
   stroke-width: 2;
@@ -3267,10 +3274,8 @@ textarea.input {
   outline-offset: 4px;
 }
 
-/* The rule popover (an event day). */
+/* The day card for a line (an event day). */
 .bchart-pop {
-  position: absolute;
-  z-index: 3;
   background: var(--c-surface);
   border: 1px solid var(--c-border);
   border-radius: var(--r-lg);
@@ -3342,10 +3347,14 @@ textarea.input {
   color: var(--c-text-2);
   font-weight: var(--fw-medium);
 }
-/* The day card for a rule: floats beside its rule on wide charts (the caret points at the rule),
-   docks under the chart on phones and when there is no clear side. */
+/* The day card for a rule: docked under the plot at every width (the caret points at its line),
+   so it never covers the balance change it explains. */
 .bchart-pop {
-  width: 280px;
+  position: relative;
+  width: auto;
+  margin-top: var(--s-3);
+  padding: var(--s-3);
+  box-shadow: var(--e-1);
   border-top: 3px solid var(--c-navy);
 }
 .bchart-pop.payday {
@@ -3354,37 +3363,57 @@ textarea.input {
 .bchart-pop::after {
   content: '';
   position: absolute;
-  top: 22px;
+  top: -9px;
+  left: calc(var(--caret) - 5px);
   width: 10px;
   height: 10px;
   background: var(--c-surface);
   border: solid var(--c-border);
   border-width: 0 0 1px 1px;
-}
-.bchart-pop.right::after {
-  left: -6px;
-  transform: rotate(45deg);
-}
-.bchart-pop.left::after {
-  right: -6px;
-  transform: rotate(-135deg);
-}
-.bchart-pop.docked {
-  position: relative;
-  width: auto;
-  margin-top: var(--s-3);
-  padding: var(--s-3);
-  box-shadow: var(--e-1);
-}
-.bchart-pop.docked.overlay {
-  position: absolute;
-  top: 100%;
-  pointer-events: none;
-}
-.bchart-pop.docked::after {
-  top: -9px;
-  left: calc(var(--caret) - 5px);
   transform: rotate(135deg);
+}
+/* Lines on nearby days share one target; the card lets you pick the day. */
+.bc-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: var(--s-1) 0 var(--s-2);
+}
+.bc-days button {
+  min-height: 28px;
+  padding: 0 10px 0 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-pill);
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+}
+.bc-days button::before {
+  content: '';
+  width: 2px;
+  height: 12px;
+  border-radius: 1px;
+  background: var(--c-navy);
+}
+.bc-days button.payday::before {
+  background: var(--c-success);
+}
+.bc-days button[aria-pressed='true'] {
+  border-color: var(--c-text-strong);
+  background: var(--c-text-strong);
+  color: #fff;
+}
+.bc-days button[aria-pressed='true']::before {
+  background: #fff;
+}
+.bc-days button:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
 }
 .bchart-pop:focus {
   outline: none;
@@ -3453,16 +3482,12 @@ textarea.input {
   font-weight: var(--fw-semibold);
 }
 .bchart-pop .bc-net {
-  font-size: 1.5rem;
-  line-height: 2rem;
+  font-size: 1.25rem;
+  line-height: 1.5rem;
   font-weight: var(--fw-bold);
   color: var(--c-text-strong);
 }
-.bchart-pop.docked .bc-net {
-  font-size: 1.25rem;
-  line-height: 1.5rem;
-}
-.bchart-pop.docked .bc-story {
+.bchart-pop .bc-story {
   margin-top: var(--s-2);
   padding: 6px var(--s-2);
 }
@@ -3518,8 +3543,7 @@ textarea.input {
   background: var(--c-success);
 }
 .bchart-key .k-rule.bill {
-  width: 0;
-  border-left: 2px dashed var(--c-navy);
+  background: repeating-linear-gradient(to bottom, var(--c-navy) 0 3px, transparent 3px 5px);
 }
 .bchart-key .k-below {
   width: 12px;
@@ -3666,7 +3690,7 @@ textarea.input {
     stroke-dashoffset: 0;
   }
 }
-/* The foot holds the key at rest and the scrub readout while scrubbing, in the same space. */
+/* The foot holds the hint at rest, a hovered line's summary or the scrub readout, in one slot. */
 .bchart-foot {
   flex-direction: column;
   align-items: flex-start;
@@ -3728,7 +3752,7 @@ textarea.input {
 }
 @media (max-width: 479px) {
   .bchart-slot {
-    min-height: 56px;
+    min-height: 60px;
   }
 }
 .bchart-p4low {
@@ -3740,8 +3764,15 @@ textarea.input {
   stroke: var(--c-danger);
 }
 .bchart-slot {
-  min-height: 36px;
+  min-height: 42px;
   margin: 0;
+}
+.bchart-peek .r1 b.pos,
+.bchart-peek .r2 .in {
+  color: var(--c-success);
+}
+.bchart-peek .act {
+  color: var(--c-text-2);
 }
 .bchart-pop .bc-name {
   font-weight: var(--fw-semibold);

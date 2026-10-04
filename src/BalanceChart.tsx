@@ -12,25 +12,21 @@ import {
 import { X } from 'lucide-react'
 import {
   bandPath,
-  COMPACT_BELOW,
+  BIG_BILL_CENTS,
+  byWeight,
+  chartModel,
   dateTicks,
-  eventRules,
-  geometry,
+  dockLeft,
+  isBill,
+  LEADER_MIN,
   leaderEnd,
-  placeLabels,
-  placePopover,
-  ringCandidates,
-  ruleBox,
   stepPath,
   textWidth,
-  type Box,
+  type ChartInput,
   type EventRule,
-  type LabelSpec,
-  type PopoverPlacement,
 } from './chartLayout'
+import { lower } from './engine'
 import { dayLabel, money, shortDate, signed } from './format'
-
-export { BIG_BILL_CENTS } from './chartLayout'
 
 /** Chart ticks are the one place money drops its cents: "$1k", "−$1k" (brief §7). */
 function tick(cents: number) {
@@ -59,22 +55,20 @@ function useWidth() {
   return [ref, width] as const
 }
 
-const isBill = (event: ForecastEvent) =>
-  event.kind === 'bill' || event.kind === 'installment' || event.kind === 'subscription'
+const reducedMotion = () =>
+  typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+
 const spendingOn = (point: ForecastPoint) =>
   point.events
     .filter((event) => event.kind === 'spending')
     .reduce((sum, event) => sum + event.amountCents, 0)
 const namedOn = (point: ForecastPoint) =>
-  point.events
-    .filter((event) => event.kind !== 'spending')
-    .sort((a, b) =>
-      a.kind === 'income' ? -1 : b.kind === 'income' ? 1 : a.amountCents - b.amountCents,
-    )
-const billTotal = (rule: EventRule) =>
-  rule.events.filter(isBill).reduce((sum, event) => sum - event.amountCents, 0)
+  point.events.filter((event) => event.kind !== 'spending').sort(byWeight)
+const netOf = (rule: EventRule) => rule.events.reduce((sum, event) => sum + event.amountCents, 0)
 const eventText = (event: ForecastEvent) =>
   `${event.name} ${signed(event.amountCents, event.amountCents > 0)}`
+const joinAnd = (items: string[]) =>
+  items.length < 2 ? (items[0] ?? '') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`
 
 function cushionText(value: number, cushion: number) {
   if (value === cushion) return 'at your cushion'
@@ -83,10 +77,8 @@ function cushionText(value: number, cushion: number) {
     : `${money(cushion - value)} below your cushion`
 }
 
-type Story = { bill?: number; payday?: number }
-/** A wide chart's card docks under the chart at this width, shifted toward its rule. */
+/** On wide charts the day card docks under the plot at this width, shifted toward its rule. */
 const DOCK_WIDTH = 340
-type Card = { rule: number; pinned: boolean }
 
 /**
  * The balance chart for one option (§5.3), drawn as plain SVG so every label is measured and
@@ -94,7 +86,8 @@ type Card = { rule: number; pinned: boolean }
  * - the daily lowest balance as a step (money moves on event days, never on a slope);
  * - a soft fill for the room above the cushion, red hatching for any dip below it;
  * - each payday and big bill as a thin rule across the plot where it moves the balance; the two
- *   behind the answer are drawn at full strength, and any rule opens a card for that day;
+ *   behind the answer are drawn at full strength, and any rule opens a card for that day, docked
+ *   under the plot so it never covers the balance it explains;
  * - a day-snapped scrubber for mouse, touch and keyboard, and a table alternative.
  * When the Pay in 4 comparison is open, its illustrative line and numbered instalments join it.
  */
@@ -106,250 +99,82 @@ export function BalanceChart({
   payIn4,
   scaleWith,
   highlight,
-}: {
-  points: ForecastPoint[]
-  cushionCents: number
-  purchase?: { date: string; amountCents: number }
-  label: string
-  payIn4?: { points: ForecastPoint[]; instalments: InstalmentDetail[] }
-  /** Series the scale makes room for even while hidden (the closed Pay in 4 comparison). */
-  scaleWith?: ForecastPoint[]
-  /** The bill and payday that drive the answer are drawn at full strength. */
-  highlight?: { billDate?: string; paydayDate?: string }
-}) {
+}: Omit<ChartInput, 'width'> & { label: string }) {
   const id = useId().replace(/:/g, '')
   const [wrap, width] = useWidth()
   const [active, setActive] = useState<number | null>(null)
-  /** The rule whose card is showing; pinned cards stay until closed. */
-  const [card, setCard] = useState<Card | null>(null)
-  const [focusRule, setFocusRule] = useState(0)
+  /** The rule whose card is open. */
+  const [open, setOpen] = useState<number | null>(null)
+  /** The target under the mouse; its summary takes the readout slot. */
+  const [peek, setPeek] = useState<number | null>(null)
+  const [focusTarget, setFocusTarget] = useState(0)
   const [spoken, setSpoken] = useState('')
   const touch = useRef(false)
   /** Set while a press focuses the scrubber, so focus does not jump to the low point. */
   const pressed = useRef(false)
-  const ruleButtons = useRef<(HTMLButtonElement | null)[]>([])
+  const targetButtons = useRef<(HTMLButtonElement | null)[]>([])
   const popover = useRef<HTMLDivElement>(null)
   const focusCard = useRef(false)
   const drag = useRef<{ x: number; scrubbing: boolean } | null>(null)
-  const compact = width < COMPACT_BELOW
-  const height = compact ? 236 : 284
 
-  const layout = useMemo(() => {
-    if (!points.length) return null
-    const values = points.map((point) => point.minimumCents)
-    const p4ByDate = new Map(payIn4?.points.map((point) => [point.date, point.minimumCents]))
-    const p4Values = payIn4
-      ? points.map((point) => p4ByDate.get(point.date) ?? point.minimumCents)
-      : null
-    const g = geometry(
-      width,
-      height,
-      points.length,
-      [...values, ...(p4Values ?? []), ...(scaleWith ?? []).map((point) => point.minimumCents)],
-      cushionCents,
-    )
-    const { plot } = g
-    const rules = eventRules(points, g, 12)
-    const lowIndex = values.reduce((min, value, index) => (value < values[min]! ? index : min), 0)
-    const low = { index: lowIndex, x: g.x(lowIndex), y: g.y(values[lowIndex]!) }
-    // The story: the bill behind the low point and the payday that lifts it back.
-    const at = (date?: string) => rules.findIndex((rule) => rule.date === date)
-    const story: Story = {}
-    if (highlight) {
-      const bill = at(highlight.billDate)
-      const pay = at(highlight.paydayDate)
-      if (bill >= 0) story.bill = bill
-      if (pay >= 0) story.payday = pay
-    } else {
-      const before = rules.filter((rule) => rule.index <= lowIndex)
-      const lastPay = before.findLast((rule) => rule.kind === 'payday')?.index ?? -1
-      const bills = before.filter((rule) => rule.kind === 'bill' && rule.index > lastPay)
-      const biggest = bills.sort((a, b) => billTotal(b) - billTotal(a))[0]
-      if (biggest) story.bill = rules.indexOf(biggest)
-      const pay = rules.findIndex((rule) => rule.kind === 'payday' && rule.index >= lowIndex)
-      if (pay >= 0) story.payday = pay
-    }
-    const storyRules = new Set([story.bill, story.payday].filter((i) => i !== undefined))
-    const buyIndex =
-      purchase && purchase.amountCents > 0
-        ? points.findIndex((point) => point.date === purchase.date)
-        : -1
-    const dot = compact ? 6 : 7.5
-    const instalments = (payIn4?.instalments ?? []).flatMap((instalment) => {
-      const index = points.findIndex((point) => point.date === instalment.date)
-      if (index < 0) return []
-      const value = p4ByDate.get(instalment.date) ?? instalment.balanceCents
-      return [{ ...instalment, index, value, x: g.x(index), y: g.y(value) }]
-    })
-    const obstacles: Box[] = [
-      { x: low.x - 8, y: low.y - 8, w: 16, h: 16 },
-      ...instalments.map((i) => ({ x: i.x - dot, y: i.y - dot, w: dot * 2, h: dot * 2 })),
-      ...(buyIndex >= 0
-        ? [
-            { x: g.x(buyIndex) - 6, y: g.y(values[buyIndex]!) - 6, w: 12, h: 12 },
-            { x: g.x(buyIndex) - 1, y: plot.y, w: 2, h: g.y(values[buyIndex]!) - plot.y },
-          ]
-        : []),
-    ]
-    // Labels may sit across a rule (they are opaque); crossing one only costs a little, more for
-    // the two story rules.
-    const soft = rules.flatMap((rule, i) =>
-      storyRules.has(i) ? [ruleBox(rule, plot), ruleBox(rule, plot)] : [ruleBox(rule, plot)],
-    )
-    const specs: LabelSpec[] = []
-    // Pay in 4 gets its own low point, so each scenario states its minimum.
-    let p4Low: { index: number; x: number; y: number; below: boolean } | null = null
-    if (p4Values) {
-      const index = p4Values.reduce((min, value, i) => (value < p4Values[min]! ? i : min), 0)
-      p4Low = {
-        index,
-        x: g.x(index),
-        y: g.y(p4Values[index]!),
-        below: p4Values[index]! < cushionCents,
-      }
-      obstacles.push({ x: p4Low.x - 6, y: p4Low.y - 6, w: 12, h: 12 })
-    }
-    // The low point: always labelled, beside its ring, clear of the line and the story rules.
-    const lowTop = `Lowest ${signed(values[lowIndex]!)}`
-    const lowBottom = `${p4Low ? 'Pay in full · ' : ''}${dayLabel(points[lowIndex]!.date)}`
-    const lowW = Math.ceil(Math.max(textWidth(lowTop, 12, 700), textWidth(lowBottom, 11, 500))) + 20
-    const lowH = 36
-    specs.push({
-      id: 'low',
-      w: lowW,
-      h: lowH,
-      required: true,
-      candidates: [
-        { x: low.x + 12, y: low.y + 6, cost: 0 },
-        { x: low.x - lowW - 12, y: low.y + 6, cost: 1 },
-        { x: low.x + 14, y: low.y - lowH / 2, cost: 3 },
-        { x: low.x - lowW - 14, y: low.y - lowH / 2, cost: 3 },
-        { x: low.x + 12, y: low.y - lowH - 6, cost: 4 },
-        { x: low.x - lowW - 12, y: low.y - lowH - 6, cost: 4 },
-        ...ringCandidates(low.x, low.y, lowW, lowH, [12, 30, 50]).map((c) => ({
-          ...c,
-          cost: c.cost + 8,
-        })),
-      ],
-    })
-    // The purchase, in the lane above the plot.
-    const buyText =
-      buyIndex >= 0
-        ? `${p4Values ? 'Pay in full' : compact ? 'Buy' : `Buy ${shortDate(purchase!.date)}`} · ${signed(-purchase!.amountCents)}`
-        : ''
-    if (buyIndex >= 0) {
-      const w = Math.ceil(textWidth(buyText, 12, 700)) + 4
-      const bx = g.x(buyIndex)
-      specs.push({
-        id: 'buy',
-        w,
-        h: 18,
-        required: true,
-        lane: true,
-        candidates: [
-          { x: bx + 6, y: 4, cost: 0 },
-          { x: bx - w - 6, y: 4, cost: 1 },
-          { x: bx - w / 2, y: 4, cost: 2 },
-        ],
-      })
-    }
-    const placed = placeLabels(specs, {
-      g,
-      values: [values, ...(p4Values ? [p4Values] : [])],
-      obstacles,
-      soft,
-      bounds: { x: plot.x, y: 0, w: plot.w, h: plot.y + plot.h },
-    })
-    return {
-      g,
-      values,
-      p4Values,
-      rules,
-      story,
-      dot,
-      low,
-      lowTop,
-      lowBottom,
-      buyIndex,
-      buyText,
-      instalments,
-      cy: g.y(cushionCents),
-      p4Low,
-      placed,
-    }
-  }, [points, payIn4, scaleWith, width, height, compact, cushionCents, purchase, highlight])
+  const layout = useMemo(
+    () => chartModel({ points, cushionCents, width, purchase, payIn4, scaleWith, highlight }),
+    [points, cushionCents, width, purchase, payIn4, scaleWith, highlight],
+  )
 
   // A new option or comparison closes any open card (adjusted during render, not in an effect).
   const [shownFor, setShownFor] = useState({ points, payIn4 })
   if (shownFor.points !== points || shownFor.payIn4 !== payIn4) {
     setShownFor({ points, payIn4 })
-    setCard(null)
+    setOpen(null)
+    setPeek(null)
     setActive(null)
   }
 
-  // Close a pinned card, or a touch readout, on a press anywhere else.
+  // Close an open card, or a touch readout, on a press anywhere else.
   useEffect(() => {
-    const pinned = card?.pinned
     const touchReadout = active !== null && touch.current
-    if (!pinned && !touchReadout) return
+    if (open === null && !touchReadout) return
     const close = (event: globalThis.PointerEvent) => {
       const target = event.target as Node
       if (popover.current?.contains(target)) return
-      if (ruleButtons.current.some((button) => button?.contains(target))) return
-      if (pinned) setCard(null)
+      if (targetButtons.current.some((button) => button?.contains(target))) return
+      if (open !== null) setOpen(null)
       if (touchReadout && !wrap.current?.contains(target)) setActive(null)
     }
     document.addEventListener('pointerdown', close)
     return () => document.removeEventListener('pointerdown', close)
-  }, [card, active, wrap])
+  }, [open, active, wrap])
 
-  // Wide charts: measure the card, then put it beside its rule, clear of the low point. Phones
-  // always dock it under the chart.
-  const [measured, setMeasured] = useState<{ key: string; at: PopoverPlacement } | null>(null)
-  const cardKey = card && layout ? `${card.rule}:${width}:${layout.low.index}` : ''
-  // Hover previews always sit under the chart, so they never cover the line being scrubbed.
-  const placement: PopoverPlacement | null = !card
-    ? null
-    : compact || !card.pinned
-      ? { side: 'below', left: 0, top: 0 }
-      : measured?.key === cardKey
-        ? measured.at
-        : null
-  useLayoutEffect(() => {
-    if (!card?.pinned || !layout || compact || measured?.key === cardKey) return
-    const element = popover.current
-    const size = { w: element?.offsetWidth || 280, h: element?.offsetHeight || 220 }
-    const lowBox = layout.placed.find((box) => box.id === 'low')
-    const { low } = layout
-    const at = placePopover(layout.rules[card.rule]!, size, layout.g, [
-      { x: low.x - 8, y: low.y - 8, w: 16, h: 16 },
-      ...(lowBox ? [lowBox] : []),
-    ])
-    // Measuring the rendered card is the one thing that cannot be derived during render.
-    // oxlint-disable-next-line react/set-state-in-effect
-    setMeasured({ key: cardKey, at })
-  }, [card, layout, compact, cardKey, measured])
-
-  // A keyboard-opened card takes focus, so Esc and Tab work from inside it; a docked card on a
-  // phone scrolls into view.
-  const side = placement?.side
+  // A keyboard-opened card takes focus, so Esc and Tab work from inside it. The docked card
+  // scrolls into view if the plot pushed it below the fold.
+  const isOpen = open !== null
   useEffect(() => {
-    if (!card?.pinned || !side) return
+    if (!isOpen) return
     if (focusCard.current) {
       focusCard.current = false
       popover.current?.focus({ preventScroll: true })
     }
-    if (side === 'below')
-      popover.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
-  }, [card, side])
+    popover.current?.scrollIntoView?.({
+      block: 'nearest',
+      behavior: reducedMotion() ? 'auto' : 'smooth',
+    })
+  }, [isOpen])
 
   if (!layout) return null
-  const { g, values, p4Values, rules, story, dot, low, placed } = layout
+  const { g, height, compact, values, p4Values, rules, targets, story, dot, low, placed } = layout
   const { plot } = g
   const below = values.some((value) => value < cushionCents)
   const p4Below = !!layout.p4Low?.below
   const isStory = (index: number) => index === story.bill || index === story.payday
-  const shownRule = card ? rules[card.rule] : undefined
+  const targetOf = (rule: number) => targets.findIndex((target) => target.rules.includes(rule))
+  const openTarget = open === null ? -1 : targetOf(open)
+  const shownRule =
+    open !== null ? rules[open] : peek !== null ? rules[targets[peek]!.primary] : undefined
+  const hot = new Set([
+    ...(open !== null ? [open] : []),
+    ...(peek !== null ? targets[peek]!.rules : []),
+  ])
 
   const describeDay = (index: number) => {
     const point = points[index]!
@@ -368,13 +193,28 @@ export function BalanceChart({
     const after = points[rule.index]!.purchaseCents
     const lowValue = values[low.index]!
     if (index === story.bill) {
-      const bill = rule.events.filter(isBill).sort((a, b) => a.amountCents - b.amountCents)[0]
+      const bill = rule.events.filter(isBill).sort(byWeight)[0]
       const payday = story.payday !== undefined ? rules[story.payday] : undefined
-      const name = bill?.name ?? 'this bill'
+      const name = bill?.name ?? 'This bill'
       const beforePay = payday && payday.index >= low.index ? ', just before payday' : ''
       if (low.index === rule.index)
         return `${name} sets your lowest point: ${signed(lowValue)} that day${beforePay}.`
-      return `${name} leaves ${signed(after)} at day’s end. Spending and smaller bills bring it to ${signed(lowValue)} by ${dayLabel(points[low.index]!.date)}${beforePay}.`
+      // Name the big bills between this one and the low, so the sentence matches the lines.
+      const between = points
+        .slice(rule.index + 1, low.index + 1)
+        .flatMap((point) => point.events.filter(isBill))
+      const big = between.filter((event) => -event.amountCents >= BIG_BILL_CENTS)
+      const parts = [
+        ...big.map((event) => `your ${lower(event.name)} (${signed(event.amountCents)})`),
+        ...(between.length > big.length ? ['smaller bills'] : []),
+      ]
+      const by = `${signed(lowValue)} by ${dayLabel(points[low.index]!.date)}${beforePay}`
+      const then = !parts.length
+        ? `Everyday spending brings it to ${by}`
+        : parts.length === 1
+          ? `Spending and ${parts[0]} bring it to ${by}`
+          : `Spending, ${joinAnd(parts)} bring it to ${by}`
+      return `${name} leaves ${signed(after)} at day’s end. ${then}.`
     }
     if (index === story.payday) {
       const lift =
@@ -395,6 +235,8 @@ export function BalanceChart({
       point.purchaseCents,
     )}.${note ? ` ${note}` : ''}`
   }
+  const describeTarget = (index: number) =>
+    targets[index]!.rules.map((rule) => describeRule(rule)).join(' ')
 
   const moveDay = (index: number, speak: boolean) => {
     const next = Math.max(0, Math.min(points.length - 1, index))
@@ -424,17 +266,18 @@ export function BalanceChart({
     return g.indexAt(clientX - (box?.left ?? 0))
   }
   const closeCard = (refocus: boolean) => {
-    const rule = card?.rule
-    setCard(null)
-    if (refocus && rule !== undefined) ruleButtons.current[rule]?.focus()
+    const target = openTarget
+    setOpen(null)
+    if (refocus && target >= 0) targetButtons.current[target]?.focus()
   }
-  const onRuleKey = (event: KeyboardEvent<HTMLElement>, index: number) => {
-    if (event.key === 'Escape' && card) {
+  /** ←/→ on the lines move focus between them; focus itself announces each line. */
+  const onTargetKey = (event: KeyboardEvent<HTMLElement>, index: number) => {
+    if (event.key === 'Escape' && open !== null) {
       event.preventDefault()
       closeCard(true)
       return
     }
-    const last = rules.length - 1
+    const last = targets.length - 1
     const next =
       event.key === 'ArrowRight' || event.key === 'ArrowDown'
         ? Math.min(last, index + 1)
@@ -447,13 +290,33 @@ export function BalanceChart({
               : null
     if (next === null) return
     event.preventDefault()
-    setFocusRule(next)
-    setSpoken(describeRule(next))
-    ruleButtons.current[next]?.focus()
-    if (card?.pinned) setCard({ rule: next, pinned: true })
+    setFocusTarget(next)
+    targetButtons.current[next]?.focus()
+    if (open !== null) setOpen(targets[next]!.primary)
+  }
+  /** ←/→ inside an open card step through every line; focus stays in the card, so speak it once. */
+  const showRule = (next: number, speak: boolean) => {
+    setOpen(next)
+    setFocusTarget(targetOf(next))
+    if (speak) setSpoken(describeRule(next))
+  }
+  const onCardKey = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeCard(true)
+      return
+    }
+    if (open === null) return
+    const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0
+    if (!step) return
+    event.preventDefault()
+    const next = Math.max(0, Math.min(rules.length - 1, open + step))
+    if (next === open) return
+    showRule(next, true)
+    popover.current?.focus({ preventScroll: true })
   }
 
-  const activeIndex = card ? null : active
+  const activeIndex = open !== null ? null : active
   const tickIndices = dateTicks(points.length, compact)
   const endLabel = shortDate(points.at(-1)!.date)
   const endRoom = textWidth(endLabel, 12, 500) + 8
@@ -481,40 +344,42 @@ export function BalanceChart({
   const clash = compact ? g.ticks.find((value) => Math.abs(g.y(value) - layout.cy) < 16) : undefined
   const tagY =
     clash === undefined ? layout.cy : g.y(clash) > layout.cy ? g.y(clash) - 17 : g.y(clash) + 17
-  const yTicks = g.ticks
   const lineD = stepPath(values, g)
   const bandD = bandPath(values, g, cushionCents)
   const byId = new Map(placed.map((box) => [box.id, box]))
   const lowBox = byId.get('low')
   const buyBox = byId.get('buy')
+  const storyBox = byId.get('story')
+  const lowEnd = lowBox ? leaderEnd(lowBox, low) : null
+  const lowLeader = !!lowEnd && Math.hypot(lowEnd.x - low.x, lowEnd.y - low.y) > LEADER_MIN
   const lowRed = values[low.index]! < cushionCents
   const popId = `${id}-pop`
-  const docked = placement?.side === 'below'
   const ruleClass = (index: number) =>
-    `${rules[index]!.kind}${isStory(index) ? ' story' : ''}${card?.rule === index ? ' on' : ''}`
+    `${rules[index]!.kind}${isStory(index) ? ' story' : ''}${hot.has(index) ? ' on' : ''}`
+  const instalmentToday =
+    activeIndex === null
+      ? undefined
+      : layout.instalments.find((instalment) => instalment.index === activeIndex)
 
-  const ruleCard = shownRule && card && (
+  const openRule = open !== null ? rules[open] : undefined
+  const dock = openRule && !compact ? dockLeft(openRule.x, width, DOCK_WIDTH) : null
+  const ruleCard = openRule && open !== null && (
     <RuleCard
       ref={popover}
       id={popId}
-      rule={shownRule}
-      after={points[shownRule.index]!.purchaseCents}
-      lowest={values[shownRule.index]!}
-      note={ruleStory(card.rule)}
-      story={isStory(card.rule)}
-      pinned={card.pinned}
+      rule={openRule}
+      after={points[openRule.index]!.purchaseCents}
+      lowest={values[openRule.index]!}
+      note={ruleStory(open)}
+      story={isStory(open)}
       cushionCents={cushionCents}
-      placement={placement}
-      caret={Math.max(14, Math.min(width - 14, shownRule.x))}
-      dock={compact ? null : Math.max(0, Math.min(width - DOCK_WIDTH, shownRule.x - 48))}
+      choices={targets[openTarget]!.rules.map((index) => ({ index, rule: rules[index]! }))}
+      current={open}
+      caret={Math.max(14, Math.min(width - 14, openRule.x)) - (dock ?? 0)}
+      dock={dock}
+      onChoose={(index) => showRule(index, false)}
       onClose={() => closeCard(true)}
-      onKeyDown={(event) => {
-        if (event.key === 'Escape') {
-          event.preventDefault()
-          closeCard(true)
-        } else if (event.key === 'ArrowRight' || event.key === 'ArrowLeft')
-          onRuleKey(event, card.rule)
-      }}
+      onKeyDown={onCardKey}
     />
   )
 
@@ -604,7 +469,7 @@ export function BalanceChart({
                 className={value === 0 ? 'zero' : undefined}
               />
             ))}
-            {yTicks.map((value) => (
+            {g.ticks.map((value) => (
               <text key={value} x={plot.x - 8} y={g.y(value) + 4} textAnchor="end">
                 {tick(value)}
               </text>
@@ -641,6 +506,25 @@ export function BalanceChart({
               />
             ))}
           </g>
+
+          {storyBox && story.bill !== undefined && (
+            <g className="bchart-storylabel">
+              <line
+                className="bchart-rule bill story"
+                x1={rules[story.bill]!.x}
+                x2={rules[story.bill]!.x}
+                y1={storyBox.y + 2}
+                y2={plot.y}
+              />
+              <text
+                x={storyBox.x + (storyBox.x >= rules[story.bill]!.x ? 0 : storyBox.w)}
+                y={storyBox.y + 13}
+                textAnchor={storyBox.x >= rules[story.bill]!.x ? 'start' : 'end'}
+              >
+                {layout.storyText}
+              </text>
+            </g>
+          )}
 
           <line
             className="bchart-cushion"
@@ -733,22 +617,22 @@ export function BalanceChart({
           <circle className={`bchart-low${lowRed ? ' below' : ''}`} cx={low.x} cy={low.y} r={5.5} />
           {lowBox && (
             <g className={`bchart-lowpill${lowRed ? ' below' : ''}`}>
-              {Math.hypot(leaderEnd(lowBox, low).x - low.x, leaderEnd(lowBox, low).y - low.y) >
-                16 && (
-                <line
-                  x1={low.x}
-                  y1={low.y}
-                  x2={leaderEnd(lowBox, low).x}
-                  y2={leaderEnd(lowBox, low).y}
-                />
-              )}
-              <rect x={lowBox.x} y={lowBox.y} width={lowBox.w} height={lowBox.h} rx={10} />
+              {lowLeader && lowEnd && <line x1={low.x} y1={low.y} x2={lowEnd.x} y2={lowEnd.y} />}
+              <rect
+                x={lowBox.x}
+                y={lowBox.y}
+                width={lowBox.w}
+                height={lowBox.h}
+                rx={lowBox.h / 2 > 10 ? 10 : lowBox.h / 2}
+              />
               <text x={lowBox.x + 10} y={lowBox.y + 15} className="t">
                 {layout.lowTop}
               </text>
-              <text x={lowBox.x + 10} y={lowBox.y + 29} className="s">
-                {layout.lowBottom}
-              </text>
+              {layout.lowBottom && (
+                <text x={lowBox.x + 10} y={lowBox.y + 29} className="s">
+                  {layout.lowBottom}
+                </text>
+              )}
             </g>
           )}
 
@@ -760,7 +644,8 @@ export function BalanceChart({
                 y1={plot.y - 4}
                 y2={plot.y + plot.h}
               />
-              {p4Values && (
+              {/* The numbered instalment already marks Pay in 4 on its days. */}
+              {p4Values && !instalmentToday && (
                 <circle
                   className="p4"
                   cx={g.x(activeIndex)}
@@ -803,7 +688,7 @@ export function BalanceChart({
           onPointerDown={(event) => {
             pressed.current = true
             touch.current = event.pointerType !== 'mouse'
-            if (card?.pinned) setCard(null)
+            if (open !== null) setOpen(null)
             moveDay(dayAt(event.clientX), false)
           }}
           onPointerMove={(event) => {
@@ -813,37 +698,39 @@ export function BalanceChart({
             if (event.pointerType === 'mouse') setActive(null)
           }}
         />
-        {rules.length > 0 && (
+        {targets.length > 0 && (
           <div
             className="bchart-rulebar"
             role="group"
             aria-label="Paydays and big bills. Use the arrow keys to move between them."
           >
-            {rules.map((rule, index) => (
+            {targets.map((target, index) => (
               <button
-                key={rule.date}
+                key={rules[target.rules[0]!]!.date}
                 type="button"
                 ref={(element) => {
-                  ruleButtons.current[index] = element
+                  targetButtons.current[index] = element
                 }}
-                className={`bchart-rulehit ${ruleClass(index)}`}
+                className={`bchart-rulehit ${rules[target.primary]!.kind}`}
                 style={{
-                  left: rule.hit.left,
-                  width: Math.max(2, rule.hit.right - rule.hit.left),
+                  left: target.left,
+                  width: target.right - target.left,
                   top: plot.y,
                   height: plot.h,
                 }}
-                tabIndex={index === focusRule ? 0 : -1}
-                aria-label={describeRule(index)}
-                aria-expanded={card?.rule === index && card.pinned}
-                aria-controls={card?.rule === index ? popId : undefined}
-                onFocus={() => setFocusRule(index)}
-                onKeyDown={(event) => onRuleKey(event, index)}
+                tabIndex={index === focusTarget ? 0 : -1}
+                aria-label={describeTarget(index)}
+                aria-expanded={openTarget === index}
+                aria-controls={openTarget === index ? popId : undefined}
+                onFocus={() => setFocusTarget(index)}
+                onKeyDown={(event) => onTargetKey(event, index)}
                 onPointerEnter={(event) => {
-                  if (event.pointerType === 'mouse' && !compact && !card?.pinned)
-                    setCard({ rule: index, pinned: false })
+                  if (event.pointerType === 'mouse') setPeek(index)
                 }}
-                // A sideways drag that starts on a rule scrubs the days instead of opening it.
+                onPointerLeave={(event) => {
+                  if (event.pointerType === 'mouse') setPeek(null)
+                }}
+                // A sideways drag that starts on a line scrubs the days instead of opening it.
                 onPointerDown={(event) => {
                   drag.current = { x: event.clientX, scrubbing: false }
                 }}
@@ -853,37 +740,45 @@ export function BalanceChart({
                   if (!start.scrubbing && Math.abs(event.clientX - start.x) < 8) return
                   start.scrubbing = true
                   touch.current = true
-                  if (card) setCard(null)
+                  if (open !== null) setOpen(null)
                   moveDay(dayAt(event.clientX), false)
-                }}
-                onPointerLeave={(event) => {
-                  if (event.pointerType === 'mouse' && !card?.pinned) setCard(null)
                 }}
                 onClick={(event) => {
                   const dragged = drag.current?.scrubbing
                   drag.current = null
                   if (dragged) return
                   setActive(null)
-                  if (card?.rule === index && card.pinned) {
-                    setCard(null)
+                  setPeek(null)
+                  if (openTarget === index) {
+                    setOpen(null)
                     return
                   }
                   // A keyboard press (detail 0) moves focus into the card.
                   focusCard.current = event.detail === 0
-                  setCard({ rule: index, pinned: true })
+                  setFocusTarget(index)
+                  setOpen(target.primary)
                 }}
               />
             ))}
           </div>
         )}
-        {(!docked || !card?.pinned) && ruleCard}
       </div>
-      {docked && card?.pinned && ruleCard}
+      {ruleCard}
       <p className="sr" aria-live="polite">
         {spoken}
       </p>
       <div className="bchart-foot">
-        {activeIndex === null ? (
+        {activeIndex !== null ? (
+          <Readout
+            point={points[activeIndex]!}
+            value={values[activeIndex]!}
+            p4={p4Values?.[activeIndex]}
+            instalment={instalmentToday}
+            cushionCents={cushionCents}
+          />
+        ) : peek !== null && open === null ? (
+          <Peek rules={targets[peek]!.rules.map((index) => rules[index]!)} points={points} />
+        ) : (
           <p className="bchart-hint bchart-slot">
             <span className="on-touch">
               Drag across the chart to read any day. Tap a bill or payday line for details.
@@ -892,14 +787,6 @@ export function BalanceChart({
               Move across the chart to read any day. Select a bill or payday line for details.
             </span>
           </p>
-        ) : (
-          <Readout
-            point={points[activeIndex]!}
-            value={values[activeIndex]!}
-            p4={p4Values?.[activeIndex]}
-            instalment={layout.instalments.find((instalment) => instalment.index === activeIndex)}
-            cushionCents={cushionCents}
-          />
         )}
       </div>
       {layout.p4Low && (
@@ -963,8 +850,8 @@ function DatePill({
   )
 }
 
-function EventList({ events, spending }: { events: ForecastEvent[]; spending: number }) {
-  if (!events.length && !spending) return null
+function EventList({ events }: { events: ForecastEvent[] }) {
+  if (!events.length) return null
   return (
     <ul className="bc-events">
       {events.map((event, index) => (
@@ -973,12 +860,6 @@ function EventList({ events, spending }: { events: ForecastEvent[]; spending: nu
           <b>{signed(event.amountCents, event.amountCents > 0)}</b>
         </li>
       ))}
-      {spending !== 0 && (
-        <li className="quiet">
-          <span>Everyday spending</span>
-          <b>{signed(spending)}</b>
-        </li>
-      )}
     </ul>
   )
 }
@@ -1030,9 +911,47 @@ function Readout({
 }
 
 /**
- * What happened on a payday or bill day, opened by click, tap or Enter on its rule. It leads with
+ * A hovered line's one-line summary in the readout slot: the day, its movement and the balance
+ * after. The full card opens on click, so a hover never covers the chart or leaves the tile.
+ */
+function Peek({ rules, points }: { rules: EventRule[]; points: ForecastPoint[] }) {
+  const first = rules[0]!
+  const last = rules.at(-1)!
+  const after = points[last.index]!.purchaseCents
+  const many = rules.length > 1
+  const net = netOf(first)
+  return (
+    <div className="bchart-readout bchart-slot bchart-peek" aria-hidden="true">
+      <div className="r1">
+        <span className="d">
+          {many ? `${dayLabel(first.date)} to ${dayLabel(last.date)}` : dayLabel(first.date)}
+        </span>
+        {!many && <b className={net > 0 ? 'pos' : undefined}>{signed(net, net > 0)}</b>}
+        <span className="vs">balance after {signed(after)}</span>
+        <span className="act">· click for details</span>
+      </div>
+      <div className="r2">
+        {rules.flatMap((rule) =>
+          rule.events.map((event, index) => (
+            <span
+              key={`${rule.date}-${index}`}
+              className={event.amountCents > 0 ? 'in' : undefined}
+            >
+              {many ? `${shortDate(rule.date)} · ` : ''}
+              {eventText(event)}
+            </span>
+          )),
+        )}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * What happened on a payday or bill day, opened by click, tap or Enter on its line. It leads with
  * the day's net movement, lists each event, gives the balance after the day and one line on why
- * it matters. Wide charts float it beside the rule; phones dock it under the chart.
+ * it matters. It docks under the plot (its caret on the line), so it never covers the step it
+ * explains. Lines on nearby days share one target, and the card offers a day chooser for them.
  */
 function RuleCard({
   ref,
@@ -1042,11 +961,12 @@ function RuleCard({
   lowest,
   note,
   story,
-  pinned,
   cushionCents,
-  placement,
+  choices,
+  current,
   caret,
   dock,
+  onChoose,
   onClose,
   onKeyDown,
 }: {
@@ -1057,39 +977,29 @@ function RuleCard({
   lowest: number
   note: string
   story: boolean
-  pinned: boolean
   cushionCents: number
-  placement: PopoverPlacement | null
+  choices: { index: number; rule: EventRule }[]
+  current: number
+  /** The caret's offset from the card's left edge. */
   caret: number
-  /** Wide charts: the docked card's left offset; null on phones (full width). */
+  /** Wide charts: the card's left offset; null on phones (full width). */
   dock: number | null
+  onChoose: (index: number) => void
   onClose: () => void
   onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void
 }) {
   const income = rule.events.some((event) => event.kind === 'income')
-  const net = rule.events.reduce((sum, event) => sum + event.amountCents, 0)
+  const net = netOf(rule)
   const title = `${rule.kind === 'payday' ? 'Payday' : 'Bill'} · ${dayLabel(rule.date)}`
-  const docked = placement?.side === 'below'
-  // A hover preview overlays the space under the chart; only an opened card takes room in the page.
-  const overlay = docked && !pinned
-  const style = docked
-    ? dock === null
+  const style =
+    dock === null
       ? { ['--caret' as string]: `${caret}px` }
-      : overlay
-        ? { width: DOCK_WIDTH, left: dock, ['--caret' as string]: `${caret - dock}px` }
-        : { width: DOCK_WIDTH, marginLeft: dock, ['--caret' as string]: `${caret - dock}px` }
-    : {
-        left: placement?.left ?? 0,
-        top: placement?.top ?? 0,
-        visibility: placement ? undefined : ('hidden' as const),
-      }
+      : { width: DOCK_WIDTH, marginLeft: dock, ['--caret' as string]: `${caret}px` }
   return (
     <div
       ref={ref}
       id={id}
-      className={`bchart-pop ${rule.kind}${story ? ' story' : ''}${pinned ? ' pinned' : ''}${
-        docked ? ' docked' : placement?.side === 'left' ? ' left' : ' right'
-      }${overlay ? ' overlay' : ''}`}
+      className={`bchart-pop ${rule.kind}${story ? ' story' : ''}`}
       style={style}
       role="dialog"
       aria-label={title}
@@ -1098,17 +1008,30 @@ function RuleCard({
     >
       <div className="bc-head">
         <span className="bc-kind">{title}</span>
-        {pinned && (
-          <button type="button" className="bc-close" aria-label="Close" onClick={onClose}>
-            <X aria-hidden="true" />
-          </button>
-        )}
+        <button type="button" className="bc-close" aria-label="Close" onClick={onClose}>
+          <X aria-hidden="true" />
+        </button>
       </div>
+      {choices.length > 1 && (
+        <div className="bc-days" role="group" aria-label="Lines on nearby days">
+          {choices.map((choice) => (
+            <button
+              key={choice.rule.date}
+              type="button"
+              className={choice.rule.kind}
+              aria-pressed={choice.index === current}
+              onClick={() => onChoose(choice.index)}
+            >
+              {shortDate(choice.rule.date)}
+            </button>
+          ))}
+        </div>
+      )}
       <div className={`bc-net${net > 0 ? ' pos' : ''}`}>{signed(net, net > 0)}</div>
       {rule.events.length === 1 ? (
         <div className="bc-name">{rule.events[0]!.name}</div>
       ) : (
-        <EventList events={rule.events} spending={0} />
+        <EventList events={rule.events} />
       )}
       <dl className="bc-after">
         {income && lowest !== after && (
@@ -1197,7 +1120,7 @@ function summary(rules: EventRule[]) {
   const paydays = rules.filter((rule) => rule.events.some((event) => event.kind === 'income'))
   const bills = rules.flatMap((rule) =>
     rule.events
-      .filter((event) => isBill(event) && -event.amountCents >= 10_000)
+      .filter((event) => isBill(event) && -event.amountCents >= BIG_BILL_CENTS)
       .map((event) => `${event.name} ${dayLabel(rule.date)}`),
   )
   return ` Paydays: ${paydays.map((rule) => dayLabel(rule.date)).join(', ') || 'none'}. Big bills: ${
