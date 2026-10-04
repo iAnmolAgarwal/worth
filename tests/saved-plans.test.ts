@@ -373,6 +373,12 @@ describe('acceptance case 21: a saved wait plan, checked on return', () => {
     const refused = await post(agent, `/api/saved/${plan.body.item.id}/prepare`)
     expect(refused.status).toBe(409)
     expect(refused.body.code).toBe('WAIT_NOT_REACHED')
+    // With a later day that fits, the error names it as people read it, never as an ISO date
+    // (finding 11d).
+    await post(agent, '/api/funds/confirm', { balanceCents: 100000 })
+    const later = await post(agent, `/api/saved/${plan.body.item.id}/prepare`)
+    expect(later.body.code).toBe('WAIT_NOT_REACHED')
+    expect(later.body.error).toMatch(/waiting until [A-Z][a-z]{2}, [A-Z][a-z]{2} \d+\./)
     expect(paypal!.create).not.toHaveBeenCalled()
   })
 

@@ -1,5 +1,6 @@
 import { compareOptions, money } from '../shared/finance.ts'
 import type { CheckoutHandoff, FinancialProfile, Product, Purchase } from '../shared/types.ts'
+import { dateLabel } from './dates.ts'
 import { mentionsItem } from './interpret.ts'
 
 export type CheckoutOption = CheckoutHandoff['option']
@@ -185,7 +186,7 @@ export function checkoutGuards(input: {
       return refuse(
         'WAIT_NOT_REACHED',
         comparison.wait.date
-          ? `Your plan suggests waiting until ${comparison.wait.date}. Worth prepares the order on or after that day, after a fresh check.`
+          ? `Your plan suggests waiting until ${dateLabel(comparison.wait.date, today)}. Worth prepares the order on or after that day, after a fresh check.`
           : 'No day in the next 30 days keeps your cushion for this price, so there is no wait date to buy on.',
       )
     fits = comparison.wait.outcome === 'fits'
