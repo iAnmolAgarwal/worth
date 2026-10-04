@@ -67,7 +67,11 @@ export function useEligibility(instance: PayPalSdkInstance | undefined, amountCe
     : { paypal: 'unknown' as Eligibility, payIn4: 'unknown' as Eligibility }
 }
 
-/** PayPal Messages, the official component, unstyled. PayPal writes its own terms. */
+/**
+ * PayPal Messages, the official component, unstyled. PayPal writes its own terms.
+ * Pinned to the Pay in 4 offer: left alone, larger amounts get PayPal's monthly
+ * financing message, which is not the plan Worth compares.
+ */
 export function PayPalMessage({
   instance,
   amountCents,
@@ -98,6 +102,7 @@ export function PayPalMessage({
         auto-bootstrap="true"
         amount={(amountCents / 100).toFixed(2)}
         currency-code="USD"
+        offer-types="PAY_LATER_SHORT_TERM"
       />
     </div>
   )
