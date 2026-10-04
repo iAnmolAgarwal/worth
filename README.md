@@ -264,8 +264,7 @@ The MCP path makes no Anthropic call. Tokens are stored as SHA-256 fingerprints,
 plan and rate-limited. Setup, the tool contract and the security model are in
 [docs/MCP.md](docs/MCP.md).
 
-<!-- TODO(coordinator): after the MCP merge, capture docs/img/connect-agent.png and replace this image. -->
-![Placeholder for Settings, Connect an agent, to be captured after the MCP merge](docs/img/placeholder-connect-agent.png)
+<img src="docs/img/connect-agent.png" width="560" alt="Settings, Connect an agent: the agent can check a purchase against your plan and read saved items, can prepare a PayPal sandbox order you approve yourself, and can never pay for you">
 
 ## Limits and degradation
 
