@@ -24,6 +24,14 @@ describe('deployment configuration', () => {
     )
   })
 
+  it('reads the Channel3 key, mode and daily limit, and rejects an unknown mode', () => {
+    expect(loadConfig({})).toMatchObject({ channel3ApiKey: undefined, channel3DailyLimit: 300 })
+    expect(
+      loadConfig({ CHANNEL3_API_KEY: ' k ', CHANNEL3_MODE: 'fixture', CHANNEL3_DAILY_LIMIT: '50' }),
+    ).toMatchObject({ channel3ApiKey: 'k', channel3Mode: 'fixture', channel3DailyLimit: 50 })
+    expect(() => loadConfig({ CHANNEL3_MODE: 'sometimes' })).toThrow(ConfigError)
+  })
+
   it('refuses to start in production on a local or plain-http origin', () => {
     for (const origin of [
       'http://localhost:5173',

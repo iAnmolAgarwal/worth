@@ -32,6 +32,12 @@ export interface AppConfig {
   contentSecurityPolicy: boolean
   anthropicKey?: string
   anthropicModel: string
+  /** Channel3 product search for similar items under what fits today; hidden without a key. */
+  channel3ApiKey?: string
+  /** live (default with a key), fixture (recorded example results only) or off. */
+  channel3Mode?: 'live' | 'fixture' | 'off'
+  /** Live Channel3 searches per day across the server, then recorded example results. */
+  channel3DailyLimit: number
 }
 
 export class ConfigError extends Error {
@@ -76,6 +82,13 @@ function publicOrigin(value: string, production: boolean) {
   return url.origin
 }
 
+function channel3Mode(env: Env): AppConfig['channel3Mode'] {
+  const value = setting(env, 'CHANNEL3_MODE')
+  if (value === undefined) return undefined
+  if (value === 'live' || value === 'fixture' || value === 'off') return value
+  throw new ConfigError(`CHANNEL3_MODE must be live, fixture or off; received “${value}”.`)
+}
+
 /**
  * Reads deployment settings from the environment. Explicit overrides win, and the production
  * origin guard applies to the final result, so a misconfigured host refuses to start.
@@ -108,6 +121,9 @@ export function loadConfig(env: Env = process.env, overrides: Partial<AppConfig>
     contentSecurityPolicy: production,
     anthropicKey: setting(env, 'ANTHROPIC_API_KEY'),
     anthropicModel: setting(env, 'ANTHROPIC_MODEL') ?? 'claude-sonnet-5-5',
+    channel3ApiKey: setting(env, 'CHANNEL3_API_KEY'),
+    channel3Mode: channel3Mode(env),
+    channel3DailyLimit: wholeNumber(env, 'CHANNEL3_DAILY_LIMIT', 300),
     ...overrides,
   }
   config.origin = publicOrigin(config.origin, config.production)

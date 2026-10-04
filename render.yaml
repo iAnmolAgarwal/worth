@@ -44,6 +44,12 @@ services:
       # sandbox decline demo (capture with PayPal-Mock-Response: INSTRUMENT_DECLINED).
       - key: PAYPAL_NEGATIVE_TESTING
         value: 'false'
+      # Channel3 search for "Similar items that fit today". Without it the panel stays hidden; when
+      # Channel3 fails or credits run out, recorded example results are shown instead.
+      - key: CHANNEL3_API_KEY
+        sync: false
+      - key: CHANNEL3_DAILY_LIMIT
+        value: '300'
       - key: CLAUDE_IP_HOURLY_LIMIT
         value: '20'
       - key: CLAUDE_DAILY_LIMIT

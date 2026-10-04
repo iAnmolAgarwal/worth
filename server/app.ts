@@ -45,18 +45,16 @@ import {
 import type { PayPalGateway, PayPalOrder } from './paypal.ts'
 import { decideAgentCheckout } from './agentCheckout.ts'
 import type { PrepareCheckoutRequest, PrepareCheckoutResult } from './agentCheckout.ts'
-import {
-  categoryCandidates,
-  createChatProvider,
-  fallbackCategories,
-  fallbackReply,
-} from './chat.ts'
+import { categoryCandidates, createChatProvider, fallbackCategories, localReply } from './chat.ts'
 import type { ChatActions, ChatProvider } from './chat.ts'
 import { allowedOrigins, loadConfig } from './config.ts'
 import type { AppConfig } from './config.ts'
 import { WindowLimiter } from './limits.ts'
 import { contentSecurityPolicy } from './csp.ts'
 import { confirmPlan, confirmRefund, PlanError, recordRefund } from './plans.ts'
+import { queryFor, roomToday } from './alternatives.ts'
+import { createChannel3, loadFixtures } from './channel3.ts'
+import type { Channel3Client } from './channel3.ts'
 
 export type { AppConfig } from './config.ts'
 export interface AppOptions {
@@ -64,6 +62,8 @@ export interface AppOptions {
   config?: Partial<AppConfig>
   paypal?: PayPalGateway
   chat?: ChatProvider
+  /** Channel3 search; defaults to the live client when CHANNEL3_API_KEY is set. */
+  channel3?: Channel3Client
   now?: () => Date
 }
 class HttpError extends Error {
@@ -152,6 +152,25 @@ const compareSchema = z
   .refine(
     (input) => input.amountCents !== undefined || input.productId !== undefined,
     'Send a price or a product.',
+  )
+const alternativesSchema = z
+  .object({
+    productId: identifier.optional(),
+    itemName: z.string().trim().min(1).max(150).optional(),
+    /** The item's own price, so its reservation is not counted against the room. */
+    amountCents: z.coerce.number().int().min(0).max(100_000_000).optional(),
+    /** A lower ceiling the person chose; never above what fits today. */
+    maxPriceCents: z.coerce.number().int().min(0).max(100_000_000).optional(),
+    /** A Channel3 product to find similar products for, such as a saved alternative. */
+    similarTo: z
+      .string()
+      .regex(/^[A-Za-z0-9_-]{1,64}$/)
+      .optional(),
+  })
+  .strict()
+  .refine(
+    (input) => Boolean(input.productId ?? input.itemName ?? input.similarTo),
+    'Send a product, an item name or a Channel3 product.',
   )
 const instalmentsSchema = z.array(z.object({ date, amountCents: cents }).strict()).max(4)
 const planSchema = z.discriminatedUnion('product', [
@@ -253,6 +272,15 @@ export function createApp(options: AppOptions = {}) {
     (config.anthropicKey
       ? createChatProvider(config.anthropicKey, config.anthropicModel)
       : undefined)
+  const channel3 =
+    options.channel3 ??
+    createChannel3({
+      apiKey: config.channel3ApiKey,
+      mode: config.channel3Mode,
+      dailyLimit: config.channel3DailyLimit,
+      fixtures: loadFixtures(),
+      now: () => now().getTime(),
+    })
   const app = express()
   app.disable('x-powered-by')
   // Behind a proxy, req.ip must be the client address the proxy appended, not the proxy itself.
@@ -334,6 +362,7 @@ export function createApp(options: AppOptions = {}) {
         paypal: paypal ? 'sandbox' : 'demo',
         ...(paypal && config.paypalClientId ? { paypalClientId: config.paypalClientId } : {}),
         ...(chat ? { model: config.anthropicModel } : {}),
+        alternatives: channel3.health(),
       },
     }
   }
@@ -778,7 +807,9 @@ export function createApp(options: AppOptions = {}) {
   app.use('/api/import', express.json({ limit: IMPORT_BODY_LIMIT }))
   app.use(express.json({ limit: '1200kb' }))
   app.use(cookieParser())
-  app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'worth' }))
+  app.get('/api/health', (_req, res) =>
+    res.json({ ok: true, service: 'worth', channel3: channel3.health() }),
+  )
   const webhookEvent = z.object({
     id: identifier,
     event_type: z.string().max(100),
@@ -944,6 +975,37 @@ export function createApp(options: AppOptions = {}) {
       },
     )
     res.json({ ...comparison, payIn4: { ...comparison.payIn4, eligibility } })
+  })
+  /**
+   * Similar items from other stores, priced at or below what fits today (the Spend less amount,
+   * rounded down to $25). Only a generic description and the price band reach Channel3. With
+   * nothing to show, the answer is status "off" and the panel stays hidden.
+   */
+  app.get('/api/alternatives', async (req, res) => {
+    const input = alternativesSchema.parse(req.query)
+    const product = input.productId ? PRODUCTS.find((p) => p.id === input.productId) : undefined
+    if (input.productId && !product) throw new HttpError(404, 'Product not found.', 'NOT_FOUND')
+    const current = state(sessionId(res))
+    const room = roomToday(
+      current.profile,
+      withoutOwnHold(current.purchases, {
+        productId: product?.id,
+        itemName: product?.name ?? input.itemName,
+        amountCents: product?.priceCents ?? input.amountCents ?? 0,
+      }),
+      current.today,
+    )
+    const ceiling = Math.min(room, input.maxPriceCents ?? room)
+    const query = input.similarTo
+      ? undefined
+      : queryFor({ productId: product?.id, itemName: input.itemName })
+    if (!input.similarTo && !query)
+      return res.json({ status: 'off', query: '', maxPriceCents: 0, items: [] })
+    res.json(
+      input.similarTo
+        ? await channel3.similar(input.similarTo, ceiling)
+        : await channel3.search(query!, ceiling),
+    )
   })
   /** Saves a purchase's new cash effect and moves the plan version, so older answers expire. */
   function savePurchase(id: string, purchase: StoredPurchase) {
@@ -1280,6 +1342,7 @@ export function createApp(options: AppOptions = {}) {
       payIn4Eligibility,
       prepareCheckout: (request) =>
         prepareCheckout(id, input.message, input.context?.itemName, request),
+      findAlternatives: (query, maxPriceCents) => channel3.search(query, maxPriceCents),
     }
   }
   app.post('/api/chat', async (req, res) => {
@@ -1297,16 +1360,17 @@ export function createApp(options: AppOptions = {}) {
       transactions: current.transactions,
       today: current.today,
     }
+    const id = sessionId(res)
+    const actions = chatActions(id, input)
+    // Local answers still search other stores for something cheaper; nothing goes to Claude.
+    const local = (reason?: string) => localReply(input, data, reason, actions)
     if (!mayUseExternalAi(current.profile))
       return res.json(
-        fallbackReply(
-          input,
-          data,
+        await local(
           'AI sharing is off. This is a local calculation, not an AI response; your financial context was not sent to Claude.',
         ),
       )
-    if (!chat) return res.json(fallbackReply(input, data))
-    const id = sessionId(res)
+    if (!chat) return res.json(await local())
     if (chatBusy.has(id))
       throw new HttpError(
         429,
@@ -1316,22 +1380,18 @@ export function createApp(options: AppOptions = {}) {
     const limited = claudeLimit(req)
     if (limited)
       return res.json(
-        fallbackReply(
-          input,
-          data,
+        await local(
           `${CLAUDE_LIMIT_REASON[limited]}, so this answer uses local calculations, not an AI response.`,
         ),
       )
     chatBusy.add(id)
     try {
-      return res.json(await chat.reply(input, data, chatActions(id, input)))
+      return res.json(await chat.reply(input, data, actions))
     } catch (error) {
       // Error class only: never the message text, financial data, or credentials.
       console.warn('Worth chat used local fallback:', error instanceof Error ? error.name : 'Error')
       return res.json(
-        fallbackReply(
-          input,
-          data,
+        await local(
           'Claude is temporarily unavailable. This answer uses local calculations, not an AI response.',
         ),
       )
