@@ -243,7 +243,7 @@ describe('conversation isolation across sessions', () => {
     await screen.findByText('A fresh sample answer.')
     expect(requests[2]!.history).toEqual([])
     expect(requests[2]!.context).toBeUndefined()
-    expect(screen.getByText('Worth’s assistant answered from your plan')).toBeTruthy()
+    expect(screen.getByText('Claude read your question · every number is Worth’s')).toBeTruthy()
   })
 
   it('replaces the sample conversation on import before the plan review and a new chat', async () => {
@@ -359,7 +359,7 @@ describe('queued prompts', () => {
 
 describe('Claude consent in chat', () => {
   const shared =
-    'your messages, recent chat history (including figures), the item, price and date you ask about, the items and prices you asked about earlier in the same conversation, a forecast summary, 30-day spending totals by category, income and bill names with amounts and dates, minimized merchant labels, whether PayPal offers Pay in 4 for the price, whether Worth prepared a checkout for a catalog item and how it went, and, when you ask for something cheaper, the kind of item to look for and whether similar items were found (never their names, stores or prices)'
+    'your messages, recent chat history (including figures), the item, price and date you ask about, the items and prices you asked about earlier in the same conversation, a forecast summary, 30-day spending totals by category, income and bill names with amounts and dates, minimized merchant labels, whether PayPal offers Pay in 4 for the price and, when you ask about Pay in 4, its illustrative payment dates and the bills they land near, whether Worth prepared a checkout for a catalog item and how it went, and, when you ask for something cheaper, the kind of item to look for and whether similar items were found (never their names, stores or prices)'
   it('lets the untouched sample profile turn Claude off, keeping focus on the switch while it saves', async () => {
     const user = userEvent.setup()
     const state = makeState()
@@ -372,7 +372,7 @@ describe('Claude consent in chat', () => {
     })[0]!
     expect(toggle.getAttribute('aria-checked')).toBe('true')
     expect((toggle as HTMLButtonElement).disabled).toBe(false)
-    expect(screen.getAllByText(/^On: the assistant explains answers/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/^On: Claude reads your question, picks which of Worth’s facts to show/).length).toBeGreaterThan(0)
     await user.click(toggle)
     expect(document.activeElement).toBe(toggle)
     expect(toggle.getAttribute('aria-disabled')).toBe('true')
@@ -476,7 +476,7 @@ describe('Ask answers', () => {
     expect(picked.textContent).toContain('Picked for your question')
     expect(within(picked).getByText(/Apartment rent/)).toBeTruthy()
     expect(screen.queryByText('full text')).toBeNull()
-    expect(screen.getByText('Worth’s assistant answered from your plan')).toBeTruthy()
+    expect(screen.getByText('Claude read your question · every number is Worth’s')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: /See the comparison/ }))
     expect(onOpenDecision).toHaveBeenCalledWith(
       { productId: 'camera' },
@@ -542,7 +542,7 @@ describe('Ask answers', () => {
     await user.click(within(confirm).getByRole('button', { name: 'Yes, continue' }))
     await user.click(screen.getByRole('button', { name: 'Open checkout' }))
     expect(onOpenCheckout).toHaveBeenCalledWith('agent-order', expect.stringContaining('ORDER'))
-    expect(screen.getByText('Worth’s assistant answered from your plan')).toBeTruthy()
+    expect(screen.getByText('Claude read your question · every number is Worth’s')).toBeTruthy()
   })
 
   it('discards private history when the server rejects a chat across a session change', async () => {

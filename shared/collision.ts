@@ -5,8 +5,7 @@
 /** How the strip and the comparison describe the spacing. */
 export const PAY_IN_4_SPACING = 'about every 2 weeks'
 /** The note under every illustrative schedule in Ask Worth. */
-export const PAY_IN_4_DATES_NOTE =
-  'Schedule is illustrative; PayPal’s may differ by a few days. PayPal sets the exact dates at checkout.'
+export const PAY_IN_4_DATES_NOTE = 'Schedule is illustrative; PayPal’s may differ by a few days.'
 
 /**
  * "about 1 day after your apartment rent", from the days between a payment and a bill (positive

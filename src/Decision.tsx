@@ -11,6 +11,7 @@ import {
   Sparkles,
   TriangleAlert,
 } from 'lucide-react'
+import { PAY_IN_4_DATES_NOTE, PAY_IN_4_SPACING } from '../shared/collision'
 import { confirmedSchedule } from '../shared/finance'
 import type { Alternative, ForecastPoint, OptionResult, Product } from '../shared/types'
 import { AlternativesPanel } from './Alternatives'
@@ -319,17 +320,18 @@ function fullLabelDate(label: string, points: ForecastPoint[], cushion: number) 
 function nearText(
   near: Extract<PayIn4, { available: true }>['instalments'][number]['nearestBill'],
 ) {
-  if (!near) return <>No bill within 3 days</>
+  if (!near) return <>No bill within about 3 days</>
+  // PayPal's own dates can run a day or two later than this schedule, so every gap is "about".
   const days = Math.abs(near.daysFromInstalment)
   const name = <b>{lower(near.name)}</b>
-  if (near.daysFromInstalment === 0) return <>Same day as your {name}</>
+  if (near.daysFromInstalment === 0) return <>About the same day as your {name}</>
   return near.daysFromInstalment < 0 ? (
     <>
-      {days} {days === 1 ? 'day' : 'days'} after {name}
+      About {days} {days === 1 ? 'day' : 'days'} after {name}
     </>
   ) : (
     <>
-      {days} {days === 1 ? 'day' : 'days'} before {name}
+      About {days} {days === 1 ? 'day' : 'days'} before {name}
     </>
   )
 }
@@ -398,7 +400,8 @@ function PayIn4Panel({
           </span>
           <span className="meta">
             4 payments {amounts.size > 1 ? 'from' : 'of'}{' '}
-            {money(p4.instalments.at(-1)!.amountCents)}, starting today · illustrative
+            {money(p4.instalments.at(-1)!.amountCents)}, {PAY_IN_4_SPACING} from today ·
+            illustrative
           </span>
         </span>
         <ChevronDown className="ico chev" aria-hidden="true" />
@@ -424,7 +427,7 @@ function PayIn4Panel({
                 <div>
                   <div className="amt num">{money(item.amountCents)}</div>
                   <div className="when">
-                    {item.date === c.today ? 'Today' : dayLabel(item.date)}
+                    {item.date === c.today ? 'Today' : `About ${dayLabel(item.date)}`}
                   </div>
                 </div>
               </div>
@@ -458,7 +461,8 @@ function PayIn4Panel({
         {/* Mounted only when opened, so PayPal is asked for terms only on request. */}
         {open && <PayPalMessage instance={instance} amountCents={c.amountCents} />}
         <p className="caption">
-          {p4.notice} Pay in 4 is shown for comparison only; Worth never recommends it.
+          {PAY_IN_4_DATES_NOTE} PayPal sets the exact terms at checkout. Pay in 4 is shown for
+          comparison only; Worth never recommends it.
           {rangeOnly ? ' Availability is decided by PayPal at checkout.' : ''}
         </p>
       </div>
@@ -853,6 +857,13 @@ export function Decision({
               />
             ))}
           </div>
+          {/* The Pay in 4 comparison sits right under the options, so its collisions are seen (#7). */}
+          <PayIn4Panel
+            c={c}
+            open={p4Open}
+            onToggle={() => setP4Open(!p4Open)}
+            instance={instance}
+          />
           {/* Under Spend less: real items from other stores that fit today, for discovery only. */}
           {selected === 'spendLess' &&
             keys.includes('spendLess') &&
@@ -868,12 +879,6 @@ export function Decision({
               />
             )}
           <ChartTile c={c} k={selected} payIn4={p4Open ? p4 : undefined} />
-          <PayIn4Panel
-            c={c}
-            open={p4Open}
-            onToggle={() => setP4Open(!p4Open)}
-            instance={instance}
-          />
         </div>
         <aside className="rail decision-rail" aria-label="Item and reasons">
           <div className="tile">
