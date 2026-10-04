@@ -1,5 +1,14 @@
-import { addDays, assessPurchase, getUpcomingFlows, money } from '../shared/finance.ts'
-import type { Assessment, Interpretation } from '../shared/types.ts'
+import { collisionLine, mainCollision, PAY_IN_4_SPACING } from '../shared/collision.ts'
+import {
+  addDays,
+  assessPurchase,
+  getUpcomingFlows,
+  money,
+  payIn4InRange,
+  payIn4Scenario,
+  withoutOwnHold,
+} from '../shared/finance.ts'
+import type { Assessment, Interpretation, PayIn4Chat, PayIn4Comparison } from '../shared/types.ts'
 import { dateLabel, shortLabel } from './dates.ts'
 import type { ChatData } from './interpret.ts'
 import { chatLabel } from './labels.ts'
@@ -146,6 +155,8 @@ export const PURCHASE_FACTS = [
   'stress',
   'bills_before',
   'pay_in_4',
+  'pay_in_4_schedule',
+  'pay_in_4_stacking',
 ] as const
 export const PLAN_FACTS = ['room_today', 'low_point', 'cause', 'income'] as const
 export const COMMITMENT_FACTS = ['total', 'next', 'largest', 'other_total'] as const
@@ -223,7 +234,105 @@ export function purchaseFacts(a: Assessment, data: ChatData): FactCatalog {
       data.payIn4 === 'unavailable'
         ? `PayPal Pay in 4 is not available for ${money(a.amountCents)}.`
         : `You can compare PayPal Pay in 4 for ${money(a.amountCents)} in the comparison view. It is shown for comparison only; PayPal decides availability and terms at checkout.`
+  const scenario = data.payIn4 && data.payIn4 !== 'unavailable' ? payIn4For(a, data) : undefined
+  if (scenario?.available) {
+    facts.pay_in_4_schedule = payIn4ScheduleText(scenario)
+    facts.pay_in_4_stacking = scenario.stacking
+      ? scenario.stacking.message
+      : 'You have no other instalment plans with payments in this window.'
+  }
   return facts
+}
+
+// ---- Pay in 4 in chat ----------------------------------------------------------------
+//
+// The engine's own scenario, as the comparison computes it. Every sentence is neutral: Pay in 4
+// is never recommended, and every collision is "about", because PayPal sets the exact dates.
+
+/** The engine's Pay in 4 scenario for an assessed amount, starting today. */
+export function payIn4For(a: Assessment, data: ChatData): PayIn4Comparison {
+  return payIn4Scenario(
+    data.profile,
+    withoutOwnHold(data.purchases, { itemName: a.itemName, amountCents: a.amountCents }),
+    { amountCents: a.amountCents, itemName: a.itemName, today: a.today },
+  )
+}
+type Scenario = Extract<PayIn4Comparison, { available: true }>
+/** "4 payments of $299.75" or "4 payments: $2.53, then 3 of $2.50". */
+function paymentsText(scenario: Scenario) {
+  const [first, ...rest] = scenario.instalments
+  return rest.every((p) => p.amountCents === first!.amountCents)
+    ? `4 payments of ${money(first!.amountCents)}`
+    : `4 payments: ${money(first!.amountCents)}, then ${rest.length} of ${money(rest[0]!.amountCents)}`
+}
+/** Each payment that lands near a bill: "payment 2 would land about 1 day after your rent". */
+export function collisionsText(scenario: Scenario) {
+  return labelled(scenario)
+    .filter((p) => p.nearestBill)
+    .map(collisionLine)
+}
+/** The scenario's payments with each nearby bill's name made safe for chat. */
+function labelled(scenario: Scenario) {
+  return scenario.instalments.map((p) => ({
+    ...p,
+    nearestBill: p.nearestBill && { ...p.nearestBill, name: chatLabel(p.nearestBill.name) },
+  }))
+}
+function payIn4ScheduleText(scenario: Scenario) {
+  const collisions = collisionsText(scenario)
+  return [
+    `PayPal Pay in 4 would be ${paymentsText(scenario)}, ${PAY_IN_4_SPACING} starting today. The total stays ${money(scenario.amountCents)} and PayPal charges no interest.`,
+    collisions.length
+      ? `${capitalize(collisions.join('; '))}.`
+      : 'No payment would land within 3 days of a bill.',
+    `${scenario.label}.`,
+    'The schedule is illustrative; PayPal sets the exact dates.',
+  ].join(' ')
+}
+/**
+ * Pay in 4 for an answer: the schedule when the person asked about it, otherwise one neutral row
+ * for a purchase PayPal's range covers. Out of range, an answer that asked shows it is unavailable.
+ */
+export function payIn4Chat(a: Assessment, data: ChatData, asked: boolean): PayIn4Chat | undefined {
+  if (a.outcome === 'incomplete') return undefined
+  const eligibility = asked ? (data.payIn4 ?? 'range-only') : 'range-only'
+  if (!payIn4InRange(a.amountCents) || eligibility === 'unavailable')
+    return asked
+      ? {
+          asked,
+          totalCents: a.amountCents,
+          eligibility: 'unavailable',
+          payments: [],
+          label: `PayPal Pay in 4 is not available for ${money(a.amountCents)}`,
+          stacking: null,
+        }
+      : undefined
+  const scenario = payIn4For(a, data)
+  if (!scenario.available) return undefined
+  return {
+    asked,
+    totalCents: a.amountCents,
+    eligibility,
+    payments: labelled(scenario).map((p) => ({
+      number: p.number,
+      date: p.date,
+      amountCents: p.amountCents,
+      nearestBill: p.nearestBill,
+      belowCushion: p.belowCushion,
+    })),
+    label: scenario.label,
+    stacking: scenario.stacking && {
+      activePlans: scenario.stacking.activePlans,
+      totalCents: scenario.stacking.totalCents,
+      message: scenario.stacking.message,
+    },
+  }
+}
+/** The engine's Pay in 4 sentence for the answer's text, when the person asked. */
+export function payIn4Text(a: Assessment, data: ChatData) {
+  if (!data.payIn4 || a.outcome === 'incomplete') return undefined
+  const facts = purchaseFacts(a, data)
+  return facts.pay_in_4_schedule ?? facts.pay_in_4
 }
 
 /** Facts about the plan before any new purchase. */
@@ -351,4 +460,236 @@ export function chipAllowed(text: string) {
     !CHIP_VERDICT.test(chip) &&
     !CHIP_NUMBER.test(chip)
   )
+}
+
+// ---- One Claude sentence (C-13) ------------------------------------------------------
+//
+// After the engine answers, Claude may add one sentence on why the result is what it is. It names
+// every figure, date, count and name through a placeholder; the server checks the sentence and
+// fills in the engine's values. Any failed check shows the engine's template sentence instead.
+
+export interface Placeholder {
+  value: string
+  about: string
+}
+export type Placeholders = Record<string, Placeholder>
+
+/** Placeholders for an assessed purchase. */
+export function purchasePlaceholders(a: Assessment, data: ChatData): Placeholders {
+  if (a.outcome === 'incomplete') return {}
+  const out: Placeholders = {
+    item: { value: chatLabel(a.itemName), about: 'the item' },
+    price: { value: money(a.amountCents), about: 'its total price' },
+    buy_day: { value: dateLabel(a.purchaseDate, a.today), about: 'the day they would buy it' },
+    cushion: { value: money(a.cushionCents), about: 'the cushion they keep' },
+    low_point: { value: money(a.lowestBalanceCents), about: 'the lowest projected balance' },
+    low_day: { value: day(a.lowestDate, a.today), about: 'the day of that low point' },
+    gap: {
+      value: money(Math.abs(a.lowestBalanceCents - a.cushionCents)),
+      about: `how far the low point is ${a.lowestBalanceCents < a.cushionCents ? 'below' : 'above'} the cushion`,
+    },
+    stress_low: {
+      value: money(a.stressLowestCents),
+      about: 'the low point if everyday spending runs 20% higher',
+    },
+  }
+  const cause = a.drivers
+    .filter((d) => d.kind !== 'income' && d.date >= a.today && d.date <= a.lowestDate)
+    .sort((x, y) => y.amountCents - x.amountCents)[0]
+  if (cause) {
+    out.cause_bill = {
+      value: chatLabel(cause.name),
+      about: 'the largest bill before the low point',
+    }
+    out.cause_amount = { value: money(cause.amountCents), about: 'that bill’s amount' }
+    out.cause_day = { value: day(cause.date, a.today), about: 'the day that bill is due' }
+  }
+  const income = a.drivers.find((d) => d.kind === 'income' && d.date >= a.today)
+  if (income) {
+    out.income_name = { value: chatLabel(income.name), about: 'the next income' }
+    out.income_day = { value: day(income.date, a.today), about: 'the day it arrives' }
+  }
+  if (a.outcome === 'tight' && a.earliestDate && a.earliestDate > a.purchaseDate)
+    out.wait_day = { value: day(a.earliestDate, a.today), about: 'the earliest day that fits' }
+  if (a.maxAffordableCents > 0)
+    out.max_spend = {
+      value: money(a.maxAffordableCents),
+      about: 'the most that keeps the cushion on that day',
+    }
+  if (data.payIn4 && data.payIn4 !== 'unavailable') {
+    const scenario = payIn4For(a, data)
+    if (scenario.available) {
+      out.p4_payment = {
+        value: money(scenario.instalments.at(-1)!.amountCents),
+        about: 'one illustrative PayPal Pay in 4 payment',
+      }
+      const main = mainCollision(labelled(scenario))
+      if (main)
+        out.p4_collision = {
+          value: collisionLine(main),
+          about: 'the first Pay in 4 payment that lands near a bill (a whole phrase)',
+        }
+      if (scenario.stacking)
+        out.p4_existing = {
+          value: money(scenario.stacking.totalCents),
+          about: 'what instalment plans already running take in this window',
+        }
+    }
+  }
+  return out
+}
+/** Placeholders for the plan before any purchase (room to spend and cheaper searches). */
+export function planPlaceholders(data: ChatData): Placeholders {
+  const base = baseline(data)
+  if (base.outcome === 'incomplete') return {}
+  const out: Placeholders = {
+    room_today: { value: money(base.maxAffordableCents), about: 'what fits today' },
+    cushion: { value: money(base.cushionCents), about: 'the cushion they keep' },
+    low_point: { value: money(base.baselineLowestCents), about: 'the lowest projected balance' },
+    low_day: { value: day(base.lowestDate, data.today), about: 'the day of that low point' },
+  }
+  const cause = base.drivers
+    .filter((d) => d.kind !== 'income' && d.date >= base.today && d.date <= base.lowestDate)
+    .sort((x, y) => y.amountCents - x.amountCents)[0]
+  if (cause) {
+    out.cause_bill = {
+      value: chatLabel(cause.name),
+      about: 'the largest bill before the low point',
+    }
+    out.cause_day = { value: day(cause.date, data.today), about: 'the day that bill is due' }
+  }
+  const income = base.drivers.find((d) => d.kind === 'income' && d.date >= base.today)
+  if (income) {
+    out.income_name = { value: chatLabel(income.name), about: 'the next income' }
+    out.income_day = { value: day(income.date, data.today), about: 'the day it arrives' }
+  }
+  return out
+}
+export function commitmentPlaceholders(data: ChatData, kind: CommitmentKind): Placeholders {
+  const value = commitments(data, kind)
+  if (!value.events.length) return {}
+  const next = value.events[0]!
+  const largest = [...value.events].sort((a, b) => b.amountCents - a.amountCents)[0]!
+  return {
+    count: { value: String(value.events.length), about: 'how many are due in the next 30 days' },
+    total: { value: money(value.totalCents), about: 'their total' },
+    next_name: { value: next.name, about: 'the next one due' },
+    next_day: { value: day(next.date, data.today), about: 'the day it is due' },
+    next_amount: { value: money(next.amountCents), about: 'its amount' },
+    largest_name: { value: largest.name, about: 'the largest one' },
+    largest_amount: { value: money(largest.amountCents), about: 'its amount' },
+  }
+}
+export function spendingPlaceholders(data: ChatData): Placeholders {
+  const value = spending(data)
+  if (!value.transactionCount) return {}
+  const top = value.categories[0]
+  return {
+    total: { value: money(value.totalCents), about: 'spending over the last 30 days' },
+    count: { value: String(value.transactionCount), about: 'how many purchases' },
+    daily_average: {
+      value: money(Math.round(value.totalCents / 30)),
+      about: 'the daily average',
+    },
+    plan_daily: {
+      value: money(data.profile.dailySpendCents),
+      about: 'the everyday spending the plan assumes',
+    },
+    ...(top
+      ? {
+          top_category: { value: top.name, about: 'the largest category' },
+          top_amount: { value: money(top.amountCents), about: 'its total' },
+        }
+      : {}),
+  }
+}
+
+/** The engine's own sentence for an answer, used whenever Claude's does not pass. */
+export function templateSentence(
+  kind: 'purchase' | 'plan' | 'commitments' | 'spending',
+  values: Placeholders,
+  outcome?: Assessment['outcome'],
+): string | undefined {
+  const has = (...keys: string[]) => keys.every((key) => key in values)
+  if (kind === 'purchase') {
+    if (outcome === 'fits' && has('low_point', 'low_day', 'cushion'))
+      return 'Even at its lowest, {low_point} on {low_day}, your balance keeps your {cushion} cushion.'
+    if (outcome === 'tight' && has('cause_bill', 'cause_amount', 'cause_day', 'low_day'))
+      return '{cause_bill} ({cause_amount}) on {cause_day} is the largest bill due before your balance reaches its low point on {low_day}.'
+    if (outcome === 'tight' && has('low_day'))
+      return 'Everyday spending is what brings your balance down to its low point on {low_day}.'
+    return undefined
+  }
+  if (kind === 'plan')
+    return has('cause_bill', 'cause_day')
+      ? '{cause_bill} on {cause_day} is the largest bill before your lowest point, which is what limits your room today.'
+      : has('low_day')
+        ? 'Your balance reaches its lowest point on {low_day}, which is what limits your room today.'
+        : undefined
+  if (kind === 'commitments')
+    return has('next_name', 'next_day')
+      ? '{next_name} on {next_day} is the next one due.'
+      : undefined
+  return has('top_category', 'top_amount')
+    ? '{top_category} was your largest category, at {top_amount}.'
+    : undefined
+}
+
+export type SentenceRejection =
+  | 'no_sentence'
+  | 'length'
+  | 'not_one_sentence'
+  | 'unknown_placeholder'
+  | 'free_number'
+  | 'free_date'
+  | 'advice'
+  | 'contradicts_result'
+const PLACEHOLDER = /\{([a-z0-9_]+)\}/g
+const NUMBER_WORD =
+  /\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundreds?|thousands?|millions?|dozens?|half|quarter|double|twice|triple|percent|dollars?|bucks|grand|cents?)\b/i
+const DATE_WORD =
+  /\b(?:today|tonight|tomorrow|yesterday|weekend|weeks?|months?|years?|fortnight|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:rs(?:day)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\b/i
+const ADVICE =
+  /\b(?:skip\w*|delay\w*|defer\w*|postpon\w*|late|miss(?:ing)?|borrow\w*|loans?|credit|financ\w*|overdraft|recommend\w*|should)\b|\b(?:use|using|try|consider|choose|pick|go\s+with|opt\s+for|switch\s+to|split)\b[^.]{0,40}\b(?:pay\s+in\s+4|pay\s+later|instal+ments?|bnpl)\b/i
+const POSITIVE =
+  /\b(?:fits?|fitting|afford\w*|safe(?:ly)?|comfortabl\w*|no\s+problem|go\s+ahead|easily|plenty|stays?\s+above|keeps?\s+your\s+cushion)\b/i
+const NEGATIVE =
+  /\b(?:dips?|dipping|below|short(?:fall)?|can['’]?t|cannot|not\s+enough|too\s+much|tight|risky|breaks?)\b/i
+
+/**
+ * Checks Claude's sentence and fills in the engine's values. Only placeholders offered for this
+ * answer count; no digit, currency, date or number word may appear outside them; it may not give
+ * advice about bills, credit or Pay in 4, or contradict the engine's outcome.
+ */
+export function checkSentence(
+  raw: string | null | undefined,
+  values: Placeholders,
+  outcome?: Assessment['outcome'],
+): { ok: true; text: string } | { ok: false; reason: SentenceRejection } {
+  const sentence = (raw ?? '').replace(/\s+/g, ' ').trim()
+  if (!sentence) return { ok: false, reason: 'no_sentence' }
+  if (sentence.length < 12 || sentence.length > 240) return { ok: false, reason: 'length' }
+  const names = [...sentence.matchAll(PLACEHOLDER)].map((m) => m[1]!)
+  if (names.some((name) => !(name in values)) || /[{}]/.test(sentence.replace(PLACEHOLDER, '')))
+    return { ok: false, reason: 'unknown_placeholder' }
+  const prose = sentence.replace(PLACEHOLDER, ' ')
+  if (!/[.!]$/.test(sentence) || /[.!?;:]\s+\S/.test(prose.slice(0, -1)))
+    return { ok: false, reason: 'not_one_sentence' }
+  if (ADVICE.test(prose)) return { ok: false, reason: 'advice' }
+  if (/[\p{N}\p{Sc}%#]/u.test(prose) || NUMBER_WORD.test(prose))
+    return { ok: false, reason: 'free_number' }
+  if (DATE_WORD.test(prose)) return { ok: false, reason: 'free_date' }
+  // A tight result may still say what would fit: waiting, or spending less.
+  const conditional = /\{(?:wait_day|max_spend)\}/.test(sentence)
+  if (
+    (outcome === 'tight' && POSITIVE.test(prose) && !conditional) ||
+    (outcome === 'fits' && NEGATIVE.test(prose))
+  )
+    return { ok: false, reason: 'contradicts_result' }
+  return { ok: true, text: fill(sentence, values) }
+}
+/** The sentence with each placeholder replaced by the engine's value. */
+export function fill(sentence: string, values: Placeholders) {
+  const text = sentence.replace(PLACEHOLDER, (_, name: string) => values[name]?.value ?? '')
+  return capitalize(text)
 }

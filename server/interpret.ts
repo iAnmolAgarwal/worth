@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { addDays, getUpcomingFlows, money } from '../shared/finance.ts'
 import { PRODUCTS } from '../shared/seed.ts'
+import { plainText } from '../shared/text.ts'
 import type {
   ChatMessage,
   FinancialProfile,
@@ -32,6 +33,11 @@ export interface ChatInput {
   context?: PurchaseContext
   /** Items assessed earlier in this conversation, most recent last. */
   items?: RememberedItem[]
+  /**
+   * Set by focusInput when it moved the conversation to an item the message names: one assessed
+   * earlier in this conversation, or a demo-store item at its catalog price.
+   */
+  focus?: 'remembered' | 'catalog'
 }
 export interface ChatData {
   profile: FinancialProfile
@@ -96,9 +102,11 @@ export const rawInterpretationSchema = z
   .strict()
 export type RawInterpretation = z.infer<typeof rawInterpretationSchema>
 
+/** Item names come from the browser: hidden control and direction characters never reach Claude. */
+const itemNameSchema = z.string().max(150).transform(plainText)
 const contextSchema = z.object({
   amountCents: z.number().int().min(0).max(100_000_000),
-  itemName: z.string().max(150).optional(),
+  itemName: itemNameSchema.optional(),
   purchaseDate: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -359,7 +367,7 @@ const rememberedSchema = z
   .array(
     z.object({
       amountCents: z.number().int().min(1).max(100_000_000),
-      itemName: z.string().max(150).optional(),
+      itemName: itemNameSchema.optional(),
     }),
   )
   .max(12)
@@ -379,16 +387,23 @@ export function focusInput(input: ChatInput): ChatInput {
     .filter((item) => namesItem(message, item.itemName))
     .reverse()
   const products = catalogMentions(message)
-  const target: PurchaseContext | undefined =
+  // Two different remembered items named at once stay a question for the user.
+  if (
     remembered.length &&
-    // Two different remembered items named at once stay a question for the user.
     remembered.every((item) => sameItem(item.itemName, remembered[0]!.itemName))
-      ? { amountCents: remembered[0]!.amountCents, itemName: remembered[0]!.itemName }
-      : !remembered.length && products.length === 1
-        ? { amountCents: products[0]!.priceCents, itemName: products[0]!.name }
-        : undefined
-  if (!target) return input
-  return { ...input, context: target }
+  )
+    return {
+      ...input,
+      context: { amountCents: remembered[0]!.amountCents, itemName: remembered[0]!.itemName },
+      focus: 'remembered',
+    }
+  if (!remembered.length && products.length === 1)
+    return {
+      ...input,
+      context: { amountCents: products[0]!.priceCents, itemName: products[0]!.name },
+      focus: 'catalog',
+    }
+  return input
 }
 
 const NOT_ITEMS = new Set([
@@ -397,6 +412,16 @@ const NOT_ITEMS = new Set([
   'different',
   'other',
   'cheaper',
+  'than',
+  // How to pay is never an item: "Is Pay in 4 cheaper than paying now?"
+  'pay',
+  'paying',
+  'paypal',
+  'later',
+  'instalment',
+  'installment',
+  'split',
+  'bnpl',
   'week',
   'day',
   'month',
@@ -568,7 +593,9 @@ function readDate(
   timing: TimingRead,
   claude: ClaudeTiming | undefined,
   contextDate: string | undefined,
-): { date: string; source: Interpretation['dateSource'] } | Exclude<InterpretResult, { ok: true }> {
+):
+  | { date: string; source: Interpretation['dateSource']; phrase?: string }
+  | Exclude<InterpretResult, { ok: true }> {
   const end = addDays(data.today, 30)
   const window = `from today through ${dateLabel(end, data.today)}`
   const ask = (
@@ -652,15 +679,16 @@ function readDate(
       'date_window',
       `${date} is outside the supported window ${data.today} to ${end}. Ask for a date in that range.`,
     )
-  return { date: date!, source: 'stated' }
+  return { date: date!, source: 'stated', ...(phrase ? { phrase } : {}) }
 }
 
 function interpretation(
   data: ChatData,
   items: InterpretedItem[],
-  date: { date: string; source: Interpretation['dateSource'] },
+  date: { date: string; source: Interpretation['dateSource']; phrase?: string },
   option: Interpretation['option'],
   source: Interpretation['source'],
+  amountSource: NonNullable<Interpretation['amountSource']>,
 ): Interpretation {
   return {
     items,
@@ -669,9 +697,20 @@ function interpretation(
     date: date.date,
     dateLabel: dateLabel(date.date, data.today),
     dateSource: date.source,
+    ...(date.phrase ? { datePhrase: date.phrase } : {}),
+    amountSource,
     option,
     source,
   }
+}
+/** Where a reading's amount came from, for the answer's trace. */
+function amountSourceOf(
+  input: ChatInput,
+  followUp: boolean,
+  items: InterpretedItem[],
+): NonNullable<Interpretation['amountSource']> {
+  if (followUp) return input.focus === 'catalog' ? 'catalog' : 'context'
+  return items.some((item) => item.priceSource === 'catalog') ? 'catalog' : 'stated'
 }
 
 // Only an explicit US-dollar reading counts; an unknown or empty currency is asked about.
@@ -842,7 +881,17 @@ export function validateInterpretation(
     const total = read.reduce((sum, item) => sum + item.amountCents * item.quantity, 0)
     return { ...date, pending: { amountCents: total, itemName: itemLabel(read) } }
   }
-  return { ok: true, interpretation: interpretation(data, read, date, raw.option, 'ai') }
+  return {
+    ok: true,
+    interpretation: interpretation(
+      data,
+      read,
+      date,
+      raw.option,
+      'ai',
+      amountSourceOf(input, Boolean(followUp), read),
+    ),
+  }
 }
 
 /** One label for one or more items, e.g. "headphones + chair". */
@@ -948,7 +997,17 @@ export function localInterpretation(input: ChatInput, data: ChatData): Interpret
   const option: Interpretation['option'] = /\b(?:when|how soon|earliest)\b/i.test(message)
     ? 'earliest_date'
     : 'check'
-  return { ok: true, interpretation: interpretation(data, [item], date, option, 'local') }
+  return {
+    ok: true,
+    interpretation: interpretation(
+      data,
+      [item],
+      date,
+      option,
+      'local',
+      amountSourceOf(input, Boolean(followUp), [item]),
+    ),
+  }
 }
 
 /** The deterministic clarifying question for a reason. */

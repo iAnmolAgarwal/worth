@@ -919,6 +919,55 @@ function payIn4Comparison(
 }
 
 /**
+ * The Pay in 4 scenario on its own, as the comparison computes it: the illustrative schedule, each
+ * payment's nearest bill, the cushion check and any plans already running. For Ask Worth, which
+ * shows it only on request and never recommends it.
+ */
+export function payIn4Scenario(
+  profile: FinancialProfile,
+  purchases: Purchase[],
+  options: { amountCents: number; itemName?: string; today: string },
+): PayIn4Comparison {
+  const missing = missingInputs(profile, purchases, options.today).length > 0
+  return payIn4Comparison(
+    profile,
+    purchases,
+    options.today,
+    missing,
+    options.amountCents,
+    options.itemName?.trim() || 'Your purchase',
+    true,
+  )
+}
+
+/** A payment of a plan already running that lands within NEARBY_BILL_DAYS of a bill. */
+export interface PlanCollision {
+  payment: ActivePlanPayment
+  bill: NearbyBill
+}
+/**
+ * Payments of instalment plans already running, within `days`, that land next to a bill or
+ * subscription. Other plans' payments are not counted as bills here.
+ */
+export function planCollisions(
+  profile: FinancialProfile,
+  purchases: Purchase[],
+  today: string,
+  days = 30,
+): PlanCollision[] {
+  const end = addDays(today, days)
+  const bills = obligations(profile, purchases, today).filter(
+    (bill) => bill.kind !== 'installment' && bill.kind !== 'purchase',
+  )
+  return activePlanPayments(profile, purchases, today)
+    .filter((payment) => payment.date <= end)
+    .flatMap((payment) => {
+      const bill = nearestBill(payment.date, bills)
+      return bill ? [{ payment, bill }] : []
+    })
+}
+
+/**
  * Compares buying today, waiting and spending less over one window fixed before any search. Pay in
  * 4 is an extra comparison for the user to open; it is never recommended or ranked.
  */

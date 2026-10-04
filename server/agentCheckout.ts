@@ -209,3 +209,54 @@ export function checkoutGuards(input: {
   }
   return { ok: true, product, fits, profileVersion: comparison.profileVersion, today }
 }
+
+/**
+ * The checks behind an order Claude asked for, in the order the server runs them: in
+ * decideAgentCheckout, then checkoutGuards, then the checkout itself. Ask Worth's trace lists them.
+ */
+export const CHECKOUT_GUARDS = [
+  { id: 'asked', label: 'You asked to buy or check out, in your own words' },
+  { id: 'catalog_item', label: 'The item is in Worth’s sandbox catalog' },
+  { id: 'item_named', label: 'You named this item in the conversation' },
+  { id: 'one_checkout', label: 'No other checkout is in progress' },
+  { id: 'funds_today', label: 'Your funds are confirmed for today' },
+  { id: 'plan_complete', label: 'Your plan is complete' },
+  { id: 'option_ready', label: 'A fresh check of the option you chose' },
+  { id: 'cushion', label: 'Keeps your cushion, or you said to go ahead anyway' },
+  { id: 'paypal', label: 'The PayPal sandbox is connected' },
+  { id: 'plan_unchanged', label: 'Your plan didn’t change since that check' },
+  {
+    id: 'catalog_price',
+    label: 'Price, currency and store come from the catalog, not from Claude',
+  },
+  { id: 'no_capture', label: 'Nothing is paid until you approve in PayPal and confirm in Worth' },
+] as const
+export type CheckoutGuardId = (typeof CHECKOUT_GUARDS)[number]['id']
+const GUARD_FOR: Record<PrepareRefusal, CheckoutGuardId> = {
+  NOT_REQUESTED: 'asked',
+  UNKNOWN_ITEM: 'catalog_item',
+  ITEM_NOT_DISCUSSED: 'item_named',
+  CHECKOUT_ACTIVE: 'one_checkout',
+  ALREADY_PREPARED: 'one_checkout',
+  FUNDS_NOT_TODAY: 'funds_today',
+  PLAN_INCOMPLETE: 'plan_complete',
+  WAIT_NOT_REACHED: 'option_ready',
+  OVER_SPEND_LESS_LIMIT: 'option_ready',
+  SHORTFALL_NOT_CONFIRMED: 'cushion',
+  PAYPAL_UNAVAILABLE: 'paypal',
+  ASSESSMENT_EXPIRED: 'plan_unchanged',
+}
+/**
+ * The guard decisions for one prepare_checkout result: every guard passed for a prepared order;
+ * for a refusal, the guards before the one that refused passed and later ones did not run.
+ */
+export function checkoutGuardTrail(
+  result: { ok: true } | { ok: false; code: PrepareRefusal },
+): { id: CheckoutGuardId; label: string; passed: boolean }[] {
+  if (result.ok) return CHECKOUT_GUARDS.map((guard) => ({ ...guard, passed: true }))
+  const failed = CHECKOUT_GUARDS.findIndex((guard) => guard.id === GUARD_FOR[result.code])
+  return CHECKOUT_GUARDS.slice(0, failed + 1).map((guard, index) => ({
+    ...guard,
+    passed: index < failed,
+  }))
+}

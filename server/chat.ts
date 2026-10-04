@@ -1,18 +1,22 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
-import { addDays, assessPurchase, money, withoutOwnHold } from '../shared/finance.ts'
+import { addDays, assessPurchase, money, payIn4InRange, withoutOwnHold } from '../shared/finance.ts'
 import { PRODUCTS } from '../shared/seed.ts'
+import { plainText } from '../shared/text.ts'
 import type {
   Alternatives,
+  AnswerTrace,
   Assessment,
   ChatIntent,
   ChatReply,
   CheckoutHandoff,
+  FactReason,
   Interpretation,
   PayIn4Eligibility,
+  TraceGuard,
   Transaction,
 } from '../shared/types.ts'
-import { CHECKOUT_OPTIONS } from './agentCheckout.ts'
+import { CHECKOUT_OPTIONS, checkoutGuardTrail } from './agentCheckout.ts'
 import {
   categoryOf,
   notProductSearch,
@@ -23,7 +27,7 @@ import {
 } from './alternatives.ts'
 import { PRICE_BUCKET_CENTS } from './channel3.ts'
 import type { PrepareCheckoutRequest, PrepareCheckoutResult } from './agentCheckout.ts'
-import { readTiming } from './dates.ts'
+import { dateLabel, readTiming } from './dates.ts'
 import {
   clarificationText,
   focusInput,
@@ -42,29 +46,45 @@ import { extractMoneyMentions, hasForeignAmount } from './money.ts'
 import {
   assessmentSummary,
   baseline,
+  checkSentence,
   chipAllowed,
   COMMITMENT_FACTS,
   commitmentFacts,
+  commitmentPlaceholders,
   commitments,
   commitmentsFacts,
+  fill,
   isRefusal,
   LEAD_INS,
   leadInText,
   OFF_TOPIC_REPLY,
   overviewFacts,
+  payIn4Chat,
+  payIn4Text,
   PLAN_FACTS,
   planFacts,
+  planPlaceholders,
   PURCHASE_FACTS,
   purchaseFacts,
+  purchasePlaceholders,
   refusalFor,
   refusalLine,
   spending,
   SPENDING_FACTS,
   spendingFacts,
   spendingFacts30,
+  spendingPlaceholders,
+  templateSentence,
   verdictFor,
 } from './narration.ts'
-import type { CommitmentKind, FactCatalog, FactId, LeadIn } from './narration.ts'
+import type {
+  CommitmentKind,
+  FactCatalog,
+  FactId,
+  LeadIn,
+  Placeholders,
+  SentenceRejection,
+} from './narration.ts'
 
 export type { ChatData, ChatInput } from './interpret.ts'
 
@@ -140,6 +160,22 @@ interface Presentation {
   points: FactId[]
   lead: LeadIn
   followUps: string[]
+  /** Claude's reason for each fact it picked, from a fixed set. */
+  reasons: Partial<Record<FactId, FactReason>>
+}
+/** Why Claude may pick a fact; the trace shows one per fact. */
+export const FACT_REASONS = [
+  'answers_question',
+  'explains_result',
+  'shows_timing',
+  'shows_risk',
+  'adds_context',
+] as const satisfies readonly FactReason[]
+/** The sentence under the verdict, and where it came from. */
+interface Sentence {
+  source: 'claude' | 'template'
+  raw: string
+  rejected?: SentenceRejection
 }
 interface Answer {
   mode: ChatReply['mode']
@@ -156,6 +192,14 @@ interface Answer {
   alternatives?: AlternativesOutcome
   /** A refusal the user's own words call for, such as paying a bill late (C-13). */
   refusal?: LeadIn
+  /** The person asked about Pay in 4 or paying later, so its schedule shows inline. */
+  payIn4Asked?: boolean
+  /** Each tool call and what the server did with it, for the trace. */
+  tools?: AnswerTrace['tools']
+  /** Server checks beyond the reading itself: a checkout's guards, a search's limit. */
+  guards?: TraceGuard[]
+  /** Claude's sentence, or why it fell back (set only for answers from Claude). */
+  sentence?: Sentence
 }
 /**
  * A request for something cheaper: what fits today, the ceiling searched under (the person's own
@@ -207,6 +251,166 @@ function refusalOnly(answer: Answer): string | undefined {
   if (!lead || (lead === 'not_yes' && answer.assessment?.outcome !== 'tight')) return undefined
   return refusalLine(lead)
 }
+/** Which placeholder set and template an answer's sentence uses, if it has one. */
+function sentenceKind(answer: Answer) {
+  if (answer.assessment) return answer.assessment.outcome === 'incomplete' ? undefined : 'purchase'
+  if (answer.intent === 'subscriptions') return 'commitments'
+  if (answer.intent === 'spending') return 'spending'
+  if (answer.intent === 'overview' || answer.intent === 'alternatives') return 'plan'
+  return undefined
+}
+/** The engine values an answer's sentence may name. */
+export function placeholdersFor(answer: Answer, data: ChatData): Placeholders {
+  const kind = sentenceKind(answer)
+  if (kind === 'purchase') return purchasePlaceholders(answer.assessment!, data)
+  if (kind === 'commitments') return commitmentPlaceholders(data, answer.kind ?? 'subscriptions')
+  if (kind === 'spending') return spendingPlaceholders(data)
+  if (kind === 'plan') return planPlaceholders(data)
+  return {}
+}
+/** The template sentence for an answer, used when Claude's is missing or fails its check. */
+function templateFor(answer: Answer, data: ChatData, rejected?: SentenceRejection) {
+  const kind = sentenceKind(answer)
+  const raw =
+    kind && templateSentence(kind, placeholdersFor(answer, data), answer.assessment?.outcome)
+  return raw ? { source: 'template' as const, raw, ...(rejected ? { rejected } : {}) } : undefined
+}
+
+const CLARIFY_GUARD: Record<NonNullable<Answer['clarify']>['reason'], string> = {
+  price_missing: 'No US-dollar price in your words, so Worth asked instead of guessing one',
+  currency: 'The price isn’t in US dollars, so Worth asked instead of converting it',
+  date_unresolved: 'The timing didn’t resolve to one day, so Worth asked which day',
+  date_vague: 'The timing was too vague for one day, so Worth asked which day',
+  date_past: 'The timing has already passed, so Worth asked for another day',
+  date_window: 'The date is outside the next 30 days, so Worth asked for another day',
+  payday_missing: 'No confirmed payday in your plan, so Worth asked for a day',
+  alternatives: 'You named more than one item to choose between, so Worth asked which one',
+  items_unclear: 'More than one amount could be the price, so Worth asked which one',
+  amount_unclear: 'An amount couldn’t be read, so Worth asked for it',
+}
+const SOURCE: Record<
+  NonNullable<Interpretation['amountSource']>,
+  'your_words' | 'catalog' | 'earlier'
+> = { stated: 'your_words', catalog: 'catalog', context: 'earlier' }
+const STORE = PRODUCTS[0]?.merchant.split(' ')[0] ?? 'Store'
+
+/** How Ask Worth read this: what was read, which tools ran, what was shown and what was checked. */
+function traceFor(answer: Answer, data: ChatData, shown: FactId[]): AnswerTrace {
+  const read = answer.interpretation
+  const guards: TraceGuard[] = []
+  if (answer.intent === 'off_topic')
+    guards.push({
+      id: 'scope',
+      label: 'Outside what Worth helps with, so it showed a fixed redirect',
+      passed: true,
+    })
+  if (read) {
+    const source = read.amountSource ?? 'stated'
+    guards.push(
+      {
+        id: 'amount_grounded',
+        label:
+          source === 'catalog'
+            ? `The amount is ${STORE}’s catalog price, not a figure Claude supplied`
+            : source === 'context'
+              ? 'The amount is the one Worth read earlier in this chat'
+              : 'The amount appears in your own words',
+        passed: true,
+      },
+      { id: 'usd', label: 'The price is in US dollars; nothing was converted', passed: true },
+      {
+        id: 'date_window',
+        label: `The date is between today and ${dateLabel(addDays(data.today, 30), data.today)}`,
+        passed: true,
+      },
+    )
+  }
+  if (answer.clarify)
+    guards.push({
+      id: answer.clarify.reason,
+      label: CLARIFY_GUARD[answer.clarify.reason],
+      passed: false,
+    })
+  if (answer.assessment && answer.assessment.outcome !== 'incomplete')
+    guards.push({
+      id: 'verdict_template',
+      label: 'The verdict sentence is Worth’s template from the engine, never Claude’s words',
+      passed: true,
+    })
+  if (answer.payIn4Asked && answer.assessment) {
+    const eligibility = data.payIn4
+    guards.push(
+      {
+        id: 'pay_in_4_on_request',
+        label: 'Pay in 4 shown only because you asked about it, and never recommended',
+        passed: true,
+      },
+      eligibility === 'unavailable'
+        ? {
+            id: 'pay_in_4_eligible',
+            label: 'PayPal Pay in 4 isn’t available for this amount',
+            passed: false,
+          }
+        : {
+            id: 'pay_in_4_eligible',
+            label:
+              eligibility === 'paypal'
+                ? 'PayPal’s eligibility check offered Pay in 4 for this amount'
+                : 'The amount is within PayPal’s Pay in 4 range; PayPal decides at checkout',
+            passed: true,
+          },
+    )
+  }
+  const lead =
+    answer.refusal ?? (isRefusal(answer.presentation?.lead) ? answer.presentation?.lead : undefined)
+  if (lead && lead !== 'not_yes')
+    guards.push({
+      id: lead,
+      label:
+        lead === 'no_skipping'
+          ? 'You mentioned skipping or paying a bill late; Worth won’t suggest it'
+          : lead === 'no_credit'
+            ? 'You asked about credit or instalments; Worth won’t suggest them to make it fit'
+            : 'You asked about using your cushion; Worth won’t suggest it',
+      passed: true,
+    })
+  guards.push(...(answer.guards ?? []))
+  return {
+    reader: answer.mode === 'anthropic' ? 'claude' : 'local',
+    ...(read
+      ? {
+          read: {
+            item: itemLabel(read.items),
+            amountCents: read.amountCents,
+            source: SOURCE[read.amountSource ?? 'stated'],
+            ...(read.amountSource === 'catalog' ? { store: STORE } : {}),
+          },
+          date: {
+            ...(read.datePhrase ? { phrase: plainText(read.datePhrase).slice(0, 80) } : {}),
+            date: read.date,
+            label: read.dateLabel,
+            source: read.dateSource,
+          },
+        }
+      : {}),
+    tools: answer.tools ?? [],
+    facts: shown.map((id) => ({
+      id,
+      ...(answer.presentation?.reasons[id] ? { reason: answer.presentation.reasons[id] } : {}),
+    })),
+    guards,
+    ...(answer.sentence
+      ? {
+          sentence: {
+            source: answer.sentence.source,
+            raw: answer.sentence.raw,
+            ...(answer.sentence.rejected ? { rejected: answer.sentence.rejected } : {}),
+          },
+        }
+      : {}),
+  }
+}
+
 function compose(answer: Answer, data: ChatData): ChatReply {
   const { assessment } = answer
   const verdict = assessment ? verdictFor(assessment, answer.interpretation) : undefined
@@ -229,6 +433,14 @@ function compose(answer: Answer, data: ChatData): ChatReply {
   const { points, lead } = pointsFor(answer, data)
   const chosen = points && [lead, ...points.map((p) => p.text)].filter(Boolean).join(' ')
   const refusal = points ? undefined : refusalOnly(answer)
+  const payIn4 = assessment ? payIn4Chat(assessment, data, Boolean(answer.payIn4Asked)) : undefined
+  // Asked about Pay in 4, the engine's schedule joins the answer's text unless Claude showed it.
+  const payIn4Line =
+    answer.payIn4Asked && assessment && !points?.some((p) => p.id.startsWith('pay_in_4'))
+      ? payIn4Text(assessment, data)
+      : undefined
+  const sentence = answer.sentence
+  const explanation = sentence ? fill(sentence.raw, placeholdersFor(answer, data)) : undefined
   const found = answer.alternatives?.result
   const shown =
     found && found.status !== 'off' && (found.items.length || found.unverified?.length)
@@ -237,8 +449,10 @@ function compose(answer: Answer, data: ChatData): ChatReply {
   return {
     message: [
       verdict,
+      explanation,
       chosen ?? refusal,
       body,
+      payIn4Line,
       answer.alternatives &&
         alternativesText(
           answer.alternatives,
@@ -261,6 +475,9 @@ function compose(answer: Answer, data: ChatData): ChatReply {
     toolCalls: answer.toolCalls ?? [],
     ...(answer.checkout ? { checkout: answer.checkout } : {}),
     ...(shown ? { alternatives: shown } : {}),
+    ...(payIn4 ? { payIn4 } : {}),
+    ...(explanation ? { explanation } : {}),
+    trace: traceFor(answer, data, points?.map((p) => p.id) ?? []),
   }
 }
 /**
@@ -392,6 +609,8 @@ function localIntent(input: ChatInput, data: ChatData): ChatIntent {
   )
     return 'alternatives'
   if (looksLikePurchase(input) || aboutContext) return 'affordability'
+  // "Which bills would my Pay in 4 payments land next to?" is about the item being discussed.
+  if (context && ASKS_PAY_IN_4.test(input.message)) return 'affordability'
   if (/subscription|recurring|\bbills?\b|upcoming|coming up|\bdue\b|commitments?/.test(text))
     return 'subscriptions'
   if (
@@ -443,10 +662,26 @@ function localAnswer(input: ChatInput, data: ChatData): Answer {
   }
 }
 const LOCAL_NOTE = 'Claude is not connected. This is a local calculation, not an AI response.'
+/** Pay in 4 availability for an answer that asked about it: PayPal's check when it can run. */
+async function payIn4Availability(
+  amountCents: number,
+  actions: ChatActions,
+): Promise<PayIn4Eligibility> {
+  if (!payIn4InRange(amountCents)) return 'unavailable'
+  if (!actions.payIn4Eligibility) return 'range-only'
+  return actions.payIn4Eligibility(amountCents).catch(() => 'range-only' as const)
+}
 export function fallbackReply(input: ChatInput, data: ChatData, reason = LOCAL_NOTE): ChatReply {
+  const answer: Answer = {
+    ...localAnswer(focusInput(input), data),
+    note: reason,
+    refusal: refusalFor(input.message),
+  }
+  const amount = answer.assessment?.amountCents
+  if (amount === undefined || !ASKS_PAY_IN_4.test(input.message)) return compose(answer, data)
   return compose(
-    { ...localAnswer(focusInput(input), data), note: reason, refusal: refusalFor(input.message) },
-    data,
+    { ...answer, payIn4Asked: true },
+    { ...data, payIn4: payIn4InRange(amount) ? 'range-only' : 'unavailable' },
   )
 }
 /** The local answer, with any search for something cheaper run through the server's actions. */
@@ -456,9 +691,16 @@ export async function localReply(
   reason = LOCAL_NOTE,
   actions: ChatActions = {},
 ): Promise<ChatReply> {
-  const answer = { ...localAnswer(focusInput(input), data), refusal: refusalFor(input.message) }
+  const answer: Answer = {
+    ...localAnswer(focusInput(input), data),
+    refusal: refusalFor(input.message),
+  }
   if (answer.alternatives)
     answer.alternatives = await searchAlternatives(answer.alternatives, actions)
+  if (answer.assessment && ASKS_PAY_IN_4.test(input.message)) {
+    answer.payIn4Asked = true
+    data = { ...data, payIn4: await payIn4Availability(answer.assessment.amountCents, actions) }
+  }
   return compose({ ...answer, note: reason }, data)
 }
 
@@ -486,8 +728,16 @@ Reading a purchase question
 
 Choosing what to show
 - Every tool takes points: up to three facts from the engine that best answer what the person asked, most important first. The app writes each fact from the engine's numbers and leaves out any that do not apply to the result.
-- lead_in picks an optional opening line from a fixed set. Use a refusal line when the person asks about skipping or delaying a bill, using credit, loans or instalments, or dipping into the cushion; use "not_yes" when they ask you to just approve the purchase.
+- point_reasons: for each fact in points, why you picked it, from a fixed set: answers_question (it answers what they asked), explains_result (it explains the verdict), shows_timing (it is about when), shows_risk (it shows what could go wrong), adds_context (useful background).
+- lead_in picks an optional opening line from a fixed set. Use a refusal line when the person asks about skipping or delaying a bill, using credit, loans or instalments to make a purchase fit, or dipping into the cushion; use "not_yes" when they ask you to just approve the purchase.
 - follow_ups: up to three short next questions in the person's own voice, without amounts, dates, or mentions of bills, credit or the cushion.
+
+PayPal Pay in 4
+- When the person asks about PayPal Pay in 4, paying later, or splitting the purchase into payments, including whether it is cheaper than paying now or which bills its payments would land next to, call interpret_purchase for the purchase being discussed (refers_to_previous_item is true when they name no other item). Pick pay_in_4_schedule first, and pay_in_4_stacking when other plans matter. The app shows the illustrative schedule with the answer.
+- Pay in 4 has the same total as paying now and PayPal charges no interest. It is shown for comparison only: never recommend it, rank it, or suggest it makes a purchase fit.
+
+One sentence of explanation
+- After a tool result, the app may ask for one sentence that explains the result. Write it only with the placeholders the app lists, never with figures, dates or names of your own.
 
 Finding something cheaper
 - When the person asks for something cheaper, a cheaper or similar item for less, what they could buy under an amount, or the cheapest thing that keeps their cushion, call find_alternatives. Do not call interpret_purchase for these unless they also ask whether a specific priced item fits.
@@ -527,9 +777,22 @@ function presentation(points: readonly string[], about: string) {
       description:
         'Up to three short next questions in the user’s voice, with no amounts, dates, or mentions of bills, credit or the cushion.',
     },
+    point_reasons: {
+      type: 'array',
+      description: 'For each fact in points, the reason you picked it.',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['point', 'reason'],
+        properties: {
+          point: { type: 'string', enum: [...points] },
+          reason: { type: 'string', enum: [...FACT_REASONS] },
+        },
+      },
+    },
   }
 }
-const PRESENTATION_KEYS = ['points', 'lead_in', 'follow_ups']
+const PRESENTATION_KEYS = ['points', 'lead_in', 'follow_ups', 'point_reasons']
 const TOOLS: Anthropic.Tool[] = [
   {
     name: 'interpret_purchase',
@@ -609,7 +872,7 @@ const TOOLS: Anthropic.Tool[] = [
         },
         ...presentation(
           PURCHASE_FACTS,
-          'low_point: the lowest projected balance against the cushion. cause: the bill that drives the low point. income: the next paycheck. wait: the earliest day that keeps the cushion. spend_less: the most that keeps the cushion on that day. stress: the low point if everyday spending runs higher. bills_before: bills due before the low point. pay_in_4: whether PayPal Pay in 4 can be compared for this amount; only when the person asked about Pay in 4 or paying later.',
+          'low_point: the lowest projected balance against the cushion. cause: the bill that drives the low point. income: the next paycheck. wait: the earliest day that keeps the cushion. spend_less: the most that keeps the cushion on that day. stress: the low point if everyday spending runs higher. bills_before: bills due before the low point. pay_in_4: whether PayPal Pay in 4 can be compared for this amount. pay_in_4_schedule: the illustrative Pay in 4 payments, the same total with no interest, and which bills each payment lands next to. pay_in_4_stacking: instalment plans already running in the same window. The three pay_in_4 facts exist only when the person asked about Pay in 4 or paying later.',
         ),
       },
     },
@@ -772,7 +1035,30 @@ const presentationSchema = z.object({
   points: z.array(z.string()).max(10),
   lead_in: z.enum(Object.keys(LEAD_INS) as [LeadIn, ...LeadIn[]]),
   follow_ups: z.array(z.string().max(300)).max(10),
+  // Optional here so answers recorded before reasons existed still replay.
+  point_reasons: z
+    .array(z.object({ point: z.string(), reason: z.enum(FACT_REASONS) }))
+    .max(10)
+    .optional(),
 })
+/** The one-sentence request after a tool result: placeholder text, or null. */
+const SENTENCE_FORMAT = {
+  type: 'json_schema' as const,
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['note'],
+    properties: { note: { anyOf: [{ type: 'string' }, { type: 'null' }] } },
+  },
+}
+const sentenceSchema = z.object({ note: z.string().max(600).nullable() })
+/** The request for Claude's sentence, listing the only names it may use for engine values. */
+function sentenceRequest(values: Placeholders) {
+  const list = Object.entries(values)
+    .map(([name, value]) => `{${name}} = ${JSON.stringify(value.value)}: ${value.about}`)
+    .join('\n')
+  return `Tools are now closed. Reply with JSON {"note": ...}. In note, write one sentence of at most 30 words that tells the person why the engine's result is what it is, for the question they asked. Name any amount, date, count or name only with these placeholders, written exactly with their braces:\n${list}\nNever write a digit, amount, date, weekday, month, relative day or number word yourself. Do not restate the verdict. Do not suggest skipping or delaying a bill, credit, a loan, Pay in 4 or using the cushion. Use null when no sentence would help.`
+}
 const TOOLS_CLOSED =
   'Tools are now closed for this answer. Reply with the final JSON only, using the tool results you already have.'
 const MAX_ROUNDS = 4
@@ -819,6 +1105,10 @@ class Turn {
   /** What fits today and what Channel3 found, when the person asked for something cheaper. */
   alternatives?: AlternativesOutcome
   private checkoutRequested = false
+  /** Every tool call in order and what the server did with it, for the answer's trace. */
+  tools: AnswerTrace['tools'] = []
+  /** Server checks a tool ran beyond the reading itself. */
+  guards: TraceGuard[] = []
   data: ChatData
   constructor(
     readonly input: ChatInput,
@@ -829,18 +1119,38 @@ class Turn {
   }
 
   async run(name: string, raw: unknown): Promise<ToolOutcome> {
+    const before = this.tools.length
+    const outcome = await this.runTool(name, raw)
+    // Unless the tool recorded a refusal or a question, an error sends the call back to Claude.
+    if (this.tools.length === before)
+      this.tools.push({ name, outcome: outcome.isError ? 'corrected' : 'ran' })
+    return outcome
+  }
+  private mark(name: string, outcome: AnswerTrace['tools'][number]['outcome']) {
+    this.tools.push({ name, outcome })
+  }
+
+  private async runTool(name: string, raw: unknown): Promise<ToolOutcome> {
     this.attempts++
-    if (this.attempts > MAX_TOOL_CALLS)
+    if (this.attempts > MAX_TOOL_CALLS) {
+      this.mark(name, 'refused')
       return { content: 'Tool limit reached. Answer with what you have.', isError: true }
+    }
     const input = (raw ?? {}) as Record<string, unknown>
     if (name === 'prepare_checkout') return this.prepare(input)
     const shown = presentationSchema.safeParse(input)
     if (!shown.success)
       return { content: 'points, lead_in and follow_ups did not match the schema.', isError: true }
+    const points = shown.data.points as FactId[]
     const chosen: Presentation = {
-      points: shown.data.points as FactId[],
+      points,
       lead: shown.data.lead_in,
       followUps: shown.data.follow_ups,
+      reasons: Object.fromEntries(
+        (shown.data.point_reasons ?? [])
+          .filter((r) => points.includes(r.point as FactId))
+          .map((r) => [r.point, r.reason]),
+      ),
     }
     if (name === 'interpret_purchase') return await this.interpret(input, chosen)
     if (name === 'find_alternatives') return await this.findAlternatives(input, chosen)
@@ -869,6 +1179,7 @@ class Turn {
         facts: planFacts(this.data),
       })
     }
+    this.mark(name, 'refused')
     return { content: `Unknown tool ${name}. Use only the listed read-only tools.`, isError: true }
   }
 
@@ -881,27 +1192,33 @@ class Turn {
 
   /** Asks the server to prepare an order. The server's guard, not Claude, decides. */
   private async prepare(raw: Record<string, unknown>): Promise<ToolOutcome> {
-    if (!this.actions.prepareCheckout)
+    if (!this.actions.prepareCheckout) {
+      this.mark('prepare_checkout', 'refused')
       return {
         content: 'Unknown tool prepare_checkout. Use only the listed read-only tools.',
         isError: true,
       }
+    }
     const parsed = prepareSchema.safeParse(raw)
     if (!parsed.success)
       return {
         content: 'item_id, option and proceed_despite_shortfall are required.',
         isError: true,
       }
-    if (this.checkoutRequested)
+    if (this.checkoutRequested) {
+      this.mark('prepare_checkout', 'refused')
       return {
         content: JSON.stringify({ status: 'refused', reason: 'ALREADY_PREPARED' }),
       }
+    }
     this.checkoutRequested = true
     const result = await this.actions.prepareCheckout({
       itemId: parsed.data.item_id,
       option: parsed.data.option,
       proceedDespiteShortfall: parsed.data.proceed_despite_shortfall,
     })
+    this.mark('prepare_checkout', result.ok ? 'ran' : 'refused')
+    this.guards.push(...checkoutGuardTrail(result))
     const product = PRODUCTS.find((p) => p.id === parsed.data.item_id)
     // The answer shows the engine's assessment of the item, at its catalog price, today.
     if (product && !this.assessment && !this.clarify) {
@@ -967,12 +1284,20 @@ class Turn {
       }
     // "Is Pay in 4 cheaper than paying now?", "Which option is cheapest?", "a cheaper phone plan":
     // the server refuses the search, so the model answers with the right tool instead.
-    if (notProductSearch(this.input.message))
+    if (notProductSearch(this.input.message)) {
+      this.mark('find_alternatives', 'refused')
+      this.guards.push({
+        id: 'not_product_search',
+        label:
+          '“Cheaper” here is about paying, timing, the options or a service, so Worth didn’t search other stores',
+        passed: false,
+      })
       return {
         content:
           'This question is about paying, timing, Worth’s options or a service, not another product. Do not search; answer it with interpret_purchase or another tool.',
         isError: true,
       }
+    }
     if (this.alternatives) return { content: JSON.stringify({ status: 'already_searched' }) }
     this.alternatives = await searchAlternatives(
       alternativesFor(this.input, this.data, parsed.data.item ?? undefined, stated),
@@ -981,6 +1306,11 @@ class Turn {
     this.presentations.set('find_alternatives', chosen)
     this.calls.push('find_alternatives')
     this.read.add('find_alternatives')
+    this.guards.push({
+      id: 'search_limit',
+      label: 'The search price limit is what keeps your cushion today, never a figure from Claude',
+      passed: true,
+    })
     const found = this.alternatives.result?.items.length ?? 0
     // Only the outcome goes back to the model, never product names, stores or prices.
     return {
@@ -1006,6 +1336,7 @@ class Turn {
     if (!result.ok) {
       this.clarify = result
       if (result.retryable) return { content: result.detail, isError: true }
+      this.mark('interpret_purchase', 'asked')
       this.presentations.set('interpret_purchase', chosen)
       return {
         content: JSON.stringify({
@@ -1097,7 +1428,12 @@ function suggestionsFor(raw: string[], data: ChatData): string[] {
 /** Combine what the tools established with Claude's choices. */
 function answerFor(turn: Turn, final: Final | undefined): Answer {
   const { input, data } = turn
-  const base = { mode: 'anthropic' as const, toolCalls: turn.calls }
+  const base = {
+    mode: 'anthropic' as const,
+    toolCalls: turn.calls,
+    tools: turn.tools,
+    guards: turn.guards,
+  }
   let answer: Answer
   if (turn.alternatives && !turn.assessment)
     answer = { ...base, intent: 'alternatives', alternatives: turn.alternatives }
@@ -1185,6 +1521,62 @@ export function createChatProvider(
   const log =
     options.log ??
     ((event: Record<string, unknown>) => console.warn('Worth chat:', JSON.stringify(event)))
+  /**
+   * One sentence on why the result is what it is (C-13): Claude continues the answered round with
+   * placeholders only, and the server checks it. Anything else shows the engine's template.
+   */
+  async function explain(
+    answer: Answer,
+    data: ChatData,
+    answered:
+      { content: Anthropic.ContentBlock[]; results: Anthropic.ToolResultBlockParam[] } | undefined,
+    messages: Anthropic.MessageParam[],
+    tools: Anthropic.Tool[],
+    deadline: number,
+  ): Promise<Sentence | undefined> {
+    const values = placeholdersFor(answer, data)
+    if (!Object.keys(values).length || answer.mode !== 'anthropic') return undefined
+    const remaining = deadline - Date.now()
+    if (!answered || remaining < 2000) return templateFor(answer, data, 'no_sentence')
+    let raw: string | null | undefined
+    try {
+      const response = await client.messages.create(
+        {
+          model,
+          max_tokens: 400,
+          system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
+          tools,
+          tool_choice: { type: 'none' },
+          messages: [
+            ...messages,
+            { role: 'assistant', content: answered.content },
+            {
+              role: 'user',
+              content: [...answered.results, { type: 'text', text: sentenceRequest(values) }],
+            },
+          ],
+          output_config: { effort: 'low', format: SENTENCE_FORMAT },
+        },
+        {
+          signal: AbortSignal.timeout(Math.min(remaining, 6000)),
+          timeout: Math.min(remaining, 6000),
+          maxRetries: 0,
+        },
+      )
+      const text = response.content
+        .filter((block) => block.type === 'text')
+        .map((block) => block.text)
+        .join('')
+        .trim()
+      raw = sentenceSchema.parse(JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ''))).note
+    } catch (error) {
+      log({ event: 'sentence_failed', ...describeError(error) })
+    }
+    const checked = checkSentence(raw, values, answer.assessment?.outcome)
+    if (checked.ok) return { source: 'claude', raw: raw!.replace(/\s+/g, ' ').trim() }
+    if (raw) log({ event: 'sentence_rejected', reason: checked.reason })
+    return templateFor(answer, data, checked.reason)
+  }
   return {
     async categorize(transactions) {
       const rows = categoryCandidates(transactions)
@@ -1281,6 +1673,9 @@ export function createChatProvider(
       }
 
       let final: Final | undefined
+      /** The round whose tool calls all succeeded, which the sentence request continues. */
+      let answered:
+        { content: Anthropic.ContentBlock[]; results: Anthropic.ToolResultBlockParam[] } | undefined
       try {
         // Claude's tool call carries both its reading and its choice of what to show, so a
         // round of successful calls completes the answer. Only a tool error needs another
@@ -1316,17 +1711,18 @@ export function createChatProvider(
           const outcomes: { use: Anthropic.ToolUseBlock; outcome: ToolOutcome }[] = []
           for (const use of uses)
             outcomes.push({ use, outcome: await turn.run(use.name, use.input) })
-          if (outcomes.every(({ outcome }) => !outcome.isError)) break
+          const results = outcomes.map(({ use, outcome }) => ({
+            type: 'tool_result' as const,
+            tool_use_id: use.id,
+            content: outcome.content,
+            ...(outcome.isError ? { is_error: true } : {}),
+          }))
+          if (outcomes.every(({ outcome }) => !outcome.isError)) {
+            answered = { content: response.content, results }
+            break
+          }
           messages.push({ role: 'assistant', content: response.content })
-          messages.push({
-            role: 'user',
-            content: outcomes.map(({ use, outcome }) => ({
-              type: 'tool_result' as const,
-              tool_use_id: use.id,
-              content: outcome.content,
-              ...(outcome.isError ? { is_error: true } : {}),
-            })),
-          })
+          messages.push({ role: 'user', content: results })
         }
       } catch (error) {
         log({ event: 'chat_failed', elapsedMs: Date.now() - started, ...describeError(error) })
@@ -1358,6 +1754,12 @@ export function createChatProvider(
           actions,
         )
       }
+      // Asked about Pay in 4, the schedule shows even when the answer came another way.
+      if (answer.assessment && ASKS_PAY_IN_4.test(input.message)) {
+        answer.payIn4Asked = true
+        turn.data.payIn4 ??= await payIn4Availability(answer.assessment.amountCents, actions)
+      }
+      answer.sentence = await explain(answer, turn.data, answered, messages, tools, deadline)
       return compose(answer, turn.data)
     },
   }
