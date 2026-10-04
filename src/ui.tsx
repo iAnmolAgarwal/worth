@@ -347,6 +347,11 @@ export function Dialog({
   )
 }
 
+const fromToday = (date: string) => {
+  const now = new Date()
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())
+  return Math.round((Date.parse(`${date}T00:00:00Z`) - today) / 86_400_000)
+}
 const shiftDay = (date: string, days: number) => {
   const next = new Date(`${date}T12:00:00Z`)
   next.setUTCDate(next.getUTCDate() + days)
@@ -408,6 +413,10 @@ export function DateStepper({
           tabIndex={disabled ? -1 : 0}
           aria-labelledby={id}
           aria-valuetext={text}
+          // The numeric value is days from today, so it is never read as 0.
+          aria-valuenow={fromToday(value)}
+          aria-valuemin={min ? fromToday(min) : undefined}
+          aria-valuemax={max ? fromToday(max) : undefined}
           aria-disabled={disabled || undefined}
           onKeyDown={(event) => {
             if (disabled) return

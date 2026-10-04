@@ -40,6 +40,8 @@ export function ForeignPayments({
           resolution,
         )) as AppState,
       )
+      // Keep focus in the resolver: on the card while payments remain, otherwise on the page.
+      setTimeout(() => (card.current ?? document.getElementById('main'))?.focus(), 0)
     } catch (failure) {
       setError((failure as Error).message)
     } finally {
