@@ -3,6 +3,7 @@ import {
   ALTERNATIVES_CUE,
   catalogItem,
   genericQuery,
+  mentionedItem,
   queryFor,
   roomToday,
 } from '../server/alternatives.ts'
@@ -48,7 +49,15 @@ describe('Channel3 response parsing (recorded live fixture)', () => {
     expect(items.length).toBeLessThanOrEqual(4)
     for (const item of items) {
       expect(Object.keys(item).sort()).toEqual(
-        expect.arrayContaining(['availability', 'id', 'priceCents', 'retailer', 'source', 'title', 'url']),
+        expect.arrayContaining([
+          'availability',
+          'id',
+          'priceCents',
+          'retailer',
+          'source',
+          'title',
+          'url',
+        ]),
       )
       expect(item.source).toBe('channel3')
       expect(item.availability).toBe('InStock')
@@ -81,7 +90,11 @@ describe('Channel3 response parsing (recorded live fixture)', () => {
           offers: [offer(300), offer(250), offer(200, { condition: 'used' })],
         },
         { id: 'stock', title: 'Out', offers: [offer(200, { availability: 'OutOfStock' })] },
-        { id: 'eur', title: 'Euro', offers: [offer(200, { price: { price: 200, currency: 'EUR' } })] },
+        {
+          id: 'eur',
+          title: 'Euro',
+          offers: [offer(200, { price: { price: 200, currency: 'EUR' } })],
+        },
         { id: 'outlier', title: 'Mispriced', offers: [offer(30), offer(299.99)] },
         { id: 'http', title: 'Plain link', offers: [offer(200, { url: 'http://buy.example/x' })] },
         { id: 'bad id!', title: 'Bad', offers: [offer(200)] },
@@ -151,20 +164,23 @@ describe('Channel3 client', () => {
     [402, 6 * HOUR],
     [429, 60_000],
     [500, 30_000],
-  ])('serves labelled example results after HTTP %i and pauses live calls', async (status, pause) => {
-    const { fetch, mock } = fakeFetch(status, camera.response)
-    const { c3, advance, log } = client({ fetch })
-    const failed = await c3.search('interchangeable lens camera', 44001)
-    expect(failed.status).toBe('fixture')
-    expect(failed.items.length).toBeGreaterThan(0)
-    expect(c3.health()).toBe('fixture')
-    await c3.search('interchangeable lens camera', 30000)
-    expect(mock).toHaveBeenCalledTimes(1)
-    advance(pause)
-    expect(c3.health()).toBe('ok')
-    expect((await c3.search('interchangeable lens camera', 30000)).status).toBe('ok')
-    expect(JSON.stringify(log.mock.calls)).not.toContain('c3-test-key')
-  })
+  ])(
+    'serves labelled example results after HTTP %i and pauses live calls',
+    async (status, pause) => {
+      const { fetch, mock } = fakeFetch(status, camera.response)
+      const { c3, advance, log } = client({ fetch })
+      const failed = await c3.search('interchangeable lens camera', 44001)
+      expect(failed.status).toBe('fixture')
+      expect(failed.items.length).toBeGreaterThan(0)
+      expect(c3.health()).toBe('fixture')
+      await c3.search('interchangeable lens camera', 30000)
+      expect(mock).toHaveBeenCalledTimes(1)
+      advance(pause)
+      expect(c3.health()).toBe('ok')
+      expect((await c3.search('interchangeable lens camera', 30000)).status).toBe('ok')
+      expect(JSON.stringify(log.mock.calls)).not.toContain('c3-test-key')
+    },
+  )
   it('falls back after a timeout, and to a recording of the same kind of item', async () => {
     const timeout = Object.assign(new Error('timed out'), { name: 'TimeoutError' })
     const { fetch } = fakeFetch(timeout)
@@ -248,12 +264,20 @@ describe('what Worth searches for', () => {
   ])('recognises “%s” as a request for something cheaper', (message) => {
     expect(ALTERNATIVES_CUE.test(message)).toBe(true)
   })
-  it.each(['Can I afford a $1,199 camera?', 'How much can I spend today?', 'What bills are coming up?'])(
-    'leaves “%s” to the other answers',
-    (message) => {
-      expect(ALTERNATIVES_CUE.test(message)).toBe(false)
-    },
-  )
+  it.each([
+    'Can I afford a $1,199 camera?',
+    'How much can I spend today?',
+    'What bills are coming up?',
+  ])('leaves “%s” to the other answers', (message) => {
+    expect(ALTERNATIVES_CUE.test(message)).toBe(false)
+  })
+  it('reads the kind of item a cheaper request names, without the model', () => {
+    expect(mentionedItem('Can you find a cheaper camera?')).toBe('Everyday camera')
+    expect(mentionedItem('any cheaper chairs?')).toBe('Desk chair')
+    expect(mentionedItem('Is there a cheaper standing desk than this?')).toBe('standing desk')
+    expect(mentionedItem('Show me something similar but less')).toBeUndefined()
+    expect(mentionedItem('Is there something cheaper?')).toBeUndefined()
+  })
   it('reads the room today from the engine, and nothing on an incomplete plan', () => {
     const seed = createDemoState('2026-10-03')
     expect(roomToday(seed.profile, [], '2026-10-03')).toBe(44001)

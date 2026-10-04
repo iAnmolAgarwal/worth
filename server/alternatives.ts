@@ -62,6 +62,25 @@ export function catalogItem(name: string | undefined): Product | undefined {
   })
 }
 
+const NAMED =
+  /\b(?:cheaper|cheapest|less expensive|lower[- ]priced|more affordable|similar|another|budget)\s+([a-z][a-z -]{2,40}?)(?=\s+(?:than|under|below|for|that|which|to|i|with|from|in|at|on|but)\b|[?.!,]|$)/i
+/**
+ * The kind of item a request for something cheaper names, read locally: a catalog item ("a
+ * cheaper camera") or the words after "cheaper" or "similar". Undefined when none is named.
+ */
+export function mentionedItem(message: string): string | undefined {
+  const said = words(message.replace(/s\b/gi, ''))
+  const product = PRODUCTS.find((p) =>
+    [...words(p.name.replace(/s\b/gi, ''))].some(
+      (word) => !NAME_ADJECTIVES.has(word) && said.has(word),
+    ),
+  )
+  if (product) return product.name
+  const named = message.match(NAMED)?.[1]
+  return genericQuery(named) ? named : undefined
+}
+const NAME_ADJECTIVES = new Set(['everyday', 'studio', 'desk', 'travel'])
+
 /** The search phrase for an item: the catalog's generic description, or the generic words. */
 export function queryFor(item: { productId?: string; itemName?: string }): string | undefined {
   const product = item.productId
