@@ -127,7 +127,10 @@ function SavedCard({
           <div className="t" style={{ fontSize: 'var(--fs-body)' }}>
             {item.name}
           </div>
-          <div className="s soft">{product?.merchant ?? item.retailer ?? ASSESSMENT_ONLY}</div>
+          <div className="s soft">
+            {product?.merchant ??
+              (item.retailer ? `${item.retailer} · ${ASSESSMENT_ONLY}` : ASSESSMENT_ONLY)}
+          </div>
         </div>
         <div className="amt num" style={{ fontSize: 'var(--fs-body)' }}>
           {money(item.amountCents)}
