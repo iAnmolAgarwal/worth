@@ -210,7 +210,7 @@ HTTP-level refusals are JSON-RPC errors: `401` (with `WWW-Authenticate: Bearer`)
 
 ## Example transcript (abridged)
 
-The full recorded run is in `workspace/review/mcp/demo.md`. It used the sample persona on the video demo clock and the real PayPal sandbox.
+Abridged from a recorded run on the sample persona, on the video day (`/?replay=video`), against the real PayPal sandbox.
 
 > **Person:** Buy me the $1,199 camera.
 >
