@@ -307,7 +307,7 @@ export default function App() {
       return undefined
     }
   }
-  /** "See the exact video scenario": pins the sample persona to the recording day (G5-3). */
+  /** The README's ?replay=video link: pins the sample persona to the recording day (G5-3). */
   async function startReplay() {
     try {
       const next = (await api<AppState>('/demo-clock', { preset: 'video' })) as AppState
@@ -461,16 +461,6 @@ export default function App() {
                   {env.split(' · ').map((part) => (
                     <span key={part}>{part}</span>
                   ))}
-                  {state.profile.source === 'demo' && (
-                    <button
-                      type="button"
-                      className="link"
-                      style={{ fontSize: 'inherit', justifyContent: 'flex-start' }}
-                      onClick={() => void startReplay()}
-                    >
-                      See the exact video scenario
-                    </button>
-                  )}
                   <a href="#settings" onClick={() => setEnvOpen(false)}>
                     About this demo
                   </a>

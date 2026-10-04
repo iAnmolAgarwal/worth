@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import {
   Bookmark,
   BookmarkCheck,
@@ -848,12 +848,6 @@ export function Settings({
       return undefined
     }
   })()
-  // Settings opened from "See the exact video scenario" lands on the demo clock.
-  const clockRef = useRef<HTMLElement>(null)
-  useEffect(() => {
-    if (window.location.hash.includes('focus=clock'))
-      clockRef.current?.scrollIntoView?.({ block: 'start' })
-  }, [])
   return (
     <div className="page plain">
       <div className="wrap narrow">
@@ -976,19 +970,23 @@ export function Settings({
               </p>
             )}
           </section>
-          <section className="tile" aria-labelledby="set-clock" ref={clockRef}>
-            <div className="sec-head">
-              <h2 className="h-section" id="set-clock">
-                <CalendarClock
-                  size={18}
-                  aria-hidden="true"
-                  style={{ verticalAlign: -3, marginRight: 8 }}
-                />
-                Demo clock
-              </h2>
-            </div>
-            <DemoClock state={state} onUpdate={onUpdate} onToast={onToast ?? (() => undefined)} />
-          </section>
+          {/* The replay is reached only from the README's ?replay=video link, so its controls show
+              only while it runs. */}
+          {state.demoClock && (
+            <section className="tile" aria-labelledby="set-clock">
+              <div className="sec-head">
+                <h2 className="h-section" id="set-clock">
+                  <CalendarClock
+                    size={18}
+                    aria-hidden="true"
+                    style={{ verticalAlign: -3, marginRight: 8 }}
+                  />
+                  Demo clock
+                </h2>
+              </div>
+              <DemoClock state={state} onUpdate={onUpdate} onToast={onToast ?? (() => undefined)} />
+            </section>
+          )}
           <section className="tile" aria-labelledby="set-about">
             <div className="sec-head">
               <h2 className="h-section" id="set-about">
