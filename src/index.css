@@ -2916,3 +2916,22 @@ textarea.input {
   color: var(--c-text-3);
   cursor: not-allowed;
 }
+
+/* 1024–1279: the four payment cards sit two by two so nothing overflows its card. */
+@media (min-width: 1024px) and (max-width: 1279px) {
+  .sched {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+/* Phones: the verdict outranks the option titles under it. */
+@media (max-width: 767px) {
+  .decision-head h1.title {
+    font-weight: var(--fw-bold);
+  }
+}
+/* The strip's tooltip opens below the markers, clear of the chart's date labels. */
+.strip .mark:hover::after,
+.strip .mark:focus-visible::after {
+  bottom: auto;
+  top: 48px;
+}

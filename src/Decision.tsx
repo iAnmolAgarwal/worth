@@ -11,7 +11,7 @@ import {
   TriangleAlert,
 } from 'lucide-react'
 import { confirmedSchedule, dateInTimezone } from '../shared/finance'
-import type { OptionResult, Product } from '../shared/types'
+import type { ForecastPoint, OptionResult, Product } from '../shared/types'
 import { BalanceChart } from './BalanceChart'
 import type { AppState, Comparison, PayIn4 } from './contract'
 import {
@@ -297,6 +297,21 @@ function ChartTile({
   )
 }
 
+/**
+ * The engine's Pay in 4 label, with its short date ("on Oct 22") written in full ("on Thu, Oct
+ * 22") for display. The engine's own label is unchanged.
+ */
+function fullLabelDate(label: string, points: ForecastPoint[], cushion: number) {
+  const dip = points.find(
+    (point) => point.minimumCents < cushion && point.baselineMinimumCents >= cushion,
+  )
+  const base = points.find((point) => point.baselineMinimumCents < cushion)
+  for (const point of [dip, base])
+    if (point && label.endsWith(shortDate(point.date)))
+      return `${label.slice(0, -shortDate(point.date).length)}${dayLabel(point.date)}`
+  return label
+}
+
 function nearText(
   near: Extract<PayIn4, { available: true }>['instalments'][number]['nearestBill'],
 ) {
@@ -386,7 +401,7 @@ function PayIn4Panel({
       </button>
       <div className="panel" id={panelId} hidden={!open}>
         <Alert tone={breach ? 'bad' : 'ok'} icon={breach ? TriangleAlert : CircleCheck} live>
-          <b>{p4.label}.</b>
+          <b>{fullLabelDate(p4.label, p4.points, c.cushionCents)}.</b>
           <br />
           Lowest <span className="num">{signed(p4.lowestBalanceCents)}</span> on{' '}
           {dayLabel(p4.lowestDate)}
@@ -411,7 +426,8 @@ function PayIn4Panel({
               </div>
               <div className="near">{nearText(item.nearestBill)}</div>
               <div className="after num">
-                Lowest after: {signed(item.balanceCents)} on {dayLabel(item.lowestDate)}
+                Lowest after: {signed(item.balanceCents)} on{' '}
+                <span className="nowrap">{dayLabel(item.lowestDate)}</span>
               </div>
             </div>
           ))}
@@ -718,7 +734,7 @@ export function Decision({
               <ArrowLeft size={16} aria-hidden="true" />
               {backLabel}
             </button>
-            <p className="meta strong" style={{ margin: 0 }}>
+            <p className="meta strong hide-m" style={{ margin: 0 }}>
               {c.itemName}, {money(c.amountCents)}
             </p>
             <h1 className="title">{verdictTitle(c)}</h1>
