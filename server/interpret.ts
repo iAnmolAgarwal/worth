@@ -1,12 +1,15 @@
 import { z } from 'zod'
 import { addDays, getUpcomingFlows, money } from '../shared/finance.ts'
+import { PRODUCTS } from '../shared/seed.ts'
 import type {
   ChatMessage,
   FinancialProfile,
   Interpretation,
   InterpretedItem,
+  Product,
   Purchase,
   PurchaseContext,
+  RememberedItem,
   Transaction,
   PayIn4Eligibility,
 } from '../shared/types.ts'
@@ -27,6 +30,8 @@ export interface ChatInput {
   message: string
   history: ChatMessage[]
   context?: PurchaseContext
+  /** Items assessed earlier in this conversation, most recent last. */
+  items?: RememberedItem[]
 }
 export interface ChatData {
   profile: FinancialProfile
@@ -204,6 +209,64 @@ export function mentionsItem(message: string, itemName: string | undefined) {
   return words(itemName!).some((w) => !ITEM_STOP.has(w) && text.has(w))
 }
 
+/** Demo-store items a text names by one of their words ("the camera", "a MacBook"). */
+export function catalogMentions(text: string): Product[] {
+  return PRODUCTS.filter((product) =>
+    (product.aliases ?? []).some((alias) => mentionsItem(text, alias)),
+  )
+}
+/**
+ * The catalog item an interpreted item names, when the message names it too. Its price is the
+ * store's own, so it counts as grounded even though the user wrote no amount (judge fix #3).
+ */
+export function catalogItemFor(name: string, message: string): Product | undefined {
+  const named = catalogMentions(message).filter((product) =>
+    catalogMentions(name).includes(product),
+  )
+  return named.length === 1 ? named[0] : undefined
+}
+/** Whether a context is a catalog item at its catalog price, so its chip names the store price. */
+function catalogContext(context: PurchaseContext) {
+  return PRODUCTS.some(
+    (product) => product.name === context.itemName && product.priceCents === context.amountCents,
+  )
+}
+
+const rememberedSchema = z
+  .array(
+    z.object({
+      amountCents: z.number().int().min(1).max(100_000_000),
+      itemName: z.string().max(150).optional(),
+    }),
+  )
+  .max(12)
+/**
+ * Moves the conversation to the item a message returns to, without a new price: an item assessed
+ * earlier in the conversation (most recent first), or else a demo-store item at its catalog price.
+ * "Split the camera" after asking about headphones is about the camera again.
+ */
+export function focusInput(input: ChatInput): ChatInput {
+  const message = input.message
+  if (priceMentions(extractMoneyMentions(message)).length) return input
+  const context = validContext(input)
+  if (context && mentionsItem(message, context.itemName)) return input
+  const parsed = rememberedSchema.safeParse(input.items ?? [])
+  const remembered = (parsed.success ? parsed.data : [])
+    .filter((item) => mentionsItem(message, item.itemName))
+    .reverse()
+  const products = catalogMentions(message)
+  const target: PurchaseContext | undefined =
+    remembered.length &&
+    // Two different remembered items named at once stay a question for the user.
+    remembered.every((item) => sameItem(item.itemName, remembered[0]!.itemName))
+      ? { amountCents: remembered[0]!.amountCents, itemName: remembered[0]!.itemName }
+      : !remembered.length && products.length === 1
+        ? { amountCents: products[0]!.priceCents, itemName: products[0]!.name }
+        : undefined
+  if (!target) return input
+  return { ...input, context: target }
+}
+
 const NOT_ITEMS = new Set([
   ...ITEM_STOP,
   'another',
@@ -244,6 +307,21 @@ const NOT_ITEMS = new Set([
   'answer',
   'version',
   'model',
+  // Words that judge the purchase ("is that fine"), never an item.
+  'fine',
+  'okay',
+  'ok',
+  'good',
+  'bad',
+  'safe',
+  'smart',
+  'wise',
+  'possible',
+  'enough',
+  'realistic',
+  'reasonable',
+  'alright',
+  'doable',
 ])
 /** Whether the message names an item other than the one being discussed. */
 export function namesOtherItem(message: string, itemName: string | undefined) {
@@ -484,7 +562,7 @@ export function validateInterpretation(
   const groundable = groundableAmounts(mentions)
   const prices = priceMentions(mentions)
   const context = validContext(input)
-  const items = raw.items.filter((item) => item.name.trim() || item.amount_cents !== null)
+  let items = raw.items.filter((item) => item.name.trim() || item.amount_cents !== null)
   const stated = prices.map((m) => describe(m.cents)).join(', ')
   const pendingName = (name?: string) =>
     name ? groundedItemName(name, message, context) : undefined
@@ -535,10 +613,23 @@ export function validateInterpretation(
             : (pendingName(items[0]?.name) ?? 'Your purchase'),
         amountCents: context.amountCents,
         quantity: 1,
+        ...(catalogContext(context) ? { priceSource: 'catalog' as const } : {}),
       },
     ]
   } else {
-    if (!items.length || items.every((item) => item.amount_cents === null))
+    // A message that names one demo-store item, while Claude reported none, is about that item.
+    const named = !items.length && !prices.length ? catalogMentions(message) : []
+    if (named.length === 1)
+      items = [{ name: named[0]!.aliases![0]!, amount_cents: null, currency: 'USD', quantity: 1 }]
+    // A demo-store item named without a price is read at the store's price.
+    const catalog = items.map((item) =>
+      item.amount_cents === null || !groundable.some((m) => m.cents === item.amount_cents)
+        ? catalogItemFor(item.name, message)
+        : undefined,
+    )
+    const unpriced = (item: (typeof items)[number], index: number) =>
+      item.amount_cents === null && !catalog[index]
+    if (!items.length || items.every(unpriced))
       return prices.length
         ? {
             ok: false,
@@ -553,7 +644,18 @@ export function validateInterpretation(
             detail: 'The user did not state a price in US dollars. Ask for the total price.',
           }
     read = []
-    for (const item of items) {
+    for (const [index, item] of items.entries()) {
+      const product = catalog[index]
+      if (product && (item.amount_cents === null || item.amount_cents === product.priceCents)) {
+        read.push({
+          name: product.name,
+          amountCents: product.priceCents,
+          // A catalog price is per item, so only the count next to the item has to be written.
+          quantity: quantityStated(`${message} each`, item.quantity, item.name) ? item.quantity : 1,
+          priceSource: 'catalog',
+        })
+        continue
+      }
       if (item.amount_cents === null)
         return {
           ok: false,
@@ -677,6 +779,7 @@ export function localInterpretation(input: ChatInput, data: ChatData): Interpret
       detail: 'More than one amount was stated.',
     }
   let item: InterpretedItem
+  const products = catalogMentions(message)
   if (followUp) {
     item = {
       name:
@@ -685,6 +788,15 @@ export function localInterpretation(input: ChatInput, data: ChatData): Interpret
           : (named ?? 'Your purchase'),
       amountCents: context.amountCents,
       quantity: 1,
+      ...(catalogContext(context) ? { priceSource: 'catalog' as const } : {}),
+    }
+  } else if (!prices.length && products.length === 1) {
+    // A demo-store item named without a price is read at the store's price.
+    item = {
+      name: products[0]!.name,
+      amountCents: products[0]!.priceCents,
+      quantity: 1,
+      priceSource: 'catalog',
     }
   } else if (prices.length === 1) {
     const each = message.match(

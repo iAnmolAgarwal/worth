@@ -26,6 +26,7 @@ import type { PrepareCheckoutRequest, PrepareCheckoutResult } from './agentCheck
 import { readTiming } from './dates.ts'
 import {
   clarificationText,
+  focusInput,
   itemLabel,
   localInterpretation,
   looksLikePurchase,
@@ -46,6 +47,7 @@ import {
   commitmentFacts,
   commitments,
   commitmentsFacts,
+  isRefusal,
   LEAD_INS,
   leadInText,
   OFF_TOPIC_REPLY,
@@ -54,6 +56,8 @@ import {
   planFacts,
   PURCHASE_FACTS,
   purchaseFacts,
+  refusalFor,
+  refusalLine,
   spending,
   SPENDING_FACTS,
   spendingFacts,
@@ -150,6 +154,8 @@ interface Answer {
   note?: string
   checkout?: CheckoutHandoff
   alternatives?: AlternativesOutcome
+  /** A refusal the user's own words call for, such as paying a bill late (C-13). */
+  refusal?: LeadIn
 }
 /**
  * A request for something cheaper: what fits today, the ceiling searched under (the person's own
@@ -186,8 +192,20 @@ function pointsFor(
     })
     .slice(0, 3)
   if (!points.length) return {}
-  const lead = leadInText(chosen.lead, answer.assessment?.outcome)
+  // A refusal the user's words call for replaces a neutral lead-in Claude chose.
+  const lead = leadInText(
+    isRefusal(chosen.lead) ? chosen.lead : (answer.refusal ?? chosen.lead),
+    answer.assessment?.outcome,
+  )
   return { points, ...(lead ? { lead } : {}) }
+}
+/** The refusal on its own, for an answer without facts, such as a clarifying question. */
+function refusalOnly(answer: Answer): string | undefined {
+  if (answer.intent === 'off_topic') return undefined
+  const chosen = answer.presentation?.lead
+  const lead = answer.refusal ?? (isRefusal(chosen) ? chosen : undefined)
+  if (!lead || (lead === 'not_yes' && answer.assessment?.outcome !== 'tight')) return undefined
+  return refusalLine(lead)
 }
 function compose(answer: Answer, data: ChatData): ChatReply {
   const { assessment } = answer
@@ -210,6 +228,7 @@ function compose(answer: Answer, data: ChatData): ChatReply {
                 : overviewFacts(data)
   const { points, lead } = pointsFor(answer, data)
   const chosen = points && [lead, ...points.map((p) => p.text)].filter(Boolean).join(' ')
+  const refusal = points ? undefined : refusalOnly(answer)
   const found = answer.alternatives?.result
   const shown =
     found && found.status !== 'off' && (found.items.length || found.unverified?.length)
@@ -218,7 +237,7 @@ function compose(answer: Answer, data: ChatData): ChatReply {
   return {
     message: [
       verdict,
-      chosen,
+      chosen ?? refusal,
       body,
       answer.alternatives &&
         alternativesText(
@@ -234,7 +253,7 @@ function compose(answer: Answer, data: ChatData): ChatReply {
     intent: answer.intent,
     ...(assessment ? { assessment, verdict } : {}),
     ...(answer.interpretation ? { interpretation: answer.interpretation } : {}),
-    ...(points ? { points, ...(lead ? { lead } : {}) } : {}),
+    ...(points ? { points, ...(lead ? { lead } : {}) } : refusal ? { lead: refusal } : {}),
     ...(answer.clarify?.pending ? { pending: answer.clarify.pending } : {}),
     suggestions:
       categoryChips(answer.alternatives) ??
@@ -425,7 +444,10 @@ function localAnswer(input: ChatInput, data: ChatData): Answer {
 }
 const LOCAL_NOTE = 'Claude is not connected. This is a local calculation, not an AI response.'
 export function fallbackReply(input: ChatInput, data: ChatData, reason = LOCAL_NOTE): ChatReply {
-  return compose({ ...localAnswer(input, data), note: reason }, data)
+  return compose(
+    { ...localAnswer(focusInput(input), data), note: reason, refusal: refusalFor(input.message) },
+    data,
+  )
 }
 /** The local answer, with any search for something cheaper run through the server's actions. */
 export async function localReply(
@@ -434,7 +456,7 @@ export async function localReply(
   reason = LOCAL_NOTE,
   actions: ChatActions = {},
 ): Promise<ChatReply> {
-  const answer = localAnswer(input, data)
+  const answer = { ...localAnswer(focusInput(input), data), refusal: refusalFor(input.message) }
   if (answer.alternatives)
     answer.alternatives = await searchAlternatives(answer.alternatives, actions)
   return compose({ ...answer, note: reason }, data)
@@ -1214,7 +1236,9 @@ export function createChatProvider(
       }
     },
 
-    async reply(input, data, actions = {}) {
+    async reply(asked, data, actions = {}) {
+      // A message that returns to an earlier item, or names a store item, is about that item.
+      const input = focusInput(asked)
       const started = Date.now()
       const deadline = started + deadlineMs
       const turn = new Turn(input, data, actions)
@@ -1309,7 +1333,7 @@ export function createChatProvider(
         // Engine results already established still answer the question, without narration.
         if (!turn.calls.length && !turn.clarify) throw error
       }
-      const answer = answerFor(turn, final)
+      const answer: Answer = { ...answerFor(turn, final), refusal: refusalFor(input.message) }
       // A clear request for a cheaper product is still searched when the model only asked a
       // question or summarised the plan. Any other reading the model chose (Pay in 4, waiting,
       // the options, bills) stands; the override is logged so evals can count it.

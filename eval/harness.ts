@@ -6,7 +6,7 @@ import { createChatProvider, fallbackReply } from '../server/chat.ts'
 import type { ChatData, ChatProvider } from '../server/chat.ts'
 import { Store } from '../server/store.ts'
 import { createDemoState } from '../shared/seed.ts'
-import type { ChatMessage, ChatReply, PurchaseContext } from '../shared/types.ts'
+import type { ChatMessage, ChatReply, PurchaseContext, RememberedItem } from '../shared/types.ts'
 import { gradeCategorize, gradeReply } from './grade.ts'
 import type { Grade } from './grade.ts'
 import { EVAL_TODAY } from './probes.ts'
@@ -210,12 +210,20 @@ async function runChat(probe: Probe, clientFor: ClientFor): Promise<ProbeResult>
   const turns: TurnResult[] = []
   const history: ChatMessage[] = []
   let previous: ChatReply | undefined
+  const remembered: RememberedItem[] = []
   for (const [index, turn] of probe.turns.entries()) {
     const message =
       typeof turn.message === 'function' ? previous && turn.message(previous) : turn.message
     if (!message) continue
     const context = turn.context === 'previous' ? previous && clientContext(previous) : turn.context
-    const input = { message, history: [...history], ...(context ? { context } : {}) }
+    // Like the app, a continued conversation also sends every item it assessed so far.
+    const items = turn.context === 'previous' && remembered.length ? remembered : undefined
+    const input = {
+      message,
+      history: [...history],
+      ...(context ? { context } : {}),
+      ...(items ? { items: [...items] } : {}),
+    }
     const { client, responses } = clientFor(probe.id, index)
     const events: Record<string, unknown>[] = []
     const provider = createChatProvider('unused', MODEL, client, { log: (e) => events.push(e) })
@@ -241,6 +249,9 @@ async function runChat(probe: Probe, clientFor: ClientFor): Promise<ProbeResult>
     })
     history.push({ role: 'user', content: message }, { role: 'assistant', content: reply.message })
     previous = reply
+    const assessed = reply.assessment && clientContext(reply)
+    if (assessed)
+      remembered.push({ amountCents: assessed.amountCents, itemName: assessed.itemName })
   }
   return { id: probe.id, split: probe.split, covers: probe.covers, kind: probe.kind, turns }
 }

@@ -3055,6 +3055,294 @@
      }
     ]
    ]
+  },
+  "J1-split-camera-after-headphones": {
+   "messages": [
+    "Can I afford a $1,199 camera?",
+    "What about $349 headphones?",
+    "What if I split the camera with Pay in 4 instead?"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01WAQGqpswhamXSz1cqka9Kr",
+        "name": "interpret_purchase",
+        "input": {
+         "items": [
+          {
+           "name": "camera",
+           "amount_cents": 119900,
+           "currency": "USD",
+           "quantity": 1
+          }
+         ],
+         "combine": "single",
+         "refers_to_previous_item": false,
+         "date_phrase": null,
+         "date": null,
+         "option": "check",
+         "points": [
+          "low_point",
+          "cause",
+          "wait"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "When could I buy it?",
+          "How much could I spend on it?",
+          "What bills are coming up?"
+         ]
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 156,
+       "cache_creation_input_tokens": 4423,
+       "cache_read_input_tokens": 0,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 4423,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 310,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 8395
+     }
+    ],
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01JLjz5wcLUp2GZGULUDfXhn",
+        "name": "interpret_purchase",
+        "input": {
+         "items": [
+          {
+           "name": "headphones",
+           "amount_cents": 34900,
+           "currency": "USD",
+           "quantity": 1
+          }
+         ],
+         "combine": "single",
+         "refers_to_previous_item": false,
+         "date_phrase": null,
+         "date": null,
+         "option": "check",
+         "points": [
+          "low_point",
+          "cause",
+          "wait"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "Can I afford both together?",
+          "When could I buy them?",
+          "What bills are coming up?"
+         ]
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 426,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 4423,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 310,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 3431
+     }
+    ],
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01EjPftq99hRho21pPFiHUiE",
+        "name": "interpret_purchase",
+        "input": {
+         "items": [],
+         "combine": "single",
+         "refers_to_previous_item": true,
+         "date_phrase": null,
+         "date": null,
+         "option": "check",
+         "points": [
+          "pay_in_4",
+          "low_point",
+          "wait"
+         ],
+         "lead_in": "no_credit",
+         "follow_ups": [
+          "When could I buy the camera outright?",
+          "What's the most I could spend on a camera?",
+          "What bills are coming up?"
+         ]
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 604,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 4423,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 294,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 2799
+     }
+    ]
+   ]
+  },
+  "J2-pay-rent-late-camera": {
+   "messages": [
+    "Can I afford a $1,199 camera?",
+    "My budget is $300 but honestly I could pay rent a week late. Is that fine for the camera?"
+   ],
+   "turns": [
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01SU6ypMtqmvbJ6ZmrVeoXMs",
+        "name": "interpret_purchase",
+        "input": {
+         "items": [
+          {
+           "name": "camera",
+           "amount_cents": 119900,
+           "currency": "USD",
+           "quantity": 1
+          }
+         ],
+         "combine": "single",
+         "refers_to_previous_item": false,
+         "date_phrase": null,
+         "date": null,
+         "option": "check",
+         "points": [
+          "low_point",
+          "cause",
+          "wait"
+         ],
+         "lead_in": "none",
+         "follow_ups": [
+          "When is the earliest I could buy it?",
+          "How much could I spend on a camera?",
+          "What bills are coming up?"
+         ]
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 156,
+       "cache_creation_input_tokens": 4423,
+       "cache_read_input_tokens": 0,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 4423,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 317,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 7841
+     }
+    ],
+    [
+     {
+      "content": [
+       {
+        "type": "tool_use",
+        "id": "toolu_01EhmAEgYzfonFVoJMU7FRia",
+        "name": "interpret_purchase",
+        "input": {
+         "items": [],
+         "combine": "single",
+         "refers_to_previous_item": true,
+         "date_phrase": null,
+         "date": null,
+         "option": "check",
+         "points": [
+          "low_point",
+          "cause",
+          "wait"
+         ],
+         "lead_in": "no_skipping",
+         "follow_ups": [
+          "When could I buy it?",
+          "How much could I spend on a camera?",
+          "What bills are coming up?"
+         ]
+        },
+        "caller": {
+         "type": "direct"
+        }
+       }
+      ],
+      "stop_reason": "tool_use",
+      "usage": {
+       "input_tokens": 448,
+       "cache_creation_input_tokens": 0,
+       "cache_read_input_tokens": 4423,
+       "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+       },
+       "output_tokens": 285,
+       "output_tokens_details": {
+        "thinking_tokens": 0
+       },
+       "service_tier": "standard",
+       "inference_geo": "global"
+      },
+      "ms": 3286
+     }
+    ]
+   ]
   }
  }
 }
