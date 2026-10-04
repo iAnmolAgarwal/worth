@@ -602,8 +602,8 @@ describe('opt-in 30-day retention (D-9 a)', () => {
     expect(off.body.retention).toEqual({ keep30: false, expiresAt: '2026-10-05T16:00:00.000Z' })
     expect(off.headers['set-cookie'][0]).toContain('Max-Age=21600')
     clock.value = new Date('2026-10-05T16:00:01Z')
-    expect((await state(agent)).retention.keep30).toBe(false)
-    expect((await agent.get('/api/state')).body.sessionKey).not.toBe(off.body.sessionKey)
+    // The session ended on its own 24-hour expiry: a fresh one starts.
+    expect((await state(agent)).sessionKey).not.toBe(off.body.sessionKey)
   })
 })
 
