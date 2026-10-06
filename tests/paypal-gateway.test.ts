@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createPayPalGateway, PayPalError } from '../server/paypal.ts'
+import { createPayPalGateway, PayPalError, retryDelay } from '../server/paypal.ts'
 import type { StoredPurchase } from '../server/store.ts'
 
 // Contract tests for the real Orders v2 gateway, with fetch mocked at the network boundary.
@@ -10,6 +10,8 @@ type Reply = Response | Error | ((url: string, init: RequestInit) => Response | 
 function gateway(replies: Reply[], options: { webhookId?: string } = {}) {
   const calls: { url: string; init: RequestInit; headers: Record<string, string> }[] = []
   const log = vi.fn()
+  // Retries wait through this instead of a timer, so the tests stay fast.
+  const sleep = vi.fn(async (_ms: number) => {})
   const fetch = vi.fn(async (url: string | URL | Request, init: RequestInit = {}) => {
     const href = String(url)
     calls.push({ url: href, init, headers: { ...(init.headers as Record<string, string>) } })
@@ -28,9 +30,10 @@ function gateway(replies: Reply[], options: { webhookId?: string } = {}) {
     fetch: fetch as unknown as typeof globalThis.fetch,
     log,
     timeoutMs: 50,
+    sleep,
   })
   const api = () => calls.filter((call) => !call.url.endsWith('/v1/oauth2/token'))
-  return { paypal, calls, api, log, fetch }
+  return { paypal, calls, api, log, fetch, sleep }
 }
 const purchase = {
   id: 'p-1',
@@ -128,10 +131,11 @@ describe('PayPal Orders v2 gateway contract', () => {
     )
   })
   it('normalizes non-JSON, timeout and network failures into PayPalError', async () => {
-    const html = new Response('<html>Bad gateway</html>', {
-      status: 502,
-      headers: { 'paypal-debug-id': 'debug-html' },
-    })
+    const html = () =>
+      new Response('<html>Bad gateway</html>', {
+        status: 502,
+        headers: { 'paypal-debug-id': 'debug-html' },
+      })
     const slow = () =>
       new Promise<Response>((_resolve, reject) =>
         setTimeout(
@@ -139,14 +143,22 @@ describe('PayPal Orders v2 gateway contract', () => {
           5,
         ),
       )
-    const { paypal, log } = gateway([html, slow, new TypeError('fetch failed')])
+    const failed = () => new TypeError('fetch failed')
+    const { paypal, api, log } = gateway([
+      ...[html(), html(), html()],
+      slow,
+      ...[failed(), failed(), failed()],
+    ])
     await expect(paypal.get('ORDER1')).rejects.toMatchObject({
       status: 502,
       issue: 'INVALID_RESPONSE',
       debugId: 'debug-html',
     })
-    await expect(paypal.get('ORDER1')).rejects.toMatchObject({ status: 0, issue: 'TIMEOUT' })
+    // An eligibility check is a POST without a request ID, so a timeout is not sent again.
+    await expect(paypal.eligibility(119900)).rejects.toMatchObject({ status: 0, issue: 'TIMEOUT' })
+    expect(api()).toHaveLength(4)
     await expect(paypal.get('ORDER1')).rejects.toMatchObject({ status: 0, issue: 'NETWORK_ERROR' })
+    expect(api()).toHaveLength(7)
     expect(JSON.stringify(log.mock.calls)).not.toContain('secret')
   })
   it('rejects a 200 response that is not JSON', async () => {
@@ -199,6 +211,123 @@ describe('PayPal Orders v2 gateway contract', () => {
     ])
     expect((await paypal.getRefund('R1')).id).toBe('R1')
     expect(api()[0]!.url).toBe(`${BASE}/v2/payments/refunds/R1`)
+  })
+})
+
+describe('retries after a rate limit or server error', () => {
+  const unavailable = (status: number, debugId: string, headers: Record<string, string> = {}) =>
+    Response.json(
+      { name: 'SERVICE_UNAVAILABLE', debug_id: debugId },
+      { status, headers: { 'paypal-debug-id': debugId, ...headers } },
+    )
+
+  it('succeeds when a 429 is followed by a 200, waiting as long as Retry-After asks', async () => {
+    const { paypal, api, sleep } = gateway([
+      unavailable(429, 'debug-429', { 'retry-after': '1' }),
+      Response.json(order),
+    ])
+    expect((await paypal.get('ORDER1')).id).toBe('ORDER1')
+    expect(api()).toHaveLength(2)
+    expect(sleep.mock.calls).toEqual([[1000]])
+  })
+
+  it('gives up after 2 retries when PayPal keeps answering 503', async () => {
+    const { paypal, api, log, sleep } = gateway([
+      unavailable(503, 'debug-1'),
+      unavailable(503, 'debug-2'),
+      unavailable(503, 'debug-3'),
+    ])
+    await expect(paypal.capture('ORDER1', 'capture-p-1')).rejects.toMatchObject({
+      status: 503,
+      issue: 'SERVICE_UNAVAILABLE',
+      debugId: 'debug-3',
+    })
+    expect(api()).toHaveLength(3)
+    expect(sleep).toHaveBeenCalledTimes(2)
+    // Each retry is logged with PayPal's debug ID, and never with a body or a token.
+    const events = log.mock.calls.map(([event]) => event as Record<string, unknown>)
+    expect(events.filter((e) => e.event === 'paypal_retry')).toEqual([
+      expect.objectContaining({ status: 503, retry: 1, debugId: 'debug-1' }),
+      expect.objectContaining({ status: 503, retry: 2, debugId: 'debug-2' }),
+    ])
+    expect(events.filter((e) => e.event === 'paypal_error')).toHaveLength(1)
+    expect(JSON.stringify(events)).not.toMatch(/token-|secret|Bearer/)
+  })
+
+  it('sends the same PayPal-Request-Id and body on every retry of a write', async () => {
+    const { paypal, api } = gateway([
+      unavailable(500, 'debug-500'),
+      unavailable(429, 'debug-429'),
+      Response.json(order, { status: 201 }),
+    ])
+    await paypal.create(purchase)
+    const sent = api()
+    expect(sent).toHaveLength(3)
+    expect(sent.map((call) => call.headers['PayPal-Request-Id'])).toEqual([
+      'create-p-1',
+      'create-p-1',
+      'create-p-1',
+    ])
+    expect(new Set(sent.map((call) => String(call.init.body))).size).toBe(1)
+  })
+
+  it('does not retry a 400 or any other client error', async () => {
+    const { paypal, api, sleep } = gateway([
+      Response.json(
+        { name: 'INVALID_REQUEST', details: [{ issue: 'MISSING_REQUIRED_PARAMETER' }] },
+        { status: 400 },
+      ),
+      declined(),
+      Response.json({ name: 'RESOURCE_NOT_FOUND' }, { status: 404 }),
+    ])
+    await expect(paypal.create(purchase)).rejects.toMatchObject({
+      status: 400,
+      issue: 'MISSING_REQUIRED_PARAMETER',
+    })
+    await expect(paypal.capture('ORDER1', 'capture-p-1')).rejects.toMatchObject({ status: 422 })
+    await expect(paypal.get('ORDER1')).rejects.toMatchObject({ status: 404 })
+    expect(api()).toHaveLength(3)
+    expect(sleep).not.toHaveBeenCalled()
+  })
+
+  it('still refreshes the token only once after a 401, alongside server-error retries', async () => {
+    const unauthorized = () => Response.json({ name: 'AUTHENTICATION_FAILURE' }, { status: 401 })
+    const { paypal, calls, api } = gateway([
+      unauthorized(),
+      unavailable(503, 'debug-503'),
+      unauthorized(),
+    ])
+    await expect(paypal.capture('ORDER1', 'capture-p-1')).rejects.toMatchObject({ status: 401 })
+    expect(api()).toHaveLength(3)
+    expect(calls.filter((call) => call.url.endsWith('/v1/oauth2/token'))).toHaveLength(2)
+    expect(api().map((call) => call.headers['PayPal-Request-Id'])).toEqual([
+      'capture-p-1',
+      'capture-p-1',
+      'capture-p-1',
+    ])
+  })
+
+  it('retries a timed-out capture under its request ID but never an unkeyed POST', async () => {
+    const timeout = () => Object.assign(new Error('timed out'), { name: 'TimeoutError' })
+    const { paypal, api, sleep } = gateway([timeout(), Response.json(order), timeout()])
+    expect((await paypal.capture('ORDER1', 'capture-p-1')).id).toBe('ORDER1')
+    expect(api()).toHaveLength(2)
+    await expect(paypal.eligibility(119900)).rejects.toMatchObject({ issue: 'TIMEOUT' })
+    expect(api()).toHaveLength(3)
+    expect(sleep).toHaveBeenCalledTimes(1)
+  })
+
+  it('backs off exponentially with jitter and caps every wait at 2 seconds', () => {
+    expect(retryDelay(1, null, () => 0)).toBe(150)
+    expect(retryDelay(1, null, () => 1)).toBe(300)
+    expect(retryDelay(2, null, () => 0)).toBe(300)
+    expect(retryDelay(2, null, () => 1)).toBe(600)
+    expect(retryDelay(6, null, () => 1)).toBe(2000)
+    expect(retryDelay(1, '0.5')).toBe(500)
+    expect(retryDelay(1, '120')).toBe(2000)
+    expect(retryDelay(1, new Date(Date.now() + 60_000).toUTCString())).toBe(2000)
+    // An unreadable Retry-After falls back to the backoff.
+    expect(retryDelay(1, 'soon', () => 1)).toBe(300)
   })
 })
 

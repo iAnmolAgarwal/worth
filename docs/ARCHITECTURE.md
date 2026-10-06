@@ -235,7 +235,7 @@ stateDiagram-v2
   completed --> completed: Duplicate response or late event
 ```
 
-PayPal create/capture request IDs derive from the persisted purchase ID and are reused on retry. Returned order identity, purchase reference, merchant, currency, amount, and capture count must match. A completed capture writes one expense and updates the profile version atomically. Order and capture IDs also have database uniqueness constraints.
+PayPal create/capture request IDs derive from the persisted purchase ID and are reused on retry. The gateway (`server/paypal.ts`) refreshes the OAuth token once after a 401 and retries a 429 or 5xx at most twice, with jittered exponential backoff from 300 ms (or PayPal's `Retry-After`), each wait capped at 2 s, and the same `PayPal-Request-Id`. Other 4xx answers are final. A timeout or network failure is retried only for a GET or a request with a request ID. Each retry is logged with PayPal's debug ID, never a body or token. Returned order identity, purchase reference, merchant, currency, amount, and capture count must match. A completed capture writes one expense and updates the profile version atomically. Order and capture IDs also have database uniqueness constraints.
 
 `src/paypalSdk.ts` loads the sandbox JavaScript SDK v6 with bounded initialization, retryable failures, and an instance cache keyed by public client ID. The checkout dialog (`src/Checkout.tsx`) checks PayPal eligibility and creates a one-time payment session with `commit: false`. It starts in the user's click handler and passes the server order promise to preserve browser popup permission. SDK approval updates the UI; it does not capture. If SDK loading or eligibility is unavailable, the server-provided approval URL remains a redirect fallback.
 
