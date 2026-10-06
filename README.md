@@ -126,7 +126,8 @@ credentials and the browser receives only the public client ID.
 
 - **Orders v2.** `POST /v2/checkout/orders` with `intent: CAPTURE`, one item at the catalog
   price, and the purchase ID as `reference_id`, `custom_id` and `invoice_id`;
-  `experience_context` sets the brand name to the demo store (the payee, not Worth), `NO_SHIPPING` and Worth's return and cancel URLs.
+  `experience_context` sets the brand name to the demo store (the payee, not Worth),
+  `NO_SHIPPING` and Worth's return and cancel URLs.
   `GET` reconciles state and `POST …/capture` captures after the buyer approves and the user
   confirms. `PayPal-Request-Id` is derived from the purchase ID, so retries are idempotent, and
   every returned order is checked for the purchase reference, merchant, currency, amount and

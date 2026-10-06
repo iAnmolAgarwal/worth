@@ -595,7 +595,7 @@ export function Checkout({
           <dl className="kvlist">
             <div>
               <dt>
-                {view === 'approved' ? `Pay ${product.merchant}` : `Paid to ${product.merchant}`}
+                {view === 'approved' ? `Pay ${product.merchant}` : `Payment to ${product.merchant}`}
               </dt>
               <dd className="num">{amount}</dd>
             </div>

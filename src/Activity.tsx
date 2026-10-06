@@ -192,7 +192,9 @@ export function Activity({
           <div className="s">
             {shortDate(t.date)} ·{' '}
             {t.source === 'purchase'
-              ? `${bought?.paymentPlan?.product === 'payIn4' ? 'Pay in 4' : 'Payment'} · Worth checkout`
+              ? `${bought?.paymentPlan?.product === 'payIn4' ? 'Pay in 4' : 'Payment'} to ${
+                  state.products.find((p) => p.id === bought?.productId)?.merchant ?? 'the store'
+                } · PayPal`
               : KIND_TEXT[t.kind]}
             {t.status === 'excluded' ? ' · not counted' : ''}
           </div>

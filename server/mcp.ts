@@ -435,8 +435,8 @@ function catalogMatch(item: string, amountCents: number): Product | undefined {
 
 function nextStep(decision: Decision, product: Product | undefined) {
   if (!product)
-    return 'This is not an item in Worth’s sandbox catalog, so Worth can check it but cannot prepare an order for it.'
-  const order = `It matches "${product.id}" in Worth’s sandbox catalog. Only if the person asks to buy it, call prepare_order with catalog_item_id "${product.id}"; the person then approves in PayPal.`
+    return 'This is not an item in the demo store’s catalog (Larkspur Supply), so Worth can check it but cannot prepare an order for it.'
+  const order = `It matches "${product.id}" in the demo store’s catalog (Larkspur Supply). Only if the person asks to buy it, call prepare_order with catalog_item_id "${product.id}"; the person then approves in PayPal.`
   return decision.status === 'affordable_now'
     ? order
     : `${order} Buying it today dips below their cushion, so prepare_order also needs acknowledge_below_cushion: true, which you may send only after the person explicitly says to go ahead anyway.`
@@ -640,7 +640,7 @@ async function prepareOrder(
     let message = result.message
     let summary = message
     if (result.code === 'UNKNOWN_ITEM')
-      message = `Worth prepares orders only for items in its sandbox catalog: ${CATALOG}.`
+      message = `Worth prepares orders only for items in the demo store’s catalog (Larkspur Supply): ${CATALOG}.`
     if (result.code === 'SHORTFALL_NOT_CONFIRMED') {
       const product = PRODUCTS.find((p) => p.id === args.catalog_item_id)!
       const comparison = compareOptions(plan.profile, plan.purchases, {
@@ -775,7 +775,7 @@ export function buildMcpServer(ctx: McpContext, caller: Caller, prepareLimiter: 
     'prepare_order',
     {
       title: 'Prepare a PayPal order for the person to approve',
-      description: `Prepare a PayPal sandbox order for an item in Worth’s sandbox catalog, behind the same checks as Worth’s own Buy button: no other checkout in progress, funds confirmed today, a complete plan and a fresh affordability check. Returns approval_url: present it to the PERSON as a link to open and approve in PayPal themselves; never open or approve it on their behalf. This tool never pays or captures; the person confirms the payment in Worth afterwards. ${QUOTE} Call it only when the person asks to buy. If buying today dips below their cushion, it refuses with SHORTFALL_NOT_CONFIRMED; pass acknowledge_below_cushion: true only after the person explicitly says to go ahead anyway. Catalog: ${CATALOG}.`,
+      description: `Prepare a PayPal sandbox order for an item in the demo store’s catalog (Larkspur Supply), behind the same checks as Worth’s own Buy button: no other checkout in progress, funds confirmed today, a complete plan and a fresh affordability check. Returns approval_url: present it to the PERSON as a link to open and approve in PayPal themselves; never open or approve it on their behalf. This tool never pays or captures; the person confirms the payment in Worth afterwards. ${QUOTE} Call it only when the person asks to buy. If buying today dips below their cushion, it refuses with SHORTFALL_NOT_CONFIRMED; pass acknowledge_below_cushion: true only after the person explicitly says to go ahead anyway. Catalog: ${CATALOG}.`,
       inputSchema: {
         catalog_item_id: z
           .string()

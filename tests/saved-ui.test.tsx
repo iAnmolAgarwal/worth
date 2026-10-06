@@ -450,8 +450,8 @@ describe('who is who: Worth is the shopper’s side, Larkspur Supply is the demo
         onEditPlan={vi.fn()}
       />,
     )
-    expect(screen.getByText('Paid to Larkspur Supply')).toBeTruthy()
-    expect(screen.getByText(/Worth sells nothing and never receives your money/)).toBeTruthy()
+    expect(screen.getByText('Payment to Larkspur Supply')).toBeTruthy()
+    expect(screen.getByText(/Worth sells nothing and never holds your money/)).toBeTruthy()
   })
 
   it('labels the store on Saved as a demo store standing in for any shop', () => {

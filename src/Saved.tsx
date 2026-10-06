@@ -611,7 +611,8 @@ export function Saved({
               </h2>
             </div>
             <p className="caption" style={{ marginBottom: 'var(--s-4)' }}>
-              {demoStoreRole(state.products[0]?.merchant ?? 'Larkspur Supply')}
+              {demoStoreRole(state.products[0]?.merchant ?? 'Larkspur Supply')} Nothing is sold or
+              shipped in this sandbox.
             </p>
             <div className="saved-grid">
               {more.map((product) => (
@@ -626,8 +627,7 @@ export function Saved({
           </section>
         )}
         <p className="caption" style={{ marginTop: 'var(--s-6)' }}>
-          Nothing is sold or shipped in the demo store. Items saved from Ask Worth that the store
-          doesn’t sell are assessments only.
+          Items saved from Ask Worth that the demo store doesn’t sell are assessments only.
         </p>
       </div>
       {confirming && (

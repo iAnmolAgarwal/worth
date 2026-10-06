@@ -132,7 +132,10 @@ export function decideAgentCheckout(input: CheckoutDecisionInput): CheckoutDecis
       'Worth prepares an order only when you ask to buy or check out. Ask again when you are ready.',
     )
   if (!product)
-    return refuse('UNKNOWN_ITEM', 'Worth can prepare orders only for items in its sandbox catalog.')
+    return refuse(
+      'UNKNOWN_ITEM',
+      'Worth can prepare orders only for items in the demo store’s catalog (Larkspur Supply).',
+    )
   if (
     !mentionsItem(ownWords(message), product.name) &&
     !mentionsItem(input.contextItemName ?? '', product.name)
@@ -216,7 +219,7 @@ export function checkoutGuards(input: {
  */
 export const CHECKOUT_GUARDS = [
   { id: 'asked', label: 'You asked to buy or check out, in your own words' },
-  { id: 'catalog_item', label: 'The item is in Worth’s sandbox catalog' },
+  { id: 'catalog_item', label: 'The item is in the demo store’s catalog (Larkspur Supply)' },
   { id: 'item_named', label: 'You named this item in the conversation' },
   { id: 'one_checkout', label: 'No other checkout is in progress' },
   { id: 'funds_today', label: 'Your funds are confirmed for today' },
