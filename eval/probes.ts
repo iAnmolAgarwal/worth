@@ -758,7 +758,7 @@ export const PROBES: Probe[] = [
   {
     id: 'PF5-pay-later-out-of-range',
     split: 'train',
-    covers: '§9 case 14: Pay in 4 above PayPal’s $1,500 maximum is not available',
+    covers: '§9 case 14: Pay in 4 above $2,000 is not available',
     kind: 'chat',
     turns: [
       {
@@ -772,9 +772,9 @@ export const PROBES: Probe[] = [
     ],
   },
   {
-    id: 'PF6-below-minimum',
+    id: 'PF6-small-amount-remainder',
     split: 'train',
-    covers: '§9 case 14: Pay in 4 below PayPal’s $30 minimum is not available',
+    covers: '§9 case 14: $10.03 is $2.53 then 3 × $2.50',
     kind: 'chat',
     turns: [
       {
@@ -782,7 +782,7 @@ export const PROBES: Probe[] = [
         expect: {
           assess: { amounts: [1003], dates: [T], item: /case/i },
           allowClarify: true,
-          payIn4: 'unavailable',
+          payIn4: 'strip',
         },
       },
     ],
