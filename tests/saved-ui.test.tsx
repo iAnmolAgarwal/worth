@@ -436,6 +436,31 @@ describe('Save for later in Ask Worth', () => {
   })
 })
 
+describe('who is who: Worth is the shopper’s side, Larkspur Supply is the demo store', () => {
+  it('says at checkout that the payment goes to the demo store, not Worth', () => {
+    routeApi(() => new Promise(() => undefined))
+    render(
+      <Checkout
+        state={makeState()}
+        product={PRODUCTS[0]!}
+        onClose={vi.fn()}
+        onUpdate={vi.fn()}
+        onViewActivity={vi.fn()}
+        onConfirmPlan={vi.fn()}
+        onEditPlan={vi.fn()}
+      />,
+    )
+    expect(screen.getByText('Paid to Larkspur Supply')).toBeTruthy()
+    expect(screen.getByText(/Worth sells nothing and never receives your money/)).toBeTruthy()
+  })
+
+  it('labels the store on Saved as a demo store standing in for any shop', () => {
+    render(<Saved {...savedProps} state={makeState()} />)
+    expect(screen.getByRole('heading', { name: 'Demo store · Larkspur Supply' })).toBeTruthy()
+    expect(screen.getByText(/standing in for any shop that takes PayPal/)).toBeTruthy()
+  })
+})
+
 describe('checkout honesty (fix #9)', () => {
   it('drops the PayPal note once the checkout is cancelled', () => {
     const state = makeState()

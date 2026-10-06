@@ -1,4 +1,5 @@
 import type { IncomingHttpHeaders } from 'node:http'
+import { DEMO_MERCHANT, PRODUCTS } from '../shared/seed.ts'
 import type { StoredPurchase } from './store.ts'
 
 export interface PayPalAmount {
@@ -370,6 +371,9 @@ export function createPayPalGateway(config: GatewayConfig): PayPalGateway {
   return {
     create(purchase) {
       const value = (purchase.amountCents / 100).toFixed(2)
+      // The payee is the store, not Worth: PayPal's approval page names the demo store the sandbox
+      // merchant stands in for, so Worth never looks like the seller.
+      const store = PRODUCTS.find((p) => p.id === purchase.productId)?.merchant ?? DEMO_MERCHANT
       return request<PayPalOrder>('/v2/checkout/orders', {
         method: 'POST',
         requestId: `create-${purchase.id}`,
@@ -381,7 +385,7 @@ export function createPayPalGateway(config: GatewayConfig): PayPalGateway {
               custom_id: purchase.id,
               // PayPal refuses a second payment for the same invoice ID.
               invoice_id: purchase.id,
-              description: `Worth sandbox: ${purchase.name}`.slice(0, 127),
+              description: `${purchase.name} from ${store} (sandbox demo store)`.slice(0, 127),
               amount: {
                 currency_code: 'USD',
                 value,
@@ -401,7 +405,7 @@ export function createPayPalGateway(config: GatewayConfig): PayPalGateway {
           payment_source: {
             paypal: {
               experience_context: {
-                brand_name: 'Worth — sandbox demo',
+                brand_name: `${store} (demo store)`.slice(0, 127),
                 user_action: 'CONTINUE',
                 shipping_preference: 'NO_SHIPPING',
                 return_url: returnUrl(config.origin, purchase.id, 'approved'),

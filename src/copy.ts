@@ -17,6 +17,12 @@ export const claudeUses = (on: boolean): [string, string][] =>
 /** What reaches Channel3 when Worth looks for similar items. It applies with the assistant off too. */
 export const CHANNEL3_SHARED_DATA =
   'A generic kind of item (such as “desk chair”) and a price limit rounded down to $25, even when the assistant is off'
+/**
+ * Who's who in the demo: Worth is on the shopper's side and sells nothing; the sandbox merchant
+ * stands in for any store that takes PayPal. Shown wherever the store and Worth meet.
+ */
+export const demoStoreRole = (store: string) =>
+  `Worth sells nothing and never receives your money. ${store} is a demo store standing in for any shop that takes PayPal; in this sandbox, your PayPal payment goes to the store.`
 /** A saved item the demo store doesn't sell (amendment A3): Worth assesses it, never checks it out. */
 export const ASSESSMENT_ONLY = 'Assessment only — not sold in the demo store'
 /** A saved wait plan whose day has come (C-17). */

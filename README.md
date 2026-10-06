@@ -27,6 +27,12 @@ session with a sample plan (Maya), kept for 24 hours.
 <!-- TODO(coordinator): fill in a dedicated judge sandbox buyer account, never the team's own. -->
 - **PayPal sandbox buyer** for the checkout step: email `TODO`, password `TODO`. If these still
   read `TODO`, ask the maintainer.
+- **Who's who:** Worth is the shopper's side. It reads your plan and helps you decide when and
+  how to pay, and it sells nothing. **Larkspur Supply is a demo store** that stands in for any
+  shop that takes PayPal: the sandbox merchant account plays that store, so PayPal's approval
+  page names "Larkspur Supply (demo store)" as the payee, never Worth. In a real deployment Worth
+  would sit with the shopper (in the PayPal app, or as a check before the PayPal button) and the
+  payment would go to the actual shop.
 - **What PayPal does:** Orders v2 create and capture, the official JS SDK v6 PayPal button and
   popup, PayPal Messages for Pay in 4, a server-side Pay Later eligibility check, and verified
   webhooks that turn a refund into a review item. Sandbox only.
@@ -120,7 +126,7 @@ credentials and the browser receives only the public client ID.
 
 - **Orders v2.** `POST /v2/checkout/orders` with `intent: CAPTURE`, one item at the catalog
   price, and the purchase ID as `reference_id`, `custom_id` and `invoice_id`;
-  `experience_context` sets the brand name, `NO_SHIPPING` and Worth's return and cancel URLs.
+  `experience_context` sets the brand name to the demo store (the payee, not Worth), `NO_SHIPPING` and Worth's return and cancel URLs.
   `GET` reconciles state and `POST …/capture` captures after the buyer approves and the user
   confirms. `PayPal-Request-Id` is derived from the purchase ID, so retries are idempotent, and
   every returned order is checked for the purchase reference, merchant, currency, amount and
