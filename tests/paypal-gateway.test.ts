@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createPayPalGateway, PayPalError, retryDelay } from '../server/paypal.ts'
 import type { StoredPurchase } from '../server/store.ts'
 
@@ -328,6 +328,153 @@ describe('retries after a rate limit or server error', () => {
     expect(retryDelay(1, new Date(Date.now() + 60_000).toUTCString())).toBe(2000)
     // An unreadable Retry-After falls back to the backoff.
     expect(retryDelay(1, 'soon', () => 1)).toBe(300)
+  })
+
+  it('never retries sooner than the backoff, whatever Retry-After says', () => {
+    const past = new Date(Date.now() - 60_000).toUTCString()
+    for (const retryAfter of ['0', '-5', past]) {
+      expect(retryDelay(1, retryAfter, () => 0)).toBe(150)
+      expect(retryDelay(2, retryAfter, () => 1)).toBe(600)
+    }
+  })
+
+  it('does not retry Pay Later eligibility, which is advisory', async () => {
+    const { paypal, api, sleep } = gateway([unavailable(503, 'debug-503'), Response.json({})])
+    await expect(paypal.eligibility(119900)).rejects.toMatchObject({ status: 503 })
+    expect(api()).toHaveLength(1)
+    expect(sleep).not.toHaveBeenCalled()
+  })
+
+  it('treats a body that fails to arrive as a transport failure, never an empty success', async () => {
+    const broken = () =>
+      new Response(
+        new ReadableStream({
+          start: (controller) => controller.error(new TypeError('terminated')),
+        }),
+        { status: 201, headers: { 'Content-Type': 'application/json' } },
+      )
+    const { paypal, api } = gateway([broken(), broken(), broken(), broken()])
+    // A keyed capture is sent again under the same request ID, then reported as uncertain.
+    await expect(paypal.capture('ORDER1', 'capture-p-1')).rejects.toMatchObject({
+      status: 0,
+      issue: 'NETWORK_ERROR',
+    })
+    expect(api()).toHaveLength(3)
+    await expect(paypal.eligibility(119900)).rejects.toMatchObject({
+      status: 0,
+      issue: 'NETWORK_ERROR',
+    })
+    expect(api()).toHaveLength(4)
+  })
+})
+
+describe('one deadline for each PayPal call', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  /**
+   * A gateway on fake timers with its own default timeouts and waits. `hang` paths never answer:
+   * their request (or, for `hang-body`, only the body) fails when the gateway aborts it.
+   */
+  function slowPayPal(
+    reply: (path: string) => Response | 'hang' | 'hang-body',
+    config: { budgetMs?: number } = {},
+  ) {
+    vi.useFakeTimers()
+    const sends: string[] = []
+    const fetch = vi.fn(async (url: string | URL | Request, init: RequestInit = {}) => {
+      const path = String(url).slice(BASE.length)
+      if (path === '/v1/oauth2/token')
+        return Response.json({ access_token: 'token', expires_in: 3600 })
+      sends.push(path)
+      const signal = init.signal!
+      const aborted = () => signal.reason as Error
+      const answer = reply(path)
+      if (answer === 'hang')
+        return new Promise<Response>((_resolve, reject) =>
+          signal.addEventListener('abort', () => reject(aborted())),
+        )
+      if (answer === 'hang-body')
+        return new Response(
+          new ReadableStream({
+            start: (controller) =>
+              signal.addEventListener('abort', () => controller.error(aborted())),
+          }),
+        )
+      return answer
+    })
+    const paypal = createPayPalGateway({
+      clientId: 'client',
+      secret: 'secret',
+      origin: 'https://worth.example.com',
+      fetch: fetch as unknown as typeof globalThis.fetch,
+      log: vi.fn(),
+      ...config,
+    })
+    /** Runs one call to the end and reports how long it took on the fake clock. */
+    async function timed<T>(call: () => Promise<T>) {
+      const start = Date.now()
+      const settled = call().then(
+        (value) => ({ value, ms: Date.now() - start }),
+        (error: unknown) => ({ error, ms: Date.now() - start }),
+      )
+      await vi.advanceTimersByTimeAsync(120_000)
+      return settled
+    }
+    return { paypal, sends, timed }
+  }
+
+  it('ends a GET that PayPal never answers at the 20 s budget', async () => {
+    const { paypal, sends, timed } = slowPayPal(() => 'hang')
+    const result = await timed(() => paypal.get('ORDER1'))
+    expect(result).toMatchObject({ error: { status: 0, issue: 'TIMEOUT' }, ms: 20_000 })
+    // The first attempt used the whole budget, so no retry started.
+    expect(sends).toHaveLength(1)
+  })
+
+  it('gives a retry only the time left in the budget', async () => {
+    const { paypal, sends, timed } = slowPayPal(() => 'hang', { budgetMs: 25_000 })
+    const result = await timed(() => paypal.capture('ORDER1', 'capture-p-1'))
+    expect(result).toMatchObject({ error: { status: 0, issue: 'TIMEOUT' }, ms: 25_000 })
+    expect(sends).toHaveLength(2)
+  })
+
+  it('starts no retry with less than 3 s of the budget left', async () => {
+    const { paypal, sends, timed } = slowPayPal(
+      () => Response.json({}, { status: 503, headers: { 'retry-after': '2' } }),
+      { budgetMs: 5_000 },
+    )
+    const result = await timed(() => paypal.get('ORDER1'))
+    // 0 s: 503, wait 2 s (3 s left after it). 2 s: 503, a second wait would leave 1 s, so stop.
+    expect(result).toMatchObject({ error: { status: 503 }, ms: 2_000 })
+    expect(sends).toHaveLength(2)
+  })
+
+  it('times out a body that never arrives instead of reading it as success', async () => {
+    const { paypal, sends, timed } = slowPayPal(() => 'hang-body')
+    const result = await timed(() => paypal.capture('ORDER1', 'capture-p-1'))
+    expect(result).toMatchObject({ error: { status: 0, issue: 'TIMEOUT' }, ms: 20_000 })
+    expect(sends).toHaveLength(1)
+  })
+
+  it('bounds the capture route (lookup, then capture) at 40 s, ending in a timeout', async () => {
+    const { paypal, sends, timed } = slowPayPal(() => 'hang')
+    const lookup = await timed(() => paypal.get('ORDER1'))
+    const capture = await timed(() => paypal.capture('ORDER1', 'capture-p-1'))
+    // A timeout is status 0, which the capture route records as PAYPAL_UNCERTAIN.
+    expect(capture).toMatchObject({ error: { status: 0, issue: 'TIMEOUT' } })
+    expect(lookup.ms + capture.ms).toBe(40_000)
+    expect(sends).toEqual(['/v2/checkout/orders/ORDER1', '/v2/checkout/orders/ORDER1/capture'])
+  })
+
+  it('bounds a checkout start (eligibility, then the order) at 25 s', async () => {
+    const { paypal, sends, timed } = slowPayPal(() => 'hang')
+    const eligibility = await timed(() => paypal.eligibility(119900))
+    const order = await timed(() => paypal.create(purchase))
+    expect(eligibility).toMatchObject({ error: { issue: 'TIMEOUT' }, ms: 5_000 })
+    expect(order).toMatchObject({ error: { status: 0, issue: 'TIMEOUT' }, ms: 20_000 })
+    expect(sends).toHaveLength(2)
   })
 })
 

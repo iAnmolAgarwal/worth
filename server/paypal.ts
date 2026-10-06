@@ -128,10 +128,24 @@ export interface GatewayConfig {
   fetch?: typeof fetch
   /** Receives PayPal debug IDs for failed calls. Never request bodies or credentials. */
   log?: (event: Record<string, unknown>) => void
+  /** One attempt's limit, including reading the body. */
   timeoutMs?: number
+  /** One call's limit across its attempts, token fetches and waits; see REQUEST_BUDGET_MS. */
+  budgetMs?: number
   /** Waits between retries. Injected in tests; defaults to a timer. */
   sleep?: (ms: number) => Promise<void>
 }
+
+/**
+ * One call's total time, retries included. Twenty seconds keeps a capture (an order lookup, then
+ * the capture) under 40 s and a checkout start (eligibility, then the order) under 25 s, well inside
+ * the 60 s an MCP client waits.
+ */
+const REQUEST_BUDGET_MS = 20_000
+/** Pay Later eligibility is advisory and falls back to the range, so it gets one short attempt. */
+const ELIGIBILITY_BUDGET_MS = 5_000
+/** No retry starts with less than this left of the call's budget; the last error is final. */
+const MIN_RETRY_BUDGET_MS = 3_000
 
 /** A 429 or 5xx is retried at most this many times, with the same PayPal-Request-Id. */
 const MAX_RETRIES = 2
@@ -140,23 +154,26 @@ const RETRY_BASE_MS = 300
 const RETRY_CAP_MS = 2_000
 
 /**
- * The wait before retry `retry` (1-based): PayPal's Retry-After when it sends one, otherwise
- * exponential backoff from RETRY_BASE_MS with jitter, so parallel callers do not retry in step.
+ * The wait before retry `retry` (1-based): exponential backoff from RETRY_BASE_MS with jitter, so
+ * parallel callers do not retry in step, or PayPal's longer Retry-After. A Retry-After of 0, a
+ * negative one or a past date never means an immediate retry.
  */
 export function retryDelay(retry: number, retryAfter: string | null, random = Math.random) {
+  const ceiling = Math.min(RETRY_CAP_MS, RETRY_BASE_MS * 2 ** (retry - 1))
+  const backoff = Math.round(ceiling / 2 + random() * (ceiling / 2))
   if (retryAfter) {
     const seconds = Number(retryAfter)
     const ms = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(retryAfter) - Date.now()
-    if (Number.isFinite(ms)) return Math.min(RETRY_CAP_MS, Math.max(0, Math.round(ms)))
+    if (Number.isFinite(ms)) return Math.min(RETRY_CAP_MS, Math.max(backoff, Math.round(ms)))
   }
-  const ceiling = Math.min(RETRY_CAP_MS, RETRY_BASE_MS * 2 ** (retry - 1))
-  return Math.round(ceiling / 2 + random() * (ceiling / 2))
+  return backoff
 }
 
 export function createPayPalGateway(config: GatewayConfig): PayPalGateway {
   const base = 'https://api-m.sandbox.paypal.com'
   const http = config.fetch ?? fetch
   const timeoutMs = config.timeoutMs ?? 20_000
+  const budgetMs = config.budgetMs ?? REQUEST_BUDGET_MS
   const sleep =
     config.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
   const log =
@@ -166,16 +183,26 @@ export function createPayPalGateway(config: GatewayConfig): PayPalGateway {
 
   /** One fetch, with transport failures and unreadable bodies turned into PayPalError. */
   async function send(path: string, init: RequestInit, timeout: number) {
+    const controller = new AbortController()
+    const timer = setTimeout(
+      () => controller.abort(new DOMException('PayPal did not answer in time', 'TimeoutError')),
+      timeout,
+    )
     let response: Response
+    let text: string
     try {
-      response = await http(`${base}${path}`, { ...init, signal: AbortSignal.timeout(timeout) })
+      response = await http(`${base}${path}`, { ...init, signal: controller.signal })
+      // The body is read under the same timeout. A body that fails to arrive is a transport
+      // failure, never an empty success: a capture's result would otherwise be lost.
+      text = await response.text()
     } catch (error) {
       const name = error instanceof Error ? error.name : ''
       const issue = name === 'TimeoutError' || name === 'AbortError' ? 'TIMEOUT' : 'NETWORK_ERROR'
       log({ event: 'paypal_transport_error', path: logPath(path), issue })
       throw new PayPalError(0, issue)
+    } finally {
+      clearTimeout(timer)
     }
-    const text = await response.text().catch(() => '')
     let body: Record<string, unknown> = {}
     let readable = true
     if (text) {
@@ -193,8 +220,8 @@ export function createPayPalGateway(config: GatewayConfig): PayPalGateway {
     return { response, body, readable, debugId }
   }
 
-  async function accessToken(refresh = false) {
-    if (!refresh && token && token.until > Date.now()) return token.value
+  async function accessToken(timeout: number) {
+    if (token && token.until > Date.now()) return token.value
     const { response, body, readable, debugId } = await send(
       '/v1/oauth2/token',
       {
@@ -205,7 +232,7 @@ export function createPayPalGateway(config: GatewayConfig): PayPalGateway {
         },
         body: 'grant_type=client_credentials',
       },
-      15_000,
+      Math.min(15_000, timeout),
     )
     if (!response.ok || !readable || typeof body.access_token !== 'string') {
       log({ event: 'paypal_auth_failed', status: response.status, debugId })
@@ -227,6 +254,9 @@ export function createPayPalGateway(config: GatewayConfig): PayPalGateway {
       rawBody?: string
       requestId?: string
       headers?: Record<string, string>
+      /** Retries after a 429, 5xx or transport failure; MAX_RETRIES by default. */
+      retries?: number
+      budgetMs?: number
     } = {},
   ): Promise<T> {
     const method = options.method ?? 'GET'
@@ -234,17 +264,29 @@ export function createPayPalGateway(config: GatewayConfig): PayPalGateway {
       options.rawBody ?? (options.body === undefined ? undefined : JSON.stringify(options.body))
     // A GET, or a write PayPal can match by its request ID, is safe to send again after a timeout.
     const repeatable = method === 'GET' || Boolean(options.requestId)
+    const maxRetries = options.retries ?? MAX_RETRIES
+    // Every attempt, token fetch and wait shares one deadline, so a call ends in bounded time.
+    const deadline = Date.now() + Math.min(budgetMs, options.budgetMs ?? budgetMs)
     let refreshed = false
     let retries = 0
+    const left = (wait = 0) => deadline - Date.now() - wait
+    const canRetry = (delayMs: number) =>
+      retries < maxRetries && left(delayMs) >= MIN_RETRY_BUDGET_MS
     for (;;) {
       let sent: Awaited<ReturnType<typeof send>>
       try {
+        const bearer = await accessToken(left())
+        const timeout = Math.min(timeoutMs, left())
+        if (timeout <= 0) {
+          log({ event: 'paypal_transport_error', path: logPath(path), issue: 'TIMEOUT' })
+          throw new PayPalError(0, 'TIMEOUT')
+        }
         sent = await send(
           path,
           {
             method,
             headers: {
-              Authorization: `Bearer ${await accessToken()}`,
+              Authorization: `Bearer ${bearer}`,
               'Content-Type': 'application/json',
               Prefer: 'return=representation',
               ...(options.requestId ? { 'PayPal-Request-Id': options.requestId } : {}),
@@ -252,13 +294,13 @@ export function createPayPalGateway(config: GatewayConfig): PayPalGateway {
             },
             ...(payload === undefined ? {} : { body: payload }),
           },
-          timeoutMs,
+          timeout,
         )
       } catch (error) {
         const transport = error instanceof PayPalError && error.status === 0
-        if (!transport || !repeatable || retries >= MAX_RETRIES) throw error
+        const delayMs = retryDelay(retries + 1, null)
+        if (!transport || !repeatable || !canRetry(delayMs)) throw error
         retries++
-        const delayMs = retryDelay(retries, null)
         log({
           event: 'paypal_retry',
           method,
@@ -272,16 +314,16 @@ export function createPayPalGateway(config: GatewayConfig): PayPalGateway {
       }
       const { response, body, readable, debugId } = sent
       // A revoked or expired token is refreshed once; the request ID keeps a retried write safe.
-      if (response.status === 401 && !refreshed) {
+      if (response.status === 401 && !refreshed && left() >= MIN_RETRY_BUDGET_MS) {
         refreshed = true
         token = undefined
         continue
       }
       // Rate limits and server errors are retried a bounded number of times with the same request
       // ID, so PayPal returns the first result instead of acting twice. Other 4xx are final.
-      if ((response.status === 429 || response.status >= 500) && retries < MAX_RETRIES) {
+      const delayMs = retryDelay(retries + 1, response.headers.get('retry-after'))
+      if ((response.status === 429 || response.status >= 500) && canRetry(delayMs)) {
         retries++
-        const delayMs = retryDelay(retries, response.headers.get('retry-after'))
         log({
           event: 'paypal_retry',
           method,
@@ -422,6 +464,8 @@ export function createPayPalGateway(config: GatewayConfig): PayPalGateway {
         eligible_methods?: Record<string, { product_code?: string; country_code?: string }>
       }>('/v2/payments/find-eligible-methods', {
         method: 'POST',
+        retries: 0,
+        budgetMs: ELIGIBILITY_BUDGET_MS,
         body: {
           customer: { country_code: 'US' },
           purchase_units: [
