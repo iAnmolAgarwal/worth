@@ -34,7 +34,7 @@ import type {
   Transaction,
 } from '../shared/types.ts'
 import { ACTIVE, RETENTION_MS, SESSION_DAY_MS, Store, publicPurchase } from './store.ts'
-import type { SessionData, StoredPurchase } from './store.ts'
+import type { SessionData, StoredPurchase, VaultRow } from './store.ts'
 import {
   approvalLink,
   createPayPalGateway,
@@ -43,7 +43,7 @@ import {
   toCents,
   validateOrder,
 } from './paypal.ts'
-import type { PayPalGateway, PayPalOrder } from './paypal.ts'
+import type { PayPalGateway, PayPalOrder, PayPalVault } from './paypal.ts'
 import { checkoutGuards, decideAgentCheckout } from './agentCheckout.ts'
 import type {
   PrepareCheckoutRequest,
@@ -282,10 +282,33 @@ const DECLINE_MESSAGES: Record<string, string> = {
 }
 const CANCELLED_IN_PAYPAL =
   'You cancelled in PayPal. Approve the payment again when you are ready, or cancel this checkout.'
+const ONE_TAP_UNCERTAIN =
+  'PayPal didn’t confirm this payment in time. The amount stays set aside. Check again: Worth asks PayPal about the same payment, so you can’t be charged twice.'
 const UNCERTAIN_CAPTURE =
   'Payment confirmation is uncertain. Your amount stays reserved; retry to check PayPal before any further action.'
 const REJECTED_CAPTURE =
   'PayPal did not accept this payment, and nothing was charged. Approve it again in PayPal, or cancel this checkout.'
+/** Why a one-tap payment fell back to the regular PayPal checkout; nothing was charged in any. */
+const ONE_TAP_FALLBACK = {
+  declined:
+    'PayPal declined your saved PayPal for this payment, and nothing was charged. Use Buy with PayPal to choose another way to pay.',
+  action:
+    'PayPal wants you to confirm this payment yourself, and nothing was charged. Use Buy with PayPal to finish it in PayPal.',
+  revoked:
+    'Your saved PayPal can no longer be used (it may have been removed in PayPal), and nothing was charged. Use Buy with PayPal instead, or save PayPal again.',
+} as const
+/** PayPal issues that mean the saved wallet itself is gone or no longer usable by Worth. */
+const REVOKED_ISSUES = new Set([
+  'PERMISSION_DENIED',
+  'TOKEN_NOT_FOUND',
+  'RESOURCE_NOT_FOUND',
+  'INVALID_RESOURCE_ID',
+  'PAYMENT_SOURCE_CANNOT_BE_USED',
+  'PAYMENT_SOURCE_INFO_CANNOT_BE_VERIFIED',
+])
+/** A setup token expires in PayPal after three days; Worth stops accepting it after one. */
+const SETUP_TOKEN_TTL_MS = 24 * 60 * 60 * 1000
+const PAYPAL_ID = /^[A-Za-z0-9_-]{1,64}$/
 /** PayPal's Pay Later answer is cached per price band for about ten minutes. */
 const ELIGIBILITY_TTL_MS = 10 * 60_000
 const ELIGIBILITY_RETRY_MS = 60_000
@@ -325,6 +348,12 @@ export function createApp(options: AppOptions = {}) {
           webhookId: config.paypalWebhookId,
         })
       : undefined)
+  /** PayPal Vault (one-tap buying), offered only while the app's PayPal token allows it. */
+  const vault = paypal?.vault
+  const vaultOn = () => Boolean(vault?.enabled())
+  // A gateway made here learns its Vault scope from its first token, before any page asks.
+  if (vault && !options.paypal)
+    void vault.check().catch(() => console.warn('PayPal: could not check the Vault feature yet.'))
   const chat =
     options.chat ??
     (config.anthropicKey
@@ -346,7 +375,33 @@ export function createApp(options: AppOptions = {}) {
   // Behind a proxy, req.ip must be the client address the proxy appended, not the proxy itself.
   if (config.trustProxy) app.set('trust proxy', config.trustProxy)
   app.locals.store = store
-  app.locals.cleanup = () => store.cleanup(now().getTime())
+  /** Deletes queued saved wallets in PayPal; tests await `app.locals.vaultDrain`. */
+  let draining: Promise<void> | undefined
+  function drainVaultDeletions(): Promise<void> {
+    if (!vault) return Promise.resolve()
+    if (draining) return draining
+    draining = (async () => {
+      for (const { paymentTokenId } of store.vaultDeletions()) {
+        let done = false
+        try {
+          await vault.deletePaymentToken(paymentTokenId)
+          done = true
+        } catch {
+          console.warn('PayPal: a saved wallet could not be deleted yet; it will be retried.')
+        }
+        store.finishVaultDeletion(paymentTokenId, done)
+      }
+    })().finally(() => {
+      draining = undefined
+    })
+    app.locals.vaultDrain = draining
+    return draining
+  }
+  app.locals.cleanup = () => {
+    const deleted = store.cleanup(now().getTime())
+    void drainVaultDeletions()
+    return deleted
+  }
   /** For payment webhooks: records a refund for the user to review, once per refund ID. */
   app.locals.recordRefund = (
     sessionId: string,
@@ -462,6 +517,7 @@ export function createApp(options: AppOptions = {}) {
     const saved = publicSaved(data.saved, day, purchases)
     const projection = fundsProjection(data, purchases, day)
     const { saved: _saved, createdAt: _created, keep30: _keep, demoClock, ...rest } = data
+    const wallet = vaultOn() ? store.vault(id) : undefined
     return {
       ...rest,
       sessionKey: createHash('sha256').update(id).digest('hex').slice(0, 20),
@@ -476,11 +532,20 @@ export function createApp(options: AppOptions = {}) {
       },
       ...(demoClock && data.profile.source === 'demo' ? { demoClock } : {}),
       ...(projection ? { fundsProjection: projection } : {}),
+      ...(wallet?.paymentTokenId
+        ? {
+            savedPayPal: {
+              ...(wallet.email ? { email: wallet.email } : {}),
+              savedAt: new Date(wallet.saved ?? now().getTime()).toISOString(),
+            },
+          }
+        : {}),
       today: day,
       config: {
         ai: chat ? 'anthropic' : 'demo',
         paypal: paypal ? 'sandbox' : 'demo',
         ...(paypal && config.paypalClientId ? { paypalClientId: config.paypalClientId } : {}),
+        ...(vaultOn() ? { vault: true } : {}),
         ...(chat ? { model: config.anthropicModel } : {}),
         alternatives: channel3.health(),
       },
@@ -705,6 +770,8 @@ export function createApp(options: AppOptions = {}) {
   }
   async function ensureOrder(id: string, purchase: StoredPurchase) {
     if (purchase.orderId) return purchase
+    // A one-tap order is created only by the one-tap path, with its own request (create = capture).
+    if (purchase.oneTap) return payWithVault(id, purchase)
     if (!paypal)
       throw new HttpError(503, 'Sandbox credentials are not configured.', 'PAYPAL_UNAVAILABLE')
     try {
@@ -744,6 +811,113 @@ export function createApp(options: AppOptions = {}) {
         'PAYPAL_UNCERTAIN',
       )
     }
+  }
+  /**
+   * Pays a one-tap purchase from the saved wallet. PayPal creates, completes and captures the
+   * order in one call, so every guard has already run. The PayPal-Request-Id is
+   * `create-<purchase id>`: a retry after an unclear answer gets PayPal's first result, never a
+   * second charge. The caller holds the purchase lock.
+   */
+  async function payWithVault(
+    id: string,
+    purchase: StoredPurchase,
+    clientMetadataId?: string,
+  ): Promise<StoredPurchase> {
+    if (!vault || !purchase.vaultTokenId)
+      throw new HttpError(409, 'Save PayPal first, or use Buy with PayPal.', 'VAULT_NOT_SAVED')
+    const attempting: StoredPurchase = {
+      ...purchase,
+      captureAttemptedAt: purchase.captureAttemptedAt ?? now().toISOString(),
+    }
+    delete attempting.lastError
+    store.putPurchase(id, attempting)
+    let order: PayPalOrder
+    try {
+      order = await vault.createOrder(
+        attempting,
+        purchase.vaultTokenId,
+        clientMetadataId ? { clientMetadataId } : {},
+      )
+      // The full representation names the merchant; an order without it is read back once.
+      if (!order.purchase_units?.[0]?.payee?.merchant_id && PAYPAL_ID.test(order.id ?? ''))
+        order = await paypal!.get(order.id)
+    } catch (error) {
+      return oneTapFailed(id, attempting, error)
+    }
+    // The same checks as every order: purchase reference, amount, merchant, one capture.
+    const result = reconcile(id, attempting, order)
+    if (result.status === 'completed' || result.status === 'pending') return result
+    if (result.status === 'unknown')
+      throw new HttpError(502, ONE_TAP_UNCERTAIN, 'PAYPAL_UNCERTAIN', undefined, {
+        purchase: publicPurchase(result),
+      })
+    // PAYER_ACTION_REQUIRED or a declined capture: nothing was captured, and Worth never will.
+    return oneTapFallback(id, result, order.status === 'PAYER_ACTION_REQUIRED' ? 'action' : 'declined')
+  }
+  /** Ends a one-tap attempt that charged nothing and sends the user to the regular checkout. */
+  function oneTapFallback(
+    id: string,
+    purchase: StoredPurchase,
+    reason: keyof typeof ONE_TAP_FALLBACK,
+  ): never {
+    const current = store.purchase(purchase.id, id) ?? purchase
+    const failed: StoredPurchase = {
+      ...current,
+      status: 'failed',
+      lastError: { code: 'ONE_TAP_FALLBACK', message: ONE_TAP_FALLBACK[reason] },
+    }
+    delete failed.captureAttemptedAt
+    store.putPurchase(id, failed)
+    if (reason === 'revoked') forgetWallet(id)
+    console.warn('Worth one-tap fell back to checkout:', reason)
+    throw new HttpError(409, ONE_TAP_FALLBACK[reason], 'ONE_TAP_FALLBACK', undefined, {
+      purchase: publicPurchase(failed),
+      reason,
+    })
+  }
+  /**
+   * Classifies a failed one-tap create. PayPal refusing the request (a 4xx) means no order was
+   * paid; anything else may have charged, so the amount stays reserved until a retry asks again.
+   */
+  function oneTapFailed(id: string, attempted: StoredPurchase, error: unknown): StoredPurchase {
+    const stored = store.purchase(attempted.id, id)!
+    if (stored.status === 'completed') return stored
+    if (error instanceof HttpError) throw error
+    if (
+      error instanceof PayPalError &&
+      error.status >= 400 &&
+      error.status < 500 &&
+      error.status !== 408 &&
+      error.status !== 429
+    )
+      return oneTapFallback(
+        id,
+        stored,
+        error.issue === 'PAYER_ACTION_REQUIRED'
+          ? 'action'
+          : error.issue === 'INSTRUMENT_DECLINED'
+            ? 'declined'
+            : REVOKED_ISSUES.has(error.issue) || error.status === 404
+              ? 'revoked'
+              : 'declined',
+      )
+    const unknown: StoredPurchase = {
+      ...stored,
+      status: 'unknown',
+      lastError: { code: 'PAYPAL_UNCERTAIN', message: ONE_TAP_UNCERTAIN },
+    }
+    store.putPurchase(id, unknown)
+    throw new HttpError(502, ONE_TAP_UNCERTAIN, 'PAYPAL_UNCERTAIN', undefined, {
+      purchase: publicPurchase(unknown),
+    })
+  }
+  /** Forgets the session's saved wallet here and queues its deletion in PayPal. */
+  function forgetWallet(id: string) {
+    const wallet = store.vault(id)
+    if (!wallet?.paymentTokenId) return
+    store.queueVaultDeletion(wallet.paymentTokenId, now().getTime())
+    store.clearVaultToken(id)
+    void drainVaultDeletions()
   }
   /** Pay in 4 availability for one amount: the configured range, then PayPal's own check. */
   async function payIn4Eligibility(amountCents: number): Promise<PayIn4Eligibility> {
@@ -1034,6 +1208,20 @@ export function createApp(options: AppOptions = {}) {
       throw new HttpError(401, 'Webhook signature verification failed.', 'INVALID_WEBHOOK')
     const event = webhookEvent.parse(JSON.parse(raw))
     if (store.hasEvent(event.id)) return res.json({ received: true, duplicate: true })
+    if (event.event_type.startsWith('VAULT.PAYMENT-TOKEN.')) {
+      const tokenId = event.resource.id
+      if (typeof tokenId !== 'string' || !PAYPAL_ID.test(tokenId))
+        return res.json({ received: true, ignored: true })
+      const gone = /^VAULT\.PAYMENT-TOKEN\.(?:DELETED|DELETION-INITIATED)$/.test(event.event_type)
+      // Deleted in PayPal, by Worth or by the buyer: nothing is left to delete.
+      if (gone) store.finishVaultDeletion(tokenId, true)
+      const owner = store.vaultByPaymentToken(tokenId)
+      if (!owner) return res.json({ received: true, ignored: true })
+      // A buyer who removes Worth in their PayPal settings revokes the saved wallet here too.
+      if (gone) store.clearVaultToken(owner)
+      store.recordEvent(event.id, owner)
+      return res.json({ received: true })
+    }
     if (/^PAYMENT\.CAPTURE\.(?:REFUNDED|REVERSED)$/.test(event.event_type)) {
       const outcome = await handleRefundEvent(event.resource)
       if (outcome.sessionId) store.recordEvent(event.id, outcome.sessionId)
@@ -1332,7 +1520,9 @@ export function createApp(options: AppOptions = {}) {
     const previous = sessionId(res)
     noActive(previous)
     const id = startSession(req, res, true)
+    // Deleting the session queues its saved PayPal wallet, if any, for deletion in PayPal.
     store.delete(previous)
+    void drainVaultDeletions()
     res.json(state(id))
   })
   app.post('/api/consent', (req, res) => {
@@ -1424,6 +1614,290 @@ export function createApp(options: AppOptions = {}) {
       mode: purchase.mode,
       state: state(id),
     })
+  })
+  /**
+   * PayPal Vault: "Save PayPal for one-tap buy" (save without a purchase) and the one-tap buy on a
+   * wait plan's day. Only the browser's own buttons reach these routes; no agent tool does.
+   */
+  const vaultLimiter = new WindowLimiter(20, 60 * 60_000)
+  function requireVault(): PayPalVault {
+    if (!vault || !vaultOn())
+      throw new HttpError(
+        404,
+        'Saving PayPal for one-tap buying isn’t available on this server.',
+        'VAULT_UNAVAILABLE',
+      )
+    return vault
+  }
+  function vaultLimit(id: string) {
+    if (!vaultLimiter.take(id, now().getTime()))
+      throw new HttpError(429, 'Please wait a while before trying that again.', 'RATE_LIMITED')
+  }
+  /** Starts a save: PayPal's setup token, which the buyer approves once in PayPal's window. */
+  app.post('/api/vault/setup-token', async (req, res) => {
+    z.object({}).strict().parse(req.body)
+    const v = requireVault()
+    const id = sessionId(res)
+    const data = dataFor(res)
+    const plans = (data.saved ?? []).filter(
+      (item) =>
+        item.status !== 'removed' && item.kind === 'catalog' && item.option === 'wait' && item.waitDate,
+    )
+    if (!plans.length)
+      throw new HttpError(
+        409,
+        'Save a store item for a later date first. One-tap buying is for wait plans.',
+        'NO_WAIT_PLAN',
+      )
+    const wallet: VaultRow = store.vault(id) ?? {}
+    if (wallet.paymentTokenId)
+      throw new HttpError(409, 'PayPal is already saved for one-tap buying.', 'VAULT_ALREADY_SAVED')
+    vaultLimit(id)
+    const setup = await v.createSetupToken({
+      requestId: `setup-${randomUUID()}`,
+      ...(wallet.customerId ? { customerId: wallet.customerId } : {}),
+    })
+    if (!PAYPAL_ID.test(setup.id ?? ''))
+      throw new HttpError(502, 'PayPal didn’t start saving PayPal. Try again.', 'PAYPAL_UNAVAILABLE')
+    const customerId = setup.customer?.id
+    store.putVault(id, {
+      ...wallet,
+      setupTokenId: setup.id,
+      setupCreated: now().getTime(),
+      ...(customerId && PAYPAL_ID.test(customerId) ? { customerId } : {}),
+    })
+    res.json({ vaultSetupToken: setup.id })
+  })
+  const vaultApprovalSchema = z
+    .object({
+      vaultSetupToken: z.string().regex(PAYPAL_ID).optional(),
+      billingToken: z.string().regex(PAYPAL_ID).optional(),
+    })
+    .strict()
+  /** After the buyer approves in PayPal: the setup token becomes the saved wallet. */
+  app.post('/api/vault/payment-token', async (req, res) => {
+    const input = vaultApprovalSchema.parse(req.body)
+    const v = requireVault()
+    const id = sessionId(res)
+    dataFor(res)
+    // PayPal's SDK v6 pages disagree on onApprove's field; record which one arrived (no values).
+    console.info(
+      'PayPal vault approval:',
+      JSON.stringify({
+        vaultSetupToken: Boolean(input.vaultSetupToken),
+        billingToken: Boolean(input.billingToken),
+      }),
+    )
+    await withPurchaseLock(`vault-${id}`, async () => {
+      const wallet = store.vault(id)
+      // A repeated approval after the wallet was saved changes nothing.
+      if (wallet?.paymentTokenId && !wallet.setupTokenId) return
+      if (
+        !wallet?.setupTokenId ||
+        (wallet.setupCreated ?? 0) + SETUP_TOKEN_TTL_MS < now().getTime()
+      )
+        throw new HttpError(
+          409,
+          'That PayPal approval has expired. Start saving PayPal again.',
+          'VAULT_SETUP_EXPIRED',
+        )
+      // Only the setup token this session started can become its wallet.
+      if (input.vaultSetupToken && input.vaultSetupToken !== wallet.setupTokenId)
+        throw new HttpError(
+          409,
+          'PayPal approved a different request. Start saving PayPal again.',
+          'VAULT_TOKEN_MISMATCH',
+        )
+      let token
+      try {
+        token = await v.createPaymentToken(wallet.setupTokenId)
+      } catch (error) {
+        if (
+          error instanceof PayPalError &&
+          error.status >= 400 &&
+          error.status < 500 &&
+          error.status !== 408 &&
+          error.status !== 429
+        ) {
+          const { setupTokenId: _setup, setupCreated: _created, ...rest } = wallet
+          store.putVault(id, rest)
+          throw new HttpError(
+            409,
+            'PayPal didn’t confirm saving PayPal, so nothing was saved. Try again.',
+            'VAULT_NOT_APPROVED',
+          )
+        }
+        throw error
+      }
+      if (!PAYPAL_ID.test(token.id ?? ''))
+        throw new HttpError(502, 'PayPal didn’t confirm saving PayPal. Try again.', 'PAYPAL_UNAVAILABLE')
+      const email = z
+        .string()
+        .email()
+        .max(254)
+        .safeParse(token.payment_source?.paypal?.email_address)
+      const customerId = token.customer?.id
+      store.putVault(id, {
+        ...(customerId && PAYPAL_ID.test(customerId)
+          ? { customerId }
+          : wallet.customerId
+            ? { customerId: wallet.customerId }
+            : {}),
+        paymentTokenId: token.id,
+        ...(email.success ? { email: email.data } : {}),
+        saved: now().getTime(),
+      })
+    })
+    res.json(state(id))
+  })
+  /** Removes the saved wallet here and deletes it in PayPal. */
+  app.post('/api/vault/remove', async (req, res) => {
+    z.object({}).strict().parse(req.body)
+    if (!vault) throw new HttpError(404, 'There is no saved PayPal to remove.', 'VAULT_UNAVAILABLE')
+    const id = sessionId(res)
+    dataFor(res)
+    if (store.purchases(id).some((p) => p.oneTap && ACTIVE.has(p.status)))
+      throw new HttpError(
+        409,
+        'PayPal is still confirming a one-tap payment. Check it first, then remove PayPal.',
+        'PAYMENT_PENDING',
+      )
+    forgetWallet(id)
+    // The response waits for PayPal's deletion; a failure is retried by the cleanup timer.
+    await drainVaultDeletions()
+    res.json(state(id))
+  })
+  /** A browser-safe client token, for the SDK only if it cannot save PayPal with the client ID. */
+  let clientToken: { value: string; until: number } | undefined
+  app.post('/api/vault/client-token', async (req, res) => {
+    z.object({}).strict().parse(req.body)
+    const v = requireVault()
+    const id = sessionId(res)
+    dataFor(res)
+    const time = now().getTime()
+    if (!clientToken || clientToken.until <= time) {
+      vaultLimit(id)
+      const minted = await v.clientToken()
+      clientToken = { value: minted.token, until: time + Math.max(0, minted.expiresIn - 60) * 1000 }
+    }
+    res.json({ clientToken: clientToken.value })
+  })
+  /** PayPal's full-page return after a save; the app finishes it from Saved. */
+  app.get('/api/vault/return', (req, res) => {
+    const result = req.query.paypal === 'cancelled' ? 'cancelled' : 'approved'
+    res.redirect(303, `/?vault=${result}#saved`)
+  })
+  const oneTapSchema = z
+    .object({
+      /** The price the user saw and confirmed; any other price is refused. */
+      amountCents: cents.min(1),
+      /** The FraudNet session ID the page loaded, sent to PayPal as PayPal-Client-Metadata-Id. */
+      clientMetadataId: z
+        .string()
+        .regex(/^[A-Za-z0-9]{1,32}$/)
+        .optional(),
+    })
+    .strict()
+  /**
+   * The one-tap buy on a wait plan's day, after the user's explicit confirm: the same guards as
+   * the Buy button (one checkout, funds confirmed today, a complete plan, the wait date reached
+   * on a fresh check, the cushion kept), the confirmed price, then one order paid from the saved
+   * wallet. A decline, a step PayPal wants from the buyer or a revoked wallet charges nothing and
+   * falls back to the regular checkout.
+   */
+  app.post('/api/saved/:id/one-tap', async (req, res) => {
+    const input = oneTapSchema.parse(req.body)
+    requireVault()
+    const id = sessionId(res)
+    const data = dataFor(res)
+    const item = savedOf(data, now()).find(
+      (saved) => saved.id === String(req.params.id) && saved.status !== 'removed',
+    )
+    if (!item) throw new HttpError(404, 'Saved item not found.', 'NOT_FOUND')
+    const product = item.kind === 'catalog' && PRODUCTS.find((p) => p.id === item.productId)
+    if (!product) throw new HttpError(409, `${ASSESSMENT_ONLY}.`, 'NOT_IN_STORE')
+    const purchases = livePurchases(id)
+    // A one-tap payment PayPal has not confirmed is asked about again, with the same request ID.
+    const open = purchases.find((p) => p.oneTap && ACTIVE.has(p.status) && p.productId === product.id)
+    if (open) {
+      const resumed = await withPurchaseLock(open.id, () =>
+        payWithVault(id, open, input.clientMetadataId),
+      )
+      return res.json({ purchase: publicPurchase(resumed), state: state(id) })
+    }
+    const wallet = store.vault(id)
+    if (!wallet?.paymentTokenId)
+      throw new HttpError(409, 'Save PayPal first, or use Buy with PayPal.', 'VAULT_NOT_SAVED')
+    const today = sessionToday(data)
+    if (publicSaved([item], today, purchases)[0]?.status === 'bought')
+      throw new HttpError(409, `You already bought the ${product.name}.`, 'ALREADY_BOUGHT')
+    if (item.option !== 'wait' || !item.waitDate)
+      throw new HttpError(
+        409,
+        'One-tap buying is for items you saved for a later date.',
+        'NOT_A_WAIT_PLAN',
+      )
+    if (input.amountCents !== product.priceCents)
+      throw new HttpError(
+        409,
+        `The price is now ${money(product.priceCents)}. Check it again before you buy.`,
+        'PRICE_CHANGED',
+        undefined,
+        { priceCents: product.priceCents },
+      )
+    const decision = checkoutGuards({
+      profile: data.profile,
+      purchases,
+      today,
+      product,
+      request: { option: 'wait' },
+      proceedDespiteShortfall: false,
+    })
+    if (!decision.ok) throw new HttpError(409, decision.message, decision.code)
+    let purchase = store.atomic(() => {
+      if (active(id))
+        throw new HttpError(
+          409,
+          'You already have a checkout in progress. Finish or cancel it first.',
+          'CHECKOUT_ACTIVE',
+        )
+      const assessment = assessmentFor(id, product.priceCents, product.name)
+      if (
+        assessment.profileVersion !== decision.profileVersion ||
+        assessment.today !== decision.today
+      )
+        throw new HttpError(
+          409,
+          'Your plan or the date changed. Check this purchase again before you buy.',
+          'ASSESSMENT_EXPIRED',
+        )
+      // One tap never goes below the cushion: there is no acknowledgement on this path.
+      assertAssessment(assessment, false)
+      const created: StoredPurchase = {
+        id: randomUUID(),
+        productId: product.id,
+        name: product.name,
+        amountCents: product.priceCents,
+        currency: 'USD',
+        mode: 'sandbox',
+        status: 'created',
+        createdAt: now().toISOString(),
+        profileVersion: assessment.profileVersion,
+        assessmentDate: assessment.today,
+        acknowledgedShortfall: false,
+        preparedBy: 'user',
+        oneTap: true,
+        // A saved-PayPal payment is always in full: Pay in 4 is not offered on it.
+        payLaterCapable: false,
+        vaultTokenId: wallet.paymentTokenId,
+      }
+      store.putPurchase(id, created)
+      return created
+    })
+    purchase = await withPurchaseLock(purchase.id, () =>
+      payWithVault(id, purchase, input.clientMetadataId),
+    )
+    res.json({ purchase: publicPurchase(purchase), state: state(id) })
   })
   /** Agent tokens for "Connect an agent" in Settings: list, create (shown once) and revoke. */
   const tokenCreations = new WindowLimiter(10, 60 * 60_000)
@@ -2003,6 +2477,14 @@ export function createApp(options: AppOptions = {}) {
           409,
           'This payment is already completed. Cancellation cannot reverse it.',
           'ALREADY_COMPLETED',
+        )
+      // A one-tap create may have paid even without a known order: only asking PayPal again with
+      // the same request ID can tell, so it is never released locally.
+      if (purchase.oneTap && purchase.captureAttemptedAt && !purchase.orderId)
+        throw new HttpError(
+          409,
+          'PayPal is still confirming this payment. Check it again before cancelling.',
+          'PAYMENT_PENDING',
         )
       // Without an order no capture can exist, so the reservation is released locally.
       if (purchase.mode === 'sandbox' && ACTIVE.has(purchase.status) && purchase.orderId) {

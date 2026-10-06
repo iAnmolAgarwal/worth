@@ -35,6 +35,8 @@ export interface StoredPurchase extends Purchase {
   captureRetries?: number
   /** Whether PayPal's checkout could offer Pay Later for this order, from the eligibility check. */
   payLaterCapable?: boolean
+  /** A one-tap purchase's saved wallet (`vault_id`), kept so a retry re-sends the same order. */
+  vaultTokenId?: string
 }
 export const ACTIVE = new Set(['created', 'pending', 'unknown'])
 const DAY = 24 * 60 * 60 * 1000
@@ -58,13 +60,27 @@ export class Store {
         hash TEXT NOT NULL UNIQUE, hint TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL,
         last_used INTEGER, revoked INTEGER);
       CREATE INDEX IF NOT EXISTS agent_tokens_session ON agent_tokens(session_id);
+      CREATE TABLE IF NOT EXISTS vault (session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+        customer_id TEXT, setup_token_id TEXT, setup_created INTEGER, payment_token_id TEXT UNIQUE, email TEXT, saved INTEGER);
+      CREATE TABLE IF NOT EXISTS vault_deletions (payment_token_id TEXT PRIMARY KEY, attempts INTEGER NOT NULL DEFAULT 0, queued INTEGER NOT NULL);
     `)
   }
   close() {
     this.db.close()
   }
   cleanup(now = Date.now()) {
-    const deleted = this.db.prepare('DELETE FROM sessions WHERE expires <= ?').run(now).changes
+    // A saved PayPal wallet outlives nothing it belongs to: expiring sessions queue their tokens
+    // for deletion in PayPal before the rows go.
+    const deleted = this.atomic(() => {
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO vault_deletions(payment_token_id, queued)
+          SELECT v.payment_token_id, ? FROM vault v JOIN sessions s ON s.id = v.session_id
+          WHERE s.expires <= ? AND v.payment_token_id IS NOT NULL`,
+        )
+        .run(now, now)
+      return this.db.prepare('DELETE FROM sessions WHERE expires <= ?').run(now).changes
+    })
     if (deleted) this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)')
     return deleted
   }
@@ -111,6 +127,8 @@ export class Store {
     this.db.prepare('UPDATE sessions SET data=? WHERE id=?').run(JSON.stringify(data), id)
   }
   delete(id: string) {
+    const token = this.vault(id)?.paymentTokenId
+    if (token) this.queueVaultDeletion(token)
     this.db.prepare('DELETE FROM sessions WHERE id=?').run(id)
     this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)')
   }
@@ -207,6 +225,74 @@ export class Store {
         .run(time, id, sessionId).changes > 0
     )
   }
+  /** The session's PayPal Vault record: a pending setup token and/or a saved wallet. */
+  vault(sessionId: string): VaultRow | undefined {
+    const row = this.db
+      .prepare(
+        'SELECT customer_id, setup_token_id, setup_created, payment_token_id, email, saved FROM vault WHERE session_id=?',
+      )
+      .get(sessionId) as RawVault | undefined
+    return row ? vaultRow(row) : undefined
+  }
+  putVault(sessionId: string, vault: VaultRow) {
+    this.db
+      .prepare(
+        `INSERT INTO vault(session_id, customer_id, setup_token_id, setup_created, payment_token_id, email, saved)
+        VALUES(?,?,?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET customer_id=excluded.customer_id,
+        setup_token_id=excluded.setup_token_id, setup_created=excluded.setup_created,
+        payment_token_id=excluded.payment_token_id, email=excluded.email, saved=excluded.saved`,
+      )
+      .run(
+        sessionId,
+        vault.customerId ?? null,
+        vault.setupTokenId ?? null,
+        vault.setupCreated ?? null,
+        vault.paymentTokenId ?? null,
+        vault.email ?? null,
+        vault.saved ?? null,
+      )
+  }
+  /** The session that holds this saved wallet, for PayPal's vault webhooks. */
+  vaultByPaymentToken(paymentTokenId: string): string | undefined {
+    const row = this.db
+      .prepare('SELECT session_id FROM vault WHERE payment_token_id=?')
+      .get(paymentTokenId) as { session_id: string } | undefined
+    return row?.session_id
+  }
+  /** Forgets the session's saved wallet (the customer ID stays, so a new save links to it). */
+  clearVaultToken(sessionId: string) {
+    this.db
+      .prepare('UPDATE vault SET payment_token_id=NULL, email=NULL, saved=NULL WHERE session_id=?')
+      .run(sessionId)
+  }
+  /** Tokens to delete in PayPal; a failed deletion is retried a few times by the cleanup timer. */
+  queueVaultDeletion(paymentTokenId: string, now = Date.now()) {
+    this.db
+      .prepare('INSERT OR IGNORE INTO vault_deletions(payment_token_id, queued) VALUES(?, ?)')
+      .run(paymentTokenId, now)
+  }
+  vaultDeletions(limit = 20): { paymentTokenId: string; attempts: number }[] {
+    return (
+      this.db
+        .prepare(
+          'SELECT payment_token_id, attempts FROM vault_deletions ORDER BY queued LIMIT ?',
+        )
+        .all(limit) as { payment_token_id: string; attempts: number }[]
+    ).map((row) => ({ paymentTokenId: row.payment_token_id, attempts: row.attempts }))
+  }
+  /** Records one deletion attempt: done removes it, and so does the last allowed failure. */
+  finishVaultDeletion(paymentTokenId: string, done: boolean, maxAttempts = 5) {
+    if (done) {
+      this.db.prepare('DELETE FROM vault_deletions WHERE payment_token_id=?').run(paymentTokenId)
+      return
+    }
+    this.db
+      .prepare('UPDATE vault_deletions SET attempts=attempts+1 WHERE payment_token_id=?')
+      .run(paymentTokenId)
+    this.db
+      .prepare('DELETE FROM vault_deletions WHERE payment_token_id=? AND attempts>=?')
+      .run(paymentTokenId, maxAttempts)
+  }
   atomic<T>(fn: () => T): T {
     this.db.exec('BEGIN IMMEDIATE')
     try {
@@ -217,6 +303,40 @@ export class Store {
       this.db.exec('ROLLBACK')
       throw error
     }
+  }
+}
+
+/**
+ * A session's PayPal Vault record. The payment token ID is the saved wallet's `vault_id`; it is
+ * stored only here and never sent to the browser, which sees the email address alone.
+ */
+export interface VaultRow {
+  /** PayPal's customer ID, reused when the same session saves PayPal again. */
+  customerId?: string
+  /** The setup token the buyer is approving now, and when it was created (ms). */
+  setupTokenId?: string
+  setupCreated?: number
+  paymentTokenId?: string
+  email?: string
+  /** When the wallet was saved (ms). */
+  saved?: number
+}
+interface RawVault {
+  customer_id: string | null
+  setup_token_id: string | null
+  setup_created: number | null
+  payment_token_id: string | null
+  email: string | null
+  saved: number | null
+}
+function vaultRow(row: RawVault): VaultRow {
+  return {
+    ...(row.customer_id ? { customerId: row.customer_id } : {}),
+    ...(row.setup_token_id ? { setupTokenId: row.setup_token_id } : {}),
+    ...(row.setup_created !== null ? { setupCreated: row.setup_created } : {}),
+    ...(row.payment_token_id ? { paymentTokenId: row.payment_token_id } : {}),
+    ...(row.email ? { email: row.email } : {}),
+    ...(row.saved !== null ? { saved: row.saved } : {}),
   }
 }
 
@@ -261,6 +381,7 @@ export function publicPurchase(purchase: StoredPurchase): Purchase {
     captureAttemptedAt: _attempted,
     captureRetries: _retries,
     payLaterCapable: _payLater,
+    vaultTokenId: _vault,
     approveUrl: _stale,
     ...result
   } = purchase

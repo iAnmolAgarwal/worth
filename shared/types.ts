@@ -233,6 +233,11 @@ export interface Purchase {
    * asked for it through Worth's MCP server (prepare_order); absent on older purchases.
    */
   preparedBy?: 'agent' | 'external' | 'user'
+  /**
+   * Paid in one tap with the PayPal wallet the user saved (PayPal Vault), after their explicit
+   * confirm in Worth. Always in full: Pay in 4 is not offered on a saved-PayPal payment.
+   */
+  oneTap?: boolean
 }
 /** Something the user must confirm before Worth changes how a purchase affects their plan. */
 export type PurchaseReview =
@@ -432,10 +437,17 @@ export interface AppState {
    * plan projects for the start of today, offered when confirming today's funds.
    */
   fundsProjection?: { cents: number; from: string }
+  /**
+   * The PayPal wallet this session saved for one-tap buying (PayPal Vault). Only the account's
+   * email reaches the browser; the payment token stays on the server.
+   */
+  savedPayPal?: { email?: string; savedAt: string }
   config: {
     ai: 'anthropic' | 'demo'
     paypal: 'sandbox' | 'demo'
     paypalClientId?: string
+    /** True when the PayPal app may save wallets (Vault), so one-tap buying can be offered. */
+    vault?: boolean
     model?: string
     /** Whether similar items from other stores can be shown (Channel3). */
     alternatives?: AlternativesStatus
