@@ -25,6 +25,7 @@ import {
   CHANNEL3_SHARED_DATA,
   CLAUDE_SHARED_DATA,
   claudeUses,
+  demoStoreRole,
   MAY_FIT_NOW,
 } from './copy'
 import type { DecisionRequest } from './Decision'
@@ -606,9 +607,13 @@ export function Saved({
           <section aria-labelledby="store-title" style={{ marginTop: 'var(--s-6)' }}>
             <div className="sec-head">
               <h2 className="h-section" id="store-title">
-                More from {state.products[0]?.merchant ?? 'the demo store'}
+                Demo store · {state.products[0]?.merchant ?? 'Larkspur Supply'}
               </h2>
             </div>
+            <p className="caption" style={{ marginBottom: 'var(--s-4)' }}>
+              {demoStoreRole(state.products[0]?.merchant ?? 'Larkspur Supply')} Nothing is sold or
+              shipped in this sandbox.
+            </p>
             <div className="saved-grid">
               {more.map((product) => (
                 <StoreCard
@@ -622,8 +627,7 @@ export function Saved({
           </section>
         )}
         <p className="caption" style={{ marginTop: 'var(--s-6)' }}>
-          A demo store for the PayPal sandbox. Nothing is sold or shipped. Items saved from Ask
-          Worth that the store doesn’t sell are assessments only.
+          Items saved from Ask Worth that the demo store doesn’t sell are assessments only.
         </p>
       </div>
       {confirming && (

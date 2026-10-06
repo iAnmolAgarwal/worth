@@ -726,7 +726,9 @@ export function Decision({
                 <img src={product!.image} alt={product!.name} />
                 <div>
                   <div className="pt">{product!.name}</div>
-                  <div className="meta">{product!.merchant} · demo store</div>
+                  <div className="meta">
+                    Sold by {product!.merchant} · demo{'\u00a0'}store
+                  </div>
                   <div className="num strong" style={{ fontWeight: 700, marginTop: 4 }}>
                     {money(bought.amountCents)}
                   </div>
@@ -869,7 +871,7 @@ export function Decision({
                 <div className="pt">{product?.name ?? c.itemName}</div>
                 <div className="meta">
                   {product
-                    ? `${product.merchant} · demo store`
+                    ? `Sold by ${product.merchant} · demo\u00a0store`
                     : 'Checkout is for demo store items'}
                 </div>
                 <div className="num strong" style={{ fontWeight: 700, marginTop: 4 }}>

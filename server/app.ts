@@ -923,7 +923,8 @@ export function createApp(options: AppOptions = {}) {
       return {
         ok: false,
         code: 'UNKNOWN_ITEM',
-        message: 'Worth prepares orders only for items in its sandbox catalog.',
+        message:
+          'Worth prepares orders only for items in the demo store’s catalog (Larkspur Supply).',
       }
     const decision = checkoutGuards({
       profile: data.profile,

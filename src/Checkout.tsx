@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import type { Assessment, Product } from '../shared/types'
 import { api, ApiError } from './api'
+import { demoStoreRole } from './copy'
 import type { AppState, Comparison, Purchase } from './contract'
 import { firstBelow, lower } from './engine'
 import { boughtOn, cx, dayLabel, money, signed } from './format'
@@ -593,11 +594,16 @@ export function Checkout({
         {view !== 'completed' && view !== 'cancelled' && (
           <dl className="kvlist">
             <div>
-              <dt>{view === 'approved' ? `Pay ${product.merchant}` : product.merchant}</dt>
+              <dt>
+                {view === 'approved' ? `Pay ${product.merchant}` : `Payment to ${product.merchant}`}
+              </dt>
               <dd className="num">{amount}</dd>
             </div>
             {(view === 'review' || view === 'approve' || view === 'approved') && lowestAfter}
           </dl>
+        )}
+        {(view === 'review' || view === 'approve') && (
+          <p className="caption">{demoStoreRole(product.merchant)}</p>
         )}
         {view === 'completed' && (
           <dl className="kvlist">

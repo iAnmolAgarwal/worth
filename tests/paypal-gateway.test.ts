@@ -98,6 +98,19 @@ describe('PayPal Orders v2 gateway contract', () => {
       cancel_url: 'https://worth.example.com/api/checkout/p-1/return?paypal=cancelled',
     })
   })
+
+  it('names the demo store as the payee in PayPal, never Worth', async () => {
+    const { paypal, api } = gateway([Response.json(order, { status: 201 })])
+    await paypal.create(purchase)
+    const body = JSON.parse(String(api()[0]!.init.body))
+    expect(body.payment_source.paypal.experience_context.brand_name).toBe(
+      'Larkspur Supply (demo store)',
+    )
+    expect(body.purchase_units[0].description).toBe(
+      'Studio headphones from Larkspur Supply (sandbox demo store)',
+    )
+    expect(JSON.stringify(body)).not.toMatch(/Worth/)
+  })
   it('caches the OAuth token and refreshes it once after a 401', async () => {
     const { paypal, calls } = gateway([
       Response.json(order),
