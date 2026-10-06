@@ -18,7 +18,7 @@ import type { AnswerTrace, FactReason, PayIn4Chat } from '../shared/types'
 import { capitalize, cx, dayLabel, money } from './format'
 import { Alert, Ring } from './ui'
 
-/** "4 payments of $299.75" or "4 payments from $7.50". */
+/** "4 payments of $299.75" or "4 payments from $2.50". */
 function payments(p4: PayIn4Chat) {
   const amounts = new Set(p4.payments.map((p) => p.amountCents))
   return `4 payments ${amounts.size > 1 ? 'from' : 'of'} ${money(p4.payments.at(-1)!.amountCents)}`
