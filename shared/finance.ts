@@ -20,9 +20,12 @@ import type {
 export const COMPARISON_WINDOW_DAYS = 60
 /** Wait candidates run from today through this many days ahead. */
 export const WAIT_SEARCH_DAYS = 30
-/** PayPal's US Pay in 4 range. Eligibility also needs PayPal's own check; it is never approval. */
-export const PAY_IN_4_MIN_CENTS = 1_000
-export const PAY_IN_4_MAX_CENTS = 200_000
+/**
+ * PayPal's US Pay in 4 range, $30.00 to $1,500.00 inclusive. Eligibility also needs PayPal's own
+ * check; it is never approval.
+ */
+export const PAY_IN_4_MIN_CENTS = 3_000
+export const PAY_IN_4_MAX_CENTS = 150_000
 /** Illustrative payment days. PayPal's real schedule can differ (the sandbox used 16-day gaps). */
 export const PAY_IN_4_OFFSETS = [0, 14, 28, 42] as const
 /** An instalment is paired with the nearest bill no more than this many days away. */
@@ -726,7 +729,7 @@ export function withoutOwnHold(
 
 /**
  * The illustrative Pay in 4 schedule: four whole-cent payments on days 0, 14, 28 and 42, with any
- * remainder on the first. $1,199.00 is 4 × $299.75; $10.03 is $2.53 then 3 × $2.50.
+ * remainder on the first. $1,199.00 is 4 × $299.75; $30.03 is $7.53 then 3 × $7.50.
  */
 export function payIn4Schedule(totalCents: number, today: string): PlanInstalment[] {
   if (!Number.isSafeInteger(totalCents) || totalCents < 0)

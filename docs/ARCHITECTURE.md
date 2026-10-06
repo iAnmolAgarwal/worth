@@ -164,9 +164,9 @@ and its schedule is set at checkout, so Worth treats Pay in 4 as a labelled comp
 confirmed fact afterwards, never as a prediction.
 
 - **Eligibility.** `/api/compare` asks PayPal's `find-eligible-methods` (US buyer, USD amount)
-  and caches the answer per price band; Worth's own $10–$2,000 range applies on top. If the call
-  fails the comparison is shown as range-only. The browser's `findEligibleMethods` decides only
-  whether to render the button and `<paypal-message>`.
+  and caches the answer per price band; Worth's own range check applies on top, using PayPal's US
+  Pay in 4 range of $30–$1,500. If the call fails the comparison is shown as range-only. The
+  browser's `findEligibleMethods` decides only whether to render the button and `<paypal-message>`.
 - **Schedule.** `payIn4Schedule` splits the total into four whole-cent payments on days 0, 14,
   28 and 42, with any remainder on the first ($1,199.00 is 4 × $299.75). The sandbox's real
   schedule used 16-day gaps, so every date is "about".

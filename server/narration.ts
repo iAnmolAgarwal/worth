@@ -266,7 +266,7 @@ export function payIn4For(a: Assessment, data: ChatData): PayIn4Comparison {
   )
 }
 type Scenario = Extract<PayIn4Comparison, { available: true }>
-/** "4 payments of $299.75" or "4 payments: $2.53, then 3 of $2.50". */
+/** "4 payments of $299.75" or "4 payments: $7.53, then 3 of $7.50". */
 function paymentsText(scenario: Scenario) {
   const [first, ...rest] = scenario.instalments
   return rest.every((p) => p.amountCents === first!.amountCents)

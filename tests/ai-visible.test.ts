@@ -168,8 +168,24 @@ describe('Pay in 4 in chat (judge #2)', () => {
     expect(reply.payIn4!.payments[1]!.nearestBill?.name).toBe('Apartment rent')
     // Not asked: the answer's text says nothing about Pay in 4.
     expect(reply.message).not.toMatch(/Pay in 4/)
-    for (const message of ['Can I afford a $9.99 book?', 'Can I afford a $2,000.01 sofa?'])
+    for (const message of ['Can I afford a $29.99 book?', 'Can I afford a $1,500.01 sofa?'])
       expect(fallbackReply(ask(message), demo()).payIn4).toBeUndefined()
+    // PayPal's US range is $30.00 to $1,500.00, both ends included.
+    for (const message of ['Can I afford a $30.00 book?', 'Can I afford a $1,500.00 sofa?'])
+      expect(fallbackReply(ask(message), demo()).payIn4).toMatchObject({
+        eligibility: 'range-only',
+      })
+  })
+
+  it('says Pay in 4 is unavailable just outside PayPal’s $30–$1,500 range when asked', () => {
+    for (const [message, amount] of [
+      ['Can I get a $29.99 book with Pay in 4?', '$29.99'],
+      ['Can I get a $1,500.01 sofa with Pay in 4?', '$1,500.01'],
+    ] as const) {
+      const reply = fallbackReply(ask(message), demo())
+      expect(reply.payIn4).toMatchObject({ asked: true, eligibility: 'unavailable', payments: [] })
+      expect(reply.message).toContain(`PayPal Pay in 4 is not available for ${amount}.`)
+    }
   })
 
   it('says Pay in 4 is unavailable out of range when asked', () => {
@@ -232,9 +248,9 @@ describe('Pay in 4 in chat (judge #2)', () => {
   })
 
   it('names the item, not “work”, in “How would Pay in 4 work for …” (judge F8)', () => {
-    const reply = fallbackReply(ask('How would Pay in 4 work for a $10.03 phone case?'), demo())
+    const reply = fallbackReply(ask('How would Pay in 4 work for a $30.03 phone case?'), demo())
     expect(reply.assessment?.itemName).toMatch(/phone case/i)
-    expect(reply.payIn4?.payments.map((p) => p.amountCents)).toEqual([253, 250, 250, 250])
+    expect(reply.payIn4?.payments.map((p) => p.amountCents)).toEqual([753, 750, 750, 750])
   })
 
   it('drops fact reasons outside the fixed set', async () => {

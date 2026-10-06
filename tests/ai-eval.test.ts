@@ -122,9 +122,12 @@ describe('AI eval regression gate (recorded model responses)', () => {
       expect(answer.payIn4?.payments[1]?.nearestBill?.name, id).toBe('Apartment rent')
     }
     expect(reply('PF5-pay-later-out-of-range').payIn4).toMatchObject({ eligibility: 'unavailable' })
-    expect(reply('PF6-small-amount-remainder').payIn4?.payments.map((p) => p.amountCents)).toEqual([
-      253, 250, 250, 250,
-    ])
+    // $10.03 is below PayPal's $30 minimum, so the recorded answer shows no schedule.
+    expect(reply('PF6-below-minimum').payIn4).toMatchObject({
+      asked: true,
+      eligibility: 'unavailable',
+      payments: [],
+    })
     // Not asked: one neutral row, never the schedule.
     expect(reply('PF3-which-bills-follow-up').payIn4?.asked).toBe(false)
   })

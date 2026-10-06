@@ -133,8 +133,9 @@ credentials and the browser receives only the public client ID.
   short-term Pay in 4 offer next to Worth's comparison. On the hosted US sandbox merchant it reads
   "Pay in 4 interest-free payments of $299.75" for the $1,199 camera.
 - **Pay Later eligibility.** The server calls `POST /v2/payments/find-eligible-methods` (US buyer,
-  USD amount) and caches the answer per price band; Worth's own $10–$2,000 range check applies on
-  top. The browser's `findEligibleMethods` decides only whether to show the button and message.
+  USD amount) and caches the answer per price band; Worth's own range check applies on top, using
+  PayPal's US Pay in 4 range of $30–$1,500. The browser's `findEligibleMethods` decides only
+  whether to show the button and message.
 - **Webhooks.** `/api/paypal/webhook` keeps the raw body and verifies it with
   `/v1/notifications/verify-webhook-signature` before anything else, only for PayPal certificate
   hosts. Order events reconcile the purchase through the same path as capture. A
