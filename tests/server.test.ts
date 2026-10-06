@@ -4,7 +4,7 @@ import request from 'supertest'
 import { createApp } from '../server/app.ts'
 import { Store } from '../server/store.ts'
 import type { StoredPurchase } from '../server/store.ts'
-import { PayPalError } from '../server/paypal.ts'
+import { createPayPalGateway, PayPalError } from '../server/paypal.ts'
 import type { PayPalGateway, PayPalOrder, PayPalRefund } from '../server/paypal.ts'
 import type { AppState } from '../shared/types.ts'
 import { createChatProvider, fallbackReply } from '../server/chat.ts'
@@ -777,6 +777,56 @@ describe('payment lifecycle: declines, cancels and late events (C-8)', () => {
     expect(created.status).toBe(200)
     return created.body as { purchase: { id: string }; orderId: string }
   }
+  it('ends a capture PayPal never answers in PAYPAL_UNCERTAIN within the gateway budget', async () => {
+    // The real gateway, with a small budget: the order exists and is approved, the capture hangs.
+    let created: PayPalOrder | undefined
+    const fetch = vi.fn(async (url: string | URL | Request, init: RequestInit = {}) => {
+      const path = new URL(String(url)).pathname
+      if (path === '/v1/oauth2/token') return Response.json({ access_token: 't', expires_in: 3600 })
+      if (path === '/v2/payments/find-eligible-methods') return Response.json({})
+      if (path === '/v2/checkout/orders') {
+        const unit = JSON.parse(String(init.body)).purchase_units[0]
+        created = {
+          id: 'ORDER1',
+          status: 'APPROVED',
+          purchase_units: [
+            {
+              custom_id: unit.custom_id,
+              reference_id: unit.reference_id,
+              amount: { currency_code: 'USD', value: unit.amount.value },
+              payee: { merchant_id: 'MERCHANT1' },
+            },
+          ],
+        }
+        return Response.json(created, { status: 201 })
+      }
+      if (path === '/v2/checkout/orders/ORDER1') return Response.json(created)
+      return new Promise<Response>((_resolve, reject) =>
+        init.signal!.addEventListener('abort', () => reject(init.signal!.reason as Error)),
+      )
+    })
+    const paypal = createPayPalGateway({
+      clientId: 'client',
+      secret: 'secret',
+      origin: config.origin,
+      fetch: fetch as unknown as typeof globalThis.fetch,
+      log: vi.fn(),
+      budgetMs: 300,
+    })
+    const { agent } = setup({ paypal })
+    const { purchase } = await checkout(agent)
+    const start = Date.now()
+    const capture = await post(agent, `/api/checkout/${purchase.id}/capture`)
+    expect(Date.now() - start).toBeLessThan(2_000)
+    expect(capture.status).toBe(502)
+    expect(capture.body.code).toBe('PAYPAL_UNCERTAIN')
+    expect((await state(agent)).purchases[0]).toMatchObject({
+      status: 'unknown',
+      lastError: { code: 'PAYPAL_UNCERTAIN' },
+    })
+    // Less than 3 s of budget was left, so the capture was sent once.
+    expect(fetch.mock.calls.filter(([url]) => String(url).endsWith('/capture'))).toHaveLength(1)
+  })
   it('reopens approval after INSTRUMENT_DECLINED, without a lockout, and captures once with a new request ID', async () => {
     const { gateway } = fakePayPal()
     const original = gateway.capture

@@ -164,9 +164,9 @@ and its schedule is set at checkout, so Worth treats Pay in 4 as a labelled comp
 confirmed fact afterwards, never as a prediction.
 
 - **Eligibility.** `/api/compare` asks PayPal's `find-eligible-methods` (US buyer, USD amount)
-  and caches the answer per price band; Worth's own $10–$2,000 range applies on top. If the call
-  fails the comparison is shown as range-only. The browser's `findEligibleMethods` decides only
-  whether to render the button and `<paypal-message>`.
+  and caches the answer per price band; Worth's own range check applies on top, using PayPal's US
+  Pay in 4 range of $30–$1,500. If the call fails the comparison is shown as range-only. The
+  browser's `findEligibleMethods` decides only whether to render the button and `<paypal-message>`.
 - **Schedule.** `payIn4Schedule` splits the total into four whole-cent payments on days 0, 14,
   28 and 42, with any remainder on the first ($1,199.00 is 4 × $299.75). The sandbox's real
   schedule used 16-day gaps, so every date is "about".
@@ -235,7 +235,7 @@ stateDiagram-v2
   completed --> completed: Duplicate response or late event
 ```
 
-PayPal create/capture request IDs derive from the persisted purchase ID and are reused on retry. Returned order identity, purchase reference, merchant, currency, amount, and capture count must match. A completed capture writes one expense and updates the profile version atomically. Order and capture IDs also have database uniqueness constraints.
+PayPal create/capture request IDs derive from the persisted purchase ID and are reused on retry. The gateway (`server/paypal.ts`) refreshes the OAuth token once after a 401 and retries a 429 or 5xx at most twice, with jittered exponential backoff from 300 ms (or PayPal's longer `Retry-After`), each wait capped at 2 s, and the same `PayPal-Request-Id`. Other 4xx answers are final. A timeout, network failure or body that fails to arrive is retried only for a GET or a request with a request ID. Each call has one 20 s budget for its attempts, token fetch and waits, and no retry starts with less than 3 s left, so a capture (lookup, then capture) ends within 40 s and a checkout start (eligibility, then order) within 25 s. The eligibility check is advisory: one attempt within 5 s, then the range-only fallback. Each retry is logged with PayPal's debug ID, never a body or token. Returned order identity, purchase reference, merchant, currency, amount, and capture count must match. A completed capture writes one expense and updates the profile version atomically. Order and capture IDs also have database uniqueness constraints.
 
 `src/paypalSdk.ts` loads the sandbox JavaScript SDK v6 with bounded initialization, retryable failures, and an instance cache keyed by public client ID. The checkout dialog (`src/Checkout.tsx`) checks PayPal eligibility and creates a one-time payment session with `commit: false`. It starts in the user's click handler and passes the server order promise to preserve browser popup permission. SDK approval updates the UI; it does not capture. If SDK loading or eligibility is unavailable, the server-provided approval URL remains a redirect fallback.
 

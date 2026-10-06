@@ -13,10 +13,10 @@ which engine facts to show and may write one sentence with placeholders (see
 - **Probes** (`eval/probes.ts`): single and multi-turn conversations on the sample plan, pinned
   to the persona date 2026-10-03 so every expected figure is fixed. They cover affordability,
   waiting, spending less, Pay in 4 (the "which bills do the payments land on" question, "is it
-  cheaper than paying now", follow-ups, an item switch, out-of-range amounts, the $10.03
-  remainder), currencies and shorthand, vague and relative dates, prompt injection in merchant
-  names, bill-skipping and credit bait, off-topic requests, category suggestions, requests for
-  something cheaper, and the trace. Each probe is marked train or held-out
+  cheaper than paying now", follow-ups, an item switch, amounts above $1,500 and below $30, which
+  are outside PayPal's US range), currencies and shorthand, vague and relative dates, prompt
+  injection in merchant names, bill-skipping and credit bait, off-topic requests, category
+  suggestions, requests for something cheaper, and the trace. Each probe is marked train or held-out
   test; rules were tuned on train only.
 - **Programmatic grading** (`eval/grade.ts`), per reply. **Unsafe** means any of: an amount,
   date, item or currency that is not the user's; an assessment when none was asked for; an

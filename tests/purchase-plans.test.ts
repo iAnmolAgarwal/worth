@@ -139,16 +139,16 @@ describe('POST /api/compare', () => {
 
   it('accepts a price alone, gates Pay in 4 on the range, and rejects a client price for a catalog item', async () => {
     const { agent } = setup()
-    const small = await post(agent, '/api/compare', { amountCents: 999, itemName: 'Socks' })
+    const small = await post(agent, '/api/compare', { amountCents: 2999, itemName: 'Socks' })
     expect(small.body).toMatchObject({
       itemName: 'Socks',
       recommendation: 'buyToday',
       payIn4: { available: false, reason: 'Not available for this amount' },
     })
-    expect((await post(agent, '/api/compare', { amountCents: 200001 })).body.payIn4.available).toBe(
+    expect((await post(agent, '/api/compare', { amountCents: 150001 })).body.payIn4.available).toBe(
       false,
     )
-    expect((await post(agent, '/api/compare', { amountCents: 1000 })).body.payIn4.available).toBe(
+    expect((await post(agent, '/api/compare', { amountCents: 3000 })).body.payIn4.available).toBe(
       true,
     )
     const forged = await post(agent, '/api/compare', { productId: 'camera', amountCents: 100 })

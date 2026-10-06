@@ -89,20 +89,25 @@ describe('Pay in 4 schedule (acceptance 14)', () => {
       { date: addDays(TODAY, 28), amountCents: 29975 },
       { date: addDays(TODAY, 42), amountCents: 29975 },
     ])
+    expect(payIn4Schedule(3003, TODAY).map((item) => item.amountCents)).toEqual([
+      753, 750, 750, 750,
+    ])
     expect(payIn4Schedule(1003, TODAY).map((item) => item.amountCents)).toEqual([
       253, 250, 250, 250,
     ])
   })
 
-  it('is available only from $10.00 to $2,000.00 and only when PayPal reports eligibility', () => {
-    expect(PAY_IN_4_MIN_CENTS).toBe(1000)
-    expect(PAY_IN_4_MAX_CENTS).toBe(200000)
-    for (const amount of [999, 200001])
+  it('is available only from $30.00 to $1,500.00 and only when PayPal reports eligibility', () => {
+    // PayPal's US Pay in 4 range (PayPal BNPL rules for the US).
+    expect(PAY_IN_4_MIN_CENTS).toBe(3000)
+    expect(PAY_IN_4_MAX_CENTS).toBe(150000)
+    // $10 and $2,000, the old range's ends, are now outside it too.
+    for (const amount of [2999, 150001, 1000, 200000])
       expect(compare(profile(), amount).payIn4).toEqual({
         available: false,
         reason: 'Not available for this amount',
       })
-    for (const amount of [1000, 200000])
+    for (const amount of [3000, 150000])
       expect(compare(profile(), amount).payIn4.available).toBe(true)
     expect(compare(profile(), 119900, [], false).payIn4).toEqual({
       available: false,
@@ -258,7 +263,7 @@ describe('Pay in 4 comparison (acceptance 16)', () => {
   })
 
   it('does not blame the instalments for a dip the plan already has without the purchase', () => {
-    const short = payIn4(compare(profile({ balanceCents: 40000 }), 1000))
+    const short = payIn4(compare(profile({ balanceCents: 40000 }), 3000))
     expect(short.outcome).toBe('tight')
     expect(short.label).toBe(
       'Your plan dips below your cushion on Oct 3 even without this purchase',
