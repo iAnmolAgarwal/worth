@@ -18,17 +18,17 @@ flowchart LR
   API --> Import[CSV normalisation]
   API --> Claude[Claude Sonnet 5.5<br/>engine tools]
   Claude --> Engine
-  Claude -.prepare_checkout.-> Guards[checkoutGuards]
-  API --> Guards
+  Claude -.open_store_checkout.-> StoreLink[Store product page link<br/>MERCHANT_ORIGIN/p/id]
+  API --> Guards[checkoutGuards]
   Guards --> PayPal[PayPal sandbox<br/>Orders v2 · eligibility]
   API --> Channel3[Channel3 search]
   UI --> SDK[PayPal JS SDK v6<br/>button · popup · Messages]
   SDK --> Approval[Buyer approval in PayPal]
   PayPal -->|webhook, raw body| Webhook[Verify signature<br/>re-read order or refund]
   Webhook --> Store
-  Agent[MCP client] -->|bearer token| MCP[/mcp]
+  Agent[MCP client] -->|bearer token| MCP["/mcp · Worth guardrail MCP"]
   MCP --> Engine
-  MCP --> Guards
+  MCP -.store_checkout_link.-> StoreLink
 ```
 
 In development, `server/index.ts` mounts Vite middleware in the same Express process. In
@@ -52,7 +52,7 @@ the model name and the Channel3 status).
 | `server/chat.ts` | The Claude tool loop, tool schemas, the answer's trace, and the deterministic local fallback. |
 | `server/interpret.ts`, `server/money.ts`, `server/dates.ts` | Checks Claude's reading against the user's own words: amounts, currencies, timing phrases and which item a follow-up means. |
 | `server/narration.ts` | Every sentence the user reads: verdict templates, fact catalogs, the Pay in 4 wording and `checkSentence` for Claude's one sentence. |
-| `server/agentCheckout.ts` | `asksToCheckOut` (the user's own unqualified instruction) and `checkoutGuards`, shared by Ask Worth, the saved-plan Buy button and MCP. |
+| `server/checkoutGuards.ts` | `checkoutGuards` for the saved-plan Buy button. Agents (Ask Worth and MCP) never prepare orders; they link to the store's own page. |
 | `server/paypal.ts` | Sandbox OAuth, Orders v2 create/get/capture, refunds, `find-eligible-methods`, webhook signature verification and order validation. |
 | `server/channel3.ts`, `server/alternatives.ts` | The Channel3 adapter (band, parsing, URL lookup, cache, back-off, limits, recorded fallback) and what Worth searches for. |
 | `server/outcome.ts` | A store's verified report-back (C4): idempotent on captureId, recorded once with consent and `returnedAt`. |
@@ -110,7 +110,7 @@ retry of a retryable provider error while time remains. The person's message, up
 eight prior messages and a bounded request context are sent; transaction and merchant strings
 are minimised and marked as data, never instructions.
 
-Tools, all read-only except the guarded request in `prepare_checkout`:
+Tools, all read-only:
 
 | Tool | What Claude reports | What the server does |
 | --- | --- | --- |
@@ -119,7 +119,7 @@ Tools, all read-only except the guarded request in `prepare_checkout`:
 | `spending_summary` | — | Totals completed USD spending by category for 30 days |
 | `get_plan_summary` | — | Room to spend today, the baseline low point and its cause |
 | `find_alternatives` | A generic kind of item and a ceiling the user wrote | Refuses for "cheaper" about timing, payment method or services; otherwise searches Channel3 within the room today; only the outcome returns to Claude, never product names or prices |
-| `prepare_checkout` | Catalog item ID, option, and whether the user said to go ahead below the cushion | Runs `checkoutGuards`; Claude receives only the outcome |
+| `open_store_checkout` | A catalog item ID, when the person asks to buy it | Assesses the item at its catalog price today and links to `MERCHANT_ORIGIN/p/<id>` (no link while the hand-off is off). Worth prepares no order; Claude receives only whether a link was shown |
 
 Every read tool also takes **presentation fields**: up to three facts from a fixed catalog for
 that tool, a reason for each from a fixed set (`answers_question`, `explains_result`,
@@ -143,14 +143,19 @@ which tool ran, the facts Claude picked with their reasons, every server check t
 stopped the answer, and Claude's raw placeholder sentence with whether it was accepted. The
 client shows it under "How Ask Worth read this".
 
-**Checkout.** `checkoutGuards` (`server/agentCheckout.ts`) runs in order: an explicit purchase
-instruction in the user's own words (quoted or pasted text dropped, no question, no negation or
-condition), a catalog item, named in the message or the item under discussion, no other active
-checkout, funds confirmed today, a complete plan, the wait date reached for the wait option, the
-spend-less limit for that option, and below the cushion only with the user's own go-ahead.
-Creating the order then re-checks a fresh assessment and that PayPal is available. The price, currency and merchant come from the catalog. An
-order prepared below the cushion is stored as needing confirmation, and capture refuses until
-the user confirms that in the checkout.
+**Buying from the demo store.** Ask Worth never prepares an order (decision 0.2 of the checkout
+pivot). When the person asks to buy a catalog item, `open_store_checkout` shows the engine's
+assessment of buying it today and an "Open at Larkspur Supply" link to the store's own product
+page. The URL, name and price come from the server's catalog and `MERCHANT_ORIGIN`, never from
+Claude; the link leaves in the same tab with `rel="noreferrer"`, like `/check`'s "Back to
+Larkspur Supply". The store creates its own PayPal order when the person checks out there.
+
+**Saved-plan checkout.** `checkoutGuards` (`server/checkoutGuards.ts`) guards the saved plan's
+Buy button: no other active checkout, funds confirmed today, a complete plan, the wait date
+reached for the wait option, the spend-less limit for that option, and the cushion kept.
+Creating the order then re-checks a fresh assessment. The price, currency and merchant come from
+the catalog. An order an agent prepared below the cushion before decision 0.2 is stored as
+needing confirmation, and capture still refuses until the user confirms that in the checkout.
 
 **Fallback.** Without a key, on a provider error or timeout, past `CLAUDE_IP_HOURLY_LIMIT` or
 `CLAUDE_DAILY_LIMIT`, or when AI sharing is off for an edited or imported plan, `fallbackReply()`
@@ -199,10 +204,11 @@ value is read from engine output; the chart computes no money of its own.
 `/mcp` is mounted outside `/api`: it reads only an `Authorization: Bearer wrth_…` token, never
 the session cookie. Tokens are created in Settings → Connect an agent, stored as SHA-256
 fingerprints with the last four characters, bound to one session's plan, capped at three per
-plan, and expire with the plan or after 30 days. Three tools map existing engine functions:
-`check_affordability` (a decision contract checked by `checkDecision` before it is sent),
-`prepare_order` (the same `checkoutGuards`, returning an approval link and never capturing) and
-`list_saved_plans`. Orders an agent requested are labelled in Activity. The MCP path makes no
+plan, and expire with the plan or after 30 days. Worth guardrail MCP has three tools, each
+mapping existing engine functions: `check_affordability` (the guardrail for any store: a decision
+contract checked by `checkDecision` before it is sent), `store_checkout_link` (the demo store's
+checkout link: its product page plus the same verdict, never an order) and `list_saved_plans`.
+Orders an agent requested before decision 0.2 stay labelled in Activity. The MCP path makes no
 Anthropic call. Limits, refusals and setup are in [MCP.md](MCP.md).
 
 ## Store hand-off (/check)
