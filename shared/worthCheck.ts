@@ -12,8 +12,8 @@
  * The page's PayPal SDK v6 instance (or a promise of one) goes in the `paypal` property. With it,
  * the element asks the store's own SDK whether Pay in 4 is offered for the amount, and refreshes
  * the link when the answer differs from the one signed into it. It never opens a window and
- * shows no PayPal artwork. Only the store's server signs; this file holds no secret. Theming: the
- * five custom properties listed at STYLE.
+ * shows no PayPal artwork. Only the store's server signs; this file holds no secret. Its default
+ * look is Worth's own branded button; see STYLE for the five properties a store may override.
  */
 
 /** The part of PayPal's v6 SDK instance this element uses. */
@@ -28,48 +28,70 @@ export interface EligibilitySource {
 export const REFRESH_BEFORE_S = 60
 const TOKEN = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/
 
+/** Worth's W (devpost-assets/worth-mark.svg): an italic W over an offset copy of itself. */
+const W =
+  'M2.136 9.729Q2 2 10 2L76 2Q84 2 83.777 9.812L77.733 221.071Q77.649 224 79.154 221.104L188.987 9.723Q193 2 201 2L247 2Q255 2 255.162 9.723L259.589 221.104Q259.649 224 261.026 221.071L360.328 9.812Q364 2 372 2L438 2Q446 2 442.01 9.729L282.208 319.304Q277.719 328 268.719 328L210.719 328Q201.719 328 201.234 319.393L191.001 137.869Q190.839 135 189.247 137.869L88.496 319.393Q83.719 328 74.719 328L16.719 328Q7.719 328 7.567 319.304Z'
 /**
- * Stores theme the element with exactly five custom properties (contract §3.1):
+ * The mark for a dark fill: the back layer in PayPal blue, the front in white, and their overlap
+ * in a pale blue so both layers still read at 18 px. Inline, so the element loads nothing.
+ */
+const MARK = [
+  '<svg class="mark" viewBox="0 0 472 362" aria-hidden="true" focusable="false">',
+  `<defs><clipPath id="front"><path d="${W}"/></clipPath></defs>`,
+  `<path d="${W}" transform="translate(24 32)" fill="#009cde"/>`,
+  `<path d="${W}" fill="#ffffff"/>`,
+  `<g clip-path="url(#front)"><path d="${W}" transform="translate(24 32)" fill="#9bd8f2"/></g>`,
+  '</svg>',
+].join('')
+
+/**
+ * Branded by default, like PayPal's own button: a full-width navy pill a little shorter than
+ * PayPal's, with the W mark. Stores may override exactly five custom properties (contract §3.1):
  * `--worth-check-bg`, `--worth-check-bg-hover`, `--worth-check-border` (a colour),
- * `--worth-check-ink` and `--worth-check-radius`. Font, case and size are inherited from the host.
+ * `--worth-check-ink` and `--worth-check-radius`.
  */
 const STYLE = `
 :host {
-  display: inline-block;
+  display: block;
+  width: 100%;
 }
 :host([hidden]) {
   display: none;
 }
 a {
   box-sizing: border-box;
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   width: 100%;
-  height: 100%;
-  min-height: 44px;
+  height: 40px;
   padding: 0 16px;
-  border: 1.5px solid var(--worth-check-border, #0b1f44);
-  border-radius: var(--worth-check-radius, 999px);
-  background: var(--worth-check-bg, #ffffff);
-  color: var(--worth-check-ink, #0b1f44);
-  font: inherit;
-  font-weight: inherit;
-  letter-spacing: inherit;
-  text-transform: inherit;
-  text-align: center;
+  border: 1px solid var(--worth-check-border, #003087);
+  border-radius: var(--worth-check-radius, 20px);
+  background: var(--worth-check-bg, #003087);
+  color: var(--worth-check-ink, #ffffff);
+  font: 600 15px/1 'Helvetica Neue', Arial, system-ui, sans-serif;
+  letter-spacing: 0.01em;
+  text-transform: none;
   text-decoration: none;
+  white-space: nowrap;
   cursor: pointer;
 }
 a:hover {
-  background: var(--worth-check-bg-hover, #eef1f6);
+  background: var(--worth-check-bg-hover, #012169);
 }
 a:focus-visible {
-  outline: 3px solid var(--worth-check-ink, #0b1f44);
+  outline: 3px solid #009cde;
   outline-offset: 2px;
 }
 a[aria-busy='true'] {
-  opacity: 0.7;
+  opacity: 0.8;
+}
+.mark {
+  width: 23px;
+  height: 18px;
+  flex: none;
 }
 .sr {
   position: absolute;
@@ -141,7 +163,7 @@ export class WorthCheck extends HTMLElement {
     style.textContent = STYLE
     this.link = document.createElement('a')
     this.link.setAttribute('part', 'link')
-    this.link.textContent = 'Analyse with Worth'
+    this.link.innerHTML = `${MARK}<span>Analyse with Worth</span>`
     this.description = document.createElement('span')
     this.description.className = 'sr'
     this.description.id = 'worth-check-description'

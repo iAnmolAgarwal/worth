@@ -60,13 +60,18 @@ describe('<worth-check> (contract §3.1, C2)', () => {
     expect(element.hidden).toBe(false)
   })
 
-  it('never opens a window or shows PayPal artwork, and is themed with custom properties', () => {
+  it('never opens a window or shows PayPal artwork, and is branded with five overrides', () => {
     const open = vi.fn()
     vi.stubGlobal('open', open)
     const element = mount({ href: href(), amount: '1199.00' })
     link(element).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
     expect(open).not.toHaveBeenCalled()
-    expect(element.shadowRoot!.querySelector('img, svg, iframe')).toBeNull()
+    // Only Worth's own inline W mark, hidden from screen readers; nothing is loaded.
+    expect(element.shadowRoot!.querySelector('img, iframe, use[href^="http"]')).toBeNull()
+    const marks = element.shadowRoot!.querySelectorAll('svg')
+    expect(marks).toHaveLength(1)
+    expect(marks[0]!.getAttribute('aria-hidden')).toBe('true')
+    expect(link(element).textContent).toBe('Analyse with Worth')
     const css = element.shadowRoot!.querySelector('style')!.textContent!
     // Exactly the five theming properties the contract lists, each with a default.
     const names = [...new Set(css.match(/--worth-check-[a-z-]+/g))].sort()
@@ -78,7 +83,8 @@ describe('<worth-check> (contract §3.1, C2)', () => {
       '--worth-check-radius',
     ])
     for (const name of names) expect(css).toMatch(new RegExp(`var\\(${name}, [^)]+\\)`))
-    expect(css).not.toMatch(/paypal/i)
+    expect(css).not.toMatch(/paypal|#ffc439|gold|yellow/i)
+    expect(css).toMatch(/a:focus-visible \{\s*outline: 3px solid/)
   })
 
   it('hides itself without a usable link and never renders a javascript: link', () => {
