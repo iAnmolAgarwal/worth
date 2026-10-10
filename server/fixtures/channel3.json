@@ -2009,5 +2009,91 @@
     ]
    }
   }
+ ],
+ "lookups": [
+  {
+   "url": "https://shop.larkspur.example/products/trailhead-daypack-28l",
+   "response": {
+    "product": {
+     "id": "LkspDaypack28",
+     "title": "Trailhead Daypack 28L - Moss Green",
+     "brands": [
+      {
+       "name": "Larkspur Supply"
+      }
+     ],
+     "images": [],
+     "offers": [
+      {
+       "url": "https://shop.larkspur.example/products/trailhead-daypack-28l",
+       "domain": "shop.larkspur.example",
+       "price": {
+        "price": 129,
+        "compare_at_price": null,
+        "currency": "USD"
+       },
+       "availability": "InStock",
+       "condition": "new"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "url": "https://shop.larkspur.example/products/merino-camp-blanket",
+   "response": {
+    "product": {
+     "id": "LkspBlanketGB",
+     "title": "Merino Camp Blanket",
+     "brands": [
+      {
+       "name": "Larkspur Supply"
+      }
+     ],
+     "images": [],
+     "offers": [
+      {
+       "url": "https://shop.larkspur.example/products/merino-camp-blanket",
+       "domain": "shop.larkspur.example",
+       "price": {
+        "price": 95,
+        "compare_at_price": null,
+        "currency": "GBP"
+       },
+       "availability": "InStock",
+       "condition": "new"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "url": "https://shop.larkspur.example/products/enamel-camp-mug",
+   "response": {
+    "product": {
+     "id": "LkspMugOther",
+     "title": "Enamel Camp Mug, 12 oz",
+     "brands": [
+      {
+       "name": "Larkspur Supply"
+      }
+     ],
+     "images": [],
+     "offers": [
+      {
+       "url": "https://fernhill-goods.example/mug",
+       "domain": "fernhill-goods.example",
+       "price": {
+        "price": 18,
+        "compare_at_price": null,
+        "currency": "USD"
+       },
+       "availability": "InStock",
+       "condition": "new"
+      }
+     ]
+    }
+   }
+  }
  ]
 }

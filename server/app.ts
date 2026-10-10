@@ -23,6 +23,7 @@ import {
   withForeignPaymentGate,
 } from '../shared/csv.ts'
 import { CSV_IMPORT_LIMITS, CSV_SIZE_MESSAGE, utf8Bytes } from '../shared/limits.ts'
+import { checkProductLink, LINK_MAX_LENGTH, storeDomain } from '../shared/link.ts'
 import type {
   AppState,
   Assessment,
@@ -181,17 +182,40 @@ const assessmentSchema = z
     purchaseDate: date.optional(),
   })
   .strict()
+/** A pasted product link: https, public host, at most 2,048 characters (checked again inside). */
+const productLink = z
+  .string()
+  .max(LINK_MAX_LENGTH)
+  .refine((value) => checkProductLink(value).ok, 'Use a store’s https product link.')
 const compareSchema = z
   .object({
     amountCents: cents.optional(),
     itemName: z.string().trim().min(1).max(150).optional(),
     productId: identifier.optional(),
+    /** For an item from a pasted link (C5): its page and who set the price. */
+    sourceUrl: productLink.optional(),
+    priceSource: z.enum(['channel3', 'user']).optional(),
   })
   .strict()
   .refine(
     (input) => input.amountCents !== undefined || input.productId !== undefined,
     'Send a price or a product.',
   )
+  .refine(
+    (input) =>
+      !(input.sourceUrl || input.priceSource) ||
+      Boolean(input.sourceUrl && input.priceSource && !input.productId),
+    'Send a pasted link with its price source, and no product.',
+  )
+const lookupSchema = z.object({ url: z.string().max(LINK_MAX_LENGTH) }).strict()
+/** Lookup failures as answers: each tells the page to ask for the price instead. */
+const LOOKUP_ERRORS = {
+  invalid: [400, 'INVALID_URL', 'Paste a store’s https product link.'],
+  off: [503, 'LOOKUP_OFF', 'Reading links is off right now.'],
+  'not-found': [404, 'LOOKUP_NOT_FOUND', 'Worth couldn’t find a product on that page.'],
+  failed: [502, 'LOOKUP_FAILED', 'Worth couldn’t read that page right now.'],
+  limit: [429, 'RATE_LIMITED', 'Worth has read a lot of links lately.'],
+} as const
 const alternativesSchema = z
   .object({
     productId: identifier.optional(),
@@ -1168,8 +1192,13 @@ export function createApp(options: AppOptions = {}) {
     if (product && input.amountCents !== undefined && input.amountCents !== product.priceCents)
       throw new HttpError(400, 'Use the catalog price for this product.', 'PRICE_MISMATCH')
     const amountCents = product?.priceCents ?? input.amountCents!
-    // PayPal's eligibility check runs first; the session is read afterwards so it is current.
-    const eligibility = await payIn4Eligibility(amountCents)
+    // PayPal's eligibility check runs first; the session is read afterwards so it is current. It
+    // answers for Worth's own demo merchant, so another store's item is judged by the range only.
+    const eligibility = input.sourceUrl
+      ? payIn4InRange(amountCents)
+        ? 'range-only'
+        : 'unavailable'
+      : await payIn4Eligibility(amountCents)
     const current = state(sessionId(res))
     const comparison = compareOptions(
       current.profile,
@@ -1185,7 +1214,32 @@ export function createApp(options: AppOptions = {}) {
         payIn4Eligible: eligibility !== 'unavailable',
       },
     )
-    res.json({ ...comparison, payIn4: { ...comparison.payIn4, eligibility } })
+    // The store is named from the link itself, never from text the browser sends.
+    const source =
+      input.sourceUrl && input.priceSource
+        ? {
+            sourceUrl: input.sourceUrl,
+            merchantName: storeDomain(new URL(input.sourceUrl).hostname),
+            priceSource: input.priceSource,
+          }
+        : undefined
+    res.json({
+      ...comparison,
+      payIn4: { ...comparison.payIn4, eligibility },
+      ...(source ? { source } : {}),
+    })
+  })
+  /**
+   * A pasted product link (C5): Channel3 reads the page and Worth returns the product for the
+   * shopper to confirm. Worth's server never fetches the link, and nothing from the page reaches
+   * Claude. Live lookups count against the Channel3 daily budget and this client's hourly share.
+   */
+  app.post('/api/lookup', async (req, res) => {
+    const input = lookupSchema.parse(req.body)
+    const result = await channel3.lookup(input.url, liveSearches(req))
+    if (result.ok) return res.json(result.product)
+    const [status, code, message] = LOOKUP_ERRORS[result.reason]
+    throw new HttpError(status, message, code)
   })
   /**
    * Similar items from other stores, priced at or below what fits today (the Spend less amount,

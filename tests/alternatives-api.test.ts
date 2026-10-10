@@ -42,6 +42,7 @@ function fakeChannel3(status: Alternatives['status'] = 'ok') {
     search: vi.fn(async (query: string, max: number) => result(query, max)),
     similar: vi.fn(async (id: string, max: number) => result(id, max)),
     checkPrice: vi.fn(async () => ({ status: 'unavailable' as const })),
+    lookup: vi.fn(async () => ({ ok: false as const, reason: 'off' as const })),
     health: vi.fn(() => status),
   } satisfies Channel3Client
 }
