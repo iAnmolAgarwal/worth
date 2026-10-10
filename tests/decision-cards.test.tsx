@@ -80,6 +80,22 @@ describe('option cards (feedback item 4)', () => {
     expect(optionWhy(c, 'wait', c.wait as OptionResult)).toBe('Thu, Oct 22, $440.01 above cushion')
     expect(optionWhy(c, 'spendLess', c.spendLess)).toBe('fits today if you skip the desk chair')
   })
+  it('counts a miss of exactly a tenth of the price as small, and anything more as not', () => {
+    const c = compare(44900, 'Desk chair')
+    const missing = (headroomCents: number) => ({ ...c.buyToday, headroomCents })
+    expect(smallMiss(missing(-1000), 10000)).toBe(true)
+    expect(smallMiss(missing(-1001), 10000)).toBe(false)
+    expect(smallMiss(missing(0), 10000)).toBe(false)
+    expect(smallMiss(missing(-1), 5)).toBe(false)
+  })
+  it('says “Leaves exactly your cushion” when the lowest point lands on it', () => {
+    const c = compare(44001, 'Desk chair')
+    expect(c.buyToday.headroomCents).toBe(0)
+    expect(optionWhy(c, 'buyToday', c.buyToday)).toBe('Leaves exactly your cushion on Thu, Oct 22')
+    expect(optionWhy(c, 'wait', { ...c.buyToday, headroomCents: 0 } as OptionResult)).toBe(
+      'Leaves exactly your cushion on Thu, Oct 22',
+    )
+  })
   it('keeps a large miss to the day it starts', () => {
     const c = compare(119900, 'Everyday camera')
     expect(smallMiss(c.buyToday, c.amountCents)).toBe(false)

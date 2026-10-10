@@ -221,6 +221,18 @@ describe('where the similar items appear', () => {
     await user.click(cheaper)
     const list = await screen.findByRole('region', { name: 'Similar items that fit today' })
     expect(rail.contains(list)).toBe(true)
+    // The card names the list, and the swap is announced while focus stays on the card.
+    expect(document.getElementById(cheaper.getAttribute('aria-controls')!)!.contains(list)).toBe(
+      true,
+    )
+    expect(
+      screen
+        .getAllByRole('status')
+        .some(
+          (el) => el.textContent === 'Similar items up to $440.01 are shown beside the options.',
+        ),
+    ).toBe(true)
+    expect(document.activeElement).toBe(cheaper)
     expect(within(list).getByText('Up to $440.01 · from other stores')).toBeTruthy()
     expect(within(cheaper).getByText('$440.01')).toBeTruthy()
     expect(
@@ -257,7 +269,13 @@ describe('where the similar items appear', () => {
     await user.click(cheaper)
     const list = await screen.findByRole('region', { name: 'Similar items that fit today' })
     expect(container.querySelector('.decision-rail')!.contains(list)).toBe(false)
-    expect(group.nextElementSibling).toBe(list)
+    // Next after the cards (and the hidden announcement), before the Pay in 4 comparison.
+    expect(group.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const p4 = container.querySelector('.disclosure')!
+    expect(list.compareDocumentPosition(p4) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByRole('status').textContent).toBe(
+      'Similar items up to $440.01 are shown below the options.',
+    )
     // The rail keeps the item, below everything else.
     expect(screen.getByText(/Sold by Larkspur Supply/)).toBeTruthy()
   })

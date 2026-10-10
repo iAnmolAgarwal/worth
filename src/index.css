@@ -1363,6 +1363,25 @@ textarea.input {
   flex-direction: column;
   gap: 6px;
 }
+/* Pay in 4's cards side by side: each card is a subgrid of three shared rows (ring, amount and
+   date; relation; lowest after), so a block that wraps in one card moves the same block in every
+   card, and the dividers stay level whatever the fonts measure. */
+@media (min-width: 768px) {
+  .sched.rows .near {
+    min-height: calc(2 * var(--lh-meta));
+  }
+  @supports (grid-template-rows: subgrid) {
+    .sched.rows .inst {
+      display: grid;
+      grid-row: span 3;
+      grid-template-rows: subgrid;
+      row-gap: 6px;
+    }
+    .sched.rows .after {
+      margin-top: 0;
+    }
+  }
+}
 .inst.flag {
   border-color: transparent;
   box-shadow: inset 0 0 0 1px #f3b7b7;

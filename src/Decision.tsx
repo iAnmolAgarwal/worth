@@ -122,6 +122,8 @@ export function optionWhy(c: Comparison, k: OptionKey, option: OptionResult) {
     return c.spendLess.maxPriceCents <= 0
       ? 'Nothing fits today without going below your cushion.'
       : `fits today if you skip the ${lower(c.itemName)}`
+  if (option.headroomCents === 0)
+    return `Leaves exactly your cushion on ${dayLabel(option.lowestDate)}`
   if (option.lowestBalanceCents >= c.cushionCents)
     return `${dayLabel(option.lowestDate)}, ${money(option.headroomCents)} above cushion`
   return smallMiss(option, c.amountCents)
@@ -180,11 +182,14 @@ function OptionCard({
   onKeyDown,
   buttonRef,
   similar,
+  controls,
 }: {
   c: Comparison
   k: OptionKey
   /** Similar items under the limit exist, so the Something cheaper card offers them. */
   similar?: boolean
+  /** The id of the similar items list while it is shown. */
+  controls?: string
   checked: boolean
   onSelect: () => void
   tabIndex: number
@@ -225,6 +230,7 @@ function OptionCard({
       className="opt"
       role="radio"
       aria-checked={checked}
+      aria-controls={controls}
       tabIndex={tabIndex}
       onClick={onSelect}
       onKeyDown={onKeyDown}
@@ -433,7 +439,7 @@ function PayIn4Panel({
           <br />
           {lines.low}
         </Alert>
-        <div className="sched" role="list" aria-label="Illustrative Pay in 4 schedule">
+        <div className="sched rows" role="list" aria-label="Illustrative Pay in 4 schedule">
           {p4.instalments.map((item) => (
             <div
               role="listitem"
@@ -571,6 +577,7 @@ export function Decision({
     ? state.products.find((item) => item.id === active.productId)
     : undefined
   const narrow = useNarrow()
+  const listId = useId()
   // Something cheaper's similar items, asked for under the card's own limit so both state one
   // number. Fetched with the comparison, so the card offers them only when there are some.
   const cheaperLimit = c && !fits(c.buyToday) ? c.spendLess.maxPriceCents : 0
@@ -828,10 +835,14 @@ export function Decision({
     )
   const listShown =
     selected === 'spendLess' && cheaperLimit > 0 && Boolean(similar.result || similar.loading)
-  const list = similar.result ? (
-    <SimilarItems state={state} result={similar.result} onSave={onSaveAlternative} />
-  ) : (
-    <AlternativesLoading />
+  const list = (
+    <div id={listId}>
+      {similar.result ? (
+        <SimilarItems state={state} result={similar.result} onSave={onSaveAlternative} />
+      ) : (
+        <AlternativesLoading />
+      )}
+    </div>
   )
   const railActions = handoff
     ? handoff.actions(true, c)
@@ -930,6 +941,12 @@ export function Decision({
             )}
             {handoff?.footer}
           </div>
+          {/* Says where the list went, since choosing the card keeps focus on it. */}
+          <p className="sr" role="status">
+            {listShown && similar.result
+              ? `Similar items up to ${money(similar.result.maxPriceCents)} are shown ${narrow ? 'below the options' : 'beside the options'}.`
+              : ''}
+          </p>
           <div
             role="radiogroup"
             aria-label="Your options"
@@ -945,6 +962,7 @@ export function Decision({
                 tabIndex={selected === key ? 0 : -1}
                 onSelect={() => setPicked(key)}
                 similar={Boolean(similar.result)}
+                controls={key === 'spendLess' && listShown ? listId : undefined}
                 onKeyDown={(event) => move(event, key)}
                 buttonRef={(element) => {
                   radios.current[index] = element
