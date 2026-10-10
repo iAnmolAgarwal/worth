@@ -51,8 +51,10 @@ export interface CaptureOptions {
    */
   mockDecline?: boolean
 }
+/** What an order is built from: Worth's stored purchase, or the demo store's own order record. */
+export type OrderSource = Pick<StoredPurchase, 'id' | 'productId' | 'name' | 'amountCents'>
 export interface PayPalGateway {
-  create(purchase: StoredPurchase): Promise<PayPalOrder>
+  create(purchase: OrderSource): Promise<PayPalOrder>
   /** `requestId` is the PayPal-Request-Id; reusing it returns the earlier capture result. */
   capture(orderId: string, requestId: string, options?: CaptureOptions): Promise<PayPalOrder>
   get(orderId: string): Promise<PayPalOrder>
@@ -125,6 +127,11 @@ export interface GatewayConfig {
   secret: string
   origin: string
   webhookId?: string
+  /**
+   * Where PayPal sends the buyer after a redirect approval. Defaults to Worth's own return route;
+   * the demo store passes its product page.
+   */
+  returnUrl?: (purchase: OrderSource, result: 'approved' | 'cancelled') => string
   /** Injected in tests; defaults to the global fetch. */
   fetch?: typeof fetch
   /** Receives PayPal debug IDs for failed calls. Never request bodies or credentials. */
@@ -180,6 +187,10 @@ export function createPayPalGateway(config: GatewayConfig): PayPalGateway {
   const log =
     config.log ??
     ((event: Record<string, unknown>) => console.warn('PayPal:', JSON.stringify(event)))
+  const returnTo =
+    config.returnUrl ??
+    ((purchase: OrderSource, result: 'approved' | 'cancelled') =>
+      returnUrl(config.origin, purchase.id, result))
   let token: { value: string; until: number } | undefined
 
   /** One fetch, with transport failures and unreadable bodies turned into PayPalError. */
@@ -408,8 +419,8 @@ export function createPayPalGateway(config: GatewayConfig): PayPalGateway {
                 brand_name: `${store} (demo store)`.slice(0, 127),
                 user_action: 'CONTINUE',
                 shipping_preference: 'NO_SHIPPING',
-                return_url: returnUrl(config.origin, purchase.id, 'approved'),
-                cancel_url: returnUrl(config.origin, purchase.id, 'cancelled'),
+                return_url: returnTo(purchase, 'approved'),
+                cancel_url: returnTo(purchase, 'cancelled'),
               },
             },
           },
@@ -503,7 +514,10 @@ function logPath(path: string) {
   return path.split('?')[0]
 }
 
-export function validateOrder(order: PayPalOrder, purchase: StoredPurchase): string {
+export function validateOrder(
+  order: PayPalOrder,
+  purchase: Pick<StoredPurchase, 'id' | 'orderId' | 'amountCents' | 'merchantId'>,
+): string {
   if (!order.id || (purchase.orderId && order.id !== purchase.orderId))
     throw new Error('Order identity mismatch')
   const units = order.purchase_units
