@@ -238,6 +238,25 @@ describe('POST /api/handoff/outcome: recording (contract §5)', () => {
     )
   })
 
+  it('removes an item saved for its date on /check once that quote’s purchase is reported', async () => {
+    const { app, agent, store } = setup()
+    await shopper(agent, { consent: false, returned: false })
+    const saved = await post(agent, '/api/handoff/save', { qid: QID, waitDate: '2026-10-23' })
+    expect(saved.status).toBe(200)
+    expect(saved.body.item).toMatchObject({ qid: QID, sourceUrl: `${STORE}/p/camera` })
+    // The link stays, but only the qid is needed: drop the link to prove the qid alone matches.
+    const id = store.quote(QID, clock.value.getTime())!.sessionId
+    const data = store.get(id)!
+    delete data.saved!.find((item) => item.qid === QID)!.sourceUrl
+    store.save(id, data)
+    await post(agent, '/api/handoff/consent', { qid: QID, consent: true })
+    await post(agent, '/api/handoff/return', { qid: QID })
+    expect((await report(app)).body).toEqual({ recorded: true })
+    const after = await state(agent)
+    expect(after.saved!.some((item) => item.qid === QID)).toBe(false)
+    expect(store.get(id)!.saved!.find((item) => item.qid === QID)!.status).toBe('removed')
+  })
+
   it('keeps Saved as it is when nothing is recorded', async () => {
     const { app, agent, store } = setup()
     await shopper(agent, { consent: false })
