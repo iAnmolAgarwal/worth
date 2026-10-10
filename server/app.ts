@@ -1395,6 +1395,8 @@ export function createApp(options: AppOptions = {}) {
       ...(fitsOn ? { fitsOn } : {}),
       ...(comparison.payIn4.available ? { payIn4Fits: comparison.payIn4.outcome === 'fits' } : {}),
     })
+    // Anti-forwarding (§5): only a quote whose shopper came back through Worth can report a purchase.
+    store.markQuoteReturned(quote.qid, sessionId(res), now().getTime())
     res.json({ url: withResult(quote.returnUrl, token) })
   })
   app.post('/api/compare', async (req, res) => {

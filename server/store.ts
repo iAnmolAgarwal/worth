@@ -214,13 +214,20 @@ export class Store {
   }
   /**
    * Binds a store's quote to the session that opened it first, for 24 hours. Reopening in the same
-   * session refreshes the details and keeps the shopper's consent; another session can't take it.
+   * session refreshes the details and keeps the shopper's consent and return; another session
+   * can't take it.
    */
   openQuote(quote: StoredQuote, now = Date.now()): StoredQuote {
     return this.atomic(() => {
       const current = this.quote(quote.qid, now)
       if (current && current.sessionId !== quote.sessionId) return current
-      const next = current ? { ...quote, consent: current.consent } : quote
+      const next = current
+        ? {
+            ...quote,
+            consent: current.consent,
+            ...(current.returnedAt ? { returnedAt: current.returnedAt } : {}),
+          }
+        : quote
       this.db
         .prepare(
           `INSERT INTO handoff_quotes(qid,session_id,data,expires) VALUES(?,?,?,?)
@@ -239,11 +246,23 @@ export class Store {
   }
   /** Records the shopper's report-back choice; false unless this session holds the quote. */
   setQuoteConsent(qid: string, sessionId: string, consent: boolean, now = Date.now()) {
+    return this.updateQuote(qid, sessionId, { consent }, now)
+  }
+  /** Records that Worth signed a result for this quote, in the session that holds it. */
+  markQuoteReturned(qid: string, sessionId: string, now = Date.now()) {
+    return this.updateQuote(qid, sessionId, { returnedAt: now }, now)
+  }
+  private updateQuote(
+    qid: string,
+    sessionId: string,
+    patch: Partial<Pick<StoredQuote, 'consent' | 'returnedAt'>>,
+    now: number,
+  ) {
     const current = this.quote(qid, now)
     if (!current || current.sessionId !== sessionId) return false
     this.db
       .prepare('UPDATE handoff_quotes SET data=? WHERE qid=? AND session_id=?')
-      .run(JSON.stringify({ ...current, consent }), qid, sessionId)
+      .run(JSON.stringify({ ...current, ...patch }), qid, sessionId)
     return true
   }
   atomic<T>(fn: () => T): T {
@@ -278,6 +297,11 @@ export interface StoredQuote {
   openedAt: number
   /** Unticked by default: the shopper opts in on the decision screen. */
   consent: boolean
+  /**
+   * When Worth last signed a result for this quote (ms): the shopper went back to the store through
+   * Worth. C4 records a purchase only with consent and this set (contract §5, anti-forwarding).
+   */
+  returnedAt?: number
 }
 
 /** An agent token as stored, without its hash. Times are in milliseconds. */

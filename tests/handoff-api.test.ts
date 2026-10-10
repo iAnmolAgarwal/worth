@@ -402,6 +402,24 @@ describe('POST /api/handoff/return (contract §4)', () => {
     expect(payload.exp - payload.iat).toBe(900)
   })
 
+  it('records returnedAt only when it signs a result, in the owning session (§5)', async () => {
+    const { agent, store } = setup()
+    await opened(agent)
+    const stored = () => store.quote(quote.qid, clock.value.getTime())!
+    expect(stored().returnedAt).toBeUndefined()
+    // A changed price goes back without a result, so it doesn't count as returning through Worth.
+    await result(agent, { amountCents: 2000 })
+    expect(stored().returnedAt).toBeUndefined()
+    clock.value = new Date(clock.value.getTime() + 5000)
+    await result(agent)
+    expect(stored().returnedAt).toBe(clock.value.getTime())
+    // Reopening the link and consenting keep it.
+    await post(agent, '/api/handoff/consent', { qid: quote.qid, consent: true })
+    await opened(agent)
+    expect(stored()).toMatchObject({ consent: true, returnedAt: clock.value.getTime() })
+    expect(store.markQuoteReturned(quote.qid, 'another-session', clock.value.getTime())).toBe(false)
+  })
+
   it('signs buy today with today’s date for an item that fits', async () => {
     const { agent } = setup()
     await opened(agent, { amountCents: 2000 })
