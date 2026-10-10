@@ -27,6 +27,12 @@ export interface ScheduledFlow {
    * snapshot already reflects it, so the forecast skips that occurrence.
    */
   paidOn?: string
+  /**
+   * Where the item came from: 'paypal' when Worth found it in the user's PayPal activity export,
+   * 'you' when the user added it. It never says how certain the amount or date is: a plan found in
+   * PayPal still has estimated dates. Absent on items from before origins were recorded.
+   */
+  origin?: 'paypal' | 'you'
 }
 export interface FinancialProfile {
   name: string

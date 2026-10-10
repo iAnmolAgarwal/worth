@@ -297,6 +297,7 @@ function recurringSuggestions(
       confirmed: false,
       active: true,
       color: latest.color,
+      origin: 'paypal',
     }
     let nextDate = occurrence(flow, 1)
     for (let count = 2; nextDate < today && count < 1000; count++)

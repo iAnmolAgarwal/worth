@@ -176,6 +176,7 @@ const profileSchema = z
             icon: z.string().max(40).optional(),
             planId: identifier.optional(),
             paidOn: date.optional(),
+            origin: z.enum(['paypal', 'you']).optional(),
           })
           .strict(),
       )
