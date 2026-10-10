@@ -22,6 +22,7 @@ import {
   createHandoff,
   HANDOFF_KID,
   MAX_LIFETIME_S,
+  outcomeSchema,
   type OutcomePayload,
 } from '../shared/handoff.ts'
 import { catalogPage, notFoundPage, productPage, resultLine, type PageOptions } from './pages.ts'
@@ -50,6 +51,17 @@ const WEBHOOK_PER_MINUTE = 60
 /** The store's own order reference carries the quote ID, so a webhook after a restart still has it. */
 const REFERENCE = /^(q_[A-Za-z0-9_-]{22})\.[A-Za-z0-9_-]{8}$/
 const ORDER_ID = /^[A-Za-z0-9-]{1,64}$/
+
+/**
+ * PayPal's capture time as Worth's outcome schema takes it, ISO 8601 in UTC. A time with an offset
+ * is converted rather than sent as is, since Worth would refuse the whole report for it.
+ */
+export function utcTime(value: string | undefined) {
+  if (!value) return undefined
+  if (outcomeSchema.shape.capturedAt.safeParse(value).success) return value
+  const time = Date.parse(value)
+  return Number.isNaN(time) ? undefined : new Date(time).toISOString()
+}
 
 class HttpError extends Error {
   constructor(
@@ -337,7 +349,7 @@ export function createMerchantApp(options: MerchantAppOptions = {}) {
       amountCents,
       currency: 'USD',
       status: 'COMPLETED',
-      capturedAt: capture.create_time ?? new Date(now()).toISOString(),
+      capturedAt: utcTime(capture.create_time) ?? new Date(now()).toISOString(),
     }
     if (reported.size > 5000) reported.clear()
     reported.add(capture.id)

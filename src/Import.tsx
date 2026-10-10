@@ -141,7 +141,8 @@ export function ImportDialog({
         (warning) =>
           !(preview?.unresolved.length && /currenc|USD conversion/i.test(warning)) &&
           !(preview?.instalmentPlans.length && /pay later|pay in 4|instal/i.test(warning)) &&
-          !(preview?.adjustments.length && /correction/i.test(warning)),
+          !(preview?.adjustments.length && /correction/i.test(warning)) &&
+          !(preview?.storeMatches?.length && /’s report of /.test(warning)),
       ),
     ),
   ]
@@ -330,6 +331,20 @@ export function ImportDialog({
             {preview.recurring.length > 0 &&
               `${count(preview.recurring.length, 'repeating item')} to confirm next.`}
           </p>
+          {preview.storeMatches?.length ? (
+            <Alert tone="info" icon={Store}>
+              <strong>Counted once</strong>
+              <ul>
+                {preview.storeMatches.map((match) => (
+                  <li key={match.row}>
+                    Matched “{match.name}” {money(-match.amountCents)} on {shortDate(match.date)} to{' '}
+                    {match.store}’s report of {match.item}. It’s already in your Activity, so it
+                    isn’t imported again.
+                  </li>
+                ))}
+              </ul>
+            </Alert>
+          ) : null}
           {attention.length > 0 && (
             <details className="quiet-details attention">
               <summary>Needs attention ({attention.length})</summary>

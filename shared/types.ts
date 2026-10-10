@@ -72,6 +72,11 @@ export interface Transaction {
   source: 'demo' | 'import' | 'purchase'
   color?: string
   referenceId?: string
+  /**
+   * On a payment a store reported (C4): the imported PayPal transaction an earlier CSV import took
+   * as this payment, so no later import matches the report again.
+   */
+  matchedImportId?: string
 }
 export interface Product {
   id: string
@@ -288,6 +293,15 @@ export interface Purchase {
    * asked for it through Worth's MCP server (prepare_order); absent on older purchases.
    */
   preparedBy?: 'agent' | 'external' | 'user'
+  /**
+   * The store's name when the store reported this payment to Worth after its own PayPal capture
+   * (handoff-contract §5). Worth never saw the checkout; it only records the payment once.
+   */
+  reportedBy?: string
+  /** The store's quoted price, kept for display when the captured amount differs from it. */
+  quotedCents?: number
+  /** Until the shopper has seen "<store> told Worth about your payment" once. */
+  reportNotice?: boolean
 }
 /** Something the user must confirm before Worth changes how a purchase affects their plan. */
 export type PurchaseReview =
@@ -740,6 +754,22 @@ export interface ImportPreview {
   converted: string[]
   /** Possible existing Pay in 4 or Pay Later plans. Their rows are never ordinary spending. */
   instalmentPlans: InstalmentPlanProposal[]
+  /**
+   * Rows taken as a payment a store already reported to Worth (C4), so not imported again. Matched
+   * by amount and date only, so the preview names each one.
+   */
+  storeMatches?: {
+    row: number
+    name: string
+    date: string
+    amountCents: number
+    store: string
+    item: string
+    /** The store-reported Activity row it matched. */
+    reportId: string
+    /** The row's own transaction ID, kept on that Activity row when the import is committed. */
+    importId: string
+  }[]
 }
 
 /**

@@ -24,7 +24,7 @@ import type { AppState, Purchase, SavePlan, SaveTarget } from './contract'
 import { alternativeTarget, decisionRequestFrom, saveRequest } from './contract'
 import { Decision, type DecisionRequest, type Explanation } from './Decision'
 import { envLabel } from './engine'
-import { dayLabel, fullDate } from './format'
+import { dayLabel, fullDate, money } from './format'
 import { Home, HomeSkeleton } from './Home'
 import { ImportDialog } from './Import'
 import { PlanPage, PlanWizard } from './Plan'
@@ -243,6 +243,29 @@ export default function App() {
     // Runs once, when the first state arrives.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [Boolean(state)])
+  // A store told Worth about a payment after its own PayPal checkout (C4): say so once, naming
+  // every new report, then clear exactly those. This tab never repeats one while that is on its way.
+  const noticed = useRef(new Set<string>())
+  useEffect(() => {
+    const fresh = (state?.purchases ?? []).filter(
+      (p) => p.reportNotice && p.reportedBy && !noticed.current.has(p.id),
+    )
+    if (!fresh.length) return
+    for (const purchase of fresh) noticed.current.add(purchase.id)
+    const stores = new Set(fresh.map((p) => p.reportedBy))
+    const who = stores.size === 1 ? fresh[0]!.reportedBy : `${stores.size} stores`
+    // oxlint-disable-next-line react/set-state-in-effect
+    setToast(
+      fresh.length === 1
+        ? `${who} told Worth about your ${money(fresh[0]!.amountCents)} payment.`
+        : `${who} told Worth about ${fresh.length} payments. They’re in your Activity.`,
+    )
+    // The server takes at most 20 per call, so every report this notice named is cleared in batches.
+    for (let start = 0; start < fresh.length; start += 20)
+      void api('/handoff/notices/seen', {
+        purchaseIds: fresh.slice(start, start + 20).map((p) => p.id),
+      }).catch(() => {})
+  }, [state])
   useEffect(() => {
     if (!toast) return
     const timer = setTimeout(() => setToast(''), 6000)

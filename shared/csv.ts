@@ -125,6 +125,12 @@ const HOLD_TYPE = /\b(?:holds?|authori[sz]ations?)\b/i
 /** PayPal's instalment products, named in a row's Type or Name. Deliberately narrow. */
 const PAY_LATER = /\bpay\s+in\s+(?:4|four)\b|\bpay\s+later\b/i
 const INSTALLMENT: Classification = { kind: 'installment', category: 'Pay in 4', color: '#c4bee0' }
+/**
+ * The Activity reference of a payment a store reported to Worth after its own PayPal capture
+ * (handoff-contract §5). The shopper's export names that payment with its own transaction ID, never
+ * the store's capture ID, so import matches it by amount and date instead.
+ */
+export const STORE_REFERENCE = 'store:'
 /** A plain bank transfer type with no other detail. */
 const BANK_TRANSFER_TYPE = /^(?:bank )?transfer$/
 
@@ -639,6 +645,8 @@ export interface ParseOptions {
   dateOrder?: DateOrder
   /** Foreign-currency payments from earlier imports; resolved ones are not raised again. */
   foreignPayments?: ForeignPayment[]
+  /** The store that reported each store-reported Activity row, by row ID (C4). */
+  storeNames?: Record<string, string>
 }
 
 export function parsePayPalCsv(
@@ -725,8 +733,30 @@ export function parsePayPalCsv(
   const knownById = new Map(existing.map((transaction) => [transaction.id, transaction]))
   const capturedPurchases = new Map(
     existing
-      .filter((transaction) => transaction.source === 'purchase' && transaction.referenceId)
+      .filter(
+        (transaction) =>
+          transaction.source === 'purchase' &&
+          transaction.referenceId &&
+          !transaction.referenceId.startsWith(STORE_REFERENCE),
+      )
       .map((transaction) => [transaction.referenceId!.replace(/^paypal:/, ''), transaction]),
+  )
+  // Payments stores reported and no import has matched yet, each matched by at most one
+  // transaction in this file. A committed match is kept on the report (`matchedImportId`): that
+  // report is never matched again, and later rows of the transaction it took are duplicates.
+  const storeReported = existing.filter(
+    (transaction) =>
+      transaction.source === 'purchase' &&
+      transaction.referenceId?.startsWith(STORE_REFERENCE) &&
+      transaction.status !== 'excluded' &&
+      !transaction.matchedImportId,
+  )
+  const storeTaken = new Set(
+    existing.flatMap((transaction) =>
+      transaction.source === 'purchase' && transaction.matchedImportId
+        ? [transaction.matchedImportId]
+        : [],
+    ),
   )
   const occurrences = new Map<string, number>()
   let noIds = 0
@@ -811,6 +841,42 @@ export function parsePayPalCsv(
     })
   }
 
+  // 1b. A payment a store already reported to Worth is counted once: the shopper's export names
+  // it with their own transaction ID, never the store's capture ID, so the same amount within a
+  // day (the capture time is UTC; the export uses the account's local date) is taken as that
+  // payment. Each report takes one row: one naming the store first, then the nearest date, then
+  // the file's order. Every row of the chosen transaction (pending, then settled) goes with it.
+  const storeName = (payment: Transaction) => options.storeNames?.[payment.id] ?? 'A store'
+  const reportedRows = new Map<number, Transaction>()
+  const reportedIds = new Set<string>()
+  for (const payment of storeReported) {
+    const store = storeName(payment).toLowerCase()
+    const candidates = rows
+      .filter(
+        (row) =>
+          !reportedRows.has(row.rowNumber) &&
+          !(row.nativeId && reportedIds.has(row.nativeId)) &&
+          !(row.nativeId && knownById.has(`paypal:${row.nativeId}`)) &&
+          !(row.nativeId && storeTaken.has(`paypal:${row.nativeId}`)) &&
+          row.currency === 'USD' &&
+          row.status !== 'excluded' &&
+          row.amount === payment.amountCents &&
+          Math.abs(dateDistance(payment.date, row.date)) <= 1 &&
+          (row.payLater ||
+            ['expense', 'installment'].includes(classify(row.name, row.type, row.amount).kind)),
+      )
+      .map((row) => ({
+        row,
+        named: row.name.toLowerCase().includes(store) ? 0 : 1,
+        days: Math.abs(dateDistance(payment.date, row.date)),
+      }))
+      .sort((a, b) => a.named - b.named || a.days - b.days || a.row.rowNumber - b.row.rowNumber)
+    const chosen = candidates[0]?.row
+    if (!chosen) continue
+    reportedRows.set(chosen.rowNumber, payment)
+    if (chosen.nativeId) reportedIds.add(chosen.nativeId)
+  }
+
   // 2. Record a row once, under the identity it was exported with.
   const identify = (row: Row) => {
     const fingerprint = hash(
@@ -875,6 +941,36 @@ export function parsePayPalCsv(
       return
     }
     const previous = knownById.get(id)
+    // A later copy of a transaction an earlier import took as a store's payment.
+    if (!previous && storeTaken.has(id)) {
+      result.duplicates++
+      return
+    }
+    const reported = override.amount === undefined ? reportedRows.get(rowNumber) : undefined
+    if (reported) {
+      const store = storeName(reported)
+      const cents = (-amount / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })
+      result.warnings.push(
+        `Row ${rowNumber}: matched “${row.name}” ${cents} on ${date} to ${store}’s report of ${reported.name}, so it is counted once.`,
+      )
+      ;(result.storeMatches ??= []).push({
+        row: rowNumber,
+        name: row.name,
+        date,
+        amountCents: amount,
+        store,
+        item: reported.name,
+        reportId: reported.id,
+        importId: id,
+      })
+      result.duplicates++
+      return
+    }
+    // Another row of a transaction taken as a store's payment, such as its settled copy.
+    if (!previous && nativeId && reportedIds.has(nativeId)) {
+      result.duplicates++
+      return
+    }
     if (previous) {
       // A USD cost the user entered gives way to the conversion a later export shows.
       const replacesEntered =

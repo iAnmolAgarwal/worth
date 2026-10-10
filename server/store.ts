@@ -35,6 +35,11 @@ export interface StoredPurchase extends Purchase {
   captureRetries?: number
   /** Whether PayPal's checkout could offer Pay Later for this order, from the eligibility check. */
   payLaterCapable?: boolean
+  /**
+   * A store's report of its own PayPal capture (C4). Kept apart from orderId and captureId, which
+   * name Worth's own PayPal orders: Worth never reads, captures or reconciles a store's order.
+   */
+  storeReport?: { mid: string; qid: string; orderId: string; captureId: string }
 }
 export const ACTIVE = new Set(['created', 'pending', 'unknown'])
 const DAY = 24 * 60 * 60 * 1000
@@ -62,6 +67,10 @@ export class Store {
         data TEXT NOT NULL, expires INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS handoff_quotes_session ON handoff_quotes(session_id);
       CREATE INDEX IF NOT EXISTS handoff_quotes_expires ON handoff_quotes(expires);
+      CREATE TABLE IF NOT EXISTS handoff_outcomes (capture_id TEXT PRIMARY KEY, qid TEXT NOT NULL,
+        session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, recorded INTEGER NOT NULL, created INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS handoff_outcomes_qid ON handoff_outcomes(qid);
+      CREATE INDEX IF NOT EXISTS handoff_outcomes_session ON handoff_outcomes(session_id);
     `)
   }
   close() {
@@ -265,6 +274,28 @@ export class Store {
       .run(JSON.stringify({ ...current, ...patch }), qid, sessionId)
     return true
   }
+  /** The answer Worth gave a store's first report of this capture, if it has had one. */
+  outcome(captureId: string): { qid: string; recorded: boolean } | undefined {
+    const row = this.db
+      .prepare('SELECT qid, recorded FROM handoff_outcomes WHERE capture_id=?')
+      .get(captureId) as { qid: string; recorded: number } | undefined
+    return row ? { qid: row.qid, recorded: row.recorded === 1 } : undefined
+  }
+  /** Whether a purchase was already recorded for this quote. */
+  quoteRecorded(qid: string) {
+    return Boolean(
+      this.db.prepare('SELECT 1 FROM handoff_outcomes WHERE qid=? AND recorded=1').get(qid),
+    )
+  }
+  /**
+   * Keeps a capture's answer under its unique ID, so a repeat report gets the same answer and
+   * has no effect. It goes with the quote's session.
+   */
+  putOutcome(captureId: string, qid: string, sessionId: string, recorded: boolean, now: number) {
+    this.db
+      .prepare('INSERT INTO handoff_outcomes VALUES(?,?,?,?,?)')
+      .run(captureId, qid, sessionId, recorded ? 1 : 0, now)
+  }
   atomic<T>(fn: () => T): T {
     this.db.exec('BEGIN IMMEDIATE')
     try {
@@ -345,6 +376,7 @@ export function publicPurchase(purchase: StoredPurchase): Purchase {
     captureAttemptedAt: _attempted,
     captureRetries: _retries,
     payLaterCapable: _payLater,
+    storeReport: _report,
     approveUrl: _stale,
     ...result
   } = purchase
