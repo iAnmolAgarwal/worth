@@ -39,6 +39,15 @@ Product names ("MacBook Pro 14-inch", "AirPods 4") are used only to name the ite
 - **Figtree** (`@fontsource-variable/figtree`), SIL Open Font License 1.1. It stands in for PayPal Open, which is licensed only to PayPal and is not self-hosted.
 - **Lucide** (`lucide-react`), ISC License.
 
+### Larkspur Supply (the demo store, `merchant/`)
+
+The store's own fonts are self-hosted in `merchant/public/fonts/`, because its CSP allows fonts only from its own origin. They are the Latin subsets from Fontsource 5.1.0, and each licence is beside the files:
+- **Archivo** (400, 500), SIL Open Font License 1.1, © The Archivo Project Authors.
+- **Archivo Narrow** (700), SIL Open Font License 1.1, © The Archivo Narrow Project Authors.
+- **IBM Plex Mono** (400, 500), SIL Open Font License 1.1, © IBM Corp.
+
+The store's sprig mark is an inline SVG drawn for this project.
+
 ## PayPal marks
 
 PayPal marks appear only inside PayPal's official SDK v6 components (the PayPal button and PayPal Messages). Worth never draws a PayPal button or logo of its own.

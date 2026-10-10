@@ -1,4 +1,4 @@
-# Render Blueprint for the hosted Worth demo (PayPal sandbox only).
+# Render Blueprint for the hosted Worth demo and its demo store, Larkspur Supply (PayPal sandbox only).
 # One paid instance with a persistent disk: SQLite lives on the disk, so the service must stay a
 # single instance, and a disk rules out zero-downtime deploys (no deploys during judging).
 services:
@@ -54,3 +54,43 @@ services:
         value: '20'
       - key: CLAUDE_DAILY_LIMIT
         value: '200'
+
+  # Larkspur Supply, the fictional demo store on its own origin. It keeps no data on disk (sessions
+  # and orders live in memory), but stays on a paid plan so it never sleeps between a shopper's
+  # visit to Worth and their return.
+  - type: web
+    name: larkspur-supply
+    runtime: node
+    plan: starter
+    region: oregon
+    buildCommand: npm ci --include=dev && npm run build:merchant
+    startCommand: npm run start:merchant
+    healthCheckPath: /healthz
+    autoDeploy: false
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: TRUST_PROXY
+        value: '2'
+      # The store's public https origin; falls back to RENDER_EXTERNAL_URL.
+      - key: MERCHANT_ORIGIN
+        sync: false
+      # Worth's public https origin, e.g. https://worth.onrender.com.
+      - key: WORTH_ORIGIN
+        sync: false
+      # 32+ random bytes, base64url; the same value as Worth's HANDOFF_SECRET.
+      - key: HANDOFF_SECRET
+        sync: false
+      - key: HANDOFF_MERCHANT_ID
+        value: larkspur
+      # The same sandbox REST app as Worth.
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      # Register https://<store host>/api/paypal/webhook in the same sandbox app (its own webhook,
+      # alongside Worth's) for PAYMENT.CAPTURE.COMPLETED, then paste that webhook's ID.
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
