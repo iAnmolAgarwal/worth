@@ -36,8 +36,12 @@ export function sanitizeName(value: string, max: number) {
   return plainText(value).slice(0, max).trim()
 }
 
-/** HANDOFF_SECRET as key bytes, or undefined when it is not base64url or shorter than 32 bytes. */
-export function secretBytes(secret: string | undefined): Buffer | undefined {
+/**
+ * HANDOFF_SECRET as key bytes, or undefined when it is not base64url or shorter than 32 bytes.
+ * Bytes already decoded are accepted as they are.
+ */
+export function secretBytes(secret: string | Buffer | undefined): Buffer | undefined {
+  if (Buffer.isBuffer(secret)) return secret.length >= MIN_SECRET_BYTES ? secret : undefined
   if (!secret || !BASE64URL.test(secret)) return undefined
   const bytes = Buffer.from(secret, 'base64url')
   return bytes.length >= MIN_SECRET_BYTES ? bytes : undefined
@@ -193,8 +197,8 @@ export function withResult(returnUrl: string, token: string) {
 }
 
 export interface HandoffKeys {
-  /** HANDOFF_SECRET, base64url, at least 32 bytes once decoded. */
-  secret: string
+  /** HANDOFF_SECRET, base64url (or its decoded bytes), at least 32 bytes once decoded. */
+  secret: string | Buffer
   /** HANDOFF_MERCHANT_ID: the `mid` claim. */
   mid: string
   /** MERCHANT_ORIGIN: the only origin a returnUrl or imageUrl may use. */
@@ -204,10 +208,8 @@ export interface HandoffKeys {
   now?: () => number
 }
 /** What a store fills in for a quote; the version, key ids and times are added when signed. */
-export type QuoteInput = Omit<QuotePayload, 'v' | 'kid' | 'mid' | 'iat' | 'exp'> & {
-  iat?: number
-  exp?: number
-}
+export type QuoteInput = Omit<QuotePayload, 'v' | 'kid' | 'mid' | 'iat' | 'exp'> &
+  Partial<Pick<QuotePayload, 'v' | 'kid' | 'mid' | 'iat' | 'exp'>>
 export type ResultInput = Omit<ResultPayload, 'v' | 'kid' | 'mid' | 'iat' | 'exp'>
 
 /**
@@ -258,6 +260,13 @@ export function createHandoff(keys: HandoffKeys) {
     merchantOrigin: origin,
     /** Store side: signs a quote at its own catalog price. Throws on a payload Worth would refuse. */
     signQuote(input: QuoteInput) {
+      // A full payload may name its version and keys; they must be these.
+      if (
+        (input.kid ?? keyId) !== keyId ||
+        (input.mid ?? keys.mid) !== keys.mid ||
+        (input.v ?? 1) !== 1
+      )
+        throw new Error('A quote must use this key: v 1, its kid and its mid.')
       const iat = input.iat ?? nowSeconds()
       const payload = quoteSchema.parse({
         ...input,

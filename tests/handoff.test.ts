@@ -305,6 +305,16 @@ describe('hand-off tokens (contract §2)', () => {
     expect(signatureMatches('not base64url!', expected)).toBe(false)
   })
 
+  it('accepts a full payload and decoded key bytes, as the store’s first version passed them', () => {
+    clock.value = NOW * 1000
+    const store = createHandoff({ ...keys, secret: key })
+    const token = store.signQuote({ ...payload })
+    expect(handoff.verifyQuote(token)).toEqual({ ok: true, payload })
+    expect(() => store.signQuote({ ...payload, mid: 'other' })).toThrow(/this key/)
+    expect(() => store.signQuote({ ...payload, kid: '2' })).toThrow(/this key/)
+    expect(() => createHandoff({ ...keys, secret: Buffer.alloc(31) })).toThrow(/32 bytes/)
+  })
+
   it('needs a base64url secret of at least 32 bytes', () => {
     expect(secretBytes(undefined)).toBeUndefined()
     expect(secretBytes(Buffer.alloc(31).toString('base64url'))).toBeUndefined()
