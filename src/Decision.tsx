@@ -45,6 +45,20 @@ export type DecisionRequest = {
   /** An item from a pasted link (C5): its store page and who set the confirmed price. */
   sourceUrl?: string
   priceSource?: 'channel3' | 'user'
+  /** A store's quote opened on /check, so the comparison uses the store's Pay in 4 answer. */
+  qid?: string
+}
+/**
+ * A store's item from a signed hand-off (/check). The store sells it, so the way back to the
+ * store replaces Worth's actions, and the store's line with its own edit replaces the Read-as chip.
+ */
+export interface DecisionHandoff {
+  intro: ReactNode
+  actions: (notes: boolean) => ReactNode
+  /** Under the answer, once: the report-back choice. */
+  footer?: ReactNode
+  merchant: string
+  imageUrl?: string
 }
 /** What Claude contributed to the answer this view came from, if it came from Ask. */
 export interface Explanation {
@@ -499,6 +513,7 @@ export function Decision({
   onSave,
   onSaveAlternative,
   onViewActivity,
+  handoff,
 }: {
   state: AppState
   request: DecisionRequest
@@ -513,6 +528,7 @@ export function Decision({
   /** Kept for callers; missing inputs now link to their exact fix. */
   onEditPlan?: () => void
   onViewActivity: () => void
+  handoff?: DecisionHandoff
 }) {
   const [override, setOverride] = useState<DecisionRequest>()
   const active = override ?? request
@@ -765,7 +781,15 @@ export function Decision({
       </Frame>
     )
   return (
-    <Frame actions={product ? actions(false) : customActions(false) || undefined}>
+    <Frame
+      actions={
+        handoff
+          ? handoff.actions(false)
+          : product
+            ? actions(false)
+            : customActions(false) || undefined
+      }
+    >
       <div className="grid">
         <div className="stack">
           <div className="stack tight decision-head">
@@ -778,12 +802,16 @@ export function Decision({
               <ArrowLeft size={16} aria-hidden="true" />
               {backLabel}
             </button>
-            <p className="meta strong hide-m" style={{ margin: 0 }}>
-              {c.itemName}, {money(c.amountCents)}
-              {c.source ? ` · ${c.source.merchantName}` : ''}
-            </p>
+            {handoff ? (
+              handoff.intro
+            ) : (
+              <p className="meta strong hide-m" style={{ margin: 0 }}>
+                {c.itemName}, {money(c.amountCents)}
+                {c.source ? ` · ${c.source.merchantName}` : ''}
+              </p>
+            )}
             <h1 className="title">{verdictTitle(c)}</h1>
-            {!editing && (
+            {!editing && !handoff && (
               <div>
                 <ReadAsChip value={readAs} onAction={() => setEditing(true)} />
               </div>
@@ -842,6 +870,7 @@ export function Decision({
                 </ul>
               </Alert>
             )}
+            {handoff?.footer}
           </div>
           <div
             role="radiogroup"
@@ -891,14 +920,17 @@ export function Decision({
           <div className="tile">
             <div className="product">
               {product && <img src={product.image} alt={product.name} />}
+              {handoff?.imageUrl && <img src={handoff.imageUrl} alt={c.itemName} />}
               <div>
                 <div className="pt">{product?.name ?? c.itemName}</div>
                 <div className="meta">
-                  {product
-                    ? `Sold by ${product.merchant} · demo\u00a0store`
-                    : c.source
-                      ? `At ${c.source.merchantName} · ${c.source.priceSource === 'channel3' ? 'price read by Channel3, confirmed by you' : 'price you entered'}`
-                      : 'Checkout is for demo store items'}
+                  {handoff
+                    ? `Sold by ${handoff.merchant}`
+                    : product
+                      ? `Sold by ${product.merchant} · demo\u00a0store`
+                      : c.source
+                        ? `At ${c.source.merchantName} · ${c.source.priceSource === 'channel3' ? 'price read by Channel3, confirmed by you' : 'price you entered'}`
+                        : 'Checkout is for demo store items'}
                 </div>
                 <div className="num strong" style={{ fontWeight: 700, marginTop: 4 }}>
                   {money(c.amountCents)}
@@ -917,8 +949,14 @@ export function Decision({
                 <span className="sr"> (opens in a new tab)</span>
               </a>
             )}
-            {product && <div className="rail-actions">{actions(true)}</div>}
-            {custom && <div className="rail-actions">{customActions(true)}</div>}
+            {handoff ? (
+              <div className="rail-actions">{handoff.actions(true)}</div>
+            ) : (
+              <>
+                {product && <div className="rail-actions">{actions(true)}</div>}
+                {custom && <div className="rail-actions">{customActions(true)}</div>}
+              </>
+            )}
           </div>
           <WhyThisAnswer explanation={explanation} />
           <Fold id="inputs" title="What went into this">
@@ -1085,16 +1123,19 @@ function WhyThisAnswer({ explanation }: { explanation?: Explanation }) {
 export function EditPurchase({
   name,
   amountCents,
+  submitLabel = 'Check again',
   onSubmit,
   onCancel,
 }: {
   name: string
-  amountCents: number
+  /** Empty when the shopper types the price themselves. */
+  amountCents?: number
+  submitLabel?: string
   onSubmit: (next: { itemName: string; amountCents: number }) => void
-  onCancel: () => void
+  onCancel?: () => void
 }) {
   const [item, setItem] = useState(name)
-  const [amount, setAmount] = useState((amountCents / 100).toFixed(2))
+  const [amount, setAmount] = useState(amountCents ? (amountCents / 100).toFixed(2) : '')
   const [error, setError] = useState('')
   return (
     <form
@@ -1129,10 +1170,12 @@ export function EditPurchase({
         </span>
       </Field>
       <div className="actions">
-        <Button type="submit">Check again</Button>
-        <Button variant="text" onClick={onCancel}>
-          Cancel
-        </Button>
+        <Button type="submit">{submitLabel}</Button>
+        {onCancel && (
+          <Button variant="text" onClick={onCancel}>
+            Cancel
+          </Button>
+        )}
       </div>
     </form>
   )
