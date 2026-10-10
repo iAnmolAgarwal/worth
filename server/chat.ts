@@ -1,6 +1,13 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
-import { addDays, assessPurchase, money, payIn4InRange, withoutOwnHold } from '../shared/finance.ts'
+import {
+  addDays,
+  assessPurchase,
+  compareOptions,
+  money,
+  payIn4InRange,
+  withoutOwnHold,
+} from '../shared/finance.ts'
 import { PRODUCTS } from '../shared/seed.ts'
 import { plainText } from '../shared/text.ts'
 import type {
@@ -1249,17 +1256,14 @@ class Turn {
     }
     this.storeRequested = true
     this.calls.push(name)
+    const purchases = withoutOwnHold(this.data.purchases, {
+      productId: product.id,
+      amountCents: product.priceCents,
+    })
+    const item = { amountCents: product.priceCents, itemName: product.name, today: this.data.today }
     // The answer shows the engine's assessment of the item, at its catalog price, today.
     if (!this.assessment && !this.clarify) {
-      const purchases = withoutOwnHold(this.data.purchases, {
-        productId: product.id,
-        amountCents: product.priceCents,
-      })
-      this.assessment = assessPurchase(this.data.profile, purchases, {
-        amountCents: product.priceCents,
-        itemName: product.name,
-        today: this.data.today,
-      })
+      this.assessment = assessPurchase(this.data.profile, purchases, item)
     }
     const url = storeProductUrl(product.id)
     this.guards.push(
@@ -1282,11 +1286,16 @@ class Turn {
           shown_by_app: 'The app shows Worth’s check of buying it today. The store link is off.',
         }),
       }
+    // Next to the link, the card repeats the engine's wait date when waiting is its advice.
+    const comparison = compareOptions(this.data.profile, purchases, item)
+    const waitDate =
+      comparison.recommendation === 'wait' ? (comparison.wait.date ?? undefined) : undefined
     this.storeLink = {
       url,
       merchant: product.merchant,
       itemName: product.name,
       amountCents: product.priceCents,
+      ...(waitDate ? { waitDate } : {}),
     }
     this.guards.push({
       id: 'store_link',

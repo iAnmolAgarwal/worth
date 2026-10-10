@@ -450,7 +450,7 @@ export function FundsDialog({
 
 /**
  * A wait plan whose day has come: confirm today's funds, see the fresh check, then (catalog items
- * only, behind the same guards as Claude's prepare_checkout) buy with PayPal (G5-4). An item from
+ * only, behind checkoutGuards) buy with PayPal (G5-4). An item from
  * another store's page links back to that store instead (C6); a price Channel3 read is read again
  * first, and the fresh check uses the price now.
  */

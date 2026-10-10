@@ -690,6 +690,8 @@ export interface StoreLink {
   merchant: string
   itemName: string
   amountCents: number
+  /** The engine's wait date when waiting is its recommendation for buying it today. */
+  waitDate?: string
 }
 /**
  * A completed payment in another currency with no matching USD conversion in the export. Until it

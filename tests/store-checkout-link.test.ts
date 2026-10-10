@@ -126,6 +126,7 @@ describe('open_store_checkout through the chat loop', () => {
     await plan(agent)
     const reply = await chat(agent, 'Buy the headphones for me')
     expect(reply.status).toBe(200)
+    // Fits today, so there is no wait date to repeat next to the link.
     expect(reply.body.storeLink).toEqual({
       url: `${STORE}/p/headphones`,
       merchant: 'Larkspur Supply',
@@ -155,9 +156,21 @@ describe('open_store_checkout through the chat loop', () => {
 
   it('links even when buying today dips below the cushion, and the verdict says so', async () => {
     const { agent, gateway } = setup([open({ item_id: 'camera' })])
-    await plan(agent, { balanceCents: 150000 })
+    // Tight today; a paycheck on Oct 8 makes Oct 9 the first day that keeps the cushion.
+    const paycheck = {
+      id: 'pay',
+      name: 'Paycheck',
+      amountCents: 100000,
+      nextDate: '2026-10-08',
+      cadence: 'once' as const,
+      kind: 'income' as const,
+      category: 'Income',
+      confirmed: true,
+      active: true,
+    }
+    await plan(agent, { balanceCents: 150000, flows: [paycheck] })
     const reply = await chat(agent, 'Buy the camera')
-    expect(reply.body.storeLink.url).toBe(`${STORE}/p/camera`)
+    expect(reply.body.storeLink).toMatchObject({ url: `${STORE}/p/camera`, waitDate: '2026-10-09' })
     expect(reply.body.assessment).toMatchObject({ amountCents: 119900, outcome: 'tight' })
     expect(paypalCalls(gateway)).toBe(0)
   })

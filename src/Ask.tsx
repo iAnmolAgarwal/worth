@@ -453,6 +453,11 @@ function StoreHandoff({ link }: { link: StoreLink }) {
       <div className="h-section">
         {link.itemName}, {money(link.amountCents)} at {link.merchant}
       </div>
+      {link.waitDate && (
+        <p className="meta" style={{ marginTop: 4 }}>
+          Worth suggests waiting until {dayLabel(link.waitDate)}.
+        </p>
+      )}
       <p className="meta" style={{ marginTop: 4 }}>
         Worth doesn’t sell this. You buy it on {link.merchant}’s own page and pay with its PayPal
         checkout.

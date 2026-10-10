@@ -109,10 +109,10 @@ On https://worth.onrender.com (no sign-in):
    ask: "If I put it on Pay in 4, which bills would the payments land next to?"
 2. Click **See the comparison**, then **Compare with PayPal Pay in 4**: four payments, the bill
    each one lands near, the plan already running, and PayPal's message.
-3. In Ask Worth, type "Go ahead and buy the studio headphones". Worth prepares a $349 PayPal
-   sandbox order behind its checkout guards and shows "Checkout ready". Choose **Open checkout**,
-   approve with the sandbox buyer above, then confirm in Worth. Activity shows the payment once,
-   and the room to spend drops by $349.
+3. In Ask Worth, type "Go ahead and buy the studio headphones". Worth shows its verdict for the
+   $349 headphones and an **Open at Larkspur Supply** link to the store's own product page, where
+   you pay with PayPal (the sandbox buyer above). Worth prepares no order: the store sells the
+   item and PayPal takes the payment.
 
 Pay in 4 itself is chosen inside PayPal's checkout. A sandbox buyer can pick it there; Worth
 cannot see which funding the buyer chose (PayPal's order and capture do not say), so after a

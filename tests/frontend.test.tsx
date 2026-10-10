@@ -526,8 +526,30 @@ describe('Ask answers', () => {
     expect(link.getAttribute('href')).toBe('https://store.example/p/camera')
     expect(link.getAttribute('rel')).toBe('noreferrer')
     expect(link.getAttribute('target')).toBeNull()
+    expect(card.textContent).not.toContain('Worth suggests waiting')
     expect(screen.queryByText(/Checkout ready/)).toBeNull()
     expect(screen.queryByRole('button', { name: 'Open checkout' })).toBeNull()
+  })
+
+  it('repeats the wait date above the store link when waiting is Worth’s advice', async () => {
+    const user = userEvent.setup()
+    routeApi(() => ({
+      ...reply('Here is what buying it today does to your plan.', 'anthropic'),
+      toolCalls: ['open_store_checkout'],
+      storeLink: {
+        url: 'https://store.example/p/camera',
+        merchant: 'Larkspur Supply',
+        itemName: 'Everyday camera',
+        amountCents: 119900,
+        waitDate: '2026-10-23',
+      },
+    }))
+    render(<Ask {...askProps} state={makeState()} />)
+    await sendMessage(user, 'Buy the camera.')
+    const card = await screen.findByRole('region', { name: 'Buy at Larkspur Supply' })
+    const line = within(card).getByText('Worth suggests waiting until Fri, Oct 23.')
+    expect(line.className).toBe('meta')
+    expect(within(card).getByRole('link', { name: 'Open at Larkspur Supply' })).toBeTruthy()
   })
 
   it('shows no store link when the answer has none', async () => {
