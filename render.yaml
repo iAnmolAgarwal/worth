@@ -54,6 +54,15 @@ services:
         value: '20'
       - key: CLAUDE_DAILY_LIMIT
         value: '200'
+      # Signed hand-offs from the demo store (specs/handoff-contract.md). Production refuses to
+      # start without both: the shared key (32+ random bytes, base64url, the same value on the
+      # store) and the store's own https origin, the only place /check sends shoppers back to.
+      - key: HANDOFF_SECRET
+        sync: false
+      - key: MERCHANT_ORIGIN
+        sync: false
+      - key: HANDOFF_MERCHANT_ID
+        value: larkspur
 
   # Larkspur Supply, the fictional demo store on its own origin. It keeps no data on disk (sessions
   # and orders live in memory), but stays on a paid plan so it never sleeps between a shopper's

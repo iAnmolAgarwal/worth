@@ -5,6 +5,7 @@ export default defineConfig({
     maxWorkers: 1,
     testTimeout: 15000,
     // Tests never spend Channel3 credits, even with a key exported in the shell.
-    env: { CHANNEL3_API_KEY: '' },
+    // Nor do they read a hand-off key or store origin from the shell.
+    env: { CHANNEL3_API_KEY: '', HANDOFF_SECRET: '', MERCHANT_ORIGIN: '' },
   },
 })

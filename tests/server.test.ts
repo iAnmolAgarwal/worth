@@ -22,6 +22,11 @@ const config = {
   paypalSecret: undefined,
   anthropicKey: undefined,
 }
+/** Production refuses to start without the hand-off key and store origin. */
+const handoffConfig = {
+  handoffSecret: Buffer.alloc(32, 1).toString('base64url'),
+  merchantOrigin: 'https://store.example',
+}
 const clock = { value: new Date('2026-10-03T12:00:00Z') }
 function setup(extra: Parameters<typeof createApp>[0] = {}) {
   clock.value = new Date('2026-10-03T12:00:00Z')
@@ -894,7 +899,14 @@ describe('payment lifecycle: declines, cancels and late events (C-8)', () => {
     const origin = 'https://worth.example.com'
     const prod = setup({
       paypal: hosted.gateway,
-      config: { ...config, production: true, trustProxy: 1, origin, paypalNegativeTesting: false },
+      config: {
+        ...config,
+        ...handoffConfig,
+        production: true,
+        trustProxy: 1,
+        origin,
+        paypalNegativeTesting: false,
+      },
     })
     const first = await request(prod.app).get('/api/state')
     const cookie = (first.headers['set-cookie'][0] as string).split(';')[0]!
@@ -2235,7 +2247,9 @@ describe('stored transaction cap', () => {
 describe('production browser hardening', () => {
   it('sends HSTS and a __Host- session cookie that authenticates later requests', async () => {
     const origin = 'https://worth.example.com'
-    const { app } = setup({ config: { ...config, production: true, trustProxy: 1, origin } })
+    const { app } = setup({
+      config: { ...config, ...handoffConfig, production: true, trustProxy: 1, origin },
+    })
     const first = await request(app).get('/api/state')
     expect(first.status).toBe(200)
     expect(first.headers['strict-transport-security']).toBe('max-age=31536000; includeSubDomains')

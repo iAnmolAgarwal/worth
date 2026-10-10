@@ -1,3 +1,5 @@
+import { secretBytes } from '../shared/handoff.ts'
+
 type Env = Record<string, string | undefined>
 
 export interface AppConfig {
@@ -50,6 +52,15 @@ export interface AppConfig {
   mcpPrepareHourly: number
   /** Agent tokens one plan may have active at once. */
   maxAgentTokens: number
+  /**
+   * The key shared with the demo store for signed hand-offs (specs/handoff-contract.md §1):
+   * base64url, at least 32 bytes. Without it and MERCHANT_ORIGIN, /check can't verify any link.
+   */
+  handoffSecret?: string
+  /** The one store origin a hand-off may return to. Production: https only. */
+  merchantOrigin?: string
+  /** The `mid` claim the store signs with. */
+  handoffMerchantId: string
 }
 
 export class ConfigError extends Error {
@@ -90,6 +101,30 @@ function publicOrigin(value: string, production: boolean) {
   )
     throw new ConfigError(
       `Refusing to start in production with the origin ${url.origin}. Set APP_ORIGIN (or APP_URL / RENDER_EXTERNAL_URL) to the public https:// address of this deployment.`,
+    )
+  return url.origin
+}
+
+/** MERCHANT_ORIGIN as an origin, held to the same production rules as APP_ORIGIN. */
+function merchantOrigin(value: string, production: boolean) {
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    throw new ConfigError(
+      `MERCHANT_ORIGIN “${value}” is not a valid URL. Set it to the demo store's origin, for example https://store.example.com.`,
+    )
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:')
+    throw new ConfigError('MERCHANT_ORIGIN must be an http(s) origin.')
+  if (
+    production &&
+    (url.protocol !== 'https:' ||
+      LOCAL_HOSTNAMES.has(url.hostname) ||
+      url.hostname.endsWith('.localhost'))
+  )
+    throw new ConfigError(
+      `Refusing to start in production with the store origin ${url.origin}. Set MERCHANT_ORIGIN to the demo store's public https:// address.`,
     )
   return url.origin
 }
@@ -142,15 +177,38 @@ export function loadConfig(env: Env = process.env, overrides: Partial<AppConfig>
     mcpAuthFailures: 20,
     mcpPrepareHourly: wholeNumber(env, 'MCP_PREPARE_HOURLY', 5, 1),
     maxAgentTokens: 3,
+    handoffSecret: setting(env, 'HANDOFF_SECRET'),
+    merchantOrigin: setting(env, 'MERCHANT_ORIGIN'),
+    handoffMerchantId: setting(env, 'HANDOFF_MERCHANT_ID') ?? 'larkspur',
     ...overrides,
   }
   config.origin = publicOrigin(config.origin, config.production)
+  // Hand-offs are off locally until both are set; production refuses to start without them.
+  if (config.handoffSecret !== undefined && !secretBytes(config.handoffSecret))
+    throw new ConfigError(
+      "HANDOFF_SECRET must be base64url and at least 32 bytes once decoded. Generate one with: node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\"",
+    )
+  if (config.merchantOrigin !== undefined)
+    config.merchantOrigin = merchantOrigin(config.merchantOrigin, config.production)
+  if (config.production && (!config.handoffSecret || !config.merchantOrigin))
+    throw new ConfigError(
+      'Set HANDOFF_SECRET and MERCHANT_ORIGIN: production refuses to start without the key and the one store origin that hand-offs may come from.',
+    )
+  if (!/^[a-z0-9_-]{1,32}$/.test(config.handoffMerchantId))
+    throw new ConfigError('HANDOFF_MERCHANT_ID must be 1–32 lowercase letters, digits, _ or -.')
   // A wrong hop count makes every visitor share one rate-limit key, so production must state it.
   if (config.production && overrides.trustProxy === undefined && !setting(env, 'TRUST_PROXY'))
     throw new ConfigError(
       'Set TRUST_PROXY to the number of reverse proxies in front of this server. Check the X-Forwarded-For hop count logged on the first request after deploying.',
     )
   return config
+}
+
+/** Whether signed hand-offs from the store can be verified here. */
+export function handoffEnabled(
+  config: AppConfig,
+): config is AppConfig & { handoffSecret: string; merchantOrigin: string } {
+  return Boolean(config.handoffSecret && config.merchantOrigin)
 }
 
 /** Origins allowed to send state-changing requests. Local development accepts both loopback names. */
