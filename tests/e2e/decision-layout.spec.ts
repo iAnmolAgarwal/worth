@@ -222,3 +222,34 @@ test('/check leads with the answer and says what the item is once', async ({ pag
       .getByText('Larkspur Supply offers PayPal Pay in 4 for this amount.'),
   ).toBeVisible()
 })
+
+test('the Decision page leads with the answer too, with the item and its edit on the right', async ({
+  page,
+}) => {
+  await page.goto(`${origins.worth}/#decision?product=camera`)
+  const h1 = page.locator('h1:visible')
+  await expect(h1).toHaveCount(1)
+  const block = page.locator('.verdict-block')
+  await expect(block.locator('> *')).toHaveCount(2)
+  await expect(block).toHaveCSS('background-color', 'rgb(240, 242, 249)')
+  await expect(h1).toHaveCSS('font-weight', '700')
+  await expect(page.getByRole('group', { name: 'How Worth read your question' })).toHaveCount(0)
+  await expect(page.getByText('Everyday camera, $1,199.00')).toHaveCount(0)
+  const edit = page.getByRole('button', { name: 'Not right? Edit' })
+  await expect(edit).toHaveCount(1)
+  if ((page.viewportSize()?.width ?? 0) < 1024) {
+    const row = page.locator('.item-row')
+    await expect(row).toContainText('$1,199.00 · Larkspur Supply · today')
+    expect((await row.boundingBox())!.y).toBeLessThan((await block.boundingBox())!.y)
+  } else {
+    const card = page.locator('.decision-rail .tile').first()
+    await expect(card.locator('.price-row')).toContainText('$1,199.00 · today')
+    await expect(card.getByRole('button', { name: 'Not right? Edit' })).toBeVisible()
+    expect(
+      Math.abs((await card.boundingBox())!.y - (await block.boundingBox())!.y),
+    ).toBeLessThanOrEqual(2)
+  }
+  // Editing opens in place and focuses the item's name.
+  await edit.click()
+  await expect(page.locator('form.readas-edit').getByLabel('Item')).toBeFocused()
+})

@@ -418,6 +418,27 @@ describe('Pay in 4 wording (contract §3.2)', () => {
 })
 
 describe('the answer and the item on /check (feedback 2)', () => {
+  it('moves focus into the edit form, and back to the edit when it closes', async () => {
+    route({ '/handoff/open': opened() })
+    visit()
+    await answer()
+    await userEvent.click(itemCard().getByRole('button', { name: 'Not right? Edit' }))
+    expect(document.activeElement).toBe(itemCard().getByLabelText('Item'))
+    await userEvent.click(itemCard().getByRole('button', { name: 'Cancel' }))
+    expect(document.activeElement).toBe(itemCard().getByRole('button', { name: 'Not right? Edit' }))
+    await userEvent.click(itemCard().getByRole('button', { name: 'Not right? Edit' }))
+    const price = itemCard().getByLabelText(/^Total price, USD/)
+    await userEvent.clear(price)
+    await userEvent.type(price, '1250')
+    await userEvent.click(itemCard().getByRole('button', { name: 'Check again' }))
+    expect(await itemCard().findByText('$1,250.00')).toBeTruthy()
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        itemCard().getByRole('button', { name: 'Not right? Edit' }),
+      ),
+    )
+  })
+
   it('puts the store’s “doesn’t offer” answer inside the Pay in 4 box', async () => {
     route({ '/handoff/open': opened({ payLater: 'not-offered' }) })
     visit()

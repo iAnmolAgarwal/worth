@@ -1,4 +1,4 @@
-import { useEffect, useState, type MouseEvent } from 'react'
+import { useEffect, useRef, useState, type MouseEvent } from 'react'
 import { Bookmark, CircleAlert, Clock, Info } from 'lucide-react'
 import { payIn4InRange } from '../shared/finance'
 import type { AppState, HandoffOpened, HandoffQuote, SavedItem } from '../shared/types'
@@ -377,13 +377,20 @@ function Quote({
     }
   }
 
+  /** Set as the form closes, so "Not right? Edit" takes focus back once it is on the page again. */
+  const refocus = useRef(false)
+  const closeEditor = () => {
+    refocus.current = true
+    setEditing(false)
+  }
   const editor = editing && (
     <EditPurchase
       name={itemName}
       amountCents={amountCents}
-      onCancel={() => setEditing(false)}
+      focusFirst
+      onCancel={closeEditor}
       onSubmit={(next) => {
-        setEditing(false)
+        closeEditor()
         setClaimed(
           next.amountCents === quote.amountCents && next.itemName === quote.item ? undefined : next,
         )
@@ -427,7 +434,17 @@ function Quote({
       onViewActivity={() => onNavigate('activity')}
       handoff={{
         edit: (
-          <button type="button" className="link edit-item" onClick={() => setEditing(true)}>
+          <button
+            type="button"
+            className="link edit-item"
+            // A new answer can remount the page, so focus returns when the button mounts.
+            ref={(element) => {
+              if (!element || !refocus.current) return
+              refocus.current = false
+              element.focus()
+            }}
+            onClick={() => setEditing(true)}
+          >
             Not right? Edit
           </button>
         ),

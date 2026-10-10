@@ -239,6 +239,12 @@ describe('where the similar items appear', () => {
       within(list).getByText('From other stores · via Channel3 · prices may change'),
     ).toBeTruthy()
     expect(within(rail as HTMLElement).queryByText(/Sold by Larkspur Supply/)).toBeNull()
+    // The item and its edit stay, compact, above the list.
+    const row = rail.querySelector('.item-row') as HTMLElement
+    expect(within(row).getByText('Everyday camera')).toBeTruthy()
+    expect(within(row).getByText(/\$1,199\.00/)).toBeTruthy()
+    expect(within(row).getByRole('button', { name: 'Not right? Edit' })).toBeTruthy()
+    expect(row.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     // Beside other stores' items, the buy action names the demo store's own product.
     expect(screen.getAllByRole('button', { name: 'Buy the everyday camera anyway' }).length).toBe(2)
     expect(screen.queryByRole('button', { name: 'Buy today anyway' })).toBeNull()
@@ -247,6 +253,40 @@ describe('where the similar items appear', () => {
     expect(screen.queryByRole('region', { name: 'Similar items that fit today' })).toBeNull()
     expect(within(rail as HTMLElement).getByText(/Sold by Larkspur Supply/)).toBeTruthy()
   })
+  it('keeps /check’s item, its edit and the price-entered note above the list', async () => {
+    const user = userEvent.setup()
+    const state = makeState()
+    route(state)
+    const { container } = render(
+      <Decision
+        {...props}
+        state={state}
+        request={{ amountCents: 119900, itemName: 'Everyday camera' }}
+        handoff={{
+          edit: <button type="button">Not right? Edit</button>,
+          note: <p>Worth is checking the price you entered.</p>,
+          actions: () => null,
+          merchant: 'Larkspur Supply',
+          imageUrl: 'https://store.example/img/camera.png',
+        }}
+      />,
+    )
+    const group = await screen.findByRole('radiogroup', { name: 'Your options' })
+    const cheaper = within(group).getByRole('radio', { name: /Something cheaper/ })
+    await within(cheaper).findByText('See similar items')
+    await user.click(cheaper)
+    const list = await screen.findByRole('region', { name: 'Similar items that fit today' })
+    const rail = container.querySelector('.decision-rail')!
+    expect(rail.contains(list)).toBe(true)
+    const row = rail.querySelector('.item-row') as HTMLElement
+    expect(within(row).getByText('Everyday camera')).toBeTruthy()
+    expect(within(row).getByText(/\$1,199\.00/)).toBeTruthy()
+    expect(within(row).getByText(/Larkspur Supply/)).toBeTruthy()
+    expect(within(row).getByRole('button', { name: 'Not right? Edit' })).toBeTruthy()
+    expect(within(row).getByText('Worth is checking the price you entered.')).toBeTruthy()
+    expect(row.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
   it('puts them right under the cards when the rail drops below (phones, tablets)', async () => {
     vi.stubGlobal(
       'matchMedia',
@@ -276,8 +316,10 @@ describe('where the similar items appear', () => {
     expect(screen.getByRole('status').textContent).toBe(
       'Similar items up to $440.01 are shown below the options.',
     )
-    // The rail keeps the item, below everything else.
-    expect(screen.getByText(/Sold by Larkspur Supply/)).toBeTruthy()
+    // The item stays on the page, in the compact row above the answer.
+    const row = container.querySelector('.item-row') as HTMLElement
+    expect(within(row).getByText('Everyday camera')).toBeTruthy()
+    expect(row.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
   it('hides See similar items when Channel3 has none under the limit', async () => {
     const state = makeState()
