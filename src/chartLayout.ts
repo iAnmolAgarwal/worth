@@ -678,32 +678,50 @@ export function chartModel(input: ChartInput) {
   // readout.
   const lowAmount = signed(values[lowIndex]!)
   const lowDate = dayLabel(points[lowIndex]!.date)
+  // When Pay in 4's low falls on another day, each line's low gets its own pill naming its line,
+  // so the two dates read as two lows rather than one contradicting the other.
+  const twoLows = !!p4Low && p4Low.index !== lowIndex
   type LowText = { top: string; bottom: string; nearOnly?: boolean; penalty: number }
-  const lowSpec = (text: LowText): LabelSpec => {
+  const pillSpec = (id: string, at: Point, text: LowText): LabelSpec => {
     const w =
       Math.ceil(
         Math.max(textWidth(text.top, 12, 700), text.bottom ? textWidth(text.bottom, 11, 500) : 0),
       ) + 20
     const h = text.bottom ? 36 : 22
-    const candidates = lowCandidates(low, w, h, plot)
+    const candidates = lowCandidates(at, w, h, plot)
     return {
-      id: 'low',
+      id,
       w,
       h,
       required: true,
-      anchor: { x: low.x, y: low.y },
+      anchor: { x: at.x, y: at.y },
       // Near and ring candidates cost under 30; the far sweep starts at 30.
       candidates: text.nearOnly ? candidates.filter((c) => c.cost < 30) : candidates,
     }
   }
+  const lowSpec = (text: LowText) => pillSpec('low', low, text)
+  const fullBelow = values[lowIndex]! < cushionCents ? ' · below cushion' : ''
+  // With two pills, this one names its line; where that does not fit, the plain variants follow.
   const named: LowText[] = [
-    { top: `Lowest point ${lowAmount}`, bottom: lowDate, penalty: 0 },
-    { top: `Lowest point ${lowAmount}`, bottom: '', penalty: 4 },
-    { top: lowAmount, bottom: 'Lowest point', nearOnly: true, penalty: 8 },
+    ...(twoLows
+      ? [
+          {
+            top: `Lowest point ${lowAmount}`,
+            bottom: `Pay in full · ${lowDate}${fullBelow}`,
+            penalty: 0,
+          },
+          { top: `Lowest point ${lowAmount}`, bottom: `Pay in full · ${lowDate}`, penalty: 2 },
+          { top: `Lowest point ${lowAmount}`, bottom: 'Pay in full', penalty: 4 },
+        ]
+      : []),
+    { top: `Lowest point ${lowAmount}`, bottom: lowDate, penalty: twoLows ? 40 : 0 },
+    { top: `Lowest point ${lowAmount}`, bottom: '', penalty: twoLows ? 44 : 4 },
+    { top: lowAmount, bottom: 'Lowest point', nearOnly: true, penalty: twoLows ? 48 : 8 },
   ]
   const short: LowText[] = [
-    { top: `Lowest ${lowAmount}`, bottom: lowDate, penalty: 0 },
-    { top: `Lowest ${lowAmount}`, bottom: '', penalty: 4 },
+    ...(twoLows ? [{ top: `Lowest ${lowAmount}`, bottom: 'Pay in full', penalty: 0 }] : []),
+    { top: `Lowest ${lowAmount}`, bottom: lowDate, penalty: twoLows ? 40 : 0 },
+    { top: `Lowest ${lowAmount}`, bottom: '', penalty: twoLows ? 44 : 4 },
   ]
   const nearest = (texts: LowText[], context: typeof ctx) => {
     let best: { text: LowText; ctx: typeof ctx; score: number } | null = null
@@ -729,6 +747,58 @@ export function chartModel(input: ChartInput) {
   const lowTop = fit?.text.top ?? named[1]!.top
   const lowBottom = fit?.text.bottom ?? ''
   const lowPlaced = fit ? placeLabels([lowSpec(fit.text)], fit.ctx) : []
+  /** A placed pill, held where it is while later labels go around it (and its leader). */
+  const fixed = (boxes: Placed[]): LabelSpec[] =>
+    boxes.map((box) => ({
+      id: box.id,
+      w: box.w,
+      h: box.h,
+      anchor: box.anchor,
+      required: true,
+      lane: true,
+      candidates: [{ x: box.x, y: box.y, cost: 0 }],
+    }))
+  // Pay in 4's own pill, around the first one. Only a clean spot will do: when there is none, the
+  // comparison line and rows under the chart still state this low with its date.
+  let p4Top = ''
+  let p4Bottom = ''
+  let p4Placed: Placed[] = []
+  if (twoLows && p4Low) {
+    const amount = signed(p4Values![p4Low.index]!)
+    const date = dayLabel(points[p4Low.index]!.date)
+    const below = p4Low.below ? ' · below cushion' : ''
+    const texts: LowText[] = [
+      // Its date and any dip below the cushion, in words, win unless they need a long leader.
+      { top: `Lowest point ${amount}`, bottom: `Pay in 4 · ${date}${below}`, penalty: 0 },
+      { top: `Lowest point ${amount}`, bottom: `Pay in 4 · ${date}`, penalty: 24 },
+      { top: `Lowest point ${amount}`, bottom: `Pay in 4${below}`, penalty: 30 },
+      { top: `Lowest ${amount}`, bottom: 'Pay in 4', penalty: 36 },
+      { top: `Pay in 4 ${amount}`, bottom: '', penalty: 40 },
+    ]
+    // Where no spot clears both lines (phones), the pill may cross its own dotted line at a cost,
+    // never the balance line, a mark or the purchase's line.
+    const crossing = { ...ctx, values: [values], softValues: [p4Values!] }
+    let best: { text: LowText; box: Placed; score: number } | null = null
+    for (const context of [ctx, crossing]) {
+      for (const text of texts) {
+        const box = placeLabels(
+          [...fixed(lowPlaced), { ...pillSpec('p4low', p4Low, text), required: false }],
+          context,
+        ).find((b) => b.id === 'p4low')
+        if (!box) continue
+        const end = leaderEnd(box, p4Low)
+        const score = Math.hypot(end.x - p4Low.x, end.y - p4Low.y) + text.penalty
+        if (!best || score < best.score) best = { text, box, score }
+      }
+      if (best) break
+    }
+    if (best) {
+      p4Top = best.text.top
+      p4Bottom = best.text.bottom
+      p4Placed = [best.box]
+    }
+  }
+  const pills = [...lowPlaced, ...p4Placed]
   // The purchase, in the lane above the plot.
   const buySpec = (text: string): LabelSpec => {
     const w = Math.ceil(textWidth(text, 12, 700)) + 4
@@ -768,25 +838,17 @@ export function chartModel(input: ChartInput) {
       ],
     }
   }
-  // The lane labels go around the placed low pill (and its leader).
+  // The lane labels go around the placed low pills (and their leaders).
   const solve = (buyText: string) => [
-    ...lowPlaced,
+    ...pills,
     ...placeLabels(
       [
-        ...lowPlaced.map((box) => ({
-          id: box.id,
-          w: box.w,
-          h: box.h,
-          anchor: box.anchor,
-          required: true,
-          lane: true,
-          candidates: [{ x: box.x, y: box.y, cost: 0 }],
-        })),
+        ...fixed(pills),
         ...(buyIndex >= 0 ? [buySpec(buyText)] : []),
         ...(story.bill !== undefined ? [storySpec()] : []),
       ],
       ctx,
-    ).filter((box) => box.id !== 'low'),
+    ).filter((box) => box.id !== 'low' && box.id !== 'p4low'),
   ]
   const hasStory = (labels: Placed[]) => labels.some((box) => box.id === 'story')
   // A purchase's date is on the axis under its marker; drop it to make room for the bill's name.
@@ -818,6 +880,8 @@ export function chartModel(input: ChartInput) {
     instalments,
     cy: g.y(cushionCents),
     p4Low,
+    p4Top,
+    p4Bottom,
     obstacles,
     buyLine,
     placed,

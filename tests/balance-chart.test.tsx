@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it } from 'vitest'
 import { BalanceChart } from '../src/BalanceChart'
-import { ChartTile } from '../src/Decision'
+import { ChartTile, fullPayName, payIn4Lines, payIn4Thesis } from '../src/Decision'
 import {
   chartModel,
   cushionGap,
@@ -562,5 +562,127 @@ describe('chart wording', () => {
     expect(live.textContent).toMatch(
       /^\w{3}, \w{3} \d+\. Day’s low −\$[\d,.]+, below your cushion\./,
     )
+  })
+})
+
+describe('Pay in 4 comparison: its point and its two low dates', () => {
+  const camera = comparison('camera')
+  if (!camera.payIn4.available || !camera.wait.date) throw new Error('Expected both scenarios')
+  const p4 = camera.payIn4
+
+  it('states the point in one line, naming when you would pay in full', () => {
+    // The video replay's figures: Pay in 4's low is a day before the wait date, paying in full
+    // on Oct 23 bottoms out at $720.53 on Nov 19.
+    expect(payIn4Thesis(camera, 'wait', p4)).toBe(
+      'With PayPal Pay in 4 from today, your lowest point is Thu, Oct 22 at $140.51, below your cushion; paying in full on Fri, Oct 23, it’s Thu, Nov 19 at $720.53.',
+    )
+    // Buying today in full bottoms out the same day, so the date is not repeated.
+    expect(payIn4Thesis(camera, 'buyToday', p4)).toBe(
+      'With PayPal Pay in 4 from today, your lowest point is Thu, Oct 22 at $140.51, below your cushion; paying in full today, it’s the same day at −$458.99, below your cushion.',
+    )
+    expect(payIn4Thesis(camera, 'spendLess', p4)).toMatch(
+      /; spending \$440\.01 today instead, it’s the same day at \$300\.00\.$/,
+    )
+    expect(fullPayName(camera, 'wait')).toBe('Pay in full on Oct 23')
+    expect(fullPayName(camera, 'buyToday')).toBe('Pay in full today')
+    expect(fullPayName(camera, 'spendLess')).toBe('Spend $440.01 today')
+    // Calm wording: one option among others, never a warning about Pay in 4 itself.
+    for (const k of ['wait', 'buyToday', 'spendLess'] as const)
+      expect(payIn4Thesis(camera, k, p4)).not.toMatch(/danger|risk|warning|breach|careful/i)
+  })
+
+  it('names the first day below the cushion and the lowest point as two different dates', () => {
+    expect(payIn4Lines(p4, camera.cushionCents)).toEqual({
+      lead: 'With Pay in 4, your balance would first go below your cushion on Wed, Oct 21',
+      low: 'Lowest point $140.51 on Thu, Oct 22, before payday.',
+    })
+    // When the first dip is the lowest day too, the second line says so instead of a new date.
+    const lowDay = p4.points.findIndex((point) => point.date === p4.lowestDate)
+    const sameDay = {
+      ...p4,
+      points: p4.points.map((point, index) =>
+        index < lowDay ? { ...point, minimumCents: Math.max(point.minimumCents, 30_000) } : point,
+      ),
+    }
+    expect(payIn4Lines(sameDay, camera.cushionCents)).toEqual({
+      lead: 'With Pay in 4, your balance would first go below your cushion on Thu, Oct 22',
+      low: 'Lowest point $140.51 that same day, before payday.',
+    })
+  })
+
+  it('labels each line’s lowest point on its own line when they fall on different days', () => {
+    if (!camera.wait.date) throw new Error('Expected a wait date')
+    const model = chartModel(decisionInput(camera, camera.wait, 662, true))!
+    const low = model.placed.find((box) => box.id === 'low')!
+    const own = model.placed.find((box) => box.id === 'p4low')!
+    expect(model.lowTop).toBe('Lowest point $720.53')
+    expect(model.lowBottom).toBe('Pay in full · Thu, Nov 19')
+    expect(model.p4Top).toBe('Lowest point $140.51')
+    expect(model.p4Bottom).toMatch(/^Pay in 4 · Thu, Oct 22/)
+    // Each pill leads to its own line's low, and stays clear of the balance line, every mark
+    // and the other labels.
+    expect(own.anchor).toEqual({ x: model.p4Low!.x, y: model.p4Low!.y })
+    expect(low.anchor).toEqual({ x: model.low.x, y: model.low.y })
+    for (const values of [model.values, model.p4Values!])
+      expect(hitsLine(own, values, model.g, 1)).toBe(false)
+    for (const obstacle of model.obstacles) expect(overlaps(own, obstacle)).toBe(false)
+    for (const other of model.placed) if (other !== own) expect(overlaps(own, other)).toBe(false)
+  })
+
+  it('keeps one pill when both lows fall on the same day, and never covers the balance line', () => {
+    for (const state of decisionStates())
+      for (const width of WIDTHS) {
+        const model = chartModel(decisionInput(state.c, state.option, width, state.p4))!
+        const own = model.placed.find((box) => box.id === 'p4low')
+        if (!model.p4Low || model.p4Low.index === model.low.index) {
+          expect(own, state.name).toBeUndefined()
+          continue
+        }
+        if (!own) continue
+        expect(hitsLine(own, model.values, model.g, 1), state.name).toBe(false)
+        for (const obstacle of model.obstacles)
+          expect(overlaps(own, obstacle), state.name).toBe(false)
+        for (const line of model.buyLine) expect(overlaps(own, line), state.name).toBe(false)
+      }
+  })
+
+  it('says it in the chart tile, its text alternative and its table', async () => {
+    const user = userEvent.setup()
+    const thesis = payIn4Thesis(camera, 'wait', p4)
+    const { container } = render(<ChartTile c={camera} k="wait" payIn4={p4} scaleWith={p4} />)
+    expect(container.querySelector('.chart-thesis')!.textContent).toBe(thesis)
+    const svg = screen.getByRole('img', { name: /^Projected balance/ })
+    expect(svg.getAttribute('aria-label')).toContain(
+      `Projected balance if you wait until Fri, Oct 23, compared with PayPal Pay in 4. ${thesis}`,
+    )
+    expect(container.querySelector('.bchart-key')!.textContent).toContain('Pay in full on Oct 23')
+    const pill = container.querySelector('.bchart-lowpill.p4')!
+    expect(pill.classList.contains('below')).toBe(true)
+    expect(pill.textContent).toMatch(/^Lowest point \$140\.51Pay in 4 · Thu, Oct 22/)
+    const rows = within(container.querySelector('.bchart-compare') as HTMLElement)
+    expect(rows.getAllByRole('term').map((row) => row.textContent)).toEqual([
+      'Pay in full on Oct 23',
+      'Pay in 4',
+    ])
+    // The scrubber names whose lowest point a day is.
+    const scrubber = screen.getByRole('slider', { name: /Balance by day/ })
+    act(() => scrubber.focus())
+    const live = document.querySelector('[aria-live="polite"]')!
+    expect(live.textContent).toMatch(/^Thu, Nov 19\. .*Lowest point, pay in full on Oct 23\.$/)
+    await user.click(screen.getByText('View as table'))
+    const table = screen.getByRole('table')
+    expect(table.querySelector('caption')!.textContent).toContain(
+      'Pay in full on Oct 23: lowest point $720.53 on Thu, Nov 19. With Pay in 4: lowest point $140.51 on Thu, Oct 22, below your cushion.',
+    )
+    expect(
+      within(table).getByRole('columnheader', { name: 'Pay in full on Oct 23 (day’s low)' }),
+    ).toBeTruthy()
+    const row = (day: string) =>
+      [...within(table).getByRole('rowheader', { name: day }).closest('tr')!.cells].map(
+        (cell) => cell.textContent,
+      )
+    expect(row('Thu, Nov 19')[1]).toBe('$720.53 · lowest point')
+    expect(row('Thu, Oct 22')[4]).toBe('$140.51 · lowest point')
+    expect(row('Thu, Oct 22')[1]).not.toMatch(/lowest/)
   })
 })

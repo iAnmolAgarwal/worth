@@ -612,7 +612,7 @@ describe('decision view', () => {
     )
   })
 
-  it('keeps Pay in 4 collapsed until asked, then shows the engine’s label, four payments and stacking, never as a recommendation', async () => {
+  it('keeps Pay in 4 collapsed until asked, then shows its two dates, four payments and stacking, never as a recommendation', async () => {
     const user = userEvent.setup()
     const state = makeState()
     routeApi((_path, data) => ({
@@ -626,9 +626,21 @@ describe('decision view', () => {
     expect(toggle.getAttribute('aria-expanded')).toBe('true')
     const scenario = compare(state, { productId: 'camera' }).payIn4
     if (!scenario.available) throw new Error('Expected a Pay in 4 scenario')
-    // The engine's label, with its date written in full for display ("on Thu, Oct 22").
-    const stem = scenario.label.replace(/ on \w{3} \d+$/, '')
-    expect(screen.getByText(new RegExp(`^${stem} on \\w{3}, \\w{3} \\d+\\.$`))).toBeTruthy()
+    // Two dates, each named for what it is: the first day below the cushion, then the lowest point.
+    expect(
+      screen.getByText(
+        /^With Pay in 4, your balance would first go below your cushion on \w{3}, \w{3} \d+\.$/,
+      ),
+    ).toBeTruthy()
+    expect(
+      screen.getByText(
+        new RegExp(`Lowest point \\$140\\.51 (on \\w{3}, \\w{3} \\d+|that same day)`),
+      ),
+    ).toBeTruthy()
+    // The chart states the comparison's point in one line, above the plot.
+    expect(document.querySelector('.chart-thesis')!.textContent).toMatch(
+      /^With PayPal Pay in 4 from today, your lowest point is \w{3}, \w{3} \d+ at \$140\.51, below your cushion; paying in full on \w{3}, \w{3} \d+, it’s \w{3}, \w{3} \d+ at \$720\.53\.$/,
+    )
     const schedule = screen.getByRole('list', { name: 'Illustrative Pay in 4 schedule' })
     expect(within(schedule).getAllByRole('listitem')).toHaveLength(4)
     expect(screen.getByText(scenario.stacking!.message)).toBeTruthy()
