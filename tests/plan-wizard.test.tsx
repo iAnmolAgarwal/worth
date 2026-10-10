@@ -203,6 +203,45 @@ describe('plan setup wizard', () => {
       ['2026-10-31', 3750, 'installment', 'once'],
     ])
     expect(new Set(plan.map((flow) => flow.planId)).size).toBe(1)
+    // Entered by hand, so the plan is recorded as added by the user.
+    expect(plan.every((flow) => flow.origin === 'you')).toBe(true)
+  })
+
+  it('records a plan reviewed from the import as from PayPal', async () => {
+    const user = userEvent.setup()
+    const onSaved = vi.fn()
+    const state = makeState()
+    apiMock.mockResolvedValue(state)
+    render(
+      <PlanWizard
+        state={state}
+        initialStep={2}
+        suggestedPlans={[
+          {
+            id: 'pay-later:paypal:S1',
+            name: 'Larkspur Supply',
+            startDate: '2026-09-19',
+            purchaseCents: 29988,
+            paymentCents: 7497,
+            payments: [{ date: '2026-09-19', amountCents: 7497, status: 'completed' }],
+            transactionIds: ['paypal:S1'],
+          },
+        ]}
+        onClose={vi.fn()}
+        onSaved={onSaved}
+      />,
+    )
+    await user.click(screen.getByRole('button', { name: 'Review' }))
+    await user.click(screen.getByRole('button', { name: 'Add plan' }))
+    await continueStep(user)
+    await screen.findByRole('heading', { name: 'Check your plan' })
+    await user.click(screen.getByRole('checkbox', { name: /My money and bills are as of today/ }))
+    await user.click(screen.getByRole('button', { name: 'Save plan' }))
+    await waitFor(() => expect(onSaved).toHaveBeenCalledOnce())
+    const flows = (apiMock.mock.calls[0]![1] as { profile: FinancialProfile }).profile.flows
+    const plan = flows.filter((flow) => flow.name === 'Larkspur Supply · Pay in 4')
+    expect(plan).toHaveLength(3)
+    expect(plan.every((flow) => flow.origin === 'paypal')).toBe(true)
   })
 
   it('blocks unconfirmed imported income and bills until each suggestion is reviewed', async () => {

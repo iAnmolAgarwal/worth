@@ -1519,22 +1519,21 @@ describe('first screen: the sample and PayPal (third-party feedback)', () => {
     expect(document.activeElement).toBe(chip)
   })
 
-  it('introduces Maya and PayPal at the top of Home and opens the import', async () => {
+  it('starts Home with the PayPal activity card above the hero, explaining the sample', async () => {
     const user = userEvent.setup()
     const state = makeState()
     routeApi((path, data) => (path === '/state' ? state : compare(state, data)))
     render(<App />)
     const hero = await screen.findByRole('region', { name: 'Room to spend today' })
-    const intro = screen.getByText(/You’re viewing Maya’s sample month/).closest('.alert')!
-    expect(intro.textContent).toContain(
+    const card = screen.getByRole('region', { name: 'Start with your PayPal activity' })
+    expect(card.textContent).toContain(
       'You’re viewing Maya’s sample month: a made-up PayPal shopper with a paycheck, bills and one PayPal Pay in 4 plan.',
     )
-    // It sits above the hero, so the figure stays the first number on the page.
-    expect(intro.compareDocumentPosition(hero) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    await user.click(
-      within(intro as HTMLElement).getByRole('button', { name: /Use your own PayPal activity/ }),
-    )
-    expect(await screen.findByRole('dialog', { name: 'Import PayPal activity' })).toBeTruthy()
+    expect(card.textContent).toContain('Raw CSV files aren’t saved')
+    // It sits above the hero, so the PayPal start is the first thing on the page.
+    expect(card.compareDocumentPosition(hero) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    await user.click(within(card).getByRole('button', { name: 'Enter your bills yourself' }))
+    await waitFor(() => expect(window.location.hash).toBe('#plan/edit'))
   })
 
   it('shows no sample intro over imported data', async () => {
