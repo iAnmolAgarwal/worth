@@ -10,12 +10,13 @@ const PAY_IN_4_PAYMENTS = 4
 const PAYMENT_GAP_DAYS = 14
 
 /**
- * Moves every date in the sample export by whole weeks so its last day falls in the week before
- * today. Weekdays stay put (paydays on Fridays), and no row is ever in the future, which the import
- * would refuse. Only the leading MM/DD/YYYY date of each row changes.
+ * Moves every date in the sample export by the same number of days so it ends yesterday, as a
+ * fresh download would. The month it builds is then the same on any day: a payday in the file's
+ * last days, the next one about two weeks later, and no row in the future, which the import would
+ * refuse. Only the leading MM/DD/YYYY date of each row changes.
  */
 export function shiftSampleExport(csv: string, today: string): string {
-  const offset = 7 * Math.floor((daysBetween(SAMPLE_EXPORT_END, today) - 1) / 7)
+  const offset = daysBetween(SAMPLE_EXPORT_END, today) - 1
   if (!offset) return csv
   return csv.replace(/^"(\d{2})\/(\d{2})\/(\d{4})"/gm, (_match, month, day, year) => {
     const moved = addDays(`${year}-${month}-${day}`, offset)
@@ -28,6 +29,8 @@ export interface DraftPlan {
   id: string
   /** The store, or null when the file has only the payments and not the purchase. */
   merchant: string | null
+  /** What was bought, when the purchase row names it. */
+  title?: string
   purchaseCents: number | null
   paymentCents: number
   /** Payments the file shows, pending or completed. */
@@ -52,6 +55,7 @@ export function draftPlans(proposals: InstalmentPlanProposal[]): DraftPlan[] {
       {
         id: plan.id,
         merchant: dated ? plan.name : null,
+        ...(dated && plan.title ? { title: plan.title } : {}),
         purchaseCents: plan.purchaseCents,
         paymentCents: plan.paymentCents,
         seen,
@@ -72,9 +76,12 @@ export function planDates(plan: Pick<DraftPlan, 'lastDate' | 'left'>, today: str
   )
 }
 
-/** "Larkspur Supply · Pay in 4", or a neutral name when the purchase isn't in the file. */
-export const planName = (plan: Pick<DraftPlan, 'merchant'>) =>
-  `${plan.merchant ?? 'Earlier purchase'} · Pay in 4`
+/**
+ * "Larkspur Supply · Headphones · Pay in 4": the store, then the item when the export names it, or a
+ * neutral name when the purchase isn't in the file.
+ */
+export const planName = (plan: Pick<DraftPlan, 'merchant' | 'title'>) =>
+  [plan.merchant ?? 'Earlier purchase', plan.title, 'Pay in 4'].filter(Boolean).join(' · ')
 
 /** A plan's remaining payments as plan flows, from PayPal. None when it is left out or all paid. */
 export function planFlows(plan: DraftPlan, today: string): ScheduledFlow[] {
@@ -92,6 +99,7 @@ export function planFlows(plan: DraftPlan, today: string): ScheduledFlow[] {
     confirmed: true,
     active: true,
     origin: 'paypal',
+    ...(plan.purchaseCents === null ? {} : { planTotalCents: plan.purchaseCents }),
   }))
 }
 
