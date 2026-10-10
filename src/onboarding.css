@@ -3,42 +3,62 @@
    Home. Built only from index.css tokens; loaded after it.
    ===================================================================== */
 
-/* ---------- First-run card ---------- */
+/* ---------- First-run card: one compact row, so the hero stays above the fold ---------- */
 .start-card {
-  padding: var(--s-6);
-}
-.start-body {
   display: flex;
   flex-direction: column;
-  gap: var(--s-4);
+  gap: var(--s-3);
+  padding: var(--s-5) var(--s-6) var(--s-2);
+  transition:
+    background var(--d-hover) linear,
+    border-color var(--d-hover) linear;
 }
-.start-body[hidden] {
-  display: none;
+.start-card.over {
+  background: var(--c-info);
+  border-color: var(--c-brand);
 }
-.start-body .meta {
-  margin: 0;
+.start-head .meta {
+  margin: 2px 0 0;
 }
-.eyebrow {
-  display: inline-flex;
+.start-actions {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  margin: 0;
+  gap: var(--s-3) var(--s-5);
+}
+.file-btn {
+  position: relative;
+}
+.file-btn:focus-within {
+  outline: 3px solid var(--c-focus);
+  outline-offset: 2px;
+}
+.file-btn.is-disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.start-foot {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-4);
+  border-top: 1px solid var(--c-divider);
+}
+.start-foot > .link {
+  min-height: 44px;
   font-size: var(--fs-meta);
-  line-height: var(--lh-meta);
-  font-weight: var(--fw-bold);
-  color: var(--c-brand);
+  flex: none;
 }
-.eyebrow .ico {
-  width: 16px;
-  height: 16px;
+.start-how {
+  flex: 1;
+  min-width: 0;
 }
-.start-title {
-  font-size: var(--fs-title);
-  line-height: var(--lh-title);
-  font-weight: var(--fw-regular);
-  color: var(--c-text-strong);
-  letter-spacing: var(--tracking-tight);
-  margin: 0;
+.start-how > summary {
+  justify-content: flex-start;
+  gap: var(--s-2);
+}
+.start-how[open] > .stack {
+  padding-bottom: var(--s-3);
 }
 .split {
   display: grid;
@@ -84,17 +104,6 @@
   font-weight: var(--fw-bold);
   color: var(--c-text-strong);
 }
-.drop label.btn {
-  position: relative;
-}
-.drop label.btn:focus-within {
-  outline: 3px solid var(--c-focus);
-  outline-offset: 2px;
-}
-.drop label.is-disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
 .howto {
   list-style: none;
   margin: 0;
@@ -137,45 +146,6 @@
   gap: var(--s-3) var(--s-5);
   padding-top: var(--s-4);
   border-top: 1px solid var(--c-divider);
-}
-.start-fold {
-  display: flex;
-  align-items: center;
-  gap: var(--s-3);
-  width: 100%;
-  min-height: var(--tap);
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  text-align: left;
-  font: inherit;
-  cursor: pointer;
-}
-.start-fold .body {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-.start-fold .t {
-  font-size: var(--fs-body);
-  line-height: var(--lh-body);
-  font-weight: var(--fw-bold);
-  color: var(--c-text-strong);
-}
-.start-fold .s {
-  font-size: var(--fs-meta);
-  line-height: var(--lh-meta);
-  color: var(--c-text-2);
-}
-.start-fold .chev {
-  width: 20px;
-  height: 20px;
-  color: var(--c-navy);
-  transition: transform var(--d-action) var(--ease-move);
-}
-.start-fold[aria-expanded='true'] .chev {
-  transform: rotate(180deg);
 }
 
 /* ---------- Check what Worth found ---------- */
@@ -520,8 +490,15 @@ html:has(.import-review) {
   .start-card {
     padding: var(--s-4);
   }
-  .start-body {
-    margin-top: var(--s-4);
+  .start-actions > .btn {
+    flex: 1 1 100%;
+  }
+  .start-foot {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+  .start-how {
+    flex: 1 1 100%;
   }
   .split {
     grid-template-columns: 1fr;

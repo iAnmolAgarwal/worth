@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import type { DragEvent } from 'react'
+import type { DragEvent, ReactNode } from 'react'
 import {
   CalendarCheck,
   CalendarClock,
-  ChevronDown,
   CircleAlert,
   FileText,
   FileUp,
@@ -32,7 +31,6 @@ import type {
 import { api } from './api'
 import type { AppState } from './contract'
 import { isActive } from './contract'
-import { SAMPLE_WHO, sampleHolds } from './copy'
 import { cadenceLabel, flowIcon } from './engine'
 import { cx, dayLabel, displayName, money, shortDate } from './format'
 import { Alert, Button, DateStepper, Disc, Field, Ring } from './ui'
@@ -51,7 +49,7 @@ export const PRIVACY_LINE =
 const ESTIMATE_NOTE =
   'Pay in 4 dates are Worth’s estimate from your PayPal activity, about every 2 weeks. PayPal sets the actual schedule.'
 
-/** Loads the bundled sample export, moved so it ends in the week before today. */
+/** Loads the bundled sample export, moved so it ends yesterday. */
 export async function loadSampleExport(today: string): Promise<ChosenFile> {
   const { default: csv } = await import('./sample/paypal-activity-sample.csv?raw')
   return { csv: shiftSampleExport(csv, today), name: SAMPLE_FILE_NAME, sample: true }
@@ -60,19 +58,6 @@ export async function loadSampleExport(today: string): Promise<ChosenFile> {
 /** The plan's real calendar day: the demo clock pins only Maya's sample, never an import. */
 const realToday = (state: AppState) =>
   state.demoClock ? todayInTimezone(state.profile.timezone) : state.today
-
-function usePhone() {
-  const query = '(max-width: 767px)'
-  const [phone, setPhone] = useState(() => Boolean(window.matchMedia?.(query).matches))
-  useEffect(() => {
-    const list = window.matchMedia?.(query)
-    if (!list) return
-    const change = () => setPhone(list.matches)
-    list.addEventListener('change', change)
-    return () => list.removeEventListener('change', change)
-  }, [])
-  return phone
-}
 
 /** The three plain steps of PayPal's own Activity → Statements → Download. */
 function HowTo() {
@@ -98,16 +83,9 @@ function HowTo() {
   )
 }
 
-/** The drop zone: drop a file on wide screens, or choose it (phone: "Choose the CSV you downloaded"). */
-function DropZone({
-  onFile,
-  disabled,
-}: {
-  onFile: (file: ChosenFile) => void
-  disabled?: boolean
-}) {
+/** Reads a chosen or dropped CSV in the browser, within the import's 1 MB limit. */
+function useCsvFile(onFile: (file: ChosenFile) => void) {
   const [error, setError] = useState('')
-  const [over, setOver] = useState(false)
   const [reading, setReading] = useState(false)
   async function read(file: File | undefined) {
     if (!file) return
@@ -125,76 +103,112 @@ function DropZone({
       setReading(false)
     }
   }
-  const drop = (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault()
-    setOver(false)
-    if (!disabled) void read(event.dataTransfer.files?.[0])
-  }
-  return (
-    <div
-      className={cx('drop', over && 'over')}
-      onDragOver={(event) => {
+  return { read, error, setError, reading }
+}
+
+/** Drag-and-drop on any element: a dropped file is read like a chosen one. */
+function useDrop(read: (file: File | undefined) => void, disabled?: boolean) {
+  const [over, setOver] = useState(false)
+  return {
+    over,
+    handlers: {
+      onDragOver: (event: DragEvent<HTMLElement>) => {
         event.preventDefault()
         setOver(true)
-      }}
-      onDragLeave={() => setOver(false)}
-      onDrop={drop}
-    >
+      },
+      onDragLeave: () => setOver(false),
+      onDrop: (event: DragEvent<HTMLElement>) => {
+        event.preventDefault()
+        setOver(false)
+        if (!disabled) read(event.dataTransfer.files?.[0])
+      },
+    },
+  }
+}
+
+/** "Choose your PayPal CSV": a button over the native file control, for keyboards and readers. */
+function ChooseFile({
+  read,
+  disabled,
+  children,
+}: {
+  read: (file: File | undefined) => void
+  disabled?: boolean
+  children: ReactNode
+}) {
+  return (
+    <label className={cx('btn btn-primary file-btn', disabled && 'is-disabled')}>
+      <FileUp className="ico" aria-hidden="true" />
+      {children}
+      <input
+        className="sr"
+        type="file"
+        accept=".csv,text/csv"
+        aria-label="Choose your PayPal activity CSV"
+        disabled={disabled}
+        onChange={(event) => {
+          read(event.target.files?.[0])
+          event.target.value = ''
+        }}
+      />
+    </label>
+  )
+}
+
+function FileError({ children }: { children: string }) {
+  return (
+    <p className="field-error" role="alert">
+      <CircleAlert size={16} aria-hidden="true" style={{ flex: 'none', marginTop: 2 }} />
+      {children}
+    </p>
+  )
+}
+
+/** The drop zone of the full import page: drop a file on wide screens, or choose it. */
+function DropZone({
+  onFile,
+  disabled,
+}: {
+  onFile: (file: ChosenFile) => void
+  disabled?: boolean
+}) {
+  const { read, error, reading } = useCsvFile(onFile)
+  const { over, handlers } = useDrop((file) => void read(file), disabled)
+  return (
+    <div className={cx('drop', over && 'over')} {...handlers}>
       <span className="co-ic" aria-hidden="true">
         <FileUp className="ico" />
       </span>
       <p className="t hide-m">Drop your PayPal activity CSV here</p>
       <p className="t show-m">Choose the CSV you downloaded</p>
       <p className="meta hide-m">or</p>
-      <label className={cx('btn btn-primary', (disabled || reading) && 'is-disabled')}>
-        <FileUp className="ico" aria-hidden="true" />
-        <span className="hide-m">Choose your PayPal CSV</span>
-        <span className="show-m">Choose the file</span>
-        <input
-          className="sr"
-          type="file"
-          accept=".csv,text/csv"
-          aria-label="Choose your PayPal activity CSV"
-          disabled={disabled || reading}
-          onChange={(event) => {
-            void read(event.target.files?.[0])
-            event.target.value = ''
-          }}
-        />
-      </label>
+      <ChooseFile read={(file) => void read(file)} disabled={disabled || reading}>
+        Choose your PayPal CSV
+      </ChooseFile>
       <p className="caption">English-language export in USD · up to 1 MB</p>
-      {error && (
-        <p className="field-error" role="alert">
-          <CircleAlert size={16} aria-hidden="true" style={{ flex: 'none', marginTop: 2 }} />
-          {error}
-        </p>
-      )}
+      {error && <FileError>{error}</FileError>}
     </div>
   )
 }
 
 /**
- * "Start with your PayPal activity": the first-run card on Maya's sample Home (P3a, option A). On a
- * phone it folds to one line, so the room-to-spend figure stays above the fold.
+ * "Start with your PayPal activity": the first-run card on Maya's sample Home (P3a). One compact row
+ * at every width, so the room-to-spend figure stays above the fold; a CSV can also be dropped on it.
+ * PayPal's download steps and the privacy line sit behind a disclosure.
  */
 export function StartCard({
   state,
-  plans,
   onFile,
   onEnterYourself,
 }: {
   state: AppState
-  /** Pay in 4 plans running in the sample, for its one-line description. */
-  plans: number
   onFile: (file: ChosenFile) => void
   onEnterYourself: () => void
 }) {
-  const phone = usePhone()
-  const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
   const busy = state.purchases.some(isActive)
-  const folded = phone && !open
+  const { read, error, setError, reading } = useCsvFile(onFile)
+  const { over, handlers } = useDrop((file) => void read(file), busy)
   async function sample() {
     setError('')
     setLoading(true)
@@ -207,66 +221,52 @@ export function StartCard({
     }
   }
   return (
-    <section className="tile start-card" aria-labelledby="start-title">
-      <button
-        type="button"
-        className="start-fold show-m"
-        aria-expanded={!folded}
-        aria-controls="start-body"
-        onClick={() => setOpen(!open)}
-      >
-        <Disc icon={FileUp} kind="plan" />
-        <span className="body">
-          <span className="t">Start with your PayPal activity</span>
-          <span className="s">Or try a sample PayPal export</span>
-        </span>
-        <ChevronDown className="ico chev" aria-hidden="true" />
-      </button>
-      <div id="start-body" className="start-body" hidden={folded}>
-        <p className="eyebrow hide-m">
-          <FileUp className="ico" aria-hidden="true" /> A few minutes
-        </p>
-        <h2 className="start-title hide-m" id="start-title">
+    <section
+      className={cx('tile start-card', over && 'over')}
+      aria-labelledby="start-title"
+      {...handlers}
+    >
+      <div className="start-head">
+        <h2 className="h-section" id="start-title">
           Start with your PayPal activity
         </h2>
         <p className="meta">
-          You’re viewing {SAMPLE_WHO} with {sampleHolds(plans)}. Bring your own PayPal activity and
-          Worth builds your month: paydays, bills, subscriptions and the Pay in 4 plans you’re
-          part-way through.
+          You’re viewing Maya’s sample month. Bring your PayPal activity to see your own.
         </p>
-        {busy && (
-          <Alert tone="warn" icon={CircleAlert}>
-            Finish or cancel your active checkout before importing PayPal activity.
-          </Alert>
-        )}
-        <div className="split">
-          <DropZone onFile={onFile} disabled={busy} />
+      </div>
+      {busy && (
+        <Alert tone="warn" icon={CircleAlert}>
+          Finish or cancel your active checkout before importing PayPal activity.
+        </Alert>
+      )}
+      <div className="start-actions">
+        <ChooseFile read={(file) => void read(file)} disabled={busy || reading}>
+          Choose your PayPal CSV
+        </ChooseFile>
+        <Button
+          variant="secondary"
+          icon={FileText}
+          loading={loading}
+          disabled={busy || loading}
+          onClick={() => void sample()}
+        >
+          Try with a sample PayPal export
+        </Button>
+      </div>
+      {error && <FileError>{error}</FileError>}
+      <div className="start-foot">
+        <details className="quiet-details start-how">
+          <summary>How to get the file from PayPal</summary>
           <div className="stack tight">
-            <h3 className="h-section">Get the file from PayPal</h3>
             <HowTo />
+            <p className="caption">
+              {PRIVACY_LINE} English-language export in USD, up to 1 MB. A few minutes.
+            </p>
           </div>
-        </div>
-        <p className="caption">{PRIVACY_LINE}</p>
-        <div className="alt-paths">
-          <Button
-            variant="secondary"
-            icon={FileText}
-            loading={loading}
-            disabled={busy || loading}
-            onClick={() => void sample()}
-          >
-            Try with a sample PayPal export
-          </Button>
-          <button type="button" className="link" onClick={onEnterYourself}>
-            Enter your bills yourself
-          </button>
-        </div>
-        {error && (
-          <p className="field-error" role="alert">
-            <CircleAlert size={16} aria-hidden="true" style={{ flex: 'none', marginTop: 2 }} />
-            {error}
-          </p>
-        )}
+        </details>
+        <button type="button" className="link" onClick={onEnterYourself}>
+          Enter your bills yourself
+        </button>
       </div>
     </section>
   )
@@ -603,6 +603,7 @@ function PlanRow({
   }
   const total = Math.max(4, plan.seen + (plan.left ?? 0))
   const name = displayName(plan.merchant)
+  const label = plan.title ? `${name} · ${plan.title}` : name
   return (
     <div className={cx('found-row plan', !plan.included && 'off')}>
       <input
@@ -615,7 +616,7 @@ function PlanRow({
       />
       <Ring part={plan.seen} of={total} />
       <div className="body">
-        <div className="t">{name}</div>
+        <div className="t">{label}</div>
         <div className="s">
           <span className="soft">
             {plan.seen} of {total} paid · {money(plan.paymentCents)} each ·{' '}

@@ -489,12 +489,7 @@ export function Home({
         <div className="grid">
           <div className="stack">
             {state.profile.source === 'demo' && onImportFile && (
-              <StartCard
-                state={state}
-                plans={plans.length}
-                onFile={onImportFile}
-                onEnterYourself={onEditPlan}
-              />
+              <StartCard state={state} onFile={onImportFile} onEnterYourself={onEditPlan} />
             )}
             {state.profile.source === 'demo' && !onImportFile && (
               <Alert tone="info" icon={Info}>

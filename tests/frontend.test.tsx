@@ -1527,7 +1527,7 @@ describe('first screen: the sample and PayPal (third-party feedback)', () => {
     const hero = await screen.findByRole('region', { name: 'Room to spend today' })
     const card = screen.getByRole('region', { name: 'Start with your PayPal activity' })
     expect(card.textContent).toContain(
-      'You’re viewing Maya’s sample month: a made-up PayPal shopper with a paycheck, bills and one PayPal Pay in 4 plan.',
+      'You’re viewing Maya’s sample month. Bring your PayPal activity to see your own.',
     )
     expect(card.textContent).toContain('Raw CSV files aren’t saved')
     // It sits above the hero, so the PayPal start is the first thing on the page.
