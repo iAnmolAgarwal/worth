@@ -220,7 +220,7 @@ describe('the review draft', () => {
     expect(dayPhrase(-2, 'rent')).toBe('2 days after rent')
   })
 
-  it('counts the month by origin, with untagged items as added by the user', () => {
+  it('counts the month by origin, keeping untagged items apart', () => {
     const flows = [
       ...draftFlows(preview, []),
       rent,
@@ -230,7 +230,9 @@ describe('the review draft', () => {
     ]
     const counts = originCounts(flows)
     expect(counts).toMatchObject({ paydays: 1, bills: 4, plans: 2 })
-    expect(counts.added.map((flow) => flow.name)).toEqual(['Maple Court rent', 'Old loan'])
+    expect(counts.added.map((flow) => flow.name)).toEqual(['Maple Court rent'])
+    // Without an origin, Worth can't say who added it.
+    expect(counts.earlier.map((flow) => flow.name)).toEqual(['Old loan'])
   })
 })
 

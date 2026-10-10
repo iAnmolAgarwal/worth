@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { DragEvent, ReactNode } from 'react'
+import type { DragEvent, KeyboardEvent, ReactNode } from 'react'
 import {
   CalendarCheck,
   CalendarClock,
@@ -9,11 +9,12 @@ import {
   Plus,
   ReceiptText,
 } from 'lucide-react'
-import { planCollisions, todayInTimezone } from '../shared/finance'
+import { addDays, planCollisions, todayInTimezone } from '../shared/finance'
 import { CSV_IMPORT_LIMITS, CSV_SIZE_MESSAGE, utf8Bytes } from '../shared/limits'
 import {
   dayPhrase,
   draftFlows,
+  estimated,
   draftPlans,
   planDates,
   planFlows,
@@ -44,6 +45,10 @@ export interface ChosenFile {
 }
 
 export const SAMPLE_FILE_NAME = 'Sample PayPal export (fictional)'
+/** The made-up rent the sample review offers, as a bill paid from a bank. */
+const SAMPLE_RENT_ID = 'you-sample-rent'
+/** The sample's money available and cushion: the review prefills them, both editable. */
+const SAMPLE_FUNDS = { balance: '1800.00', cushion: '300.00' }
 export const PRIVACY_LINE =
   'You choose the file; there’s no PayPal login and no account link. Raw CSV files aren’t saved: Worth reads the file in this session.'
 const ESTIMATE_NOTE =
@@ -192,9 +197,10 @@ function DropZone({
 }
 
 /**
- * "Start with your PayPal activity": the first-run card on Maya's sample Home (P3a). One compact row
- * at every width, so the room-to-spend figure stays above the fold; a CSV can also be dropped on it.
- * PayPal's download steps and the privacy line sit behind a disclosure.
+ * "Start with your PayPal activity": the first-run card on Maya's sample Home (P3a). Compact at every
+ * width, so the room-to-spend figure and the first starter stay above the fold; on a phone it is the
+ * title and two short buttons. A CSV can also be dropped on it. PayPal's download steps, the
+ * privacy line and, on a phone, "Enter your bills yourself" sit behind a disclosure.
  */
 export function StartCard({
   state,
@@ -230,7 +236,7 @@ export function StartCard({
         <h2 className="h-section" id="start-title">
           Start with your PayPal activity
         </h2>
-        <p className="meta">
+        <p className="meta hide-m">
           You’re viewing Maya’s sample month. Bring your PayPal activity to see your own.
         </p>
       </div>
@@ -241,7 +247,8 @@ export function StartCard({
       )}
       <div className="start-actions">
         <ChooseFile read={(file) => void read(file)} disabled={busy || reading}>
-          Choose your PayPal CSV
+          <span className="hide-m">Choose your PayPal CSV</span>
+          <span className="show-m">Choose CSV</span>
         </ChooseFile>
         <Button
           variant="secondary"
@@ -250,25 +257,80 @@ export function StartCard({
           disabled={busy || loading}
           onClick={() => void sample()}
         >
-          Try with a sample PayPal export
+          <span className="hide-m">Try with a sample PayPal export</span>
+          <span className="show-m">Try a sample</span>
         </Button>
       </div>
       {error && <FileError>{error}</FileError>}
       <div className="start-foot">
         <details className="quiet-details start-how">
-          <summary>How to get the file from PayPal</summary>
+          {/* On a phone the summary is an icon at the card's top right, keeping the card one row. */}
+          <summary>
+            <span className="how-label">How to get the file from PayPal</span>
+          </summary>
           <div className="stack tight">
             <HowTo />
             <p className="caption">
               {PRIVACY_LINE} English-language export in USD, up to 1 MB. A few minutes.
             </p>
+            <button type="button" className="link show-m" onClick={onEnterYourself}>
+              Enter your bills yourself
+            </button>
           </div>
         </details>
-        <button type="button" className="link" onClick={onEnterYourself}>
+        <button type="button" className="link hide-m" onClick={onEnterYourself}>
           Enter your bills yourself
         </button>
       </div>
     </section>
+  )
+}
+
+/**
+ * Chips that pick one answer, as an ARIA radio group: one tab stop (the chosen chip, or the first),
+ * and the arrow keys move and choose.
+ */
+function ChipGroup<T>({
+  options,
+  value,
+  onChange,
+  labelledBy,
+  disabled,
+  className = 'seg',
+}: {
+  options: [T, string][]
+  value: T | undefined
+  onChange: (value: T) => void
+  labelledBy: string
+  disabled?: boolean
+  className?: string
+}) {
+  const current = options.findIndex(([option]) => option === value)
+  const move = (event: KeyboardEvent<HTMLDivElement>) => {
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key]
+    if (!step) return
+    event.preventDefault()
+    const next = (Math.max(current, 0) + step + options.length) % options.length
+    onChange(options[next]![0])
+    const buttons = event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]')
+    buttons[next]?.focus()
+  }
+  return (
+    <div className={className} role="radiogroup" aria-labelledby={labelledBy} onKeyDown={move}>
+      {options.map(([option, text], index) => (
+        <button
+          key={text}
+          type="button"
+          role="radio"
+          disabled={disabled}
+          aria-checked={option === value}
+          tabIndex={index === Math.max(current, 0) ? 0 : -1}
+          onClick={() => onChange(option)}
+        >
+          {text}
+        </button>
+      ))}
+    </div>
   )
 }
 
@@ -278,9 +340,9 @@ const ordinal = (day: number) => {
     tens >= 11 && tens <= 13 ? 'th' : (({ 1: 'st', 2: 'nd', 3: 'rd' } as const)[day % 10] ?? 'th')
   return `${day}${suffix}`
 }
-/** "Monthly on the 13th · next about Tue, Oct 13"; dates Worth projected from PayPal say "about". */
+/** "Monthly on the 13th · next about Tue, Oct 13"; only Worth's estimated dates say "about". */
 function schedule(flow: ScheduledFlow) {
-  const about = flow.origin === 'paypal' ? 'about ' : ''
+  const about = estimated(flow) ? 'about ' : ''
   const day = flow.anchorDay ?? Number(flow.nextDate.slice(8, 10))
   const repeat =
     flow.cadence === 'monthly'
@@ -327,10 +389,12 @@ function SectionHead({ id, title, count }: { id: string; title: string; count?: 
 /** One reviewed row: tick to include, the amount and its origin, and a small inline edit. */
 function FoundRow({
   flow,
+  today,
   disabled,
   onChange,
 }: {
   flow: ScheduledFlow
+  today: string
   disabled: boolean
   onChange: (flow: ScheduledFlow) => void
 }) {
@@ -344,8 +408,13 @@ function FoundRow({
     const cents = readCents(amount)
     if (cents === undefined) return setError(`Enter an amount for ${name}, such as 65.00.`)
     setError('')
-    // An edited item is still from PayPal; only its amount or date changed.
-    onChange({ ...flow, amountCents: cents, nextDate: date })
+    // An edited item is still from PayPal; a date the user set is theirs, not an estimate.
+    onChange({
+      ...flow,
+      amountCents: cents,
+      nextDate: date,
+      ...(flow.userDate || date !== flow.nextDate ? { userDate: true } : {}),
+    })
     setEditing(false)
   }
   return (
@@ -364,6 +433,11 @@ function FoundRow({
         <div className="s">
           <span className="soft">{schedule(flow)}</span>
         </div>
+        {flow.id === SAMPLE_RENT_ID && (
+          <p className="caption">
+            Made up for the sample, as rent paid from a bank · change or untick it
+          </p>
+        )}
       </div>
       <div className="end">
         <div className={cx('amt num', income && 'pos')}>
@@ -400,6 +474,7 @@ function FoundRow({
             </Field>
             <DateStepper
               label={income ? 'Next payday' : 'Next due date'}
+              min={today}
               value={date}
               onChange={setDate}
             />
@@ -484,19 +559,12 @@ function AddBill({
       </div>
       <div className="field">
         <span id="bill-often">How often</span>
-        <div className="seg" role="radiogroup" aria-labelledby="bill-often">
-          {CADENCES.map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              role="radio"
-              aria-checked={cadence === value}
-              onClick={() => setCadence(value)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <ChipGroup
+          options={CADENCES}
+          value={cadence}
+          onChange={setCadence}
+          labelledBy="bill-often"
+        />
       </div>
       {error && (
         <p className="field-error" role="alert">
@@ -576,20 +644,14 @@ function PlanRow({
               {shortDate(plan.lastDate)}, but not the purchase. How many are left?
             </span>
           </div>
-          <div className="seg chips-seg" role="radiogroup" aria-labelledby={label}>
-            {answers.map(([left, text]) => (
-              <button
-                key={text}
-                type="button"
-                role="radio"
-                disabled={disabled}
-                aria-checked={plan.left === left}
-                onClick={() => onChange({ ...plan, left })}
-              >
-                {text}
-              </button>
-            ))}
-          </div>
+          <ChipGroup
+            className="seg chips-seg"
+            options={answers}
+            value={plan.left}
+            onChange={(left) => onChange({ ...plan, left })}
+            labelledBy={label}
+            disabled={disabled}
+          />
           {plan.left ? (
             <p className="caption">
               Next about {dayLabel(dates[0]!)}
@@ -690,13 +752,38 @@ export function ImportReview({
         const known = new Set(keptPlans.map((flow) => flow.name.toLowerCase()))
         setPreview(result)
         setLoadError('')
-        setFlows(draftFlows(result, existing))
-        setPlans(
-          draftPlans(result.instalmentPlans).filter(
-            (plan) => !known.has(planName(plan).toLowerCase()),
-          ),
+        const drafted = draftPlans(result.instalmentPlans).filter(
+          (plan) => !known.has(planName(plan).toLowerCase()),
         )
+        const flows = draftFlows(result, existing)
+        setPlans(drafted)
         setDaily(asInput(result.suggestedDailySpendCents))
+        if (file.sample) {
+          // The sample lands on a believable month without guessing: its funds, and a made-up rent
+          // the day before the largest plan's next payment, which is what PayPal can't see.
+          setBalance(SAMPLE_FUNDS.balance)
+          setCushion(SAMPLE_FUNDS.cushion)
+          const largest = drafted
+            .filter((plan) => plan.merchant && plan.left)
+            .sort((a, b) => b.paymentCents - a.paymentCents)[0]
+          const next = largest && planDates(largest, today)[0]
+          if (next && addDays(next, -1) >= today)
+            flows.push({
+              id: SAMPLE_RENT_ID,
+              name: 'Maple Court rent',
+              amountCents: 165000,
+              nextDate: addDays(next, -1),
+              cadence: 'monthly',
+              kind: 'bill',
+              category: 'Other',
+              icon: 'home',
+              confirmed: true,
+              active: true,
+              origin: 'you',
+              userDate: true,
+            })
+        }
+        setFlows(flows)
       })
       .catch((failure: Error) => !cancelled && setLoadError(failure.message))
     return () => {
@@ -750,6 +837,7 @@ export function ImportReview({
     missingFields: [],
   }
   const notes = collisionNotes(draft, plans, today)
+  const dailyFromPayPal = !preview || readCents(daily) === preview.suggestedDailySpendCents
   const paydays = flows.filter((flow) => flow.kind === 'income')
   const bills = flows.filter((flow) => flow.kind !== 'income')
   const fromPayPal = (items: { origin?: string }[]) =>
@@ -801,6 +889,7 @@ export function ImportReview({
         balanceCents,
         cushionCents,
         dailySpendCents: dailyCents,
+        dailySpendOrigin: dailyCents === preview.suggestedDailySpendCents ? 'paypal' : 'you',
         flows: finalFlows,
         snapshotDate: base.today,
         confirmed: true,
@@ -931,7 +1020,13 @@ export function ImportReview({
                 {paydays.length ? (
                   <div className="rows">
                     {paydays.map((flow) => (
-                      <FoundRow key={flow.id} flow={flow} disabled={busy} onChange={update} />
+                      <FoundRow
+                        key={flow.id}
+                        flow={flow}
+                        today={today}
+                        disabled={busy}
+                        onChange={update}
+                      />
                     ))}
                   </div>
                 ) : (
@@ -949,7 +1044,13 @@ export function ImportReview({
                 />
                 <div className="rows">
                   {bills.map((flow) => (
-                    <FoundRow key={flow.id} flow={flow} disabled={busy} onChange={update} />
+                    <FoundRow
+                      key={flow.id}
+                      flow={flow}
+                      today={today}
+                      disabled={busy}
+                      onChange={update}
+                    />
                   ))}
                 </div>
                 <div style={{ marginTop: 'var(--s-3)' }}>
@@ -986,7 +1087,11 @@ export function ImportReview({
                 </section>
               )}
               <section aria-labelledby="found-daily">
-                <SectionHead id="found-daily" title="Everyday spending" count="From PayPal" />
+                <SectionHead
+                  id="found-daily"
+                  title="Everyday spending"
+                  count={dailyFromPayPal ? 'From PayPal' : undefined}
+                />
                 <div className="found-row">
                   <Disc icon={ReceiptText} />
                   <div className="body">
@@ -1003,12 +1108,16 @@ export function ImportReview({
                         </span>
                       </Field>
                     ) : (
-                      <div className="t">About {money(readCents(daily) ?? 0)} a day</div>
+                      <div className="t">
+                        {dailyFromPayPal ? 'About ' : ''}
+                        {money(readCents(daily) ?? 0)} a day
+                      </div>
                     )}
                     <div className="s">
                       <span className="soft">
-                        Your average over {preview.coverageDays} days, leaving out the bills and
-                        plans above
+                        {dailyFromPayPal
+                          ? `Your average over ${preview.coverageDays} days, leaving out the bills and plans above`
+                          : `Set by you. PayPal’s average was ${money(preview.suggestedDailySpendCents)} a day.`}
                       </span>
                     </div>
                   </div>

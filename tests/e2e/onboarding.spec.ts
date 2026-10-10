@@ -33,5 +33,5 @@ test('the sample PayPal export builds a believable month with its calm note', as
   const room = Number((await hero.locator('.v').innerText()).replace(/[$,]/g, ''))
   expect(room).toBeGreaterThanOrEqual(250)
   expect(room).toBeLessThanOrEqual(600)
-  await expect(page.getByText('The day after Maple Court rent.')).toBeVisible()
+  await expect(page.getByText('The day after Maple Court rent.', { exact: true })).toBeVisible()
 })

@@ -205,6 +205,7 @@ describe('plan setup wizard', () => {
     expect(new Set(plan.map((flow) => flow.planId)).size).toBe(1)
     // Entered by hand, so the plan is recorded as added by the user.
     expect(plan.every((flow) => flow.origin === 'you')).toBe(true)
+    expect(plan.every((flow) => flow.userDate)).toBe(true)
   })
 
   it('records a plan reviewed from the import as from PayPal', async () => {
@@ -242,6 +243,8 @@ describe('plan setup wizard', () => {
     const plan = flows.filter((flow) => flow.name === 'Larkspur Supply · Pay in 4')
     expect(plan).toHaveLength(3)
     expect(plan.every((flow) => flow.origin === 'paypal')).toBe(true)
+    // Worth's estimated dates, unchanged, so they still read "about".
+    expect(plan.some((flow) => flow.userDate)).toBe(false)
   })
 
   it('blocks unconfirmed imported income and bills until each suggestion is reviewed', async () => {

@@ -487,18 +487,56 @@ html:has(.import-review) {
 }
 
 @media (max-width: 767px) {
+  /* One row on a phone: the title with a "how to" icon, then two short buttons side by side, so
+     the first starter stays where it was before the card (judge P3a #1). */
   .start-card {
-    padding: var(--s-4);
+    position: relative;
+    padding: var(--s-3) var(--s-4);
+    gap: var(--s-2);
+  }
+  .start-head .h-section {
+    font-size: var(--fs-body);
+    line-height: var(--lh-body);
+    padding-right: 40px;
+  }
+  .start-actions {
+    flex-wrap: nowrap;
+    gap: var(--s-2);
   }
   .start-actions > .btn {
-    flex: 1 1 100%;
+    flex: 1 1 0;
+    min-width: 0;
+    height: 40px;
+    padding: 0 var(--s-3);
+    font-size: var(--fs-meta);
   }
   .start-foot {
-    flex-wrap: wrap;
-    row-gap: 0;
+    display: block;
+    border-top: 0;
   }
-  .start-how {
-    flex: 1 1 100%;
+  .start-how > summary {
+    position: absolute;
+    top: 2px;
+    right: 4px;
+    width: 44px;
+    height: 44px;
+    justify-content: center;
+    gap: 0;
+  }
+  .start-how > summary::after {
+    margin: 0 0 4px;
+  }
+  .start-how[open] {
+    border-top: 1px solid var(--c-divider);
+    padding-top: var(--s-3);
+  }
+  .how-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
   .split {
     grid-template-columns: 1fr;

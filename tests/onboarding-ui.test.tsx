@@ -141,11 +141,11 @@ describe('Check what Worth found', () => {
     }) as typeof api)
     return calls
   }
-  function renderReview(onDone = vi.fn()) {
+  function renderReview(onDone = vi.fn(), file = FILE) {
     return render(
       <ImportReview
         state={demoState()}
-        file={FILE}
+        file={file}
         onFile={vi.fn()}
         onEnterYourself={vi.fn()}
         onCancel={vi.fn()}
@@ -276,6 +276,95 @@ describe('Check what Worth found', () => {
     ).toBe('true')
     expect(calls.map((call) => call.path)).toEqual(['/import/preview'])
   })
+
+  it('prefills the sample’s funds and a made-up rent, so the demo lands without guessing', async () => {
+    const user = userEvent.setup()
+    const calls = reviewApi()
+    renderReview(vi.fn(), { ...FILE, sample: true })
+    await screen.findByText('Northwind Payroll')
+    expect(
+      (screen.getByRole('textbox', { name: /Money available today/ }) as HTMLInputElement).value,
+    ).toBe('1800.00')
+    expect((screen.getByRole('textbox', { name: /Cushion/ }) as HTMLInputElement).value).toBe(
+      '300.00',
+    )
+    const bills = screen.getByRole('region', { name: 'Bills and subscriptions' })
+    expect(within(bills).getByText(/Made up for the sample/)).toBeTruthy()
+    expect(within(bills).getByText(/Monthly on the 22nd · next Thu, Oct 22/)).toBeTruthy()
+    // The note shows straight away, from the suggested rent.
+    expect(
+      screen.getByText('Payment 3 of 4: $74.97 on Fri, Oct 23, the day after Maple Court rent.'),
+    ).toBeTruthy()
+    await user.click(screen.getByRole('radio', { name: 'All paid' }))
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await waitFor(() => expect(calls.at(-1)?.path).toBe('/profile'))
+    const { profile } = calls.at(-1)!.data as { profile: FinancialProfile }
+    expect(profile).toMatchObject({ balanceCents: 180000, cushionCents: 30000 })
+    expect(profile.flows.find((flow) => flow.name === 'Maple Court rent')).toMatchObject({
+      origin: 'you',
+      amountCents: 165000,
+      nextDate: '2026-10-22',
+    })
+    expect(
+      compareOptions(profile, [], { amountCents: 0, today: TODAY }).spendLess.maxPriceCents,
+    ).toBe(41203)
+  })
+
+  it('drops "about" from a date the user set, never before today, and credits edited spending to them', async () => {
+    const user = userEvent.setup()
+    const calls = reviewApi()
+    renderReview()
+    await screen.findByText('Northwind Payroll')
+    expect(screen.getByText(/Monthly on the 17th · next about Sat, Oct 17/)).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Edit Ridgeline Fitness' }))
+    // The date picker stops at today.
+    for (let week = 0; week < 3; week++)
+      await user.click(screen.getByRole('button', { name: 'Next due date: a week earlier' }))
+    expect(
+      screen.getByRole('spinbutton', { name: 'Next due date' }).getAttribute('aria-valuetext'),
+    ).toBe('Sat, Oct 10')
+    await user.click(screen.getByRole('button', { name: 'Next due date: a day later' }))
+    await user.click(screen.getByRole('button', { name: 'Close Ridgeline Fitness' }))
+    expect(screen.getByText(/· next Sun, Oct 11/)).toBeTruthy()
+    expect(screen.queryByText(/next about Sun, Oct 11/)).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Edit everyday spending' }))
+    const daily = screen.getByRole('textbox', { name: /Everyday spending/ })
+    await user.clear(daily)
+    await user.type(daily, '25')
+    await user.click(screen.getByRole('button', { name: 'Done editing everyday spending' }))
+    expect(screen.getByText(/Set by you\. PayPal’s average was/)).toBeTruthy()
+    await user.click(screen.getByRole('radio', { name: 'All paid' }))
+    await user.type(screen.getByRole('textbox', { name: /Money available today/ }), '1800')
+    await user.type(screen.getByRole('textbox', { name: /Cushion/ }), '300')
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await waitFor(() => expect(calls.at(-1)?.path).toBe('/profile'))
+    const { profile } = calls.at(-1)!.data as { profile: FinancialProfile }
+    expect(profile.flows.find((flow) => flow.name === 'Ridgeline Fitness')).toMatchObject({
+      origin: 'paypal',
+      userDate: true,
+      nextDate: '2026-10-11',
+    })
+    expect(profile).toMatchObject({ dailySpendCents: 2500, dailySpendOrigin: 'you' })
+  })
+
+  it('moves through the answer chips with the arrow keys, one tab stop for the group', async () => {
+    const user = userEvent.setup()
+    reviewApi()
+    renderReview()
+    await screen.findByText('Northwind Payroll')
+    const chips = within(screen.getByRole('radiogroup', { name: /payments of \$62\.50/ }))
+    expect(chips.getAllByRole('radio').map((chip) => chip.tabIndex)).toEqual([0, -1, -1])
+    chips.getByRole('radio', { name: '1 left' }).focus()
+    await user.keyboard('{ArrowRight}')
+    const two = chips.getByRole('radio', { name: '2 left' })
+    expect(two.getAttribute('aria-checked')).toBe('true')
+    expect(document.activeElement).toBe(two)
+    await user.keyboard('{ArrowRight}{ArrowRight}')
+    expect(chips.getByRole('radio', { name: '1 left' }).getAttribute('aria-checked')).toBe('true')
+    await user.keyboard('{ArrowLeft}')
+    expect(chips.getByRole('radio', { name: 'All paid' }).getAttribute('aria-checked')).toBe('true')
+    expect(chips.getAllByRole('radio').map((chip) => chip.tabIndex)).toEqual([-1, -1, 0])
+  })
 })
 
 describe('Start with your PayPal activity', () => {
@@ -293,7 +382,7 @@ describe('Start with your PayPal activity', () => {
       'Choose Statements › Download. It’s next to the search box.',
       'Pick CSV and the last 90 days, then save the file.',
     ])
-    await user.click(within(card).getByRole('button', { name: 'Try with a sample PayPal export' }))
+    await user.click(within(card).getByRole('button', { name: /Try with a sample PayPal export/ }))
     await waitFor(() => expect(onFile).toHaveBeenCalled())
     const file = onFile.mock.calls[0]![0] as ChosenFile
     expect(file).toMatchObject({ name: 'Sample PayPal export (fictional)', sample: true })
@@ -321,7 +410,7 @@ describe('Start with your PayPal activity', () => {
     expect(within(card).getByText(/^You’re viewing Maya’s sample month\./)).toBeTruthy()
     const how = card.querySelector('details')!
     expect(how.open).toBe(false)
-    expect(within(how).getByText('How to get the file from PayPal').tagName).toBe('SUMMARY')
+    expect(within(how).getByText('How to get the file from PayPal').closest('summary')).toBeTruthy()
     expect(within(how).getAllByRole('listitem', { hidden: true })).toHaveLength(3)
     expect(how.textContent).toContain('Raw CSV files aren’t saved')
     await user.click(within(how).getByText('How to get the file from PayPal'))
@@ -340,7 +429,7 @@ describe('Start with your PayPal activity', () => {
         path === '/state' ? state : path === '/import/preview' ? preview : compare(state),
       )) as typeof api)
     render(<App />)
-    await user.click(await screen.findByRole('button', { name: 'Try with a sample PayPal export' }))
+    await user.click(await screen.findByRole('button', { name: /Try with a sample PayPal export/ }))
     await waitFor(() => expect(window.location.hash).toBe('#import'))
     expect(await screen.findByRole('heading', { name: 'Check what Worth found' })).toBeTruthy()
     expect(await screen.findByText('Sample PayPal export (fictional)')).toBeTruthy()
@@ -423,6 +512,60 @@ describe('the month-led Home for imported PayPal activity', () => {
       ).toBeTruthy()
     expect(line.className).toContain('show-m')
     expect(line.textContent).toBe('PayPal Pay in 4: 2 in progress · next about Oct 16')
+  })
+
+  it('says when the low is the morning of payday, and words what the user added by kind', async () => {
+    const state = monthState()
+    state.profile = {
+      ...state.profile,
+      dailySpendOrigin: 'you',
+      dailySpendCents: 2500,
+      flows: [
+        ...state.profile.flows,
+        {
+          ...rent,
+          id: 'side',
+          name: 'Weekend shifts',
+          kind: 'income',
+          amountCents: 20000,
+          cadence: 'biweekly',
+        },
+        { ...rent, id: 'old', name: 'Old loan', amountCents: 5000, origin: undefined },
+        {
+          ...rent,
+          id: 'desk-1',
+          planId: 'desk',
+          name: 'Desk · Pay in 4',
+          kind: 'installment',
+          cadence: 'once',
+          amountCents: 5000,
+          nextDate: '2026-10-14',
+          userDate: true,
+        },
+      ],
+    }
+    renderHome(state)
+    const hero = await screen.findByRole('region', { name: /Your month from PayPal/ })
+    const room = compare(state)
+    // The low is dated on a payday: a bill that day leaves before the pay lands.
+    expect(room.buyToday.lowestDate).toBe('2026-11-03')
+    await waitFor(() => expect(hero.textContent).toContain('on Tue, Nov 3, the morning of payday.'))
+    const built = screen.getByRole('region', { name: 'How your month was built' })
+    expect(built.textContent).toContain('Added by you')
+    expect(built.textContent).toContain('Maple Court rent, paid outside PayPal')
+    expect(built.textContent).toContain('Weekend shifts, pay you added')
+    expect(built.textContent).not.toContain('Weekend shifts, paid outside PayPal')
+    expect(built.textContent).toContain('Desk · Pay in 4, with dates you set')
+    expect(built.textContent).toContain('Old loan, from before')
+    // Edited everyday spending is the user's, not PayPal's.
+    expect(built.textContent).not.toContain('everyday spending of about')
+    expect(built.textContent).toContain('everyday spending $25.00 a day')
+    // A plan the user dated reads without "about"; PayPal's estimated one keeps it.
+    const next = screen.getByRole('region', { name: 'Next 30 days' })
+    expect(within(next).getByText(/^Wed, Oct 14$/)).toBeTruthy()
+    expect(within(next).getByText(/^about Fri, Oct 23$/)).toBeTruthy()
+    const desk = screen.getByRole('article', { name: 'Desk Pay in 4 plan' })
+    expect(desk.textContent).toContain('Last payment Wed, Oct 14')
   })
 
   it('keeps Maya’s sample Home as it was', async () => {

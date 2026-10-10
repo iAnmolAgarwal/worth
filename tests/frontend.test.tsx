@@ -1532,7 +1532,8 @@ describe('first screen: the sample and PayPal (third-party feedback)', () => {
     expect(card.textContent).toContain('Raw CSV files aren’t saved')
     // It sits above the hero, so the PayPal start is the first thing on the page.
     expect(card.compareDocumentPosition(hero) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    await user.click(within(card).getByRole('button', { name: 'Enter your bills yourself' }))
+    // Shown in the card on wide screens, and inside the disclosure on a phone.
+    await user.click(within(card).getAllByRole('button', { name: 'Enter your bills yourself' })[0]!)
     await waitFor(() => expect(window.location.hash).toBe('#plan/edit'))
   })
 
