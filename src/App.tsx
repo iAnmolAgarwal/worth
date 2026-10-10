@@ -243,8 +243,8 @@ export default function App() {
     // Runs once, when the first state arrives.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [Boolean(state)])
-  // A store told Worth about a payment after its own PayPal checkout (C4): say so once. The server
-  // then forgets the notice; this tab never repeats it while that request is on its way.
+  // A store told Worth about a payment after its own PayPal checkout (C4): say so once, naming
+  // every new report, then clear exactly those. This tab never repeats one while that is on its way.
   const noticed = useRef(new Set<string>())
   useEffect(() => {
     const fresh = (state?.purchases ?? []).filter(
@@ -252,9 +252,14 @@ export default function App() {
     )
     if (!fresh.length) return
     for (const purchase of fresh) noticed.current.add(purchase.id)
-    const latest = fresh[0]!
+    const stores = new Set(fresh.map((p) => p.reportedBy))
+    const who = stores.size === 1 ? fresh[0]!.reportedBy : `${stores.size} stores`
     // oxlint-disable-next-line react/set-state-in-effect
-    setToast(`${latest.reportedBy} told Worth about your ${money(latest.amountCents)} payment.`)
+    setToast(
+      fresh.length === 1
+        ? `${who} told Worth about your ${money(fresh[0]!.amountCents)} payment.`
+        : `${who} told Worth about ${fresh.length} payments. They’re in your Activity.`,
+    )
     void api('/handoff/notices/seen', { purchaseIds: fresh.map((p) => p.id) }).catch(() => {})
   }, [state])
   useEffect(() => {

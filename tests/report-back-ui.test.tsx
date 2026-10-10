@@ -149,6 +149,20 @@ describe('the one-time notice', () => {
     expect(screen.getAllByText(/told Worth about your/)).toHaveLength(1)
   })
 
+  it('names every new report in one notice and clears exactly those', async () => {
+    const second = reported({ id: 'p-store-2', name: 'Travel backpack', amountCents: 12900 })
+    const seen = serve(
+      makeState([second, reported(), reported({ id: 'p-old', reportNotice: undefined })]),
+    )
+    render(<App />)
+    expect(
+      await screen.findByText(
+        'Larkspur Supply told Worth about 2 payments. They’re in your Activity.',
+      ),
+    ).toBeTruthy()
+    await waitFor(() => expect(seen).toEqual([{ purchaseIds: ['p-store-2', 'p-store'] }]))
+  })
+
   it('says nothing for Worth’s own purchases or a notice already seen', async () => {
     const own = reported({ reportedBy: undefined, reportNotice: undefined })
     const seenBefore = reported({ id: 'p-old', reportNotice: undefined })
