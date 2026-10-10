@@ -213,6 +213,25 @@ describe('POST /api/handoff/open (contract §3.3)', () => {
       expect((await post(agent, '/api/handoff/open', body)).body).toEqual(unverified)
   })
 
+  it('with the hand-off off, every route answers generically and says it is off', async () => {
+    const { agent } = setup({
+      config: { ...config, handoffSecret: undefined, merchantOrigin: undefined },
+    })
+    expect((await agent.get('/api/health')).body.handoff).toBe('off')
+    expect((await state(agent)).config.handoff).toBe('off')
+    const token = larkspur.signQuote(quote)
+    expect((await open(agent, token)).body).toEqual(unverified)
+    const qid = quote.qid
+    expect((await agent.get(`/api/handoff/quotes/${qid}`)).status).toBe(404)
+    expect((await post(agent, '/api/handoff/consent', { qid, consent: true })).status).toBe(404)
+    expect((await post(agent, '/api/handoff/return', { qid })).status).toBe(404)
+    expect((await post(agent, '/api/compare', { amountCents: 119900, qid })).status).toBe(404)
+    expect((await post(agent, '/api/handoff/outcome', {})).status).toBe(404)
+    const on = setup()
+    expect((await request(on.app).get('/api/health')).body.handoff).toBe('on')
+    expect((await state(on.agent)).config.handoff).toBe('on')
+  })
+
   it('treats every link as unverified while the key or store origin is unset', async () => {
     const { agent } = setup({ config: { ...config, handoffSecret: undefined } })
     const response = await open(agent, larkspur.signQuote(quote))

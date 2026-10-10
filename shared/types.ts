@@ -469,6 +469,8 @@ export interface AppState {
     model?: string
     /** Whether similar items from other stores can be shown (Channel3). */
     alternatives?: AlternativesStatus
+    /** Whether signed store hand-offs (/check) can be verified: off until both settings are set. */
+    handoff?: 'on' | 'off'
   }
 }
 export interface ChatMessage {

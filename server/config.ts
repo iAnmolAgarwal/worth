@@ -183,16 +183,17 @@ export function loadConfig(env: Env = process.env, overrides: Partial<AppConfig>
     ...overrides,
   }
   config.origin = publicOrigin(config.origin, config.production)
-  // Hand-offs are off locally until both are set; production refuses to start without them.
+  // Hand-offs are off until both are set (contract §1). A partial or invalid setting is refused in
+  // production, where it can only be a mistake; both unset runs with the hand-off off.
   if (config.handoffSecret !== undefined && !secretBytes(config.handoffSecret))
     throw new ConfigError(
       "HANDOFF_SECRET must be base64url and at least 32 bytes once decoded. Generate one with: node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\"",
     )
   if (config.merchantOrigin !== undefined)
     config.merchantOrigin = merchantOrigin(config.merchantOrigin, config.production)
-  if (config.production && (!config.handoffSecret || !config.merchantOrigin))
+  if (config.production && Boolean(config.handoffSecret) !== Boolean(config.merchantOrigin))
     throw new ConfigError(
-      'Set HANDOFF_SECRET and MERCHANT_ORIGIN: production refuses to start without the key and the one store origin that hand-offs may come from.',
+      `Set both HANDOFF_SECRET and MERCHANT_ORIGIN, or neither: ${config.handoffSecret ? 'MERCHANT_ORIGIN' : 'HANDOFF_SECRET'} is unset, so store hand-offs can't be verified.`,
     )
   if (!/^[a-z0-9_-]{1,32}$/.test(config.handoffMerchantId))
     throw new ConfigError('HANDOFF_MERCHANT_ID must be 1–32 lowercase letters, digits, _ or -.')
@@ -209,6 +210,16 @@ export function handoffEnabled(
   config: AppConfig,
 ): config is AppConfig & { handoffSecret: string; merchantOrigin: string } {
   return Boolean(config.handoffSecret && config.merchantOrigin)
+}
+
+/** The one start-up line when hand-offs are off, naming the unset settings, never any value. */
+export function handoffStatusLine(config: AppConfig): string | undefined {
+  if (handoffEnabled(config)) return undefined
+  const unset = [
+    ...(config.handoffSecret ? [] : ['HANDOFF_SECRET']),
+    ...(config.merchantOrigin ? [] : ['MERCHANT_ORIGIN']),
+  ]
+  return `Store hand-off is off: ${unset.join(' and ')} ${unset.length > 1 ? 'are' : 'is'} unset.`
 }
 
 /** Origins allowed to send state-changing requests. Local development accepts both loopback names. */

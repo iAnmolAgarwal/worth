@@ -2,7 +2,13 @@ import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import request from 'supertest'
 import { createApp } from '../server/app.ts'
-import { allowedOrigins, ConfigError, handoffEnabled, loadConfig } from '../server/config.ts'
+import {
+  allowedOrigins,
+  ConfigError,
+  handoffEnabled,
+  handoffStatusLine,
+  loadConfig,
+} from '../server/config.ts'
 import { WindowLimiter } from '../server/limits.ts'
 import { Store } from '../server/store.ts'
 
@@ -94,27 +100,65 @@ describe('deployment configuration', () => {
     expect(() => loadConfig({ MERCHANT_ORIGIN: 'ftp://store.example' })).toThrow(/MERCHANT_ORIGIN/)
   })
 
-  it('refuses to start in production without the hand-off key or an https store origin', () => {
+  it('starts production with the hand-off off when both settings are unset, and says so', () => {
     const hosted = { NODE_ENV: 'production', TRUST_PROXY: '1', APP_ORIGIN: 'https://w.example' }
-    expect(() => loadConfig(hosted)).toThrow(/HANDOFF_SECRET and MERCHANT_ORIGIN/)
-    expect(() => loadConfig({ ...hosted, HANDOFF_SECRET: HANDOFF.HANDOFF_SECRET })).toThrow(
-      /HANDOFF_SECRET and MERCHANT_ORIGIN/,
+    const off = loadConfig(hosted)
+    expect(handoffEnabled(off)).toBe(false)
+    expect(handoffStatusLine(off)).toBe(
+      'Store hand-off is off: HANDOFF_SECRET and MERCHANT_ORIGIN are unset.',
     )
-    expect(() => loadConfig({ ...hosted, MERCHANT_ORIGIN: HANDOFF.MERCHANT_ORIGIN })).toThrow(
-      /HANDOFF_SECRET and MERCHANT_ORIGIN/,
-    )
-    for (const origin of ['http://store.example', 'https://localhost:8788', 'https://s.localhost'])
-      expect(() => loadConfig({ ...hosted, ...HANDOFF, MERCHANT_ORIGIN: origin })).toThrow(
-        /store origin/,
-      )
-    expect(handoffEnabled(loadConfig({ ...hosted, ...HANDOFF }))).toBe(true)
+    expect(handoffStatusLine(loadConfig({ ...hosted, ...HANDOFF }))).toBeUndefined()
+    const local = loadConfig({ HANDOFF_SECRET: HANDOFF.HANDOFF_SECRET })
+    const line = handoffStatusLine(local)!
+    expect(line).toBe('Store hand-off is off: MERCHANT_ORIGIN is unset.')
+    // Names only: the key's value never reaches a log line.
+    expect(line).not.toContain(HANDOFF.HANDOFF_SECRET)
     const store = new Store(':memory:')
     expect(() =>
       createApp({
         store,
         config: { production: true, trustProxy: 1, origin: 'https://w.example' },
       }),
-    ).toThrow(/HANDOFF_SECRET/)
+    ).not.toThrow()
+    store.close()
+  })
+
+  it('refuses a partial or invalid hand-off configuration in production', () => {
+    const hosted = { NODE_ENV: 'production', TRUST_PROXY: '1', APP_ORIGIN: 'https://w.example' }
+    expect(() => loadConfig({ ...hosted, HANDOFF_SECRET: HANDOFF.HANDOFF_SECRET })).toThrow(
+      /MERCHANT_ORIGIN is unset/,
+    )
+    expect(() => loadConfig({ ...hosted, MERCHANT_ORIGIN: HANDOFF.MERCHANT_ORIGIN })).toThrow(
+      /HANDOFF_SECRET is unset/,
+    )
+    expect(() =>
+      loadConfig({ ...hosted, ...HANDOFF, HANDOFF_SECRET: Buffer.alloc(31).toString('base64url') }),
+    ).toThrow(/at least 32 bytes/)
+    expect(() => loadConfig({ ...hosted, ...HANDOFF, HANDOFF_MERCHANT_ID: 'Bad Id' })).toThrow(
+      /HANDOFF_MERCHANT_ID/,
+    )
+    for (const origin of [
+      'http://store.example',
+      'https://localhost:8788',
+      'https://s.localhost',
+      'not a url',
+    ])
+      expect(() => loadConfig({ ...hosted, ...HANDOFF, MERCHANT_ORIGIN: origin })).toThrow(
+        /MERCHANT_ORIGIN|store origin/,
+      )
+    expect(handoffEnabled(loadConfig({ ...hosted, ...HANDOFF }))).toBe(true)
+    const store = new Store(':memory:')
+    expect(() =>
+      createApp({
+        store,
+        config: {
+          production: true,
+          trustProxy: 1,
+          origin: 'https://w.example',
+          handoffSecret: HANDOFF.HANDOFF_SECRET,
+        },
+      }),
+    ).toThrow(/MERCHANT_ORIGIN/)
     expect(() =>
       createApp({
         store,

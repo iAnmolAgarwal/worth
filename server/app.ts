@@ -529,6 +529,7 @@ export function createApp(options: AppOptions = {}) {
         ...(paypal && config.paypalClientId ? { paypalClientId: config.paypalClientId } : {}),
         ...(chat ? { model: config.anthropicModel } : {}),
         alternatives: channel3.health(),
+        handoff: handoff ? 'on' : 'off',
       },
     }
   }
@@ -1070,7 +1071,12 @@ export function createApp(options: AppOptions = {}) {
     prepareOrder: prepareExternalOrder,
   })
   app.get('/api/health', (_req, res) =>
-    res.json({ ok: true, service: 'worth', channel3: channel3.health() }),
+    res.json({
+      ok: true,
+      service: 'worth',
+      channel3: channel3.health(),
+      handoff: handoff ? 'on' : 'off',
+    }),
   )
   const webhookEvent = z.object({
     id: identifier,

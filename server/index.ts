@@ -2,7 +2,7 @@ import 'dotenv/config'
 import { resolve } from 'node:path'
 import express from 'express'
 import { createApp } from './app.ts'
-import { loadConfig } from './config.ts'
+import { handoffStatusLine, loadConfig } from './config.ts'
 import type { AppConfig } from './config.ts'
 
 let config: AppConfig
@@ -12,6 +12,8 @@ try {
   console.error(error instanceof Error ? error.message : error)
   process.exit(1)
 }
+const handoffOff = handoffStatusLine(config)
+if (handoffOff) console.info(handoffOff)
 const app = createApp({ config })
 if (config.production) {
   const directory = resolve('dist')

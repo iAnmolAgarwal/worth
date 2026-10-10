@@ -54,9 +54,10 @@ services:
         value: '20'
       - key: CLAUDE_DAILY_LIMIT
         value: '200'
-      # Signed hand-offs from the demo store (specs/handoff-contract.md). Production refuses to
-      # start without both: the shared key (32+ random bytes, base64url, the same value on the
-      # store) and the store's own https origin, the only place /check sends shoppers back to.
+      # Signed hand-offs from the demo store (specs/handoff-contract.md): the shared key (32+ random
+      # bytes, base64url, the same value on the store) and the store's own https origin, the only
+      # place /check sends shoppers back to. Set both or neither: with neither the hand-off is off
+      # (logged at start, `handoff: off` in /api/health); with one, production refuses to start.
       - key: HANDOFF_SECRET
         sync: false
       - key: MERCHANT_ORIGIN
