@@ -20,3 +20,18 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      # The demo store (merchant/) is a second service: start its production build and probe it.
+      - name: Smoke-test the demo store
+        env:
+          NODE_ENV: production
+          MERCHANT_PORT: '8788'
+          MERCHANT_ORIGIN: https://larkspur.ci.example
+          WORTH_ORIGIN: https://worth.ci.example
+          TRUST_PROXY: '1'
+        run: |
+          export HANDOFF_SECRET="$(node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))")"
+          npm run start:merchant &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8788/healthz && break; sleep 1; done
+          curl -fsS http://127.0.0.1:8788/p/camera | grep -q 'Analyse with Worth'
+          curl -fsS http://127.0.0.1:8788/assets/store.js > /dev/null
+          curl -fsSI http://127.0.0.1:8788/ | grep -qi "content-security-policy: default-src 'self'"
