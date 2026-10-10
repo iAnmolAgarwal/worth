@@ -72,6 +72,20 @@ describe('hand-off token format', () => {
     expect(h.open('quote', 42)).toBeUndefined()
   })
 
+  it('accepts only the canonical 43-character signature', () => {
+    const h = handoff()
+    const [payload, sig] = h.signQuote(quote).split('.') as [string, string]
+    expect(sig).toHaveLength(43)
+    // The last character's two low bits are padding: flipping one decodes to the same MAC bytes.
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+    const last = alphabet[alphabet.indexOf(sig.at(-1)!) ^ 1]!
+    const malleated = `${sig.slice(0, -1)}${last}`
+    expect(Buffer.from(malleated, 'base64url').equals(Buffer.from(sig, 'base64url'))).toBe(true)
+    expect(h.open('quote', `${payload}.${malleated}`)).toBeUndefined()
+    expect(h.open('quote', `${payload}.${sig}A`)).toBeUndefined()
+    expect(h.open('quote', `${payload}.${sig}`)).toEqual(quote)
+  })
+
   it('rejects a token over 4 KB before decoding it', () => {
     const h = handoff()
     const big = h.sign('quote', { ...quote, item: 'x'.repeat(4000) })

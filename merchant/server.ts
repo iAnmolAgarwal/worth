@@ -6,12 +6,11 @@ import { createMerchantApp } from './app.ts'
 import type { MerchantConfig } from './config.ts'
 
 // Larkspur Supply, the demo store on its own origin. Production serves the built client from
-// dist-merchant; development lets Vite compile it on request (no injected scripts, so the full
-// CSP stays on).
+// dist-merchant; development lets Vite compile it on request (see devClient.ts).
 const production = process.env.NODE_ENV === 'production'
 let app: ReturnType<typeof createMerchantApp>
 try {
-  app = createMerchantApp({ scriptSrc: production ? '/assets/store.js' : '/client/main.ts' })
+  app = createMerchantApp({ scriptSrc: production ? '/assets/store.js' : '/main.ts' })
 } catch (error) {
   console.error(error instanceof ConfigError ? error.message : error)
   process.exit(1)
@@ -20,13 +19,8 @@ const config = app.locals.config as MerchantConfig
 if (production) {
   app.use('/assets', express.static(resolve('dist-merchant/assets'), { maxAge: '1h' }))
 } else {
-  const { createServer } = await import('vite')
-  const vite = await createServer({
-    configFile: resolve('merchant/vite.config.ts'),
-    server: { middlewareMode: true, hmr: false, ws: false },
-    appType: 'custom',
-  })
-  app.use(vite.middlewares)
+  const { createDevClient } = await import('./devClient.ts')
+  app.use((await createDevClient()).middlewares)
 }
 app.use((_req, res) => res.status(404).type('text').send('Not found.'))
 const server = app.listen(config.port, config.host, () =>

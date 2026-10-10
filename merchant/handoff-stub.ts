@@ -76,6 +76,7 @@ export interface HandoffOptions {
 }
 
 const BASE64URL = /^[A-Za-z0-9_-]+$/
+const SIG_LENGTH = 43
 
 function mac(secret: Buffer, message: string) {
   return createHmac('sha256', secret).update(message).digest()
@@ -98,8 +99,13 @@ export function createHandoff({ secret, merchantId, now = Date.now }: HandoffOpt
     if (parts.length !== 2 || !BASE64URL.test(parts[0]!) || !BASE64URL.test(parts[1]!))
       return undefined
     const [encoded, sig] = parts as [string, string]
-    const expected = mac(secret, `${HANDOFF_LABEL}.${direction}.${encoded}`)
-    const given = Buffer.from(sig, 'base64url')
+    // A SHA-256 MAC is exactly 43 base64url characters; anything else is a non-canonical encoding.
+    if (sig.length !== SIG_LENGTH) return undefined
+    // The canonical encodings are compared, so a signature with altered padding bits never passes.
+    const expected = Buffer.from(
+      mac(secret, `${HANDOFF_LABEL}.${direction}.${encoded}`).toString('base64url'),
+    )
+    const given = Buffer.from(sig)
     if (given.length !== expected.length || !timingSafeEqual(given, expected)) return undefined
     let payload: unknown
     try {

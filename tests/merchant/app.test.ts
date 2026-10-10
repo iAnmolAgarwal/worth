@@ -11,10 +11,13 @@ const WORTH = 'https://worth.example'
 const T0 = 1_791_000_000
 
 function setup(
-  options: { paypal?: Partial<PayPalGateway> | null; reportReplies?: Response[] } = {},
+  options: {
+    paypal?: Partial<PayPalGateway> | null
+    reportReplies?: (Response | Promise<Response>)[]
+  } = {},
 ) {
   let clock = T0 * 1000
-  const created: Parameters<PayPalGateway['create']>[0][] = []
+  const created: (Parameters<PayPalGateway['create']>[0] & { qid?: string })[] = []
   const orderFor = (
     source: { id: string; amountCents: number },
     captured = false,
@@ -271,10 +274,75 @@ describe('Worth’s result beside the PayPal button', () => {
       expect((await agent.get(`/p/camera?worth=${token}`)).text).not.toContain(
         'lk-buy__worth-result',
       )
-    // Another shopper cannot reuse it, and it does not apply to another product.
+    // A shopper holding another quote for the product ignores it, and it never applies to another
+    // product.
     const valid = t.worth.sign('result', result(qid))
-    expect((await request(t.app).get(`/p/camera?worth=${valid}`)).text).not.toContain('Worth:')
+    const other = request.agent(t.app)
+    await other.get('/p/camera')
+    expect((await other.get(`/p/camera?worth=${valid}`)).text).not.toContain('Worth:')
     expect((await agent.get(`/p/chair?worth=${valid}`)).text).not.toContain('Worth:')
+    // ...nor is it pinned to that other product's order.
+    await agent.post('/api/orders').set(json).send({ productId: 'chair' }).expect(201)
+    expect(t.created[0]!.qid).not.toBe(qid)
+  })
+
+  it('adopts a verified result’s qid when the shopper’s session is new (a restarted store)', async () => {
+    const t = setup()
+    const { qid } = await visit(t)
+    const fresh = request.agent(t.app)
+    const page = await fresh.get(`/p/camera?worth=${t.worth.sign('result', result(qid))}`)
+    expect(page.text).toContain('Worth: fits on Fri, Oct 23')
+    expect(t.worth.open('quote', quoteToken(page.text))!.qid).toBe(qid)
+  })
+})
+
+describe('one quote ID per shopper and product', () => {
+  it('re-signs the same qid with a fresh iat and exp on every render and refresh', async () => {
+    const t = setup()
+    const agent = request.agent(t.app)
+    const first = t.worth.open('quote', quoteToken((await agent.get('/p/camera')).text))!
+    t.tick(300)
+    const again = t.worth.open('quote', quoteToken((await agent.get('/p/camera')).text))!
+    expect(again.qid).toBe(first.qid)
+    expect(again.iat).toBe(T0 + 300)
+    expect(again.exp).toBe(T0 + 1200)
+    t.tick(300)
+    const refreshed = await agent.get('/api/worth-quote?productId=camera').expect(200)
+    expect(t.worth.open('quote', refreshed.body.token)).toMatchObject({
+      qid: first.qid,
+      iat: T0 + 600,
+    })
+    // Another product, and another shopper, get their own.
+    const chair = t.worth.open('quote', quoteToken((await agent.get('/p/chair')).text))!
+    expect(chair.qid).not.toBe(first.qid)
+    const other = t.worth.open('quote', quoteToken((await request(t.app).get('/p/camera')).text))!
+    expect(other.qid).not.toBe(first.qid)
+  })
+
+  it('orders and reports back with the qid Worth opened, after the shopper comes back', async () => {
+    const t = setup()
+    const agent = request.agent(t.app)
+    // The store's page links to Worth with qid A; Worth opens it and sends the shopper back.
+    const opened = t.worth.open('quote', quoteToken((await agent.get('/p/camera')).text))!.qid
+    t.tick(120)
+    const back = await agent.get(
+      `/p/camera?worth=${t.worth.sign('result', {
+        v: 1,
+        kid: '1',
+        mid: 'larkspur',
+        qid: opened,
+        verdict: 'buy_today',
+        iat: T0 + 120,
+        exp: T0 + 1020,
+      })}`,
+    )
+    expect(back.text).toContain('Worth: fits today')
+    await agent.post('/api/orders').set(json).send({ productId: 'camera' }).expect(201)
+    expect(t.created[0]!.qid).toBe(opened)
+    expect(t.created[0]!.id.startsWith(`${opened}.`)).toBe(true)
+    await agent.post('/api/orders/ORDER1/capture').set(json).send({}).expect(200)
+    await t.app.locals.lastReport
+    expect(JSON.parse(String(t.reports[0]!.init.body)).qid).toBe(opened)
   })
 })
 
@@ -466,6 +534,66 @@ describe('store webhook', () => {
       .post('/api/paypal/webhook')
       .set('Content-Type', 'application/json')
       .send(event('PAYMENT.CAPTURE.COMPLETED', 'WH-2'))
+    expect(t.reports).toHaveLength(1)
+  })
+
+  it('sends one report when the capture path and the webhook overlap, and resends after a failure', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    const t = setup({
+      reportReplies: [
+        gate.then(() => new Response('', { status: 400 })),
+        Response.json({ recorded: true }),
+      ],
+    })
+    const agent = request.agent(t.app)
+    await agent.get('/p/camera')
+    await agent.post('/api/orders').set(json).send({ productId: 'camera' })
+    // The capture's report is in flight while the webhook arrives.
+    const slow = t.app.locals as { lastReport?: Promise<unknown> }
+    await agent.post('/api/orders/ORDER1/capture').set(json).send({}).expect(200)
+    const inFlight = slow.lastReport
+    await request(t.app)
+      .post('/api/paypal/webhook')
+      .set('Content-Type', 'application/json')
+      .send(event('PAYMENT.CAPTURE.COMPLETED', 'WH-A'))
+      .expect(200)
+    release()
+    // Worth rejected the first report (400), so it is not counted as sent.
+    expect(await inFlight).toBe('rejected')
+    expect(t.reports).toHaveLength(1)
+    // A later delivery may try again.
+    await request(t.app)
+      .post('/api/paypal/webhook')
+      .set('Content-Type', 'application/json')
+      .send(event('PAYMENT.CAPTURE.COMPLETED', 'WH-B'))
+    expect(await t.app.locals.lastReport).toBe('sent')
+    expect(t.reports).toHaveLength(2)
+  })
+
+  it('handles a redelivery when the order re-read failed the first time', async () => {
+    const t = setup()
+    const agent = request.agent(t.app)
+    await agent.get('/p/camera')
+    await agent.post('/api/orders').set(json).send({ productId: 'camera' })
+    const get = vi.mocked(t.paypal.get)
+    const real = get.getMockImplementation()!
+    get.mockImplementationOnce(async () => {
+      throw new PayPalError(503, 'SERVICE_UNAVAILABLE')
+    })
+    await request(t.app)
+      .post('/api/paypal/webhook')
+      .set('Content-Type', 'application/json')
+      .send(event())
+      .expect(502)
+    get.mockImplementation(real)
+    const retry = await request(t.app)
+      .post('/api/paypal/webhook')
+      .set('Content-Type', 'application/json')
+      .send(event())
+      .expect(200)
+    expect(retry.body).toEqual({ received: true })
+    await t.app.locals.lastReport
     expect(t.reports).toHaveLength(1)
   })
 

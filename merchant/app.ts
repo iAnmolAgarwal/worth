@@ -77,8 +77,13 @@ export function createMerchantApp(options: MerchantAppOptions = {}) {
   const apiLimiter = new WindowLimiter(API_PER_MINUTE, 60_000)
   const quoteLimiter = new WindowLimiter(QUOTES_PER_MINUTE, 60_000)
   const webhookLimiter = new WindowLimiter(WEBHOOK_PER_MINUTE, 60_000)
-  /** Captures Worth already acknowledged, so the webhook does not send them again. */
+  /**
+   * Captures with a report in flight or acknowledged by Worth. A capture enters when sending
+   * starts, so the capture path and the webhook never send at once, and leaves if the report
+   * fails, so a later delivery can try again.
+   */
   const reported = new Set<string>()
+  /** Webhook events handled to the end; a delivery that failed part-way is not one of them. */
   const seenEvents = new Set<string>()
   const pageOptions = (req: Request): PageOptions => ({
     scriptSrc: options.scriptSrc ?? '/assets/store.js',
@@ -134,14 +139,21 @@ export function createMerchantApp(options: MerchantAppOptions = {}) {
     return id
   }
 
-  /** Signs a quote from the store's own catalog price (contract §3.1) and records it. */
+  /**
+   * Signs this shopper's quote for a product from the store's own catalog price (contract §3.1).
+   * The qid stays the same for the session; each render re-signs it with a fresh iat and exp.
+   */
   function mintQuote(
     sessionId: string,
     product: Product,
     extra: { payLater?: boolean; replay?: boolean } = {},
   ) {
     const iat = Math.floor(now() / 1000)
-    const qid = `q_${randomBytes(16).toString('base64url')}`
+    const qid = sessions.quoteId(
+      sessionId,
+      product.id,
+      () => `q_${randomBytes(16).toString('base64url')}`,
+    )
     const productUrl = `${config.origin}/p/${encodeURIComponent(product.id)}`
     const token = handoff.signQuote({
       v: 1,
@@ -162,7 +174,6 @@ export function createMerchantApp(options: MerchantAppOptions = {}) {
       iat,
       exp: iat + QUOTE_TTL_S,
     })
-    sessions.addQuote(sessionId, qid, product.id)
     return { token, exp: iat + QUOTE_TTL_S, href: `${config.worthOrigin}/check#q=${token}` }
   }
 
@@ -179,9 +190,11 @@ export function createMerchantApp(options: MerchantAppOptions = {}) {
         .send(notFoundPage(pageOptions(req)))
     const sessionId = session(req, res)
     const page = pageOptions(req)
-    // A result from Worth adds one display line, and only for a quote this shopper was given for
-    // this product. It never changes the price, the cart or the order.
+    // A result from Worth adds one display line, and only for this shopper's quote for this
+    // product. It never changes the price, the cart or the order. A verified qid the session does
+    // not hold yet (a restarted store) is adopted, so the order reports back the quote Worth opened.
     const result = handoff.verifyResult(req.query.worth)
+    if (result) sessions.pinQuote(sessionId, product.id, result.qid)
     const quoted = result ? sessions.quote(sessionId, result.qid) : undefined
     const worthLine = result && quoted?.productId === product.id ? resultLine(result) : undefined
     return res.type('html').send(
@@ -235,7 +248,7 @@ export function createMerchantApp(options: MerchantAppOptions = {}) {
     const product = parsed.success ? findProduct(parsed.data.productId) : undefined
     if (!product) throw new HttpError(400, 'Unknown product.', 'UNKNOWN_PRODUCT')
     const sessionId = session(req, res)
-    const quote = sessions.latestQuote(sessionId, product.id)
+    const quote = sessions.quoteFor(sessionId, product.id)
     const suffix = randomBytes(6).toString('base64url')
     // The price is the catalog's, never the browser's.
     const record: Omit<OrderRecord, 'orderId'> = {
@@ -304,15 +317,14 @@ export function createMerchantApp(options: MerchantAppOptions = {}) {
       status: 'COMPLETED',
       capturedAt: capture.create_time ?? new Date(now()).toISOString(),
     }
+    if (reported.size > 5000) reported.clear()
+    reported.add(capture.id)
     const pending = reportOutcome(body, {
       worthOrigin: config.worthOrigin,
       handoff,
       ...options.report,
     }).then((result) => {
-      if (result === 'sent') {
-        if (reported.size > 5000) reported.clear()
-        reported.add(capture.id)
-      }
+      if (result !== 'sent') reported.delete(capture.id)
       return result
     })
     app.locals.lastReport = pending
@@ -332,15 +344,19 @@ export function createMerchantApp(options: MerchantAppOptions = {}) {
       throw new HttpError(401, 'Webhook signature verification failed.', 'INVALID_WEBHOOK')
     const event = webhookEvent.parse(JSON.parse(raw))
     if (seenEvents.has(event.id)) return res.json({ received: true, duplicate: true })
-    if (seenEvents.size > 5000) seenEvents.clear()
-    seenEvents.add(event.id)
+    // Marked only once handled: if the order re-read below fails, PayPal's redelivery is retried.
+    const handled = (body: Record<string, unknown>) => {
+      if (seenEvents.size > 5000) seenEvents.clear()
+      seenEvents.add(event.id)
+      return res.json(body)
+    }
     if (event.event_type !== 'PAYMENT.CAPTURE.COMPLETED')
-      return res.json({ received: true, ignored: true })
+      return handled({ received: true, ignored: true })
     const related = event.resource.supplementary_data as
       { related_ids?: { order_id?: unknown } } | undefined
     const orderId = related?.related_ids?.order_id
     if (typeof orderId !== 'string' || !ORDER_ID.test(orderId))
-      return res.json({ received: true, ignored: true })
+      return handled({ received: true, ignored: true })
     // The event is only a hint: the order is re-read from PayPal, and only this store's own
     // orders (a reference carrying a quote ID, for a catalog item) are reported.
     const order = await paypal.get(orderId)
@@ -348,9 +364,9 @@ export function createMerchantApp(options: MerchantAppOptions = {}) {
     const qid = unit?.custom_id?.match(REFERENCE)?.[1]
     const capture = unit?.payments?.captures?.find((c) => c.status === 'COMPLETED')
     if (!qid || !capture || unit?.reference_id !== unit?.custom_id)
-      return res.json({ received: true, ignored: true })
+      return handled({ received: true, ignored: true })
     sendReport({ qid }, order.id, capture)
-    return res.json({ received: true })
+    return handled({ received: true })
   })
 
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'Not found.', 'NOT_FOUND')))
