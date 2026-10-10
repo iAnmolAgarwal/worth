@@ -186,7 +186,7 @@ export interface Alternatives {
   status: AlternativesStatus
   /** The generic description searched for; never a brand. */
   query: string
-  /** The search's price ceiling: what fits today, rounded down to $25. */
+  /** The price limit, exactly what fits today; every row is at or below it. */
   maxPriceCents: number
   /** Rows with a current price and link: found just now, or re-read from Channel3 before display. */
   items: Alternative[]

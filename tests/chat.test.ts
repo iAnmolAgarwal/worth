@@ -837,12 +837,12 @@ describe('Pay in 4 availability in the facts (case 29)', () => {
 })
 
 describe('finding something cheaper through Channel3 (G-C3-2)', () => {
-  // The persona's room today is $440.01, so searches run under $425.
+  // The persona's room today is $440.01, so searches show items up to $440.01.
   const cameraContext = { amountCents: 119900, itemName: 'camera', purchaseDate: TODAY }
   const found = (query: string, maxPriceCents: number): Alternatives => ({
     status: 'ok',
     query,
-    maxPriceCents: Math.floor(maxPriceCents / 2500) * 2500,
+    maxPriceCents,
     items: [
       {
         id: 'DBouSIg',
@@ -883,7 +883,7 @@ describe('finding something cheaper through Channel3 (G-C3-2)', () => {
     expect(reply.points?.[0]?.id).toBe('room_today')
     // The room Claude picked as a fact is not repeated in the search sentence.
     expect(reply.message).toBe(
-      'Apartment rent on Fri, Oct 16 is the largest bill before your lowest point, which is what limits your room today.\n\nUp to $440.01 today would keep your $300 cushion.\n\nHere are similar items under $425 from other stores, found through Channel3. Prices may change, and Worth doesn’t sell these items.',
+      'Apartment rent on Fri, Oct 16 is the largest bill before your lowest point, which is what limits your room today.\n\nUp to $440.01 today would keep your $300 cushion.\n\nHere are similar items up to $440.01 from other stores, found through Channel3. Prices may change, and Worth doesn’t sell these items.',
     )
     const plain = model([readTool('get_plan_summary')])
     await plain.provider.reply(ask('How much can I spend?'), demo())
@@ -985,7 +985,7 @@ describe('finding something cheaper through Channel3 (G-C3-2)', () => {
     expect(findAlternatives).toHaveBeenCalledWith('interchangeable lens camera', 44001)
     expect(reply.alternatives?.items).toHaveLength(1)
     expect(reply.message).toContain(
-      'Up to $440.01 fits today and keeps your $300 cushion. Here are similar items under $425',
+      'Up to $440.01 fits today and keeps your $300 cushion. Here are similar items up to $440.01',
     )
     const failing = await localReply(
       ask('Show me something similar but less', { context: cameraContext }),

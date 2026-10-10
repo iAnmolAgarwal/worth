@@ -8,7 +8,7 @@ import { Store } from '../server/store.ts'
 import type { Alternatives, AppState } from '../shared/types.ts'
 
 // GET /api/alternatives: the contract the Decision panel and Phase 5's "Save for later" rely on.
-// The persona's room today is $440.01, so searches run under $425.
+// The persona's room today is $440.01, so searches show items up to $440.01.
 
 const stores: Store[] = []
 afterEach(() => {
@@ -35,7 +35,7 @@ function fakeChannel3(status: Alternatives['status'] = 'ok') {
   const result = (query: string, maxPriceCents: number): Alternatives => ({
     status,
     query,
-    maxPriceCents: Math.floor(maxPriceCents / 2500) * 2500,
+    maxPriceCents,
     items: status === 'off' ? [] : [item],
   })
   return {
@@ -73,7 +73,7 @@ describe('GET /api/alternatives', () => {
     expect(response.body).toEqual({
       status: 'ok',
       query: 'interchangeable lens camera',
-      maxPriceCents: 42500,
+      maxPriceCents: 44001,
       items: [item],
     })
     expect(response.body.items.length).toBeLessThanOrEqual(4)
@@ -330,7 +330,7 @@ describe('POST /api/chat for something cheaper', () => {
     expect(response.body.alternatives).toEqual({
       status: 'ok',
       query: 'interchangeable lens camera',
-      maxPriceCents: 42500,
+      maxPriceCents: 44001,
       items: [item],
     })
     expect(channel3.search).toHaveBeenCalledWith(
