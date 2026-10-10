@@ -562,6 +562,13 @@ export interface ChatReply {
   interpretation?: Interpretation
   /** Deterministic sentence built from the engine's assessment. Never model-written. */
   verdict?: string
+  /**
+   * The refusal and its reason in one sentence, when the question asks for something Worth won't
+   * suggest (skipping a bill, borrowing, using the cushion). It opens the answer, above the verdict.
+   */
+  refusal?: string
+  /** The budget the person stated for an assessed purchase; the verdict and options stay within it. */
+  budgetCents?: number
   /** A lead-in Claude chose from a fixed set, shown before the points. */
   lead?: string
   /**

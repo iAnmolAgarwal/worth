@@ -328,6 +328,11 @@ export function readTiming(text: string, today: string, incomeDate?: string): Ti
     )
     // "Pay later" names a way to pay (PayPal Pay Later), not when the purchase happens.
     .replace(/\bpay(?:ing)?\s+(?:for\s+it\s+|it\s+)?later\b/g, (m) => ' '.repeat(m.length))
+    // A budget's period ("$400 this week", "my budget this week") is not when the purchase happens.
+    .replace(
+      /(\$\s?\d[\d,.]*k?\s+(?:to\s+spend\s+|to\s+spare\s+|budget\s+|left\s+)?|\bbudget\s+(?:for\s+)?)((?:this|per|a|each|every)\s+(?:week|month))\b/g,
+      (_, owner: string, period: string) => owner + ' '.repeat(period.length),
+    )
   // Every rule reads the original text; where spans overlap, the longest wins, so
   // "two days from now" is not read as "now" and "last Friday" is not read as "Friday".
   const found: Span[] = []

@@ -130,13 +130,16 @@ function traceText(reply: ChatReply, state: AppState) {
     : 'Worth’s own calculation · assistant off'
 }
 
-/** The answer's own text; the facts Claude picked are shown separately. */
+/** The answer's own text; the refusal and the facts Claude picked are shown separately. */
 function paragraphs(reply: ChatReply) {
   const chosen =
     reply.points && [reply.lead, ...reply.points.map((p) => p.text)].filter(Boolean).join(' ')
   return reply.message
     .split('\n\n')
-    .filter((paragraph) => paragraph !== chosen && paragraph !== reply.explanation)
+    .filter(
+      (paragraph) =>
+        paragraph !== chosen && paragraph !== reply.explanation && paragraph !== reply.refusal,
+    )
 }
 
 /**
@@ -173,13 +176,17 @@ const status = (option: OptionResult) => {
   return [tone, text] as const
 }
 
-function OptionRows({ c, at }: { c: Comparison; at?: Assessment }) {
+function OptionRows({ c, at, budget }: { c: Comparison; at?: Assessment; budget?: number }) {
   // A question about a later day is answered for that day; waiting and spending less still
   // count from today.
   const later = at && at.purchaseDate !== c.today ? at : undefined
   const buy: OptionResult = later ? { ...later, lowPointCause: null } : c.buyToday
   const day = later ? dayLabel(later.purchaseDate) : 'today'
-  const maxCents = later ? later.maxAffordableCents : c.spendLess.maxPriceCents
+  const room = later ? later.maxAffordableCents : c.spendLess.maxPriceCents
+  // A budget the person stated caps spending less (judge round 3 #8).
+  const withinBudget = budget !== undefined && budget < room
+  const maxCents = withinBudget ? budget : room
+  const overBudget = budget !== undefined && at !== undefined && budget < at.amountCents
   const recommendation = later ? (fits(buy) ? 'buyToday' : c.recommendation) : c.recommendation
   // Each row states its status once: as a pill when there is one, otherwise in words.
   const lowest = (option: OptionResult) =>
@@ -205,14 +212,16 @@ function OptionRows({ c, at }: { c: Comparison; at?: Assessment }) {
       ? {
           key: 'spendLess',
           title: 'Spend less',
-          sub: `Up to ${money(maxCents)} ${later ? `on ${day}` : 'today'}`,
+          sub: `Up to ${money(maxCents)} ${later ? `on ${day}` : 'today'}${withinBudget ? ' · your budget' : ''}`,
           // Spending exactly the most you can keeps you at your limit, whichever day it is.
-          pill: ['warn', 'At your limit'] as const,
+          pill: withinBudget
+            ? (['ok', 'Within your budget'] as const)
+            : (['warn', 'At your limit'] as const),
         }
       : { key: 'spendLess', title: 'Spend less', sub: `Nothing fits ${day}` },
   ]
-  // Spending less only matters when the item doesn't fit as it is.
-  const shown = fits(buy) ? rows.filter((row) => row.key !== 'spendLess') : rows
+  // Spending less only matters when the item doesn't fit as it is, or is over the budget.
+  const shown = fits(buy) && !overBudget ? rows.filter((row) => row.key !== 'spendLess') : rows
   return (
     <div className="rows mini-opts" role="list" aria-label="Your options">
       {shown.map((row) => (
@@ -309,7 +318,7 @@ function VerdictTile({
         </div>
       )}
       {comparison ? (
-        <OptionRows c={comparison} at={assessment} />
+        <OptionRows c={comparison} at={assessment} budget={reply.budgetCents} />
       ) : assessment.outcome !== 'incomplete' ? (
         <div className="stack tight" style={{ marginTop: 16 }} aria-hidden="true">
           <span className="sk" style={{ width: '70%' }} />
@@ -1086,7 +1095,7 @@ function Answer({
     (point) => !(point.id === 'pay_in_4_schedule' && reply.payIn4?.payments.length),
   )
   const explanation: Explanation = {
-    lead: reply.lead,
+    lead: [reply.refusal, reply.lead].filter(Boolean).join(' ') || undefined,
     points: reply.points?.map((point) => point.text) ?? [],
     toolCalls: reply.toolCalls,
     mode: reply.mode,
@@ -1094,6 +1103,7 @@ function Answer({
   }
   return (
     <>
+      {reply.refusal && <p className="refusal">{reply.refusal}</p>}
       {read && !editing && (
         <ReadAsChip
           value={`${readName} · ${priceLabel(read!, state.products)} · ${read!.dateLabel}`}
@@ -1124,7 +1134,6 @@ function Answer({
           onAction={onAnswer}
         />
       )}
-      {assessment && reply.lead && !reply.points?.length && <p>{reply.lead}</p>}
       {assessment ? (
         <VerdictTile
           reply={reply}

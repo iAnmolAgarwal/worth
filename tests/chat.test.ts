@@ -593,9 +593,12 @@ describe('Claude picks engine facts; the server writes them (C-13)', () => {
       }),
       demo(),
     )
-    expect(reply.lead).toBe(
-      'I wouldn’t skip or delay a bill to make a purchase fit. Here’s what matters instead:',
+    // The refusal opens the answer; the facts keep only what follows it.
+    expect(reply.refusal).toBe(
+      'I wouldn’t skip or delay rent to make a purchase fit, because late fees and a missed payment cost more than waiting.',
     )
+    expect(reply.message.split('\n\n').slice(0, 2)).toEqual([reply.refusal, reply.verdict])
+    expect(reply.lead).toBe('Here’s what matters instead:')
     expect(reply.points?.map((p) => p.id)).toEqual(['wait', 'spend_less'])
   })
 

@@ -1699,6 +1699,17 @@ textarea.input {
   letter-spacing: -0.01em;
   margin: 0;
 }
+/* A refusal opens the answer, above the verdict: calm, one sentence, never an alert. */
+.refusal {
+  margin: 0;
+  padding-left: var(--s-3);
+  border-left: 3px solid var(--c-border-strong);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  font-weight: var(--fw-semibold);
+  color: var(--c-text-strong);
+  text-wrap: pretty;
+}
 .mini-opts {
   width: 100%;
   gap: 0;

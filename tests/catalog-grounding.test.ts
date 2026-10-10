@@ -224,6 +224,9 @@ describe('multi-item memory', () => {
   })
 })
 
+const RENT =
+  'I wouldn’t skip or delay rent to make a purchase fit, because late fees and a missed payment cost more than waiting.'
+
 describe('the refusal to skip a bill', () => {
   it('reads the user’s own words', () => {
     expect(refusalFor('honestly I could pay rent a week late')).toBe('no_skipping')
@@ -241,15 +244,16 @@ describe('the refusal to skip a bill', () => {
       data,
     )
     expect(reply.assessment?.amountCents).toBe(119900)
-    expect(reply.lead).toBe('I wouldn’t skip or delay a bill to make a purchase fit.')
-    expect(reply.message).toContain('I wouldn’t skip or delay a bill')
+    expect(reply.refusal).toBe(RENT)
+    expect(reply.message.split('\n\n')[0]).toBe(RENT)
   })
 
   it('fires even when the purchase needs a clarifying question', () => {
     const reply = fallbackReply(ask('I could pay rent late. Can I get a new phone?'), data)
     expect(reply.intent).toBe('clarify')
-    expect(reply.lead).toBe('I wouldn’t skip or delay a bill to make a purchase fit.')
-    expect(reply.message.split('\n\n')[0]).toBe(reply.lead)
+    expect(reply.refusal).toBe(RENT)
+    expect(reply.lead).toBeUndefined()
+    expect(reply.message.split('\n\n')[0]).toBe(reply.refusal)
   })
 
   it('replaces a neutral lead-in Claude chose, and keeps Claude’s own refusal on a question', async () => {
@@ -284,11 +288,12 @@ describe('the refusal to skip a bill', () => {
     )
     // The camera under discussion keeps the price the user gave earlier.
     expect(camerasReply.assessment?.amountCents).toBe(119900)
-    expect(camerasReply.lead).toBe(
-      'I wouldn’t skip or delay a bill to make a purchase fit. Here’s what matters instead:',
-    )
+    expect(camerasReply.refusal).toBe(RENT)
+    expect(camerasReply.lead).toBe('Here’s what matters instead:')
     const phone = await provider.reply(ask('Should I put off my phone bill for a new phone?'), data)
     expect(phone.intent).toBe('clarify')
-    expect(phone.lead).toBe('I wouldn’t skip or delay a bill to make a purchase fit.')
+    expect(phone.refusal).toBe(
+      'I wouldn’t skip or delay a bill to make a purchase fit, because late fees and a missed payment cost more than waiting.',
+    )
   })
 })

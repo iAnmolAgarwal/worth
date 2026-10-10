@@ -67,8 +67,9 @@ import {
   PURCHASE_FACTS,
   purchaseFacts,
   purchasePlaceholders,
+  afterRefusal,
   refusalFor,
-  refusalLine,
+  refusalSentence,
   spending,
   SPENDING_FACTS,
   spendingFacts,
@@ -236,20 +237,21 @@ function pointsFor(
     })
     .slice(0, 3)
   if (!points.length) return {}
-  // A refusal the user's words call for replaces a neutral lead-in Claude chose.
-  const lead = leadInText(
-    isRefusal(chosen.lead) ? chosen.lead : (answer.refusal ?? chosen.lead),
-    answer.assessment?.outcome,
-  )
+  // The refusal itself opens the answer, so the facts keep only "Here's what matters instead:".
+  const refusal = refusalOf(answer)
+  const lead = refusal ? afterRefusal(refusal) : leadInText(chosen.lead, answer.assessment?.outcome)
   return { points, ...(lead ? { lead } : {}) }
 }
-/** The refusal on its own, for an answer without facts, such as a clarifying question. */
-function refusalOnly(answer: Answer): string | undefined {
+/**
+ * The refusal an answer opens with: the one the user's own words call for, otherwise one Claude
+ * chose. "I can't simply say yes" applies only when the purchase would dip below the cushion.
+ */
+function refusalOf(answer: Answer): LeadIn | undefined {
   if (answer.intent === 'off_topic') return undefined
   const chosen = answer.presentation?.lead
   const lead = answer.refusal ?? (isRefusal(chosen) ? chosen : undefined)
   if (!lead || (lead === 'not_yes' && answer.assessment?.outcome !== 'tight')) return undefined
-  return refusalLine(lead)
+  return lead
 }
 /** Which placeholder set and template an answer's sentence uses, if it has one. */
 function sentenceKind(answer: Answer) {
@@ -361,8 +363,7 @@ function traceFor(answer: Answer, data: ChatData, shown: FactId[]): AnswerTrace 
           },
     )
   }
-  const lead =
-    answer.refusal ?? (isRefusal(answer.presentation?.lead) ? answer.presentation?.lead : undefined)
+  const lead = refusalOf(answer)
   if (lead && lead !== 'not_yes')
     guards.push({
       id: lead,
@@ -411,9 +412,13 @@ function traceFor(answer: Answer, data: ChatData, shown: FactId[]): AnswerTrace 
   }
 }
 
-function compose(answer: Answer, data: ChatData): ChatReply {
+function compose(answer: Answer, data: ChatData, asked = ''): ChatReply {
   const { assessment } = answer
-  const verdict = assessment ? verdictFor(assessment, answer.interpretation) : undefined
+  // A stated budget shapes only an assessed purchase; a search uses it as its ceiling instead.
+  const budgetCents = assessment ? data.budgetCents : undefined
+  const verdict = assessment
+    ? verdictFor(assessment, answer.interpretation, budgetCents)
+    : undefined
   const body =
     answer.intent === 'off_topic'
       ? OFF_TOPIC_REPLY
@@ -432,7 +437,9 @@ function compose(answer: Answer, data: ChatData): ChatReply {
                 : overviewFacts(data)
   const { points, lead } = pointsFor(answer, data)
   const chosen = points && [lead, ...points.map((p) => p.text)].filter(Boolean).join(' ')
-  const refusal = points ? undefined : refusalOnly(answer)
+  const refused = refusalOf(answer)
+  // The refusal and its reason lead, before the verdict and the options (judge round 3 #8).
+  const refusal = refused && refusalSentence(refused, asked)
   const payIn4 = assessment ? payIn4Chat(assessment, data, Boolean(answer.payIn4Asked)) : undefined
   // Asked about Pay in 4, the engine's schedule joins the answer's text unless Claude showed it.
   const payIn4Line =
@@ -448,9 +455,10 @@ function compose(answer: Answer, data: ChatData): ChatReply {
       : undefined
   return {
     message: [
+      refusal,
       verdict,
       explanation,
-      chosen ?? refusal,
+      chosen,
       body,
       payIn4Line,
       answer.alternatives &&
@@ -467,7 +475,9 @@ function compose(answer: Answer, data: ChatData): ChatReply {
     intent: answer.intent,
     ...(assessment ? { assessment, verdict } : {}),
     ...(answer.interpretation ? { interpretation: answer.interpretation } : {}),
-    ...(points ? { points, ...(lead ? { lead } : {}) } : refusal ? { lead: refusal } : {}),
+    ...(refusal ? { refusal } : {}),
+    ...(budgetCents !== undefined ? { budgetCents } : {}),
+    ...(points ? { points, ...(lead ? { lead } : {}) } : {}),
     ...(answer.clarify?.pending ? { pending: answer.clarify.pending } : {}),
     suggestions:
       categoryChips(answer.alternatives) ??
@@ -498,9 +508,13 @@ function alternativesText(
       : `Nothing fits today without going below your ${cushion} cushion, so Worth didn’t look for alternatives.`
   const fits = roomShown ? '' : `Up to ${room} fits today and keeps your ${cushion} cushion.`
   const above =
-    outcome.statedCents !== undefined && outcome.statedCents > outcome.roomCents
-      ? ` That is less than the ${money(outcome.statedCents)} you mentioned, so Worth searched below it.`
-      : ''
+    outcome.statedCents === undefined
+      ? ''
+      : outcome.statedCents > outcome.roomCents
+        ? ` That is less than the ${money(outcome.statedCents)} you mentioned, so Worth searched below it.`
+        : outcome.statedCents < outcome.roomCents
+          ? ` Worth kept to the ${money(outcome.statedCents)} you mentioned.`
+          : ''
   if (!outcome.query)
     return `${fits}${above} Tell me what kind of item you’d like under ${money(ceilingOf(outcome))}, such as headphones or a desk chair, and Worth will look for some from other stores.`.trim()
   if (!shown)
@@ -553,12 +567,31 @@ async function searchAlternatives(
   const result = await actions.findAlternatives(outcome.query, ceiling).catch(() => undefined)
   return result ? { ...outcome, result } : outcome
 }
-/** A US dollar ceiling the person wrote ("under $300"), when there is exactly one. */
+/**
+ * A US dollar ceiling the person wrote ("under $300"): their stated budget, or else the only
+ * amount in the message.
+ */
 function statedCeiling(message: string) {
   const amounts = extractMoneyMentions(message).filter(
     (m) => (m.currency === 'USD' || m.currency === 'NONE') && m.cents !== null,
   )
-  return amounts.length === 1 ? amounts[0]!.cents! : undefined
+  return statedBudget(message) ?? (amounts.length === 1 ? amounts[0]!.cents! : undefined)
+}
+/**
+ * The budget the person stated in this message ("my budget is $300", "I only want to spend $200",
+ * "under $1.2k", "$400 this week"), when they stated exactly one. Never a price they asked about.
+ */
+export function statedBudget(message: string) {
+  const budgets = extractMoneyMentions(message).filter(
+    (m) =>
+      m.role === 'budget' && (m.currency === 'USD' || m.currency === 'NONE') && m.cents !== null,
+  )
+  return new Set(budgets.map((m) => m.cents)).size === 1 ? budgets[0]!.cents! : undefined
+}
+/** The data for one message, with the budget it states. */
+const withBudget = (message: string, data: ChatData): ChatData => {
+  const budgetCents = statedBudget(message)
+  return budgetCents === undefined ? data : { ...data, budgetCents }
 }
 function assess(data: ChatData, interpretation: Interpretation) {
   const itemName = itemLabel(interpretation.items)
@@ -672,16 +705,19 @@ async function payIn4Availability(
   return actions.payIn4Eligibility(amountCents).catch(() => 'range-only' as const)
 }
 export function fallbackReply(input: ChatInput, data: ChatData, reason = LOCAL_NOTE): ChatReply {
+  data = withBudget(input.message, data)
   const answer: Answer = {
     ...localAnswer(focusInput(input), data),
     note: reason,
     refusal: refusalFor(input.message),
   }
   const amount = answer.assessment?.amountCents
-  if (amount === undefined || !ASKS_PAY_IN_4.test(input.message)) return compose(answer, data)
+  if (amount === undefined || !ASKS_PAY_IN_4.test(input.message))
+    return compose(answer, data, input.message)
   return compose(
     { ...answer, payIn4Asked: true },
     { ...data, payIn4: payIn4InRange(amount) ? 'range-only' : 'unavailable' },
+    input.message,
   )
 }
 /** The local answer, with any search for something cheaper run through the server's actions. */
@@ -691,6 +727,7 @@ export async function localReply(
   reason = LOCAL_NOTE,
   actions: ChatActions = {},
 ): Promise<ChatReply> {
+  data = withBudget(input.message, data)
   const answer: Answer = {
     ...localAnswer(focusInput(input), data),
     refusal: refusalFor(input.message),
@@ -701,7 +738,7 @@ export async function localReply(
     answer.payIn4Asked = true
     data = { ...data, payIn4: await payIn4Availability(answer.assessment.amountCents, actions) }
   }
-  return compose({ ...answer, note: reason }, data)
+  return compose({ ...answer, note: reason }, data, input.message)
 }
 
 // ---- Claude -----------------------------------------------------------------------
@@ -1277,7 +1314,8 @@ class Turn {
     const parsed = findSchema.safeParse({ item: raw.item, max_price_cents: raw.max_price_cents })
     if (!parsed.success)
       return { content: 'item and max_price_cents must be a string or null.', isError: true }
-    const stated = parsed.data.max_price_cents ?? undefined
+    // A budget the person wrote still caps the search when Claude passed none.
+    const stated = parsed.data.max_price_cents ?? statedBudget(this.input.message)
     if (
       stated !== undefined &&
       !extractMoneyMentions(this.input.message).some(
@@ -1651,7 +1689,7 @@ export function createChatProvider(
       const input = focusInput(asked)
       const started = Date.now()
       const deadline = started + deadlineMs
-      const turn = new Turn(input, data, actions)
+      const turn = new Turn(input, withBudget(input.message, data), actions)
       const tools = [
         ...TOOLS,
         ...(actions.findAlternatives ? [FIND_ALTERNATIVES_TOOL] : []),
@@ -1778,7 +1816,7 @@ export function createChatProvider(
         turn.data.payIn4 ??= await payIn4Availability(answer.assessment.amountCents, actions)
       }
       answer.sentence = await explain(answer, turn.data, answered, messages, tools, deadline)
-      return compose(answer, turn.data)
+      return compose(answer, turn.data, input.message)
     },
   }
 }

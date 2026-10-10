@@ -120,10 +120,12 @@ const CURRENCY_MARKERS = new RegExp(
   'i',
 )
 
+// A ceiling the person sets: "my budget is $300", "I only want to spend $200", "I can't go over
+// $500", "$400 this week". "Can I spend $349 on headphones?" stays a price.
 const BUDGET_BEFORE =
-  /\b(?:budget|have|has|had|got|left|spare|saved|savings|balance|earn(?:ed)?|make|made|income|paid|salary|limit|max(?:imum)?|up\s+to|under|less\s+than|below|within|no\s+more\s+than|at\s+most)\s*(?:is|of|was|are|=)?\s*(?:about|around|roughly|like|just|only)?\s*$/i
+  /\b(?:budget(?:\s+(?:for\s+)?(?:this|the|per|a)\s+(?:week|month))?|have|has|had|got|left|spare|saved|savings|balance|earn(?:ed)?|make|made|income|paid|salary|limit|max(?:imum)?|up\s+to|under|less\s+than|below|within|no\s+more\s+than|at\s+most|spend\s+more\s+than|go(?:ing)?\s+over|exceed(?:ing)?|keep\s+it\s+(?:to|at|under)|(?:only|just)\s+(?:want|wanna|plan|mean|hope|need)\s+to\s+spend|i\s+(?:can|could)\s+(?:only\s+|just\s+)?(?:spend|afford))\s*(?:is|of|was|are|=)?\s*(?:about|around|roughly|like|just|only)?\s*$/i
 const BUDGET_AFTER =
-  /^\s*(?:budget|left|to\s+spare|to\s+spend|in\s+(?:savings|my\s+account|the\s+bank)|saved|spare|limit|max(?:imum)?|or\s+less|tops)\b/i
+  /^\s*(?:budget|left|to\s+spare|to\s+spend|in\s+(?:savings|my\s+account|the\s+bank)|saved|spare|limit|max(?:imum)?|or\s+less|tops|this\s+week|for\s+the\s+week)\b/i
 const OTHER_BEFORE =
   /\b(?:was|were|used\s+to\s+be|originally|down\s+from|marked\s+down\s+from|regular(?:ly)?|list\s+price(?:\s+of)?|msrp(?:\s+of)?|retail(?:s)?(?:\s+for)?|save|saving|discount\s+of|refund(?:ed)?(?:\s+of)?|deposit(?:\s+of)?|spent|spend\s+about)\s*$/i
 const OTHER_AFTER = /^\s*(?:off|discount|cheaper|less|more|savings?|refund|deposit|ago)\b/i
