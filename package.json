@@ -15,6 +15,7 @@
     "typecheck": "tsc -b",
     "test": "vitest run --maxWorkers=1",
     "test:watch": "vitest --maxWorkers=1",
+    "test:e2e": "npm run build && playwright test",
     "lint": "oxlint src server shared tests eval merchant",
     "check": "npm run lint && npm run typecheck && npm test && npm run build",
     "format": "prettier --write src server shared tests eval merchant *.ts *.json index.html",
