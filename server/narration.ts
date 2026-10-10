@@ -467,9 +467,7 @@ export function afterRefusal(lead: LeadIn) {
  */
 export function refusalSentence(lead: LeadIn, message = '') {
   if (lead === 'no_skipping') {
-    const rent = message
-      .split(/[.!?;]+/)
-      .some((clause) => /\brent\b/i.test(clause) && SKIP.test(clause))
+    const rent = /\brent\b/i.test(message.match(SKIP_BILL)?.[0] ?? '')
     return `I wouldn’t skip or delay ${rent ? 'rent' : 'a bill'} to make a purchase fit, because late fees and a missed payment cost more than waiting.`
   }
   if (lead === 'no_credit')
@@ -478,23 +476,30 @@ export function refusalSentence(lead: LeadIn, message = '') {
     return 'I wouldn’t dip into your cushion for this, because it’s there for surprises, not purchases.'
   return 'I can’t simply say yes, because this purchase would take your balance below your cushion.'
 }
-const BILL =
-  /\b(?:rent|bills?|utilit(?:y|ies)|insurance|loan|phone\s+plan|mortgage|car\s+payment|student\s+loan)\b/i
-const SKIP =
-  /\b(?:skip\w*|delay\w*|defer\w*|postpon\w*|late|miss(?:ing)?|hold\s+off\s+on|put\s+off|push\w*\s+(?:\w+\s+){0,2}back|fall\w*\s+behind)\b/i
-// Borrowing to buy. Pay in 4 is not here: asked about, it is shown for comparison, never advised.
+// A bill, and a request to skip or delay that bill itself: "skip rent", "pay rent a week late",
+// "put off my phone bill". A skip word elsewhere in the sentence ("too late to buy before rent",
+// "skip the camera and save for rent") is not a request to skip the bill.
+const BILL = String.raw`(?:rent|(?:[a-z]+\s+)?bills?|utilit(?:y|ies)|insurance|phone\s+plan|mortgage|car\s+payment|(?:student\s+|car\s+)?loan(?:\s+payment)?)`
+const WHOSE = String.raw`(?:(?:my|the|our|this|next|that)\s+(?:month['’]?s\s+|week['’]?s\s+)?)?`
+const SKIP_BILL = new RegExp(
+  String.raw`\b(?:skip(?:ping)?|delay(?:ing)?|defer(?:ring)?|postpon(?:e|ing)|miss(?:ing)?|hold(?:ing)?\s+off\s+on|put(?:ting)?\s+off|push(?:ing)?|not\s+pay(?:ing)?|fall(?:ing)?\s+behind\s+on|stiff(?:ing)?)\s+(?:paying\s+)?${WHOSE}${BILL}\b` +
+    String.raw`|\bpay(?:ing)?\s+${WHOSE}${BILL}\s+(?:[a-z]+\s+){0,3}?(?:late|later)\b` +
+    String.raw`|\b${BILL}\s+(?:can|could)\s+(?:wait|be\s+late)\b`,
+  'i',
+)
+// Borrowing to buy, in the present or future. Pay in 4 is not here: asked about, it is shown for
+// comparison, never advised. A card alone may be a debit card, so it takes "credit".
 const BORROW =
-  /\b(?:borrow\w*|(?:take|taking|took|get|getting)\s+(?:out\s+)?(?:a\s+)?(?:personal\s+|payday\s+)?loan|personal\s+loan|payday\s+loan|cash\s+advance|(?:put|putting|charge|charging)\s+(?:it|this|that)\s+on\s+(?:my\s+|a\s+)?(?:credit\s+)?card|(?:use|using)\s+(?:my\s+|a\s+)?credit(?:\s+card)?|overdraw\w*|overdraft)\b/i
+  /\b(?:borrow(?:ing)?|lend(?:ing)?\s+me|(?:take|taking|get|getting)\s+(?:out\s+)?(?:a\s+)?(?:personal\s+|payday\s+)?loan|personal\s+loan|payday\s+loan|cash\s+advance|(?:put|putting|charge|charging)\s+(?:it|this|that)\s+on\s+(?:my\s+|a\s+)?credit\s+card|(?:use|using)\s+(?:my\s+|a\s+)?credit(?:\s+card)?|max(?:ing)?\s+out\s+(?:my\s+|a\s+)?(?:credit\s+)?cards?|paypal\s+credit)\b/i
 const CUSHION =
-  /\b(?:dip|dipping|eat|eating|use|using|tap|tapping|raid|raiding|break|breaking)\s+(?:into\s+)?(?:my\s+|the\s+)?(?:cushion|emergency\s+(?:fund|savings|money)|safety\s+net)\b/i
+  /\b(?:dip|dipping|eat|eating|use|using|tap|tapping|raid|raiding|break|breaking)\s+(?:into\s+)?(?:my\s+|the\s+)?(?:[a-z]+\s+)?(?:cushion|emergency\s+(?:fund|savings|money)|safety\s+net)\b/i
 /**
  * The refusal a message calls for, read from the user's own words: skipping or paying a bill late
  * ("I could pay rent a week late"), borrowing to buy, or dipping into the cushion. It applies even
  * when Claude chose none, or when the purchase itself still needs a question.
  */
 export function refusalFor(message: string): LeadIn | undefined {
-  const clauses = message.split(/[.!?;]+/)
-  if (clauses.some((clause) => BILL.test(clause) && SKIP.test(clause))) return 'no_skipping'
+  if (SKIP_BILL.test(message)) return 'no_skipping'
   if (BORROW.test(message)) return 'no_credit'
   if (CUSHION.test(message)) return 'no_cushion'
   return undefined
@@ -537,6 +542,11 @@ export interface Placeholder {
 }
 export type Placeholders = Record<string, Placeholder>
 
+const BUDGET_BELOW_PRICE = 'the budget the person stated, which is below the price'
+/** Words that would say a budget below the price is enough for it, or that it may be exceeded. */
+const BUDGET_STRETCH =
+  /\b(?:cover\w*|within|enough|fits?|fitting|afford\w*|stretch\w*|past|over|exceed\w*|beyond|above|more\s+than)\b/i
+
 /** Placeholders for an assessed purchase. */
 export function purchasePlaceholders(a: Assessment, data: ChatData): Placeholders {
   if (a.outcome === 'incomplete') return {}
@@ -568,7 +578,15 @@ export function purchasePlaceholders(a: Assessment, data: ChatData): Placeholder
       about: 'the low point if everyday spending runs 20% higher',
     },
     ...(data.budgetCents !== undefined
-      ? { budget: { value: money(data.budgetCents), about: 'the budget the person stated' } }
+      ? {
+          budget: {
+            value: money(data.budgetCents),
+            about:
+              data.budgetCents < a.amountCents
+                ? BUDGET_BELOW_PRICE
+                : 'the budget the person stated, which covers the price',
+          },
+        }
       : {}),
   }
   // From the purchase date on: for a later day, earlier bills and income never explain it.
@@ -857,6 +875,13 @@ export function checkSentence(
   const payIn4 = payIn4Problem(sentence, values)
   if (payIn4) return reject(payIn4)
   if (wrongValue(sentence, values)) return reject('wrong_value')
+  // A budget below the price never covers it, and Worth never suggests going past it.
+  if (
+    /\{budget\}/.test(sentence) &&
+    values.budget?.about === BUDGET_BELOW_PRICE &&
+    BUDGET_STRETCH.test(prose)
+  )
+    return reject('contradicts_result')
   if (misordered(sentence, values)) return reject('contradicts_result')
   // A tight result may still say what would fit: waiting, or spending less.
   const conditional = /\{(?:wait_day|max_spend)\}|\bwait\w*|\bonly\s+(?:once|after|when)\b/i.test(

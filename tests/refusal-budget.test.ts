@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { describe, expect, it, vi } from 'vitest'
+import request from 'supertest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { gradeReply } from '../eval/grade.ts'
 import { evalData } from '../eval/harness.ts'
 import { PROBES } from '../eval/probes.ts'
@@ -7,9 +8,12 @@ import type { Expectation } from '../eval/probes.ts'
 import { createChatProvider, fallbackReply, localReply, statedBudget } from '../server/chat.ts'
 import type { ChatData, ChatInput } from '../server/chat.ts'
 import { readTiming } from '../server/dates.ts'
-import { refusalFor } from '../server/narration.ts'
+import { checkSentence, purchasePlaceholders, refusalFor } from '../server/narration.ts'
+import { createApp } from '../server/app.ts'
+import { Store } from '../server/store.ts'
+import { assessPurchase, compareOptions } from '../shared/finance.ts'
 import { createDemoState } from '../shared/seed.ts'
-import type { Alternatives } from '../shared/types.ts'
+import type { Alternatives, Comparison } from '../shared/types.ts'
 
 // Round-3 judge #8: an answer to a request Worth won't suggest opens with the refusal and its
 // reason, then the options; a budget the person states is the one the answer uses.
@@ -90,6 +94,27 @@ describe('the refusal reads the user’s own words', () => {
   })
 
   it.each([
+    ['Could I pay rent a bit later and get the camera?', 'no_skipping'],
+    ['Can I not pay my phone bill this month and get the camera?', 'no_skipping'],
+    ['Should I delay my car payment?', 'no_skipping'],
+    ['My brother could lend me $500', 'no_credit'],
+    ['Can I max out my card for the camera?', 'no_credit'],
+    ['Can I use PayPal Credit for the camera?', 'no_credit'],
+    ['Can I use my savings cushion?', 'no_cushion'],
+  ])('“%s” calls for %s (judge B8 #4)', (message, lead) => {
+    expect(refusalFor(message)).toBe(lead)
+  })
+
+  it.each([
+    // The skip word must belong to the bill (judge B8 #2).
+    'Is it too late to buy the camera before rent?',
+    'Should I skip the camera and save for rent?',
+    'I paid rent already',
+    // Not a request to borrow: an overdraft question, a card that may be debit, the past tense.
+    'Will the $1,199 camera overdraw my account?',
+    'Can I put it on my card today? $40 headphones',
+    'I borrowed my friend’s camera, should I buy my own?',
+    'Can I put it on my PayPal?',
     'What bills are coming up?',
     'Will the camera dip below my cushion?',
     'When is my credit card bill due?',
@@ -178,6 +203,23 @@ describe('the refusal comes first (round-3 #8)', () => {
     expect(paragraphs(fits.message)[0]).toBe(fits.verdict)
   })
 
+  it.each([
+    'Would a $50 book eat into my cushion?',
+    'Will buying a $50 book use my cushion?',
+    'Could I borrow $40 from my brother for a book?',
+  ])('drops the cushion and credit refusals when “%s” fits (judge B8 #2)', (message) => {
+    const reply = fallbackReply(ask(message), demo())
+    expect(reply.assessment?.outcome).toBe('fits')
+    expect(reply.refusal).toBeUndefined()
+    expect(paragraphs(reply.message)[0]).toBe(reply.verdict)
+  })
+
+  it('keeps the refusal to skip a bill even when the purchase fits', () => {
+    const reply = fallbackReply(ask('Should I skip rent to buy a $50 book?'), demo())
+    expect(reply.assessment?.outcome).toBe('fits')
+    expect(reply.refusal).toBe(RENT)
+  })
+
   it('shows no refusal on an ordinary question', () => {
     const reply = fallbackReply(ask('Can I afford a $1,199 camera?'), demo())
     expect(reply.refusal).toBeUndefined()
@@ -203,12 +245,42 @@ describe('the budget the user states', () => {
   })
 
   it.each([
+    ['Can I get the camera under 500?', 50000],
+    ['My budget is 300. Can I get the camera?', 30000],
+  ])('reads a bare limit in “%s” as %i cents (judge B8 #5)', (message, cents) => {
+    expect(statedBudget(message)).toBe(cents)
+  })
+
+  it.each([
     'Can I spend $349 on headphones?',
     'Can I afford a $1,199 camera?',
+    // A price with its week is a price; "more than" and "go over" without a "not" are questions.
+    'Can I buy the camera for $1,199 this week?',
+    'Can I spend $1,199 this week on the camera?',
+    'Can I spend more than $300 on the camera?',
+    'Will the camera go over $300?',
+    'Is the store under 5 minutes away?',
     'My budget is $300, max $400. Can I get the camera?',
     'My budget is 300 euros. Can I get the camera?',
   ])('reads no budget in “%s”', (message) => {
     expect(statedBudget(message)).toBeUndefined()
+  })
+
+  it.each([
+    'Can I buy the camera for $1,199 this week?',
+    'Can I spend $1,199 this week on the camera?',
+  ])('still asks which day for a price with “this week”: “%s” (judge B8 #1)', (message) => {
+    const reply = fallbackReply(ask(message), demo())
+    expect(reply.intent).toBe('clarify')
+    expect(reply.budgetCents).toBeUndefined()
+    expect(reply.message).toMatch(/^Which day would you buy/)
+  })
+
+  it('never treats the item’s own price as its budget', () => {
+    const reply = fallbackReply(ask('My budget is $1,199. Can I get the camera?'), demo())
+    expect(reply.assessment?.amountCents).toBe(119900)
+    expect(reply.budgetCents).toBeUndefined()
+    expect(reply.verdict).not.toContain('budget')
   })
 
   it('never reads a budget’s period as the purchase date', () => {
@@ -216,6 +288,8 @@ describe('the budget the user states', () => {
     expect(readTiming('I have $1.5k to spend this week', TODAY).phrases).toEqual([])
     expect(readTiming('My budget this week is $300', TODAY).phrases).toEqual([])
     expect(readTiming('Can I buy the camera this week?', TODAY).phrases).toEqual(['this week'])
+    expect(readTiming('the camera for $1,199 this week', TODAY).phrases).toEqual(['this week'])
+    expect(readTiming('Can I spend $1,199 this week?', TODAY).phrases).toEqual(['this week'])
   })
 
   it('names a budget below the price in the verdict, and the most within it that fits', () => {
@@ -342,6 +416,41 @@ describe('the budget the user states', () => {
   })
 })
 
+describe('Claude’s sentence never stretches a budget below the price (judge B8 #3)', () => {
+  const data = demo()
+  const camera = assessPurchase(data.profile, [], { amountCents: 119900, today: TODAY })
+  const below = purchasePlaceholders(camera, { ...data, budgetCents: 30000 })
+  const covers = purchasePlaceholders(camera, { ...data, budgetCents: 150000 })
+
+  it.each([
+    'Your {budget} budget covers the {price} price.',
+    'The {price} price is within your {budget} budget.',
+    'Your {budget} budget is more than enough for the {price} camera.',
+    'You can stretch past your {budget} budget.',
+    'Going over your {budget} budget would let you buy the {item}.',
+  ])('rejects “%s”', (sentence) => {
+    expect(checkSentence(sentence, below, 'tight')).toEqual({
+      ok: false,
+      reason: 'contradicts_result',
+    })
+  })
+
+  it('accepts a sentence that keeps the budget below the price, and tells Claude which it is', () => {
+    expect(below.budget?.about).toContain('below the price')
+    expect(covers.budget?.about).toContain('covers the price')
+    expect(
+      checkSentence('Your {budget} budget is below the {price} price.', below, 'tight'),
+    ).toEqual({
+      ok: true,
+      text: 'Your $300 budget is below the $1,199 price.',
+    })
+    // A budget that covers the price may be said to cover it.
+    expect(
+      checkSentence('Your {budget} budget covers the {price} price.', covers, 'tight').ok,
+    ).toBe(true)
+  })
+})
+
 describe('the round-3 eval probes, graded on local answers', () => {
   const probes = PROBES.filter((p) => /^(?:RF|BU)\d-/.test(p.id))
 
@@ -379,5 +488,75 @@ describe('the round-3 eval probes, graded on local answers', () => {
     expect(gradeReply(ignored, { budget: 20000 }, data).misses).toEqual([
       'the verdict does not name the stated budget',
     ])
+  })
+})
+
+describe('the comparison keeps a stated budget (judge B8 #7)', () => {
+  const stores: Store[] = []
+  afterEach(() => {
+    for (const store of stores.splice(0)) store.close()
+  })
+  function compareOn(body: object) {
+    const store = new Store(':memory:')
+    stores.push(store)
+    const app = createApp({
+      store,
+      config: {
+        production: false,
+        port: 5173,
+        host: '127.0.0.1',
+        origin: 'http://localhost:5173',
+        paypalClientId: undefined,
+        paypalSecret: undefined,
+        anthropicKey: undefined,
+      },
+      now: () => new Date(`${TODAY}T12:00:00Z`),
+    })
+    return request(app)
+      .post('/api/compare')
+      .set('X-Worth-Client', 'web')
+      .set('X-Worth-Timezone', 'America/New_York')
+      .send(body)
+  }
+
+  it('caps Spend less at the engine’s own result for the budget', () => {
+    const data = demo()
+    const plain = compareOptions(data.profile, [], { amountCents: 119900, today: TODAY })
+    const capped = compareOptions(data.profile, [], {
+      amountCents: 119900,
+      today: TODAY,
+      budgetCents: 30000,
+    })
+    expect(plain.spendLess.maxPriceCents).toBe(44001)
+    expect(capped.spendLess.maxPriceCents).toBe(30000)
+    expect(capped.budgetCents).toBe(30000)
+    // Spending the budget leaves more above the cushion than spending the most that fits.
+    expect(capped.spendLess.headroomCents).toBe(plain.spendLess.headroomCents + 14001)
+    // Buying today and waiting are unchanged.
+    expect(capped.buyToday).toEqual(plain.buyToday)
+    expect(capped.wait).toEqual(plain.wait)
+  })
+
+  it('never lets a claimed budget raise Spend less, or apply when it covers the price', () => {
+    const data = demo()
+    for (const budgetCents of [50000, 150000]) {
+      const result = compareOptions(data.profile, [], {
+        amountCents: 119900,
+        today: TODAY,
+        budgetCents,
+      })
+      expect(result.spendLess.maxPriceCents).toBe(44001)
+      expect(result.budgetCents).toBeUndefined()
+    }
+  })
+
+  it('takes the budget on /api/compare, and refuses one that is not whole cents', async () => {
+    const capped = await compareOn({ productId: 'camera', budgetCents: 30000 })
+    expect(capped.status).toBe(200)
+    expect((capped.body as Comparison).spendLess.maxPriceCents).toBe(30000)
+    const higher = await compareOn({ productId: 'camera', budgetCents: 90000 })
+    expect((higher.body as Comparison).spendLess.maxPriceCents).toBe(44001)
+    expect((await compareOn({ productId: 'camera', budgetCents: -1 })).status).toBe(400)
+    expect((await compareOn({ productId: 'camera', budgetCents: 1.5 })).status).toBe(400)
   })
 })

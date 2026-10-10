@@ -4,6 +4,8 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Ask } from '../src/Ask'
 import { api } from '../src/api'
+import { decisionRequestFrom } from '../src/contract'
+import { Decision } from '../src/Decision'
 import { fallbackReply } from '../server/chat'
 import { compareOptions } from '../shared/finance'
 import { createDemoState, PRODUCTS } from '../shared/seed'
@@ -46,25 +48,29 @@ function reply(state: AppState, message: string): ChatReply {
     },
   )
 }
-async function ask(state: AppState, answer: ChatReply) {
+/** The comparison the server returns, budget included (server/app.ts passes it to the engine). */
+function compare(state: AppState, input: unknown) {
+  const request = input as { productId?: string; amountCents?: number; budgetCents?: number }
+  const product = PRODUCTS.find((p) => p.id === request.productId)
+  return compareOptions(state.profile, state.purchases, {
+    amountCents: product?.priceCents ?? request.amountCents ?? 119900,
+    itemName: product?.name,
+    today: TODAY,
+    payIn4Eligible: true,
+    ...(request.budgetCents !== undefined ? { budgetCents: request.budgetCents } : {}),
+  })
+}
+async function ask(state: AppState, answer: ChatReply, onOpenDecision = vi.fn()) {
   const user = userEvent.setup()
   apiMock.mockImplementation(((path: string, input: unknown) => {
     if (path !== '/compare') return Promise.resolve(answer)
-    const product = PRODUCTS.find((p) => p.id === (input as { productId?: string }).productId)
-    return Promise.resolve(
-      compareOptions(state.profile, state.purchases, {
-        amountCents: product?.priceCents ?? 119900,
-        itemName: product?.name,
-        today: TODAY,
-        payIn4Eligible: true,
-      }),
-    )
+    return Promise.resolve(compare(state, input))
   }) as typeof api)
   render(
     <Ask
       visible
       state={state}
-      onOpenDecision={vi.fn()}
+      onOpenDecision={onOpenDecision}
       onOpenCheckout={vi.fn()}
       onNavigate={vi.fn()}
     />,
@@ -111,6 +117,9 @@ describe('Ask Worth leads with the refusal (round-3 #8)', () => {
     expect(refusal.compareDocumentPosition(verdict) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(tile.contains(refusal)).toBe(false)
     expect(screen.getAllByText(RENT)).toHaveLength(1)
+    // Screen readers hear it as Worth's stance (judge B8 #6).
+    expect(refusal.textContent).toBe(`Worth won’t suggest this: ${RENT}`)
+    expect(within(refusal).getByText('Worth won’t suggest this:').className).toBe('sr')
   })
 
   it('leads a clarifying question with the refusal too', async () => {
@@ -177,5 +186,59 @@ describe('Ask Worth keeps to the stated budget (round-3 #8)', () => {
     await ask(state, answer)
     const options = await screen.findByRole('list', { name: 'Your options' })
     expect(options.textContent).toContain('Up to $300.00 today · your budget')
+  })
+})
+
+describe('the comparison keeps the stated budget (judge B8 #7)', () => {
+  it('opens “See the comparison” with the budget Ask used', async () => {
+    const state = makeState()
+    const onOpenDecision = vi.fn()
+    await ask(
+      state,
+      reply(state, 'I only want to spend $200. Can I get the camera?'),
+      onOpenDecision,
+    )
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: /See the comparison/ }))
+    expect(onOpenDecision).toHaveBeenCalledWith(
+      { productId: 'camera', budgetCents: 20000 },
+      expect.anything(),
+    )
+  })
+
+  it('reads the budget back from the comparison link, and only a positive whole number', () => {
+    const link = (query: string) => decisionRequestFrom(new URLSearchParams(query))
+    expect(link('product=camera&budget=30000')).toEqual({ productId: 'camera', budgetCents: 30000 })
+    expect(link('amount=50000&item=Desk&budget=20000')).toEqual({
+      amountCents: 50000,
+      itemName: 'Desk',
+      budgetCents: 20000,
+    })
+    expect(link('product=camera&budget=-5')).toEqual({ productId: 'camera' })
+    expect(link('product=camera&budget=abc')).toEqual({ productId: 'camera' })
+  })
+
+  it('shows Spend less at the budget on the Decision page, not what keeps the cushion', async () => {
+    const state = makeState()
+    apiMock.mockImplementation(((_path: string, input: unknown) =>
+      Promise.resolve(compare(state, input))) as typeof api)
+    render(
+      <Decision
+        backLabel="Back"
+        onBack={vi.fn()}
+        onBuy={vi.fn()}
+        onSave={vi.fn()}
+        onEditPlan={vi.fn()}
+        onViewActivity={vi.fn()}
+        state={state}
+        request={{ productId: 'camera', budgetCents: 30000 }}
+      />,
+    )
+    const options = await screen.findByRole('radiogroup', { name: 'Your options' })
+    const spendLess = within(options)
+      .getAllByRole('radio')
+      .find((option) => option.textContent?.includes('Your budget today'))!
+    expect(spendLess.textContent).toContain('$300.00')
+    expect(options.textContent).not.toContain('$440.01')
   })
 })

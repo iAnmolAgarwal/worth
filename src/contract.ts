@@ -101,8 +101,11 @@ export function decisionRequestFrom(
   params: URLSearchParams,
   confirmed?: DecisionRequest,
 ): DecisionRequest | undefined {
+  // A budget the person stated in Ask; the server only lets it lower Spend less.
+  const budgetCents = Number(params.get('budget') ?? NaN)
+  const budget = Number.isSafeInteger(budgetCents) && budgetCents > 0 ? { budgetCents } : {}
   const product = params.get('product')
-  if (product) return { productId: product }
+  if (product) return { productId: product, ...budget }
   const amount = Number(params.get('amount'))
   if (!Number.isSafeInteger(amount) || amount <= 0) return undefined
   const saved = params.get('saved')
@@ -113,7 +116,7 @@ export function decisionRequestFrom(
     ...(saved && /^[A-Za-z0-9_-]{1,100}$/.test(saved) ? { savedId: saved } : {}),
   }
   const link = checkProductLink(params.get('link') ?? '')
-  if (!link.ok) return item
+  if (!link.ok) return { ...item, ...budget }
   const read =
     confirmed?.priceSource === 'channel3' &&
     confirmed.sourceUrl === link.url &&

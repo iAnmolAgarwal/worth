@@ -132,7 +132,12 @@ export function runningPlans(flows: ScheduledFlow[], today: string): RunningPlan
 
 /** Engine comparison from POST /api/compare, refreshed when the plan version changes. */
 export function useComparison(
-  request: { productId?: string; amountCents?: number; itemName?: string } | null,
+  request: {
+    productId?: string
+    amountCents?: number
+    itemName?: string
+    budgetCents?: number
+  } | null,
   version: number,
 ) {
   const key = request ? JSON.stringify(request) : ''

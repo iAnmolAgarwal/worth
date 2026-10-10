@@ -206,6 +206,11 @@ const compareSchema = z
     qid: qidSchema.optional(),
     /** A saved item of this session's: one with a store link is judged by the range alone. */
     savedId: identifier.optional(),
+    /**
+     * A budget the person stated in Ask. It is their own claim, so it may only lower Spend less,
+     * never raise it above what keeps the cushion.
+     */
+    budgetCents: cents.optional(),
   })
   .strict()
   .refine(
@@ -1495,6 +1500,7 @@ export function createApp(options: AppOptions = {}) {
         itemName: product?.name ?? input.itemName,
         today: current.today,
         payIn4Eligible: eligibility !== 'unavailable',
+        ...(input.budgetCents !== undefined ? { budgetCents: input.budgetCents } : {}),
       },
     )
     // The store is named from the link itself, never from text the browser sends.

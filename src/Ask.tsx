@@ -168,7 +168,11 @@ function requestFor(reply: ChatReply, state: AppState): DecisionRequest {
   const amountCents = reply.interpretation?.amountCents ?? assessment.amountCents
   const name = reply.interpretation ? itemLabel(reply.interpretation) : assessment.itemName
   const product = matchProduct(state.products, name, amountCents)
-  return product ? { productId: product.id } : { amountCents, itemName: name.slice(0, 150) }
+  // The budget the person stated caps Spend less on the comparison too (judge B8 #7).
+  const budget = reply.budgetCents !== undefined ? { budgetCents: reply.budgetCents } : {}
+  return product
+    ? { productId: product.id, ...budget }
+    : { amountCents, itemName: name.slice(0, 150), ...budget }
 }
 
 const status = (option: OptionResult) => {
@@ -183,8 +187,9 @@ function OptionRows({ c, at, budget }: { c: Comparison; at?: Assessment; budget?
   const buy: OptionResult = later ? { ...later, lowPointCause: null } : c.buyToday
   const day = later ? dayLabel(later.purchaseDate) : 'today'
   const room = later ? later.maxAffordableCents : c.spendLess.maxPriceCents
-  // A budget the person stated caps spending less (judge round 3 #8).
-  const withinBudget = budget !== undefined && budget < room
+  // A budget the person stated caps spending less (judge round 3 #8); the comparison may already
+  // be capped at it.
+  const withinBudget = budget !== undefined && budget <= room
   const maxCents = withinBudget ? budget : room
   const overBudget = budget !== undefined && at !== undefined && budget < at.amountCents
   const recommendation = later ? (fits(buy) ? 'buyToday' : c.recommendation) : c.recommendation
@@ -1103,7 +1108,12 @@ function Answer({
   }
   return (
     <>
-      {reply.refusal && <p className="refusal">{reply.refusal}</p>}
+      {reply.refusal && (
+        <p className="refusal">
+          <span className="sr">Worth won’t suggest this: </span>
+          {reply.refusal}
+        </p>
+      )}
       {read && !editing && (
         <ReadAsChip
           value={`${readName} · ${priceLabel(read!, state.products)} · ${read!.dateLabel}`}

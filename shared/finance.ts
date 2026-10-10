@@ -983,7 +983,14 @@ export function planCollisions(
 export function compareOptions(
   profile: FinancialProfile,
   purchases: Purchase[],
-  options: { amountCents: number; itemName?: string; today?: string; payIn4Eligible?: boolean },
+  options: {
+    amountCents: number
+    itemName?: string
+    today?: string
+    payIn4Eligible?: boolean
+    /** A budget the person stated: Spend less never goes above it. */
+    budgetCents?: number
+  },
 ): Comparison {
   const today = options.today ?? todayInTimezone(profile.timezone)
   if (!validDate(today)) throw new Error('Use a valid calendar date.')
@@ -1009,9 +1016,12 @@ export function compareOptions(
   const waitDate = missing ? null : earliestFittingDate(profile, purchases, today, amountCents)
   const baseline = forecast(profile, purchases, { today, days: COMPARISON_WINDOW_DAYS })
   const cushion = cushionOf(profile)
-  const maxPriceCents = missing
+  const roomCents = missing
     ? 0
     : Math.max(0, Math.min(...baseline.map((point) => point.baselineMinimumCents)) - cushion)
+  const budget = options.budgetCents
+  const capped = budget !== undefined && budget < roomCents && budget < amountCents
+  const maxPriceCents = capped ? budget : roomCents
   return {
     itemName,
     amountCents,
@@ -1021,6 +1031,7 @@ export function compareOptions(
     cushionCents: cushion,
     missingFields,
     buyToday,
+    ...(capped ? { budgetCents: budget } : {}),
     wait: waitDate
       ? {
           date: waitDate,

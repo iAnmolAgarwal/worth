@@ -288,6 +288,7 @@ export default function App() {
         if (request.sourceUrl) params.set('link', request.sourceUrl)
         if (request.savedId) params.set('saved', request.savedId)
       }
+      if (request.budgetCents !== undefined) params.set('budget', String(request.budgetCents))
       params.set('from', from)
       // Channel3's price counts as read only in this tab's memory, never from the URL (C5).
       setConfirmedLink(request.priceSource === 'channel3' ? request : undefined)

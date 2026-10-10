@@ -251,6 +251,9 @@ function refusalOf(answer: Answer): LeadIn | undefined {
   const chosen = answer.presentation?.lead
   const lead = answer.refusal ?? (isRefusal(chosen) ? chosen : undefined)
   if (!lead || (lead === 'not_yes' && answer.assessment?.outcome !== 'tight')) return undefined
+  // A purchase that fits needs no credit and leaves the cushion alone, so there is nothing to refuse.
+  if ((lead === 'no_credit' || lead === 'no_cushion') && answer.assessment?.outcome === 'fits')
+    return undefined
   return lead
 }
 /** Which placeholder set and template an answer's sentence uses, if it has one. */
@@ -412,7 +415,16 @@ function traceFor(answer: Answer, data: ChatData, shown: FactId[]): AnswerTrace 
   }
 }
 
-function compose(answer: Answer, data: ChatData, asked = ''): ChatReply {
+/** The data an answer uses: an amount that is the item's own price is never also its budget. */
+function budgetScoped(answer: Answer, data: ChatData): ChatData {
+  if (data.budgetCents === undefined || data.budgetCents !== answer.assessment?.amountCents)
+    return data
+  const { budgetCents: _price, ...rest } = data
+  return rest
+}
+
+function compose(answer: Answer, scoped: ChatData, asked = ''): ChatReply {
+  const data = budgetScoped(answer, scoped)
   const { assessment } = answer
   // A stated budget shapes only an assessed purchase; a search uses it as its ceiling instead.
   const budgetCents = assessment ? data.budgetCents : undefined
@@ -1581,6 +1593,7 @@ export function createChatProvider(
     tools: Anthropic.Tool[],
     deadline: number,
   ): Promise<Sentence | undefined> {
+    data = budgetScoped(answer, data)
     const values = placeholdersFor(answer, data)
     if (!Object.keys(values).length || answer.mode !== 'anthropic') return undefined
     const remaining = deadline - Date.now()

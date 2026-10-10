@@ -440,6 +440,8 @@ export interface Comparison {
   cushionCents: number
   missingFields: string[]
   buyToday: OptionResult
+  /** The budget the person stated, when it is what limits Spend less. */
+  budgetCents?: number
   wait: WaitOption
   spendLess: SpendLessOption
   /** A comparison the user opens deliberately. It is never recommended or ranked. */
