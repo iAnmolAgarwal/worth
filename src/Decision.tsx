@@ -20,6 +20,7 @@ import { BalanceChart } from './BalanceChart'
 import type { AppState, Comparison, PayIn4, SavePlan, SaveTarget } from './contract'
 import { sourceTarget } from './contract'
 import { ASSESSMENT_ONLY } from './copy'
+import { fullPayName, payIn4Lines, payIn4Thesis } from './payIn4Text'
 import { countedHold, ReservationNote } from './Reservation'
 import {
   billOn,
@@ -237,34 +238,6 @@ function chartTitle(c: Comparison, k: OptionKey) {
 
 type P4 = Extract<PayIn4, { available: true }>
 
-/** What the plain line means with Pay in 4 open, so "Pay in full" always says when you'd pay. */
-export function fullPayName(c: Comparison, k: OptionKey) {
-  const option = optionOf(c, k) ?? c.buyToday
-  if (option === c.buyToday) return 'Pay in full today'
-  if (option === c.wait && c.wait.date) return `Pay in full on ${shortDate(c.wait.date)}`
-  return `Spend ${money(c.spendLess.maxPriceCents)} today`
-}
-
-/**
- * The Pay in 4 comparison's point in one line: each line's lowest point, its day and amount, and
- * whether it goes below the cushion. Pay in 4 is one option, stated as plainly as paying in full.
- */
-export function payIn4Thesis(c: Comparison, k: OptionKey, p4: P4) {
-  const option = optionOf(c, k) ?? c.buyToday
-  const start = p4.instalments[0]?.date
-  const from = !start || start === c.today ? 'from today' : `from ${dayLabel(start)}`
-  const how =
-    option === c.buyToday
-      ? 'paying in full today'
-      : option === c.wait && c.wait.date
-        ? `paying in full on ${dayLabel(c.wait.date)}`
-        : `spending ${money(c.spendLess.maxPriceCents)} today instead`
-  const below = (value: number) => (value < c.cushionCents ? ', below your cushion' : '')
-  const p4Low = `${dayLabel(p4.lowestDate)} at ${signed(p4.lowestBalanceCents)}${below(p4.lowestBalanceCents)}`
-  const fullLow = `${option.lowestDate === p4.lowestDate ? 'the same day' : dayLabel(option.lowestDate)} at ${signed(option.lowestBalanceCents)}${below(option.lowestBalanceCents)}`
-  return `With PayPal Pay in 4 ${from}, your lowest point is ${p4Low}; ${how}, it’s ${fullLow}.`
-}
-
 export function ChartTile({
   c,
   k,
@@ -281,7 +254,8 @@ export function ChartTile({
   const cause = option.lowPointCause
   const payday = paydayOn(option.points, option.lowestDate)
   const title = chartTitle(c, k)
-  const thesis = payIn4 ? payIn4Thesis(c, k, payIn4) : ''
+  const fullName = fullPayName(c, option)
+  const thesis = payIn4 ? payIn4Thesis(c, option, payIn4) : ''
   return (
     <section className="tile" aria-labelledby="chart-title">
       <h2 className="h-section" id="chart-title">
@@ -298,7 +272,7 @@ export function ChartTile({
         purchase={{ date: option.purchaseDate, amountCents: option.amountCents }}
         payIn4={payIn4}
         scaleWith={scaleWith?.points}
-        fullName={fullPayName(c, k)}
+        fullName={fullName}
         highlight={{
           billDate:
             cause && cause.kind !== 'spending' && cause.kind !== 'purchase'
@@ -310,7 +284,7 @@ export function ChartTile({
               point.events.some((event) => event.kind === 'income'),
           )?.date,
         }}
-        label={`Projected balance ${title.replace(/^If/, 'if')}${payIn4 ? `, compared with PayPal Pay in 4. ${thesis}` : '.'} Each day shows its low, with that day’s bills taken out before pay arrives. Lowest point ${signed(option.lowestBalanceCents)} on ${fullDate(option.lowestDate)}, ${cushionGap(option.lowestBalanceCents, c.cushionCents)}.`}
+        label={`Projected balance ${title.replace(/^If/, 'if')}${payIn4 ? `, compared with PayPal Pay in 4. ${thesis}` : '.'} Each day shows its low, with that day’s bills taken out before pay arrives. ${payIn4 ? `${fullName}: lowest point` : 'Lowest point'} ${signed(option.lowestBalanceCents)} on ${fullDate(option.lowestDate)}, ${cushionGap(option.lowestBalanceCents, c.cushionCents)}.`}
       />
       {/* With Pay in 4 open, the chart's own two-row comparison already states both lows. */}
       {!payIn4 && (
@@ -326,28 +300,6 @@ export function ChartTile({
       )}
     </section>
   )
-}
-
-/**
- * The Pay in 4 summary in two lines that name their dates for what they are: the day the balance
- * first goes below the cushion, then the lowest point. The engine's own label is unchanged.
- */
-export function payIn4Lines(p4: P4, cushion: number) {
-  const dip = p4.points.find(
-    (point) => point.minimumCents < cushion && point.baselineMinimumCents >= cushion,
-  )
-  const base = p4.points.find((point) => point.baselineMinimumCents < cushion)
-  const first = dip ?? base
-  const lead =
-    p4.outcome === 'incomplete' || !first
-      ? p4.label
-      : dip
-        ? `With Pay in 4, your balance would first go below your cushion on ${dayLabel(dip.date)}`
-        : `Your plan first goes below your cushion on ${dayLabel(first.date)}, even without this purchase`
-  const day =
-    first && first.date === p4.lowestDate ? 'that same day' : `on ${dayLabel(p4.lowestDate)}`
-  const payday = paydayOn(p4.points, p4.lowestDate) ? ', before payday' : ''
-  return { lead, low: `Lowest point ${signed(p4.lowestBalanceCents)} ${day}${payday}.` }
 }
 
 function nearText(

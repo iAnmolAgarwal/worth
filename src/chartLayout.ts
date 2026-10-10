@@ -701,28 +701,33 @@ export function chartModel(input: ChartInput) {
   }
   const lowSpec = (text: LowText) => pillSpec('low', low, text)
   const fullBelow = values[lowIndex]! < cushionCents ? ' · below cushion' : ''
-  // With two pills, this one names its line; where that does not fit, the plain variants follow.
-  const named: LowText[] = [
-    ...(twoLows
-      ? [
-          {
-            top: `Lowest point ${lowAmount}`,
-            bottom: `Pay in full · ${lowDate}${fullBelow}`,
-            penalty: 0,
-          },
-          { top: `Lowest point ${lowAmount}`, bottom: `Pay in full · ${lowDate}`, penalty: 2 },
-          { top: `Lowest point ${lowAmount}`, bottom: 'Pay in full', penalty: 4 },
-        ]
-      : []),
-    { top: `Lowest point ${lowAmount}`, bottom: lowDate, penalty: twoLows ? 40 : 0 },
-    { top: `Lowest point ${lowAmount}`, bottom: '', penalty: twoLows ? 44 : 4 },
-    { top: lowAmount, bottom: 'Lowest point', nearOnly: true, penalty: twoLows ? 48 : 8 },
-  ]
-  const short: LowText[] = [
-    ...(twoLows ? [{ top: `Lowest ${lowAmount}`, bottom: 'Pay in full', penalty: 0 }] : []),
-    { top: `Lowest ${lowAmount}`, bottom: lowDate, penalty: twoLows ? 40 : 0 },
-    { top: `Lowest ${lowAmount}`, bottom: '', penalty: twoLows ? 44 : 4 },
-  ]
+  // With two pills, every variant names its line, so neither low reads as the other's.
+  const named: LowText[] = twoLows
+    ? [
+        {
+          top: `Lowest point ${lowAmount}`,
+          bottom: `Pay in full · ${lowDate}${fullBelow}`,
+          penalty: 0,
+        },
+        { top: `Lowest point ${lowAmount}`, bottom: `Pay in full · ${lowDate}`, penalty: 2 },
+        { top: `Lowest point ${lowAmount}`, bottom: 'Pay in full', penalty: 4 },
+      ]
+    : [
+        { top: `Lowest point ${lowAmount}`, bottom: lowDate, penalty: 0 },
+        { top: `Lowest point ${lowAmount}`, bottom: '', penalty: 4 },
+        { top: lowAmount, bottom: 'Lowest point', nearOnly: true, penalty: 8 },
+      ]
+  const short: LowText[] = twoLows
+    ? [
+        { top: `Lowest ${lowAmount}`, bottom: 'Pay in full', penalty: 0 },
+        // One line, for the gaps a two-line pill cannot fit.
+        { top: `Lowest point ${lowAmount} · Pay in full`, bottom: '', penalty: 4 },
+        { top: `Lowest ${lowAmount} · Pay in full`, bottom: '', penalty: 6 },
+      ]
+    : [
+        { top: `Lowest ${lowAmount}`, bottom: lowDate, penalty: 0 },
+        { top: `Lowest ${lowAmount}`, bottom: '', penalty: 4 },
+      ]
   const nearest = (texts: LowText[], context: typeof ctx) => {
     let best: { text: LowText; ctx: typeof ctx; score: number } | null = null
     for (const text of texts) {
@@ -737,9 +742,14 @@ export function chartModel(input: ChartInput) {
   const narrowest = [...named, ...short].reduce((a, b) => (lowSpec(b).w < lowSpec(a).w ? b : a))
   // With Pay in 4 open, the comparison rows under the plot state this low with its date, so when
   // no spot is clear of both lines the pill is left out rather than drawn across them.
+  // With two lows, a named pill right beside its ring may cross the dotted Pay in 4 line or the
+  // purchase's line (never the balance line) before it is left out, so narrow frames still say
+  // whose low this is without a long leader.
+  const beside = (text: LowText): LowText => ({ ...text, nearOnly: true })
   const fit =
     nearest(named, ctx) ??
     nearest(short, ctx) ??
+    (twoLows ? nearest([...named, ...short].map(beside), lenient) : null) ??
     (p4Values
       ? null
       : (nearest(named, lenient) ??
@@ -772,8 +782,8 @@ export function chartModel(input: ChartInput) {
       { top: `Lowest point ${amount}`, bottom: `Pay in 4 · ${date}${below}`, penalty: 0 },
       { top: `Lowest point ${amount}`, bottom: `Pay in 4 · ${date}`, penalty: 24 },
       { top: `Lowest point ${amount}`, bottom: `Pay in 4${below}`, penalty: 30 },
+      // The last resort, as for the other pill: "Lowest $X" over its line's name.
       { top: `Lowest ${amount}`, bottom: 'Pay in 4', penalty: 36 },
-      { top: `Pay in 4 ${amount}`, bottom: '', penalty: 40 },
     ]
     // Where no spot clears both lines (phones), the pill may cross its own dotted line at a cost,
     // never the balance line, a mark or the purchase's line.

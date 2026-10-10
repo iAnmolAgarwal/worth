@@ -639,7 +639,7 @@ describe('decision view', () => {
     ).toBeTruthy()
     // The chart states the comparison's point in one line, above the plot.
     expect(document.querySelector('.chart-thesis')!.textContent).toMatch(
-      /^With PayPal Pay in 4 from today, your lowest point is \w{3}, \w{3} \d+ at \$140\.51, below your cushion; paying in full on \w{3}, \w{3} \d+, it’s \w{3}, \w{3} \d+ at \$720\.53\.$/,
+      /^With PayPal Pay in 4 from today, \w{3} \d+, your lowest point is \w{3}, \w{3} \d+ at \$140\.51, below your cushion; paying in full on \w{3}, \w{3} \d+, it’s \w{3}, \w{3} \d+ at \$720\.53\.$/,
     )
     const schedule = screen.getByRole('list', { name: 'Illustrative Pay in 4 schedule' })
     expect(within(schedule).getAllByRole('listitem')).toHaveLength(4)
