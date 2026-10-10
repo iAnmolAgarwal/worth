@@ -816,9 +816,8 @@ export function ImportReview({
     }
   }
 
-  const range = preview?.transactions.length
-    ? `${shortDate(preview.transactions.at(-1)!.date)} – ${shortDate(preview.transactions[0]!.date)}`
-    : undefined
+  const dates = preview?.transactions.map((item) => item.date).sort() ?? []
+  const range = dates.length ? `${shortDate(dates[0]!)} – ${shortDate(dates.at(-1)!)}` : undefined
   return (
     <div className="page plain import-review">
       <div className="wrap narrow">

@@ -186,8 +186,8 @@ function HeroTile({
             {kept
               ? `this keeps your ${money(room.cushionCents)} cushion through ${dayLabel(room.window.end)}.`
               : `your month dips below your ${money(room.cushionCents)} cushion on ${dayLabel(lowest.lowestDate)}.`}{' '}
-            Your lowest point is about {money(lowest.lowestBalanceCents, false)} on{' '}
-            {dayLabel(lowest.lowestDate)}
+            Your lowest point is about {lowest.lowestBalanceCents < 0 ? '−' : ''}
+            {money(Math.abs(lowest.lowestBalanceCents), false)} on {dayLabel(lowest.lowestDate)}
             {paydays.some(({ date }) => daysFrom(lowest.lowestDate, date) === 1)
               ? ', the day before payday'
               : ''}
