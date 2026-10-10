@@ -257,6 +257,26 @@ describe('POST /api/handoff/outcome: recording (contract §5)', () => {
     expect(store.get(id)!.saved!.find((item) => item.qid === QID)!.status).toBe('removed')
   })
 
+  it('takes the sample plan’s saved camera out of Saved when Larkspur reports it (Gate 1)', async () => {
+    const { app, agent } = setup()
+    const before = await shopper(agent)
+    const catalog = (s: AppState) =>
+      s.saved!.filter((item) => item.kind === 'catalog').map((item) => item.productId)
+    expect(catalog(before)).toEqual(expect.arrayContaining(['camera', 'headphones']))
+    expect((await report(app)).body).toEqual({ recorded: true })
+    const after = await state(agent)
+    expect(catalog(after)).toEqual(['headphones'])
+    expect(after.wishlist).toEqual(['headphones'])
+  })
+
+  it('leaves a catalog item alone when another store sells something with the same id', async () => {
+    const { app, agent } = setup()
+    await shopper(agent, { input: { merchant: 'Other Camera Shop' } })
+    expect((await report(app)).body).toEqual({ recorded: true })
+    const saved = (await state(agent)).saved!
+    expect(saved.some((item) => item.kind === 'catalog' && item.productId === 'camera')).toBe(true)
+  })
+
   it('keeps Saved as it is when nothing is recorded', async () => {
     const { app, agent, store } = setup()
     await shopper(agent, { consent: false })
@@ -563,6 +583,9 @@ describe('with the hand-off off (contract §1)', () => {
         expect(response.status).toBe(404)
         expect(response.body).toEqual(NOT_FOUND)
       }
+      const agent = request.agent(app)
+      const seen = await post(agent, '/api/handoff/notices/seen', { purchaseIds: ['p1'] })
+      expect(seen.status).toBe(404)
     })
 })
 
@@ -604,6 +627,13 @@ describe('a later PayPal CSV import (contract §5)', () => {
     store.save(id, data)
     const preview = await post(agent, '/api/import/preview', { csv })
     expect(preview.body.duplicates).toBe(1)
+    expect(preview.body.storeMatches).toEqual([
+      expect.objectContaining({
+        name: 'Larkspur Supply',
+        store: 'Larkspur Supply',
+        item: 'Everyday camera',
+      }),
+    ])
     const committed = await post(agent, '/api/import/commit', { csv })
     expect(committed.status).toBe(200)
     const after = committed.body as AppState

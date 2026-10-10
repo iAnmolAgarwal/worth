@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { STORE_REFERENCE } from '../shared/csv.ts'
 import { dateInTimezone } from '../shared/finance.ts'
+import { DEMO_MERCHANT, PRODUCTS } from '../shared/seed.ts'
 import type { OutcomePayload } from '../shared/handoff.ts'
 import type { SavedItem, Transaction } from '../shared/types.ts'
 import { demoToday } from './demoClock.ts'
@@ -94,10 +95,19 @@ function addPayment(store: Store, quote: StoredQuote, outcome: OutcomePayload, d
   store.save(quote.sessionId, data)
 }
 
-/** A Saved item for the quote's store page: saved from /check, or with its return link. */
+/**
+ * A Saved item for what the store sold: saved from /check, with the store page's link, or, for
+ * the demo store, the same item from Worth's catalog (the sample plan's Saved list).
+ */
 function fromQuote(item: SavedItem, quote: StoredQuote) {
   if (item.qid === quote.qid) return true
-  return Boolean(item.sourceUrl) && sameLink(item.sourceUrl!, quote.returnUrl)
+  if (item.sourceUrl && sameLink(item.sourceUrl, quote.returnUrl)) return true
+  return (
+    item.kind === 'catalog' &&
+    item.productId === quote.productId &&
+    quote.merchant === DEMO_MERCHANT &&
+    PRODUCTS.some((p) => p.id === quote.productId && p.merchant === DEMO_MERCHANT)
+  )
 }
 
 function sameLink(a: string, b: string) {
