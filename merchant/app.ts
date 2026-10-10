@@ -251,8 +251,10 @@ export function createMerchantApp(options: MerchantAppOptions = {}) {
     const payLater = req.query.payLater
     if (payLater !== undefined && payLater !== 'true' && payLater !== 'false')
       throw new HttpError(400, 'payLater must be true or false.', 'INVALID_REQUEST')
+    // Only a yes is signed (contract §3.2): PayPal's no before the shopper logs in isn't reliable,
+    // so payLater=false is read as unknown and the quote carries no answer.
     const quote = mintQuote(session(req, res), product, {
-      ...(payLater === undefined ? {} : { payLater: payLater === 'true' }),
+      ...(payLater === 'true' ? { payLater: true } : {}),
       replay: req.query.replay === 'video',
     })
     res.json(quote)
