@@ -93,7 +93,12 @@ export function BalanceChart({
   payIn4,
   scaleWith,
   highlight,
-}: Omit<ChartInput, 'width'> & { label: string }) {
+  fullName = 'Pay in full',
+}: Omit<ChartInput, 'width'> & {
+  label: string
+  /** With Pay in 4 open: what the plain line means, such as "Pay in full on Oct 23". */
+  fullName?: string
+}) {
   const id = useId().replace(/:/g, '')
   const [wrap, width] = useWidth()
   const [active, setActive] = useState<number | null>(null)
@@ -161,6 +166,14 @@ export function BalanceChart({
   const below = values.some((value) => value < cushionCents)
   const p4Below = !!layout.p4Low?.below
   const isStory = (index: number) => index === story.bill || index === story.payday
+  /** With Pay in 4 open: which line's lowest point falls on this day, in words, or ''. */
+  const lowsOn = (index: number) => {
+    const full = index === low.index
+    const p4 = !!p4Values && index === layout.p4Low?.index
+    if (!p4Values) return ''
+    if (full && p4) return 'Lowest point of both lines'
+    return full ? `Lowest point, ${lower(fullName)}` : p4 ? 'Lowest point with Pay in 4' : ''
+  }
   const targetOf = (rule: number) => targets.findIndex((target) => target.rules.includes(rule))
   const openTarget = open === null ? -1 : targetOf(open)
   const shownRule =
@@ -180,6 +193,8 @@ export function BalanceChart({
     const spending = spendingOn(point)
     if (spending) parts.push(`Everyday spending ${signed(spending)}.`)
     if (p4Values) parts.push(`With Pay in 4, day’s low ${signed(p4Values[index]!)}.`)
+    const lows = lowsOn(index)
+    if (lows) parts.push(`${lows}.`)
     return parts.join(' ')
   }
   const ruleStory = (index: number) => {
@@ -346,6 +361,8 @@ export function BalanceChart({
   const lowEnd = lowBox ? leaderEnd(lowBox, low) : null
   const lowLeader = !!lowEnd && Math.hypot(lowEnd.x - low.x, lowEnd.y - low.y) > LEADER_MIN
   const lowRed = values[low.index]! < cushionCents
+  const p4Box = byId.get('p4low')
+  const p4End = p4Box && layout.p4Low ? leaderEnd(p4Box, layout.p4Low) : null
   const popId = `${id}-pop`
   const ruleClass = (index: number) =>
     `${rules[index]!.kind}${isStory(index) ? ' story' : ''}${hot.has(index) ? ' on' : ''}`
@@ -381,7 +398,7 @@ export function BalanceChart({
       <div className="bchart-key" aria-hidden="true">
         <span>
           <i className="k-line" />
-          {p4Values ? 'Pay in full' : 'Balance (day’s low)'}
+          {p4Values ? fullName : 'Balance (day’s low)'}
         </span>
         {p4Values && (
           <span>
@@ -630,6 +647,29 @@ export function BalanceChart({
               )}
             </g>
           )}
+          {p4Box && layout.p4Low && (
+            <g className={`bchart-lowpill p4${layout.p4Low.below ? ' below' : ''}`}>
+              {p4End &&
+                Math.hypot(p4End.x - layout.p4Low.x, p4End.y - layout.p4Low.y) > LEADER_MIN && (
+                  <line x1={layout.p4Low.x} y1={layout.p4Low.y} x2={p4End.x} y2={p4End.y} />
+                )}
+              <rect
+                x={p4Box.x}
+                y={p4Box.y}
+                width={p4Box.w}
+                height={p4Box.h}
+                rx={p4Box.h / 2 > 10 ? 10 : p4Box.h / 2}
+              />
+              <text x={p4Box.x + 10} y={p4Box.y + 15} className="t">
+                {layout.p4Top}
+              </text>
+              {layout.p4Bottom && (
+                <text x={p4Box.x + 10} y={p4Box.y + 29} className="s">
+                  {layout.p4Bottom}
+                </text>
+              )}
+            </g>
+          )}
 
           {activeIndex !== null && (
             <g className="bchart-scrub" aria-hidden="true">
@@ -787,7 +827,7 @@ export function BalanceChart({
       {layout.p4Low && (
         <dl className="bchart-compare">
           {[
-            { key: 'full', name: 'Pay in full', index: low.index, value: values[low.index]! },
+            { key: 'full', name: fullName, index: low.index, value: values[low.index]! },
             {
               key: 'p4',
               name: 'Pay in 4',
@@ -814,6 +854,9 @@ export function BalanceChart({
         p4={p4Values}
         cushionCents={cushionCents}
         instalments={payIn4?.instalments}
+        fullName={fullName}
+        lowIndex={low.index}
+        p4LowIndex={layout.p4Low?.index}
       />
     </div>
   )
@@ -1054,14 +1097,22 @@ function ChartTable({
   p4,
   cushionCents,
   instalments,
+  fullName,
+  lowIndex,
+  p4LowIndex,
 }: {
   points: ForecastPoint[]
   values: number[]
   p4: number[] | null
   cushionCents: number
   instalments?: InstalmentDetail[]
+  fullName: string
+  lowIndex: number
+  p4LowIndex?: number
 }) {
   const spend = points[0] ? spendingOn(points[0]) : 0
+  const lowText = (value: number, index: number) =>
+    `Lowest point ${signed(value)} on ${dayLabel(points[index]!.date)}${value < cushionCents ? ', below your cushion' : ''}`
   return (
     <details className="bchart-table">
       <summary>View as table</summary>
@@ -1076,11 +1127,14 @@ function ChartTable({
             Projected balance each day at its low, with that day’s bills taken out before pay
             arrives, against your {money(cushionCents)} cushion.
             {spend ? ` Each day also includes about ${money(-spend)} of everyday spending.` : ''}
+            {p4 && p4LowIndex !== undefined
+              ? ` ${fullName}: ${lower(lowText(values[lowIndex]!, lowIndex))}. With Pay in 4: ${lower(lowText(p4[p4LowIndex]!, p4LowIndex))}.`
+              : ''}
           </caption>
           <thead>
             <tr>
               <th scope="col">Day</th>
-              <th scope="col">{p4 ? 'Pay in full (day’s low)' : 'Balance (day’s low)'}</th>
+              <th scope="col">{p4 ? `${fullName} (day’s low)` : 'Balance (day’s low)'}</th>
               <th scope="col">Against your cushion</th>
               <th scope="col">What happens</th>
               {p4 && <th scope="col">With Pay in 4</th>}
@@ -1093,7 +1147,10 @@ function ChartTable({
               return (
                 <tr key={point.date} className={value < cushionCents ? 'below' : undefined}>
                   <th scope="row">{dayLabel(point.date)}</th>
-                  <td className="num">{signed(value)}</td>
+                  <td className="num">
+                    {signed(value)}
+                    {p4 && index === lowIndex ? ' · lowest point' : ''}
+                  </td>
                   <td>
                     {value === cushionCents
                       ? 'At cushion'
@@ -1106,6 +1163,7 @@ function ChartTable({
                     <td className="num">
                       {signed(p4[index]!)}
                       {instalment ? ` · payment ${instalment.number} of 4` : ''}
+                      {index === p4LowIndex ? ' · lowest point' : ''}
                     </td>
                   )}
                 </tr>

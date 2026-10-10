@@ -3784,6 +3784,36 @@ textarea.input {
 .bchart-lowpill.below line {
   stroke: var(--c-danger);
 }
+/* The Pay in 4 comparison's point, in one line above the chart. */
+.chart-thesis {
+  margin: var(--s-2) 0 0;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  font-weight: var(--fw-semibold);
+  color: var(--c-text-strong);
+}
+/* Pay in 4's own low: an outlined pill with a dotted edge, like its line. */
+.bchart-lowpill.p4 rect {
+  fill: var(--c-surface);
+  stroke: var(--c-navy);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 2;
+}
+.bchart-lowpill.p4 .t,
+.bchart-lowpill.p4 .s {
+  fill: var(--c-navy);
+}
+.bchart-lowpill.p4 line {
+  stroke: var(--c-navy);
+}
+.bchart-lowpill.p4.below rect,
+.bchart-lowpill.p4.below line {
+  stroke: var(--c-danger);
+}
+.bchart-lowpill.p4.below .t,
+.bchart-lowpill.p4.below .s {
+  fill: var(--c-danger);
+}
 @media (max-width: 479px) {
   .bchart-slot {
     min-height: 60px;
@@ -3859,5 +3889,15 @@ textarea.input {
 }
 .bchart-compare .below dd b {
   color: var(--c-danger);
+}
+/* Wide frames: the two rows' names share one column, however long the plain line's name is. */
+@media (min-width: 480px) {
+  .bchart-compare {
+    grid-template-columns: max-content 1fr;
+    column-gap: var(--s-2);
+  }
+  .bchart-compare > div {
+    display: contents;
+  }
 }
 /* ===================== end balance chart ===================== */
