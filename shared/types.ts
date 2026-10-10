@@ -27,6 +27,16 @@ export interface ScheduledFlow {
    * snapshot already reflects it, so the forecast skips that occurrence.
    */
   paidOn?: string
+  /**
+   * Where the item came from: 'paypal' when Worth found it in the user's PayPal activity export,
+   * 'you' when the user added it. It never says how certain the amount or date is: a plan found in
+   * PayPal still has estimated dates. Absent on items from before origins were recorded.
+   */
+  origin?: 'paypal' | 'you'
+  /** For a plan payment: the full price of the purchase the plan pays for, when it is known. */
+  planTotalCents?: number
+  /** True once the user set this item's date themselves, so it is no longer Worth's estimate. */
+  userDate?: boolean
 }
 export interface FinancialProfile {
   name: string
@@ -55,6 +65,11 @@ export interface FinancialProfile {
    * by default; this records an explicit opt-out so it is respected.
    */
   aiChoiceMade?: boolean
+  /**
+   * 'paypal' while everyday spending is the average from the user's PayPal activity, 'you' once
+   * they changed it. Absent on the sample and older records.
+   */
+  dailySpendOrigin?: 'paypal' | 'you'
 }
 export interface Transaction {
   id: string
@@ -717,6 +732,8 @@ export interface InstalmentPlanProposal {
   id: string
   /** The merchant, or the row's own label when the purchase is not in the file. */
   name: string
+  /** What was bought, from the purchase row's Item Title, when the export has one. */
+  title?: string
   /** The purchase date, or the first payment seen. */
   startDate: string
   /** The full price, when the purchase row is in the file. */

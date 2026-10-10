@@ -93,7 +93,11 @@ and 47% of BNPL users say they paid late in the past year
   cushion today, found through Channel3. They link out; Worth does not sell them.
 - **Your own history.** Import a PayPal activity CSV (personal or business export, up to 1 MB and
   10,000 rows). Worth proposes recurring bills, categories and existing Pay in 4 plans for you to
-  confirm; it never deducts history from today's funds a second time.
+  confirm; it never deducts history from today's funds a second time. Home starts with "Start
+  with your PayPal activity": choose the file (or **Try with a sample PayPal export**, a fictional
+  export in `src/sample/` that runs through the same import), tick what Worth found in one review
+  screen, each row tagged From PayPal or You added, and Home becomes your month from PayPal. Raw
+  CSV files aren't saved.
 - **Connect an agent.** Any MCP client can ask Worth before it pays. See [Worth guardrail MCP](#worth-guardrail-mcp).
 
 ![Saved on a return visit: the camera saved for Fri, Oct 23 now shows "Your plan suggests this may fit now — confirm today's funds"](docs/img/saved-return-visit.png)

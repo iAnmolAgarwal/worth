@@ -297,6 +297,7 @@ function recurringSuggestions(
       confirmed: false,
       active: true,
       color: latest.color,
+      origin: 'paypal',
     }
     let nextDate = occurrence(flow, 1)
     for (let count = 2; nextDate < today && count < 1000; count++)
@@ -414,6 +415,8 @@ interface Row {
   status: Transaction['status']
   /** Type or Name mentions Pay in 4 or Pay Later. */
   payLater: boolean
+  /** The export's Item Title (or Subject), when it has one. */
+  title: string
 }
 
 function readStatus(statusText: string): Transaction['status'] {
@@ -599,6 +602,7 @@ function proposeInstalmentPlans(records: PayLaterRecord[]): InstalmentPlanPropos
       id: `pay-later:${transaction.id}`,
       name: row.name,
       startDate: row.date,
+      ...(row.title && row.title !== row.name ? { title: row.title } : {}),
       purchaseCents: -row.amount,
       paymentCents: quarterSplit(-row.amount)[0]!,
       payments: [],
@@ -838,6 +842,7 @@ export function parsePayPalCsv(
       statusText,
       status: readStatus(statusText),
       payLater,
+      title: get(raw, 'title').trim().slice(0, 60),
     })
   }
 

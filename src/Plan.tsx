@@ -219,6 +219,7 @@ export function PlanWizard({
         category: step === 1 ? 'Income' : 'Other',
         active: true,
         confirmed: false,
+        origin: 'you',
       },
     ])
     setEditingId(id)
@@ -250,6 +251,11 @@ export function PlanWizard({
       balanceCents: readMoney(balance, 'Money available'),
       cushionCents: readMoney(cushion, 'Cushion'),
       dailySpendCents: readMoney(dailySpend, 'Everyday spending'),
+      // Everyday spending stays credited to PayPal only while it is the import's own average.
+      ...(state.profile.dailySpendOrigin &&
+      readMoney(dailySpend, 'Everyday spending') !== state.profile.dailySpendCents
+        ? { dailySpendOrigin: 'you' as const }
+        : {}),
       timezone: timezone.trim(),
       flows: flows.map((flow) => readFlow(flow)),
       reflectedPurchaseIds: reflectedIds.filter((id) =>
@@ -793,7 +799,7 @@ function FlowCard({
             <DateStepper
               label={flow.kind === 'income' ? 'Next payday' : 'Next due date'}
               value={flow.nextDate || today}
-              onChange={(nextDate) => onChange({ nextDate })}
+              onChange={(nextDate) => onChange({ nextDate, userDate: true })}
             />
             {flow.kind !== 'income' && (
               <Field label="Type">
@@ -929,8 +935,12 @@ function InstalmentPlans({
   const [amount, setAmount] = useState('')
   const [left, setLeft] = useState('3')
   const [first, setFirst] = useState(addDays(today, 14))
+  /** The next payment Worth estimated for a plan from the import; a different date is the user's. */
+  const [estimate, setEstimate] = useState<string>()
   const [every, setEvery] = useState<'14' | 'month'>('14')
   const [error, setError] = useState('')
+  /** Set while the form holds a plan the import found, so the plan is recorded as from PayPal. */
+  const [fromImport, setFromImport] = useState(false)
   const known = new Set(plans.map((plan) => plan.name.toLowerCase()))
   const offered = suggestions.filter((plan) => !known.has(plan.name.toLowerCase()))
   /** Fill the form from what the import saw; the user checks it before adding. */
@@ -942,8 +952,10 @@ function InstalmentPlans({
     setAmount((plan.paymentCents / 100).toFixed(2))
     setLeft(String(Math.max(1, 4 - plan.payments.length)))
     setFirst(next)
+    setEstimate(next)
     setEvery('14')
     setError('')
+    setFromImport(true)
     onAdding(true)
   }
   function add() {
@@ -982,12 +994,15 @@ function InstalmentPlans({
           category: 'Instalment plans',
           active: true,
           confirmed: true,
+          origin: fromImport ? ('paypal' as const) : ('you' as const),
+          ...(fromImport && first === estimate ? {} : { userDate: true }),
         }
       }),
     )
     setName('')
     setAmount('')
     setError('')
+    setFromImport(false)
   }
   return (
     <section aria-labelledby="plans-title" className="stack tight">
@@ -1125,7 +1140,13 @@ function InstalmentPlans({
             <Button onClick={add} disabled={locked}>
               Add plan
             </Button>
-            <Button variant="text" onClick={() => onAdding(false)}>
+            <Button
+              variant="text"
+              onClick={() => {
+                setFromImport(false)
+                onAdding(false)
+              }}
+            >
               Cancel
             </Button>
           </div>
