@@ -52,7 +52,7 @@ the model name and the Channel3 status).
 | `server/narration.ts` | Every sentence the user reads: verdict templates, fact catalogs, the Pay in 4 wording and `checkSentence` for Claude's one sentence. |
 | `server/agentCheckout.ts` | `asksToCheckOut` (the user's own unqualified instruction) and `checkoutGuards`, shared by Ask Worth, the saved-plan Buy button and MCP. |
 | `server/paypal.ts` | Sandbox OAuth, Orders v2 create/get/capture, refunds, `find-eligible-methods`, webhook signature verification and order validation. |
-| `server/channel3.ts`, `server/alternatives.ts` | The Channel3 adapter (band, parsing, cache, back-off, limits, recorded fallback) and what Worth searches for. |
+| `server/channel3.ts`, `server/alternatives.ts` | The Channel3 adapter (band, parsing, URL lookup, cache, back-off, limits, recorded fallback) and what Worth searches for. |
 | `server/saved.ts`, `server/plans.ts`, `server/remember.ts` | Saved items and wait plans, confirmed Pay in 4 and refund schedules, and signed memory of items assessed earlier in a conversation. |
 | `server/demoClock.ts` | The labelled demo clock for the sample persona (`/?replay=video`). |
 | `server/mcp.ts`, `server/mcpDecision.ts`, `server/mcpStdio.ts` | The MCP server, its decision contract with coherence invariants, and the stdio relay. |
@@ -64,6 +64,7 @@ the model name and the Channel3 status).
 | `src/Saved.tsx`, `src/Alternatives.tsx`, `src/Activity.tsx`, `src/Reviews.tsx` | Saved items and wait plans, similar items, activity, and the "how did you pay" and refund reviews. |
 | `src/Plan.tsx`, `src/Import.tsx`, `src/ForeignPayments.tsx` | The four-step plan editor, CSV import preview and unresolved foreign payments. |
 | `src/ConnectAgent.tsx` | Settings → Connect an agent: create, copy and revoke MCP tokens. |
+| `shared/link.ts`, `src/PasteLink.tsx` | Pasted product links: link checks, title cleaning and the "Is $X right?" card with its manual fallback. |
 
 ## Financial calculation
 
@@ -213,6 +214,20 @@ Under the Spend less option, and in Ask answers to requests for something cheape
 - **Routing.** A product search runs only for a request for a cheaper or similar *product*. Questions where "cheaper" is about how or when to pay, which of Worth's options to pick, or a service plan ("Is Pay in 4 cheaper than paying now?", "Is it cheaper to wait?", "Which option is cheapest?", "a cheaper phone plan", "the cheapest way to pay") never search, while "cheaper options for headphones" and "something cheaper than the camera" do: the server refuses Claude's `find_alternatives` call for them, local mode answers them as before, and the server's fallback override applies only when Claude asked a question or summarised the plan. A priced item asked with "or something cheaper" is assessed first, then the search follows.
 - **AI.** `find_alternatives` takes a kind of item and an optional ceiling the user wrote (checked against their words). The server searches and writes the answer; only the outcome (found, none found, needs an item) returns to the model, never product names, stores or prices. Without a kind of item, the answer names the limit and offers one-tap searches ("Find headphones under $300").
 - **Capture.** `?capture=1` blurs product photos, titles and store names for recordings.
+
+## Paste a product link (Channel3 lookup)
+
+For a store that has no "Analyse with Worth" button, the shopper pastes the product link into either composer (Home or Ask Worth). Worth reads it through Channel3 and asks "Is $X right?" before it checks anything.
+
+- **Routing.** The browser checks every composer message first (`linkIn` in `shared/link.ts`). A message holding an http(s) link never goes to `/api/chat`: one link opens the confirm card, several get "Paste one product link at a time". Link turns are also left out of the history later chat messages send.
+- **Validation.** `checkProductLink` accepts only https on the default port, at most 2,048 characters, with no user name or password, on a public domain name. IP literals (v4 and v6), `localhost`, single-label hosts and private suffixes (`.local`, `.internal`, `.lan`, `home.arpa`, …) are refused, and the fragment is dropped. The browser and the server both run it.
+- **No fetch by Worth.** `POST /api/lookup { url }` calls Channel3 `POST /v1/lookup { url }` (header `x-api-key`; response `{ product }`, the same Product model as `GET /v1/products/{id}`; 404 and 422 for no product page, 500 and 504 when the page could not be read). Worth's server never requests the pasted URL itself, so there is no server-side request forgery surface.
+- **Mapping.** `parseLookup` returns `{ name, priceCents?, currency?, merchantName, merchantDomain, imageUrl?, sourceUrl, status }`. Only an offer on the pasted link's own domain is used, preferring an in-stock USD one; another store's price is never shown as this one's. The title is made plain text (control and bidirectional characters removed) and cut to 80 characters. Images are kept only on `cdn.trychannel3.com`. `sourceUrl` is the link as pasted, never Channel3's affiliate redirect.
+- **Confirmation.** The price is never used until the shopper confirms or edits it, along with the name. With no price for this store, a price in another currency, an invalid link, Channel3 off, a failed lookup or a used-up allowance, the card becomes "We couldn't read that page. What's the price?" (or asks for the US dollar price) with name and price fields.
+- **Decision.** The confirmed name and price open the usual decision, carrying `sourceUrl` and `priceSource` (`channel3` when the read price was kept, `user` otherwise). `/api/compare` echoes `source { sourceUrl, merchantName, priceSource }`, naming the store from the link's domain. It does not ask PayPal about Pay in 4, since that check answers for Worth's demo merchant: the panel reads "If this store offers PayPal Pay in 4", shown for $10 to $2,000, without PayPal's message. Saved does not keep the link yet (C6).
+- **Limits.** Lookups share the search budget: the daily cap (`CHANNEL3_DAILY_LIMIT`), the per-client hourly share (`CHANNEL3_IP_HOURLY_LIMIT`) and the back-off on 401/402/403/429. A found product is cached for 15 minutes and a miss for an hour (500 and 504 for 15 minutes), with one request in flight per link. Lookups wait up to 10 seconds. A slow or unreadable page does not pause other calls.
+- **Modes.** `off` answers `LOOKUP_OFF` and goes straight to the manual card. `fixture` serves the recorded lookups in `server/fixtures/channel3.json` (fictional store links on `shop.larkspur.example`: one USD price, one GBP price, one priced only at another store) and "not found" for any other link.
+- **No page text to Claude.** Nothing Channel3 reads from the page is sent to Claude. If the shopper then asks a follow-up in Ask, only the confirmed item name and price travel, as the purchase under discussion, which `requestContext` passes as a quoted, minimised JSON string like any typed item name.
 
 ## Payment state and concurrency
 
