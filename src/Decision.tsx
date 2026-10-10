@@ -64,10 +64,17 @@ export type DecisionRequest = {
 }
 /**
  * A store's item from a signed hand-off (/check). The store sells it, so the way back to the
- * store replaces Worth's actions, and the store's line with its own edit replaces the Read-as chip.
+ * store replaces Worth's actions, and the item card with its own edit replaces the Read-as chip.
  */
 export interface DecisionHandoff {
-  intro: ReactNode
+  /** "Not right? Edit", beside the item's price. */
+  edit: ReactNode
+  /** The edit form, in place of the item's price while the shopper corrects it. */
+  editor?: ReactNode
+  /** Under the item's price after an edit: the store's price and the way back to it. */
+  note?: ReactNode
+  /** The store's own Pay in 4 answer for this amount, under the Pay in 4 heading. */
+  payLater?: string
   /** The actions for this answer: the way back to the store, and Save for a wait plan's day. */
   actions: (notes: boolean, c: Comparison) => ReactNode
   /** Under the answer, once: the report-back choice. */
@@ -366,11 +373,14 @@ function PayIn4Panel({
   open,
   onToggle,
   instance,
+  note,
 }: {
   c: Comparison
   open: boolean
   onToggle: () => void
   instance?: PayPalSdkInstance
+  /** The store's own Pay in 4 answer, as a second line under the heading. */
+  note?: string
 }) {
   const panelId = useId()
   const p4 = c.payIn4
@@ -393,6 +403,7 @@ function PayIn4Panel({
             <span className="meta">
               {p4.available ? 'Not available for this amount' : p4.reason}
             </span>
+            {note && <span className="meta p4-store">{note}</span>}
           </span>
         </div>
       </div>
@@ -430,6 +441,7 @@ function PayIn4Panel({
             4 payments {amounts.size > 1 ? 'from' : 'of'}{' '}
             {money(p4.instalments.at(-1)!.amountCents)}, {PAY_IN_4_SPACING} from today
           </span>
+          {note && <span className="meta p4-store">{note}</span>}
         </span>
         <ChevronDown className="ico chev" aria-hidden="true" />
       </button>
@@ -872,14 +884,49 @@ export function Decision({
               {backLabel}
             </button>
             {handoff ? (
-              handoff.intro
+              // Narrow screens drop the rail's item card far below, so the item leads here.
+              narrow && (
+                <>
+                  <div className="tile item-row">
+                    <div className="item-top">
+                      {handoff.imageUrl && <img src={handoff.imageUrl} alt="" />}
+                      <div>
+                        <div className="pt">{c.itemName}</div>
+                        <div className="meta">
+                          <span className="num strong">{money(c.amountCents)}</span> ·{' '}
+                          {handoff.merchant}
+                        </div>
+                        {!handoff.editor && handoff.edit}
+                      </div>
+                    </div>
+                    {(handoff.editor || handoff.note) && (
+                      <div className="product-edit">
+                        {handoff.editor}
+                        {handoff.note}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )
             ) : (
               <p className="meta strong hide-m" style={{ margin: 0 }}>
                 {c.itemName}, {money(c.amountCents)}
                 {c.source ? ` · ${c.source.merchantName}` : ''}
               </p>
             )}
-            <h1 className="title">{verdictTitle(c)}</h1>
+            {handoff ? (
+              // The answer is the headline: one calm block, the verdict and the engine's sentence.
+              <section className="verdict-block" aria-labelledby="verdict-head">
+                <h1 className="title" id="verdict-head">
+                  {verdictTitle(c)}
+                </h1>
+                <p className="lead">
+                  <AnswerDetail c={c} />
+                </p>
+              </section>
+            ) : (
+              <h1 className="title">{verdictTitle(c)}</h1>
+            )}
             {!editing && !handoff && (
               <div>
                 <ReadAsChip value={readAs} onAction={() => setEditing(true)} />
@@ -912,9 +959,11 @@ export function Decision({
                 }}
               />
             )}
-            <p className="lead">
-              <AnswerDetail c={c} />
-            </p>
+            {!handoff && (
+              <p className="lead">
+                <AnswerDetail c={c} />
+              </p>
+            )}
             {hold && (
               <ReservationNote
                 purchase={hold}
@@ -978,6 +1027,7 @@ export function Decision({
             open={p4Open}
             onToggle={() => setP4Open(!p4Open)}
             instance={instance}
+            note={handoff?.payLater}
           />
           <ChartTile c={c} k={selected} payIn4={p4Open ? p4 : undefined} scaleWith={p4} />
         </div>
@@ -988,6 +1038,9 @@ export function Decision({
               {list}
               <div className="rail-actions bare">{railActions}</div>
             </>
+          ) : handoff && narrow ? (
+            // The item leads the page here, so only the way back stays (tablets have no bar).
+            <div className="rail-actions solo">{railActions}</div>
           ) : (
             <div className="tile">
               <div className="product">
@@ -1004,11 +1057,24 @@ export function Decision({
                           ? `At ${c.source.merchantName} · ${c.source.priceSource === 'channel3' ? 'price read by Channel3, confirmed by you' : 'price you entered'}`
                           : 'Checkout is for demo store items'}
                   </div>
-                  <div className="num strong" style={{ fontWeight: 700, marginTop: 4 }}>
-                    {money(c.amountCents)}
-                  </div>
+                  {handoff ? (
+                    <div className="price-row">
+                      <span className="num strong">{money(c.amountCents)}</span>
+                      {!handoff.editor && handoff.edit}
+                    </div>
+                  ) : (
+                    <div className="num strong" style={{ fontWeight: 700, marginTop: 4 }}>
+                      {money(c.amountCents)}
+                    </div>
+                  )}
                 </div>
               </div>
+              {handoff && (handoff.editor || handoff.note) && (
+                <div className="product-edit">
+                  {handoff.editor}
+                  {handoff.note}
+                </div>
+              )}
               {c.source && (
                 <a
                   className="caption"

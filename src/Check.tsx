@@ -115,14 +115,17 @@ function failure(error: unknown): View {
   return { kind: 'failed', message }
 }
 
-/** §3.2: the store's own Pay in 4 answer applies only to the price it was asked about. */
+/**
+ * §3.2: the store's own Pay in 4 answer applies only to the price it was asked about. Without one
+ * there is nothing to say: the comparison box speaks for itself.
+ */
 export function payLaterLine(quote: HandoffQuote, amountCents: number) {
-  if (!payIn4InRange(amountCents)) return undefined
-  const answer = amountCents === quote.amountCents ? quote.payLater : 'unknown'
-  if (answer === 'offered') return `${quote.merchant} offers PayPal Pay in 4 for this amount.`
-  if (answer === 'not-offered')
+  if (!payIn4InRange(amountCents) || amountCents !== quote.amountCents) return undefined
+  if (quote.payLater === 'offered')
+    return `${quote.merchant} offers PayPal Pay in 4 for this amount.`
+  if (quote.payLater === 'not-offered')
     return `${quote.merchant} doesn’t offer PayPal Pay in 4 for this amount.`
-  return 'If this store offers PayPal Pay in 4, compare it below.'
+  return undefined
 }
 
 /** A link back to the store, which the browser follows like any other. */
@@ -318,7 +321,6 @@ function Quote({
     itemName,
     ...(quote.canConsent ? { qid: quote.qid } : {}),
   }
-  const p4 = payLaterLine(quote, amountCents)
   /** Worth's answer names no price, so the store only ever gets it for its own price. */
   const priceChanged = amountCents !== quote.amountCents
 
@@ -375,56 +377,29 @@ function Quote({
     }
   }
 
-  const intro = (
-    <div className="stack tight">
-      {editing ? (
-        <EditPurchase
-          name={itemName}
-          amountCents={amountCents}
-          onCancel={() => setEditing(false)}
-          onSubmit={(next) => {
-            setEditing(false)
-            setClaimed(
-              next.amountCents === quote.amountCents && next.itemName === quote.item
-                ? undefined
-                : next,
-            )
-          }}
-        />
-      ) : (
-        <div>
-          <span
-            className="readas"
-            role="group"
-            aria-label={`${claimed ? 'You entered' : `From ${quote.merchant}`} · ${itemName} · ${money(amountCents)}`}
-          >
-            <span className="lbl">{claimed ? 'You entered' : `From ${quote.merchant}`}</span>
-            <span className="val">
-              {itemName} · <span className="num">{money(amountCents)}</span>
-            </span>
-            <button className="edit" type="button" onClick={() => setEditing(true)}>
-              Not right? Edit
-            </button>
-          </span>
-        </div>
-      )}
-      {claimed && (
-        <p className="caption" style={{ margin: 0 }}>
-          {quote.merchant}’s price was {money(quote.amountCents)}. Worth is checking the price you
-          entered.
-          {priceChanged &&
-            ` ${quote.merchant} won’t show Worth’s answer, because you changed the price.`}{' '}
-          <button type="button" className="link inline" onClick={() => setClaimed(undefined)}>
-            Use the store’s price
-          </button>
-        </p>
-      )}
-      {p4 && (
-        <p className="meta" style={{ margin: 0 }}>
-          {p4}
-        </p>
-      )}
-    </div>
+  const editor = editing && (
+    <EditPurchase
+      name={itemName}
+      amountCents={amountCents}
+      onCancel={() => setEditing(false)}
+      onSubmit={(next) => {
+        setEditing(false)
+        setClaimed(
+          next.amountCents === quote.amountCents && next.itemName === quote.item ? undefined : next,
+        )
+      }}
+    />
+  )
+  const note = claimed && (
+    <p className="caption" style={{ margin: 0 }}>
+      {quote.merchant}’s price was {money(quote.amountCents)}. Worth is checking the price you
+      entered.
+      {priceChanged &&
+        ` ${quote.merchant} won’t show Worth’s answer, because you changed the price.`}{' '}
+      <button type="button" className="link inline" onClick={() => setClaimed(undefined)}>
+        Use the store’s price
+      </button>
+    </p>
   )
   const footer = quote.canConsent && (
     <label className="check">
@@ -451,7 +426,14 @@ function Quote({
       onSave={() => undefined}
       onViewActivity={() => onNavigate('activity')}
       handoff={{
-        intro,
+        edit: (
+          <button type="button" className="link edit-item" onClick={() => setEditing(true)}>
+            Not right? Edit
+          </button>
+        ),
+        editor: editor || undefined,
+        note: note || undefined,
+        payLater: payLaterLine(quote, amountCents),
         footer,
         merchant: quote.merchant,
         imageUrl: quote.imageUrl,
