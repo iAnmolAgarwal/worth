@@ -1,7 +1,7 @@
 /**
  * `<worth-check>`: the store's "Analyse with Worth" link, next to its PayPal button
  * (specs/handoff-contract.md §3.1–§3.2, C2). Dependency-free and framework-free: a store serves it
- * as a module script (see worthCheckScript.ts) and themes it with CSS custom properties.
+ * as a module script (the store's build emits it as worth-check.js) and themes it with CSS custom properties.
  *
  * Attributes:
  * - `href`: the signed Worth link the store's server minted, `{WORTH_ORIGIN}/check#q={token}`;

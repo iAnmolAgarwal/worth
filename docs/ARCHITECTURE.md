@@ -45,7 +45,7 @@ the model name and the Channel3 status).
 | `shared/csv.ts` | PayPal personal and business export parsing: headers, per-file date order, currency-conversion pairing, transfer/memo/hold rules, Pay in 4 proposals, transaction identity, recurring suggestions and the daily-spending estimate. |
 | `shared/seed.ts` | The relative-dated sample persona (Maya) and the server-owned demo catalog (Larkspur Supply). |
 | `shared/handoff.ts` | The store ↔ Worth hand-off: quote and result tokens signed with direction labels, strict schemas, origin and expiry checks, and outcome-report signatures. Server-only. |
-| `shared/worthCheck.ts`, `shared/worthCheckScript.ts` | The `<worth-check>` element a store places beside its PayPal button, and the same file with its types stripped for the store to serve. |
+| `shared/worthCheck.ts` | The `<worth-check>` element a store places beside its PayPal button; the store's build emits it as `worth-check.js`. |
 | `shared/types.ts`, `shared/limits.ts`, `shared/text.ts` | API contracts, the one CSV size and row limit, and plain-text rules for saved names. |
 | `server/app.ts` | Sessions, validation, routes, ownership, plan rules, checkout reservation, capture, cancel, webhooks and reconciliation. |
 | `server/store.ts` | SQLite tables, atomic operations, uniqueness constraints, expiry and deletion. |
