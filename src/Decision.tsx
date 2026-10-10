@@ -18,6 +18,7 @@ import type { Alternative, ForecastPoint, OptionResult, Product } from '../share
 import { AlternativesPanel } from './Alternatives'
 import { BalanceChart } from './BalanceChart'
 import type { AppState, Comparison, PayIn4, SavePlan, SaveTarget } from './contract'
+import { sourceTarget } from './contract'
 import { ASSESSMENT_ONLY } from './copy'
 import { countedHold, ReservationNote } from './Reservation'
 import {
@@ -616,7 +617,13 @@ export function Decision({
         : 'Save for later',
     run: () =>
       onSave(
-        { kind: 'custom', name: c.itemName, amountCents: c.amountCents },
+        {
+          kind: 'custom',
+          name: c.itemName,
+          amountCents: c.amountCents,
+          // A pasted link keeps its store page, so Saved can link back on the ready day (C6).
+          ...sourceTarget(c.source),
+        },
         c.recommendation === 'wait' && c.wait.date
           ? { waitDate: c.wait.date }
           : c.recommendation

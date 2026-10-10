@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Bookmark,
   BookmarkCheck,
@@ -8,6 +8,7 @@ import {
   CircleAlert,
   Clock,
   Database,
+  ExternalLink,
   Info,
   ShoppingBag,
   Sparkles,
@@ -15,7 +16,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { addDays } from '../shared/finance'
-import type { Product, SavedItem } from '../shared/types'
+import type { Product, SavedItem, SavedPriceCheck } from '../shared/types'
 import { api, ApiError } from './api'
 import { usePriceDrop } from './Alternatives'
 import { ClaudeSwitch, JudgeBadge } from './Ask'
@@ -32,7 +33,7 @@ import {
 import type { DecisionRequest } from './Decision'
 import { claudeOn, fits, useComparison } from './engine'
 import type { AppState, Purchase } from './contract'
-import { isActive, saveRequest } from './contract'
+import { isActive, savedSource, saveRequest } from './contract'
 import { dayLabel, fromMoney, fullDate, money, shortDate, signed } from './format'
 import { Alert, Button, DateStepper, Dialog, Disc, Field, Pill, Toggle } from './ui'
 
@@ -74,10 +75,61 @@ export async function migratePlanned(onUpdate: (state: AppState) => void) {
   }
 }
 
-const decisionFor = (item: SavedItem): DecisionRequest =>
+/** A saved item's comparison, at its saved price or at a price just re-checked. */
+const decisionFor = (item: SavedItem, amountCents = item.amountCents): DecisionRequest =>
   item.kind === 'catalog'
     ? { productId: item.productId }
-    : { amountCents: item.amountCents, itemName: item.name.slice(0, 150) }
+    : { amountCents, itemName: item.name.slice(0, 150), ...savedSource(item) }
+
+/** Who set a store item's saved price, in the card's words (C6). */
+const priceNote = (item: SavedItem) =>
+  item.priceSource === 'channel3'
+    ? 'price read by Channel3, confirmed by you'
+    : 'price you confirmed'
+
+const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
+
+/** The store's name for "Back to <store>": its own name, or the link's domain. */
+const storeName = (item: SavedItem) =>
+  item.merchantName ?? new URL(item.sourceUrl!).hostname.replace(/^www\./, '')
+
+/**
+ * The ready day's price re-check (C6), for an item whose price Channel3 read. It asks once each
+ * time the Saved screen shows the ready plan, never on a timer; a failure keeps the saved price.
+ */
+function usePriceRecheck(item: SavedItem) {
+  const { id, status, priceSource, sourceUrl } = item
+  const due = status === 'ready' && priceSource === 'channel3' && Boolean(sourceUrl)
+  const [check, setCheck] = useState<SavedPriceCheck>()
+  useEffect(() => {
+    if (!due) return
+    let cancelled = false
+    api<SavedPriceCheck>(`/saved/${id}/recheck`, {})
+      .catch((): SavedPriceCheck => ({ status: 'unavailable', savedPriceCents: item.amountCents }))
+      .then((result) => !cancelled && setCheck(result))
+    return () => {
+      cancelled = true
+    }
+    // Asked again only for another item, or the same item saved at another price.
+  }, [due, id, item.amountCents])
+  return { due, check, checking: due && !check }
+}
+
+/** "Back to <store>": a plain link to the store page the item came from, with nothing added. */
+function BackToStore({ item, primary }: { item: SavedItem; primary?: boolean }) {
+  return (
+    <a
+      className={`btn ${primary ? 'btn-primary' : 'btn-secondary'}`}
+      href={item.sourceUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      Back to {storeName(item)}
+      <ExternalLink className="ico" aria-hidden="true" />
+      <span className="sr"> (opens in a new tab)</span>
+    </a>
+  )
+}
 
 /** A saved item's picture: the store photo, or a plain disc for an assessment-only item. */
 function Picture({
@@ -100,7 +152,7 @@ function Picture({
       <ShoppingBag className="ico" strokeWidth={1.75} />
     </span>
   ) : (
-    <Disc icon={item.retailer ? ShoppingBag : Bookmark} kind="plan" />
+    <Disc icon={item.sourceUrl ? Store : item.retailer ? ShoppingBag : Bookmark} kind="plan" />
   )
 }
 
@@ -133,7 +185,11 @@ function SavedCard({
           </div>
           <div className="s soft">
             {product?.merchant ??
-              (item.retailer ? `${item.retailer} · ${ASSESSMENT_ONLY}` : ASSESSMENT_ONLY)}
+              (item.sourceUrl
+                ? `${storeName(item)} · ${priceNote(item)}`
+                : item.retailer
+                  ? `${item.retailer} · ${ASSESSMENT_ONLY}`
+                  : ASSESSMENT_ONLY)}
           </div>
         </div>
         <div className="amt num" style={{ fontSize: 'var(--fs-body)' }}>
@@ -142,12 +198,19 @@ function SavedCard({
       </div>
       <div className="hide-m">
         <div className="t">{item.name}</div>
-        <div className="meta">{product?.merchant ?? item.retailer ?? 'Your assessment'}</div>
+        <div className="meta">
+          {product?.merchant ??
+            (item.sourceUrl ? storeName(item) : (item.retailer ?? 'Your assessment'))}
+        </div>
         <div className="num strong" style={{ fontWeight: 700, marginTop: 4 }}>
           {money(item.amountCents)}
         </div>
       </div>
-      {item.kind === 'custom' && <p className="caption hide-m">{ASSESSMENT_ONLY}</p>}
+      {item.kind === 'custom' && (
+        <p className="caption hide-m">
+          {item.sourceUrl ? sentence(priceNote(item)) : ASSESSMENT_ONLY}
+        </p>
+      )}
       {item.status === 'bought' && <span className="corner-pill">Bought</span>}
       {item.status !== 'bought' && statusPill(item) && <div>{statusPill(item)}</div>}
       {item.status !== 'bought' && dropped !== undefined && (
@@ -383,7 +446,9 @@ export function FundsDialog({
 
 /**
  * A wait plan whose day has come: confirm today's funds, see the fresh check, then (catalog items
- * only, behind the same guards as Claude's prepare_checkout) buy with PayPal (G5-4).
+ * only, behind the same guards as Claude's prepare_checkout) buy with PayPal (G5-4). An item from
+ * another store's page links back to that store instead (C6); a price Channel3 read is read again
+ * first, and the fresh check uses the price now.
  */
 function ReadyPlan({
   item,
@@ -402,13 +467,17 @@ function ReadyPlan({
   onUpdate: (state: AppState) => void
   onToast: (text: string) => void
   onOpenCheckout: (purchase: Purchase) => void
-  onOpen: () => void
+  /** Opens the item's options, at the price now when it was just re-checked. */
+  onOpen: (amountCents?: number) => void
 }) {
   const fundsToday = state.profile.confirmed && state.profile.snapshotDate === state.today
   // Today's funds, once confirmed, hold for every plan whose day has come.
   const fresh = fundsToday
+  const recheck = usePriceRecheck(item)
+  const priceCents =
+    recheck.check?.status === 'changed' ? recheck.check.priceCents! : item.amountCents
   const { comparison: c, loading } = useComparison(
-    fresh ? decisionFor(item) : null,
+    fresh && !recheck.checking ? decisionFor(item, priceCents) : null,
     state.profile.version,
   )
   const [busy, setBusy] = useState(false)
@@ -437,7 +506,19 @@ function ReadyPlan({
         saveRequest(
           item.kind === 'catalog'
             ? { kind: 'catalog', productId: item.productId! }
-            : { kind: 'custom', name: item.name, amountCents: item.amountCents },
+            : {
+                kind: 'custom',
+                name: item.name,
+                amountCents: item.amountCents,
+                // The store page stays with the plan; the price stays the one the shopper confirmed.
+                ...(item.sourceUrl
+                  ? {
+                      sourceUrl: item.sourceUrl,
+                      merchantName: item.merchantName,
+                      priceSource: item.priceSource,
+                    }
+                  : {}),
+              },
           { waitDate: date },
         ),
       )
@@ -462,9 +543,27 @@ function ReadyPlan({
           </div>
           <div className="s">
             <span className="soft">
-              {item.name} · {money(item.amountCents)} · planned for {dayLabel(item.waitDate!)}
+              {item.name} · {money(priceCents)} · planned for {dayLabel(item.waitDate!)}
+              {item.sourceUrl ? ` · ${storeName(item)}` : ''}
             </span>
           </div>
+          {recheck.checking && <p className="caption">Checking the price at {storeName(item)}…</p>}
+          {recheck.check?.status === 'changed' && (
+            <p className="meta strong" style={{ marginTop: 4 }}>
+              Price now {money(recheck.check.priceCents!)} (was{' '}
+              {money(recheck.check.savedPriceCents)})
+            </p>
+          )}
+          {recheck.check?.status === 'same' && (
+            <p className="caption">
+              Price checked just now: still {money(item.amountCents)} at {storeName(item)}.
+            </p>
+          )}
+          {recheck.check?.status === 'unavailable' && (
+            <p className="caption">
+              Couldn’t re-check the price. Showing the {money(item.amountCents)} you confirmed.
+            </p>
+          )}
           {fresh && loading && <p className="caption">Checking your plan for today…</p>}
           {fresh && c && (
             <p className="meta" style={{ marginTop: 4 }} role="status">
@@ -475,7 +574,7 @@ function ReadyPlan({
                   : 'Checked just now: it doesn’t fit in the next 30 days.'}
             </p>
           )}
-          {fresh && c && fitsNow && item.kind === 'custom' && (
+          {fresh && c && fitsNow && item.kind === 'custom' && !item.sourceUrl && (
             <p className="caption">{ASSESSMENT_ONLY}.</p>
           )}
           {error && (
@@ -488,7 +587,7 @@ function ReadyPlan({
       <div className="actions">
         {!fresh ? (
           <Button onClick={onConfirm}>Confirm today’s funds</Button>
-        ) : c && fitsNow && product ? (
+        ) : c && fitsNow && item.sourceUrl ? null : c && fitsNow && product ? (
           active ? (
             <Button variant="secondary" onClick={() => onOpenCheckout(active)}>
               {active.productId === item.productId
@@ -505,10 +604,12 @@ function ReadyPlan({
             Save for {dayLabel(c.wait.date)}
           </Button>
         ) : c ? (
-          <Button variant="secondary" onClick={onOpen}>
+          <Button variant="secondary" onClick={() => onOpen(priceCents)}>
             See your options
           </Button>
         ) : null}
+        {/* Another store's item is bought on its own page, never through Worth (C6). */}
+        {item.sourceUrl && <BackToStore item={item} primary={fresh && Boolean(c) && fitsNow} />}
       </div>
     </section>
   )
@@ -586,7 +687,7 @@ export function Saved({
                 onUpdate={onUpdate}
                 onToast={onToast}
                 onOpenCheckout={onOpenCheckout}
-                onOpen={() => onOpenDecision(decisionFor(item))}
+                onOpen={(amountCents) => onOpenDecision(decisionFor(item, amountCents))}
               />
             ))}
           </div>
