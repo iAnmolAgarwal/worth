@@ -129,7 +129,9 @@ describe('store pages', () => {
       expect(html).toContain(product.image)
     }
     expect(html).toContain('$1,199.00')
-    expect(html).toContain('Demo store · PayPal sandbox · nothing ships')
+    expect(html).toContain('Larkspur Supply is a demo store · PayPal sandbox · nothing ships')
+    expect(html).toContain('<p class="lk-catalog__count">6 products</p>')
+    expect(html).toContain('<span class="lk-card__no">No. 02</span>')
     expect(html).toContain('<title>Larkspur Supply</title>')
   })
 
@@ -157,6 +159,13 @@ describe('store pages', () => {
       /<a class="worth-check" href="https:\/\/worth\.example\/check#q=[^"]+">Analyse with Worth<\/a>/,
     )
     expect(html).not.toContain('lk-buy__worth-result')
+    // The spec sheet: stock number, breadcrumb, facts and four other products.
+    expect(html).toContain('<span class="lk-product__no">No. 02</span>Cameras')
+    expect(html).toContain('<span class="lk-product__crumb">Cameras</span>')
+    expect(html).toContain('<dt>Payment</dt><dd>PayPal sandbox</dd>')
+    const more = html.slice(html.indexOf('class="lk-more"'))
+    expect(more.match(/class="lk-card"/g)).toHaveLength(4)
+    expect(more).not.toContain('href="/p/camera"')
   })
 
   it('says when PayPal is not configured and 404s an unknown product', async () => {
@@ -624,5 +633,21 @@ describe('store webhook', () => {
       .send(event('PAYMENT.CAPTURE.COMPLETED', 'WH-3'))
     expect(foreign.body).toEqual({ received: true, ignored: true })
     expect(t.reports).toHaveLength(0)
+  })
+})
+
+describe('store design assets', () => {
+  it('serves the stylesheet and its self-hosted fonts from the store’s own origin', async () => {
+    const { app } = setup()
+    const css = await request(app).get('/static/store.css').expect(200)
+    const fonts = [...css.text.matchAll(/url\('([^']+)'\)/g)].map((m) => m[1]!)
+    expect(fonts).toHaveLength(5)
+    for (const font of fonts) {
+      expect(font).toMatch(/^fonts\/[a-z0-9-]+\.woff2$/)
+      const file = await request(app).get(`/static/${font}`).expect(200)
+      expect(file.body.subarray(0, 4).toString()).toBe('wOF2')
+    }
+    // Colours of the Worth control belong to its component, never the store.
+    expect(css.text).not.toMatch(/\.worth-check\s*[{,]/)
   })
 })

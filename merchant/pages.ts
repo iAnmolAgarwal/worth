@@ -39,14 +39,15 @@ function layout(title: string, main: string, options: PageOptions) {
 </head>
 <body class="lk">
 <header class="lk-header">
-  <a class="lk-header__brand" href="${home}">${esc(STORE_NAME)}</a>
+  <a class="lk-header__brand" href="${home}">${MARK}<span class="lk-header__name">${esc(STORE_NAME)}</span></a>
   <span class="lk-header__tag">Demo store</span>
+  <nav class="lk-header__nav" aria-label="Store"><a href="${home}">All products</a></nav>
 </header>
 <main class="lk-main">
 ${main}
 </main>
 <footer class="lk-footer">
-  <p class="lk-footer__note">Demo store · PayPal sandbox · nothing ships</p>
+  <p class="lk-footer__note">${esc(STORE_NAME)} is a demo store · PayPal sandbox · nothing ships</p>
   <p class="lk-footer__fine">${esc(STORE_NAME)} is a fictional store for a hackathon demo. Payments run in PayPal’s sandbox with test accounts only.</p>
 </footer>
 </body>
@@ -54,27 +55,40 @@ ${main}
 `
 }
 
+/** The store's sprig mark, drawn inline so it follows the stylesheet's colours. */
+const MARK = `<svg class="lk-header__mark" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 22V9"/><circle cx="12" cy="5" r="2.2"/><circle cx="8.2" cy="9.2" r="1.9"/><circle cx="15.8" cy="9.2" r="1.9"/><circle cx="9" cy="13.6" r="1.6"/><circle cx="15" cy="13.6" r="1.6"/></svg>`
+
 function productHref(product: Product, replay?: boolean) {
   return `/p/${encodeURIComponent(product.id)}${replay ? '?replay=video' : ''}`
 }
 
-export function catalogPage(options: PageOptions) {
-  const cards = CATALOG.map(
-    (product) => `  <li class="lk-card">
-    <a class="lk-card__link" href="${esc(productHref(product, options.replay))}">
-      <img class="lk-card__image" src="${esc(product.image)}" alt="" width="480" height="360" loading="lazy">
+/** "No. 02": the item's stock number, from its place in the catalog. */
+export function stockNumber(product: Product) {
+  return `No. ${String(CATALOG.indexOf(product) + 1).padStart(2, '0')}`
+}
+
+function card(product: Product, replay?: boolean) {
+  return `  <li class="lk-card">
+    <a class="lk-card__link" href="${esc(productHref(product, replay))}">
+      <span class="lk-card__media" style="--lk-swatch: ${esc(product.color)}"><img class="lk-card__image" src="${esc(product.image)}" alt="" width="480" height="360" loading="lazy"></span>
+      <span class="lk-card__no">${esc(stockNumber(product))}</span>
       <span class="lk-card__category">${esc(product.category)}</span>
       <span class="lk-card__name">${esc(product.name)}</span>
       <span class="lk-card__price">${esc(formatPrice(product.priceCents))}</span>
     </a>
-  </li>`,
-  ).join('\n')
+  </li>`
+}
+
+export function catalogPage(options: PageOptions) {
   return layout(
     STORE_NAME,
     `<section class="lk-catalog">
-  <h1 class="lk-catalog__title">Everyday things, made to last</h1>
+  <div class="lk-catalog__head">
+    <h1 class="lk-catalog__title">Everyday things, made to last</h1>
+    <p class="lk-catalog__count">${CATALOG.length} products</p>
+  </div>
   <ul class="lk-catalog__grid">
-${cards}
+${CATALOG.map((product) => card(product, options.replay)).join('\n')}
   </ul>
 </section>`,
     options,
@@ -129,12 +143,12 @@ export function productPage(view: ProductView, options: PageOptions) {
   return layout(
     `${product.name} · ${STORE_NAME}`,
     `<article class="lk-product">
-  <nav class="lk-product__back"><a href="${options.replay ? '/?replay=video' : '/'}">All products</a></nav>
+  <nav class="lk-product__back" aria-label="Breadcrumb"><a href="${options.replay ? '/?replay=video' : '/'}">All products</a><span class="lk-product__crumb">${esc(product.category)}</span></nav>
   <div class="lk-product__media" style="--lk-swatch: ${esc(product.color)}">
     <img class="lk-product__image" src="${esc(product.image)}" alt="${esc(product.name)}" width="960" height="720">
   </div>
   <div class="lk-product__info">
-    <p class="lk-product__category">${esc(product.category)}</p>
+    <p class="lk-product__category"><span class="lk-product__no">${esc(stockNumber(product))}</span>${esc(product.category)}</p>
     <h1 class="lk-product__name">${esc(product.name)}</h1>
     <p class="lk-product__price">${esc(formatPrice(product.priceCents))}</p>
     <p class="lk-product__description">${esc(product.description)}</p>
@@ -151,6 +165,12 @@ export function productPage(view: ProductView, options: PageOptions) {
       </div>
       <p class="lk-buy__error" role="alert" hidden></p>
     </section>
+    <dl class="lk-facts">
+      <div class="lk-facts__row"><dt>Category</dt><dd>${esc(product.category)}</dd></div>
+      <div class="lk-facts__row"><dt>Sold by</dt><dd>${esc(STORE_NAME)}</dd></div>
+      <div class="lk-facts__row"><dt>Payment</dt><dd>PayPal sandbox</dd></div>
+      <div class="lk-facts__row"><dt>Shipping</dt><dd>Demo store, nothing ships</dd></div>
+    </dl>
     <section class="lk-thanks" id="thanks" tabindex="-1" hidden>
       <h2 class="lk-thanks__title">Thank you for your order</h2>
       <p class="lk-thanks__body">PayPal confirmed your sandbox payment for ${esc(product.name)}. This is a demo store, so nothing ships.</p>
@@ -158,7 +178,16 @@ export function productPage(view: ProductView, options: PageOptions) {
       <a class="lk-thanks__more" href="${options.replay ? '/?replay=video' : '/'}">Keep browsing</a>
     </section>
   </div>
-</article>`,
+</article>
+<section class="lk-more">
+  <h2 class="lk-more__title">More from ${esc(STORE_NAME)}</h2>
+  <ul class="lk-catalog__grid lk-more__grid">
+${CATALOG.filter((other) => other !== product)
+  .slice(0, 4)
+  .map((other) => card(other, options.replay))
+  .join('\n')}
+  </ul>
+</section>`,
     options,
   )
 }
