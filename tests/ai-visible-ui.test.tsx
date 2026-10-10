@@ -244,12 +244,36 @@ describe('the collision, surfaced', () => {
         onReviewRefund={vi.fn()}
       />,
     )
-    const insight = screen.getByRole('region', { name: 'Pay in 4 payment next to a bill' })
+    const insight = screen.getByRole('region', { name: 'PayPal Pay in 4 payment next to a bill' })
     expect(insight.textContent).toContain(
-      'Your laptop Pay in 4 payment lands about 1 day before your apartment rent',
+      'Your laptop PayPal Pay in 4 payment lands about 1 day before your apartment rent',
     )
     expect(insight.textContent).toContain('$160.00 on Thu, Oct 15')
     expect(insight.textContent).not.toMatch(/recommend|should/i)
+  })
+
+  it('keeps a plan that is not Pay in 4 generic, without the PayPal name', () => {
+    const state = makeState()
+    state.profile.flows = state.profile.flows.map((flow) =>
+      flow.kind === 'installment' ? { ...flow, name: 'Sofa · Store financing' } : flow,
+    )
+    apiMock.mockImplementation(((_path: string, input: unknown) =>
+      Promise.resolve(compare(state, input))) as typeof api)
+    render(
+      <Home
+        state={state}
+        onAsk={vi.fn()}
+        onNavigate={vi.fn()}
+        onOpenProduct={vi.fn()}
+        onEditPlan={vi.fn()}
+        onOpenCheckout={vi.fn()}
+        onConfirmPlan={vi.fn()}
+        onReviewRefund={vi.fn()}
+      />,
+    )
+    const insight = screen.getByRole('region', { name: 'Plan payment next to a bill' })
+    expect(insight.textContent).toContain('Your sofa plan payment lands about 1 day before')
+    expect(insight.textContent).not.toContain('PayPal')
   })
 
   it('puts the Pay in 4 comparison directly under the option cards', async () => {

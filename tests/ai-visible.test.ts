@@ -298,8 +298,8 @@ describe('the collision, surfaced (judge #7)', () => {
     expect(found[0]!.payment).toMatchObject({ name: 'Laptop · Pay in 4', date: '2026-10-15' })
     expect(found[0]!.bill).toMatchObject({ name: 'Apartment rent', daysFromInstalment: 1 })
     expect(
-      `Your ${planLabel(found[0]!.payment.name)} Pay in 4 payment lands ${nearPhrase(1, 'Apartment rent')}`,
-    ).toBe('Your laptop Pay in 4 payment lands about 1 day before your apartment rent')
+      `Your ${planLabel(found[0]!.payment.name)} PayPal Pay in 4 payment lands ${nearPhrase(1, 'Apartment rent')}`,
+    ).toBe('Your laptop PayPal Pay in 4 payment lands about 1 day before your apartment rent')
   })
 
   it('never states a collision to the day', () => {

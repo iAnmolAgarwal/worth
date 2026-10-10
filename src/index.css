@@ -2651,7 +2651,14 @@ textarea.input {
   font-weight: var(--fw-medium);
   white-space: nowrap;
 }
-.env-pop a {
+.env-pop .env-about {
+  white-space: normal;
+  max-width: 256px;
+  margin-bottom: var(--s-1);
+  font-weight: var(--fw-regular);
+}
+.env-pop a,
+.env-pop .link {
   margin-top: var(--s-1);
   min-height: 32px;
   display: inline-flex;
@@ -2664,11 +2671,6 @@ textarea.input {
   }
   .topbar .in {
     gap: var(--s-4);
-  }
-}
-@media (max-width: 1023px) {
-  .env-wrap.d {
-    display: none;
   }
 }
 

@@ -29,7 +29,7 @@ import { ImportDialog } from './Import'
 import { PlanPage, PlanWizard } from './Plan'
 import { ConfirmPlanDialog, RefundDialog } from './Reviews'
 import { migratePlanned, Saved, Settings } from './Saved'
-import { ASSESSMENT_ONLY } from './copy'
+import { ASSESSMENT_ONLY, paypalModeLine, SAMPLE_WHO } from './copy'
 import { usePayPalSdk } from './paypal'
 import { Alert, Button, IconButton, Wordmark } from './ui'
 
@@ -79,7 +79,7 @@ export default function App() {
   const [error, setError] = useState('')
   const [route, setRoute] = useState(parseRoute)
   const [menu, setMenu] = useState(false)
-  /** The "Sandbox demo" chip's details: data source, assistant state and PayPal mode. */
+  /** The data chip's details: whose data this is, assistant state and PayPal mode. */
   const [envOpen, setEnvOpen] = useState(false)
   const envButton = useRef<HTMLButtonElement>(null)
   // Escape anywhere closes the chip's details and returns focus to it; so does a click outside.
@@ -378,7 +378,9 @@ export default function App() {
       : screen === 'plan-edit'
         ? 'plan'
         : screen
-  const sample = state.profile.source === 'demo' ? 'Sample data' : 'Your data'
+  const demo = state.profile.source === 'demo'
+  // One label at every width: it names whose month this is (third-party feedback F1).
+  const sample = demo ? 'Sample: Maya' : 'Your data'
   const env = envLabel(state)
   const decisionProduct = decisionRequest?.productId
     ? state.products.find((p) => p.id === decisionRequest.productId)
@@ -435,7 +437,7 @@ export default function App() {
             ))}
           </nav>
           <div className="right">
-            <span className="env-wrap d">
+            <span className="env-wrap">
               <button
                 type="button"
                 className="env env-btn"
@@ -454,20 +456,36 @@ export default function App() {
                     setEnvOpen(false)
                 }}
               >
-                Sandbox demo
+                {sample}
               </button>
               {envOpen && (
                 <span className="env-pop" id="env-details" role="status">
+                  <span className="env-about">
+                    {demo
+                      ? `This is ${SAMPLE_WHO}. No real money moves, and ${paypalModeLine(state.config.paypal)}.`
+                      : `This is the PayPal activity you imported. ${paypalModeLine(state.config.paypal)}.`}
+                  </span>
                   {env.split(' · ').map((part) => (
                     <span key={part}>{part}</span>
                   ))}
+                  {demo && (
+                    <button
+                      type="button"
+                      className="link"
+                      onClick={() => {
+                        setEnvOpen(false)
+                        setImporting(true)
+                      }}
+                    >
+                      Use your own PayPal activity
+                    </button>
+                  )}
                   <a href="#settings" onClick={() => setEnvOpen(false)}>
                     About this demo
                   </a>
                 </span>
               )}
             </span>
-            <span className="env show-m">{sample}</span>
             <a className="icon-btn hide-m" href="#settings" aria-label="Settings and privacy">
               <SettingsIcon className="ico" strokeWidth={1.75} aria-hidden="true" />
             </a>
@@ -568,6 +586,7 @@ export default function App() {
               )
             }
             onEditPlan={() => navigate('plan/edit')}
+            onImport={() => setImporting(true)}
             onOpenCheckout={openCheckout}
             onConfirmPlan={(purchaseId) => setReview({ kind: 'plan', purchaseId })}
             onReviewRefund={(purchaseId, refundId) =>
