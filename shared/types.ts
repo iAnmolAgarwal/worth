@@ -284,13 +284,15 @@ export interface Purchase {
   /** The last problem with this checkout, written for the user; never raw PayPal output. */
   lastError?: { code: string; message: string }
   /**
-   * True for an order Claude prepared although it dips below the cushion. The UI shows a confirm
-   * step, and capture requires `{ acknowledgeShortfall: true }` from the user.
+   * True for an order an agent prepared although it dips below the cushion, from before agents
+   * switched to linking to the store (decision 0.2). The UI shows a confirm step, and capture
+   * requires `{ acknowledgeShortfall: true }` from the user.
    */
   proceedConfirmRequired?: boolean
   /**
-   * 'agent' when Ask Worth's prepare_checkout created the order; 'external' when an outside agent
-   * asked for it through Worth's MCP server (prepare_order); absent on older purchases.
+   * On orders from before decision 0.2: 'agent' when Ask Worth's assistant prepared the order;
+   * 'external' when an outside agent asked for it through Worth's MCP server. Agents now link to
+   * the store instead, so new orders are 'user' only; absent on older purchases.
    */
   preparedBy?: 'agent' | 'external' | 'user'
   /**
@@ -597,8 +599,12 @@ export interface ChatReply {
   suggestions: string[]
   /** Tools that ran successfully for this answer. */
   toolCalls: string[]
-  /** A PayPal order Claude prepared for the user to approve. Capture stays a separate user action. */
-  checkout?: CheckoutHandoff
+  /**
+   * The demo store's own page for a catalog item the person wants to buy (decision 0.2). Worth
+   * prepares no order: the store sells it and its own PayPal checkout takes the payment. Absent
+   * while the store hand-off is off.
+   */
+  storeLink?: StoreLink
   /** Similar items under what fits today, from other stores. Shown only when some were found. */
   alternatives?: Alternatives
   /** The assessed item, signed for this session, to send back with later questions. */
@@ -677,16 +683,13 @@ export interface AnswerTrace {
     rejected?: string
   }
 }
-/** What the UI needs to hand a prepared order to PayPal for approval. */
-export interface CheckoutHandoff {
-  purchaseId: string
-  orderId: string
-  approveUrl: string
+/** A link to the store's own product page, with the catalog's name and price for the label. */
+export interface StoreLink {
+  /** `MERCHANT_ORIGIN/p/<productId>`, built by the server; never from Claude. */
+  url: string
+  merchant: string
   itemName: string
   amountCents: number
-  option: 'buyToday' | 'wait' | 'spendLess'
-  /** True when the user chose to go ahead despite a shortfall; the UI confirms that first. */
-  requiresProceedConfirm: boolean
 }
 /**
  * A completed payment in another currency with no matching USD conversion in the export. Until it

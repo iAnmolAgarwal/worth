@@ -5,10 +5,8 @@ import {
   Bookmark,
   BookmarkCheck,
   CircleAlert,
-  ExternalLink,
   ListChecks,
   Sparkles,
-  TriangleAlert,
 } from 'lucide-react'
 import { addDays } from '../shared/finance'
 import { linkIn } from '../shared/link'
@@ -21,17 +19,11 @@ import type {
   PurchaseContext,
   SavedItem,
   SignedItem,
+  StoreLink,
 } from '../shared/types'
 import { api, ApiError } from './api'
 import { alternativeTarget } from './contract'
-import type {
-  AgentCheckout,
-  AppState,
-  ChatReply,
-  Comparison,
-  SavePlan,
-  SaveTarget,
-} from './contract'
+import type { AppState, ChatReply, Comparison, SavePlan, SaveTarget } from './contract'
 import { SimilarItems } from './Alternatives'
 import { PayIn4Row, PayIn4Strip, TraceDetails } from './AskTrace'
 import { ASSESSMENT_ONLY, claudeUses } from './copy'
@@ -450,53 +442,25 @@ function AskEdit({
   )
 }
 
-function AgentHandoff({
-  checkout,
-  onOpen,
-}: {
-  checkout: AgentCheckout
-  onOpen: (purchaseId: string, approveUrl: string) => void
-}) {
-  const [confirmed, setConfirmed] = useState(!checkout.requiresProceedConfirm)
-  const [declined, setDeclined] = useState(false)
-  if (declined)
-    return (
-      <p className="meta">
-        Not now. The checkout stays open until you cancel it from Home or Activity.
-      </p>
-    )
-  if (!confirmed)
-    return (
-      <section className="tile" style={{ width: '100%' }} aria-label="Confirm before checkout">
-        <Alert tone="bad" icon={TriangleAlert}>
-          <b>Buying {checkout.itemName} today takes you below your cushion.</b>
-          <br />
-          You asked Worth’s assistant to go ahead anyway. Confirm once more before PayPal opens.
-        </Alert>
-        <div className="actions" style={{ marginTop: 12 }}>
-          <Button onClick={() => setConfirmed(true)}>Yes, continue</Button>
-          <Button variant="text" onClick={() => setDeclined(true)}>
-            Not now
-          </Button>
-        </div>
-      </section>
-    )
+/**
+ * The store's own page for an item the person asked to buy (decision 0.2). Worth sells nothing and
+ * prepares no order: the store's PayPal checkout takes the payment. Like /check's "Back to <store>",
+ * the link leaves in the same tab, and no referrer goes with it.
+ */
+function StoreHandoff({ link }: { link: StoreLink }) {
   return (
-    <section className="tile" style={{ width: '100%' }} aria-label="Prepared by Worth’s assistant">
+    <section className="tile" style={{ width: '100%' }} aria-label={`Buy at ${link.merchant}`}>
       <div className="h-section">
-        Checkout ready: {checkout.itemName}, {money(checkout.amountCents)}
+        {link.itemName}, {money(link.amountCents)} at {link.merchant}
       </div>
       <p className="meta" style={{ marginTop: 4 }}>
-        Worth’s assistant prepared this in the PayPal sandbox. You approve in PayPal, then confirm
-        here. Nothing is charged until you do.
+        Worth doesn’t sell this. You buy it on {link.merchant}’s own page and pay with its PayPal
+        checkout.
       </p>
       <div className="actions" style={{ marginTop: 12 }}>
-        <Button
-          icon={ExternalLink}
-          onClick={() => onOpen(checkout.purchaseId, checkout.approveUrl)}
-        >
-          Open checkout
-        </Button>
+        <a className="btn btn-primary" href={link.url} rel="noreferrer">
+          Open at {link.merchant}
+        </a>
       </div>
     </section>
   )
@@ -637,7 +601,7 @@ export function Ask({
   onUpdate?: (state: AppState) => void
   onSessionChange?: () => void
   onOpenDecision: (request: DecisionRequest, explanation?: Explanation) => void
-  onOpenCheckout: (purchaseId: string, approveUrl?: string) => void
+  onOpenCheckout: (purchaseId: string) => void
   onNavigate: (hash: string) => void
   onSave?: OnSave
 }) {
@@ -745,7 +709,6 @@ export function Ask({
             itemName: reply.assessment.itemName,
             purchaseDate: reply.assessment.purchaseDate,
           })
-        if (reply.checkout) onUpdate?.((await api<AppState>('/state')) as AppState)
       } catch (failure) {
         if (failure instanceof ApiError && failure.code === 'SESSION_CHANGED') {
           setEntries([])
@@ -763,7 +726,7 @@ export function Ask({
         setBusy(false)
       }
     },
-    [state.sessionKey, onSessionChange, onUpdate],
+    [state.sessionKey, onSessionChange],
   )
   useEffect(() => {
     if (initialPrompt && lastPrompt.current !== initialPrompt.id && !inFlight.current) {
@@ -1066,7 +1029,7 @@ function Answer({
   onSend: (text: string, context?: PurchaseContext) => void
   onAnswer: () => void
   onOpenDecision: (request: DecisionRequest, explanation?: Explanation) => void
-  onOpenCheckout: (purchaseId: string, approveUrl?: string) => void
+  onOpenCheckout: (purchaseId: string) => void
   onNavigate: (hash: string) => void
   onSave?: OnSave
 }) {
@@ -1160,7 +1123,7 @@ function Answer({
           onOpen={(request) => onOpenDecision(request, explanation)}
           onSave={onSave}
           onNavigate={onNavigate}
-          onOpenCheckout={(purchaseId) => onOpenCheckout(purchaseId)}
+          onOpenCheckout={onOpenCheckout}
         />
       ) : (
         <>
@@ -1213,7 +1176,7 @@ function Answer({
           onSave={onSave && ((item) => void onSave(alternativeTarget(item)))}
         />
       )}
-      {reply.checkout && <AgentHandoff checkout={reply.checkout} onOpen={onOpenCheckout} />}
+      {reply.storeLink && <StoreHandoff link={reply.storeLink} />}
       {fix && last && (
         <button type="button" className="link" onClick={() => onNavigate(fix.hash)}>
           {fix.label} <ArrowRight size={16} aria-hidden="true" />

@@ -50,7 +50,7 @@ const iconFor = (t: Transaction): LucideIcon =>
           ? CalendarCheck
           : Store
 const PAGE = 25
-/** An order an outside agent asked for through Worth's MCP server (prepare_order). */
+/** An order an outside agent asked for over MCP, from before agents linked to the store. */
 function ExternalAgent() {
   return (
     <div className="pills">
