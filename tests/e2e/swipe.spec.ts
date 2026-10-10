@@ -112,15 +112,15 @@ test.describe('the swipe button', () => {
     await page.waitForURL(`${origins.worth}/check`)
   })
 
-  test('the arrows nudge, and stay still under reduced motion', async ({ page }) => {
+  test('the tab arrow nudges, and stays still under reduced motion', async ({ page }) => {
     await swipeRow(page)
     const animations = () =>
       page
         .locator('worth-check .nudge')
         .evaluateAll((arrows) => arrows.map((arrow) => getComputedStyle(arrow).animationName))
-    await expect.poll(animations).toEqual(['worth-nudge', 'worth-nudge'])
+    await expect.poll(animations).toEqual(['worth-nudge'])
     await page.emulateMedia({ reducedMotion: 'reduce' })
-    await expect.poll(animations).toEqual(['none', 'none'])
+    await expect.poll(animations).toEqual(['none'])
   })
 })
 

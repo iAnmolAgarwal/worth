@@ -7,9 +7,9 @@
  * - Dragging the tab left unwraps a white "W | Analyse with Worth →" bar over the button, only
  *   while dragging. Releasing past half the row (or a fast flick) goes to Worth; earlier, it
  *   springs back.
- * - The tab is a real link, so a tap, Enter (and Space here) open Worth too. A small left arrow in
- *   the tab and in a "Swipe left for Worth" hint under it nudges left on a gentle loop; reduced
- *   motion keeps both still and turns the drag off, leaving the tab a plain link.
+ * - The tab is a real link, so a tap, Enter (and Space here) open Worth too. A left arrow in the
+ *   tab nudges left on a gentle loop, over a plain "Swipe left for Worth" hint; reduced motion
+ *   keeps the arrow still and turns the drag off, leaving the tab a plain link.
  * - Without PayPal's button (still loading, ineligible or failed) the tab becomes the default
  *   full-width outline link, so Worth stays one tap away.
  */
@@ -23,7 +23,7 @@ export const FLICK_SPEED = 0.9
 export const FLICK_FROM = 0.15
 /** Horizontal travel before a press becomes a drag; a vertical move first lets the page scroll. */
 export const SLOP_PX = 6
-/** The arrows' loop: one nudge per cycle, for this many cycles once the row is first in view. */
+/** The tab arrow's loop: one nudge per cycle, for this many cycles once the row is first in view. */
 export const NUDGE_MS = 1800
 export const NUDGE_CYCLES = 10
 
@@ -103,7 +103,7 @@ export const SWIPE_STYLE = `
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 5px;
   width: var(--tab);
   height: 45px;
   border: 1px solid var(--line);
@@ -155,8 +155,8 @@ export const SWIPE_STYLE = `
 .chevron {
   display: block;
   flex: none;
-  width: 6px;
-  height: 10px;
+  width: 10px;
+  height: 15px;
 }
 .text {
   display: none;
@@ -238,7 +238,6 @@ export const SWIPE_STYLE = `
   display: flex;
   justify-content: flex-end;
   align-items: center;
-  gap: 5px;
   margin: 6px 0 0;
   padding-right: 2px;
   font-size: 12px;
@@ -247,15 +246,11 @@ export const SWIPE_STYLE = `
   user-select: none;
   -webkit-user-select: none;
 }
-.hint .chevron {
-  width: 5px;
-  height: 8px;
-}
 .used .hint {
   visibility: hidden;
 }
 
-/* The arrows' leftward nudge: a few px out and back, then a rest, in step in the tab and the hint. */
+/* The tab arrow's leftward nudge: a few px out and back, then a rest. */
 @keyframes worth-nudge {
   0%,
   60%,
@@ -263,7 +258,7 @@ export const SWIPE_STYLE = `
     transform: translateX(0);
   }
   30% {
-    transform: translateX(-3px);
+    transform: translateX(-4px);
   }
 }
 .hinting .nudge {
@@ -367,7 +362,7 @@ export class SwipeControl {
   ) {
     this.box = document.createElement('div')
     this.box.className = 'swipe'
-    this.box.innerHTML = `<div class="row" part="row"><slot></slot><span class="seam" aria-hidden="true"></span><div class="panel" aria-hidden="true"><div class="label"><span class="words">Analyse with Worth</span>${ARROW}</div></div><a class="tab" part="link" draggable="false" aria-label="Analyse with Worth">${CHEVRON}${MARK}<span class="text">Analyse with Worth</span></a></div><p class="hint" aria-hidden="true">${CHEVRON}<span>Swipe left for Worth</span></p>`
+    this.box.innerHTML = `<div class="row" part="row"><slot></slot><span class="seam" aria-hidden="true"></span><div class="panel" aria-hidden="true"><div class="label"><span class="words">Analyse with Worth</span>${ARROW}</div></div><a class="tab" part="link" draggable="false" aria-label="Analyse with Worth">${CHEVRON}${MARK}<span class="text">Analyse with Worth</span></a></div><p class="hint" aria-hidden="true">Swipe left for Worth</p>`
     this.tab = this.box.querySelector('.tab')!
     this.label = this.box.querySelector('.label')!
     this.words = this.box.querySelector('.words')!
@@ -394,7 +389,7 @@ export class SwipeControl {
       attributeFilter: ['hidden'],
     })
     this.sync()
-    // The arrows start nudging once the row is first fully in view, so the loop isn't spent unseen.
+    // The arrow starts nudging once the row is first fully in view, so the loop isn't spent unseen.
     if (this.box.classList.contains('hinting')) return
     if (typeof IntersectionObserver !== 'function') return void this.box.classList.add('hinting')
     this.viewer = new IntersectionObserver(

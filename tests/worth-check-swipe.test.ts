@@ -97,7 +97,8 @@ describe('<worth-check mode="swipe">', () => {
     expect(panel.getAttribute('aria-hidden')).toBe('true')
     expect(hint.getAttribute('aria-hidden')).toBe('true')
     expect(hint.textContent).toBe('Swipe left for Worth')
-    expect(hint.querySelector('svg.chevron.nudge')).not.toBeNull()
+    // Words only: the one moving arrow is the tab's.
+    expect(hint.querySelector('svg, .nudge')).toBeNull()
     expect(element.shadowRoot!.querySelectorAll('a, button, [tabindex]')).toHaveLength(1)
     expect(box.classList.contains('solo')).toBe(false)
     expect(element.hidden).toBe(false)
@@ -164,11 +165,11 @@ describe('<worth-check mode="swipe">', () => {
   })
 })
 
-describe('the arrows’ nudge', () => {
-  it('loops gently left and back, in step in the tab and the hint, and stops after use', () => {
+describe('the tab arrow’s nudge', () => {
+  it('loops gently left and back in the tab, and stops after use', () => {
     const element = mount()
     const { box, tab, css } = parts(element)
-    expect(css).toMatch(/@keyframes worth-nudge \{[^@]*30% \{\s*transform: translateX\(-3px\);/)
+    expect(css).toMatch(/@keyframes worth-nudge \{[^@]*30% \{\s*transform: translateX\(-4px\);/)
     expect(css).toContain(
       `.hinting .nudge {\n  animation: worth-nudge ${NUDGE_MS}ms cubic-bezier(0.45, 0, 0.55, 1) ${NUDGE_CYCLES};`,
     )
@@ -199,7 +200,7 @@ describe('the arrows’ nudge', () => {
     expect(box.classList.contains('hinting')).toBe(true)
   })
 
-  it('keeps both arrows still and the tab a plain link under reduced motion', () => {
+  it('keeps the arrow still and the tab a plain link under reduced motion', () => {
     reduced(true)
     const element = mount()
     const { box, tab, css } = parts(element)
