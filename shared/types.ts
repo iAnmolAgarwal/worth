@@ -35,6 +35,8 @@ export interface ScheduledFlow {
   origin?: 'paypal' | 'you'
   /** For a plan payment: the full price of the purchase the plan pays for, when it is known. */
   planTotalCents?: number
+  /** True once the user set this item's date themselves, so it is no longer Worth's estimate. */
+  userDate?: boolean
 }
 export interface FinancialProfile {
   name: string
@@ -63,6 +65,11 @@ export interface FinancialProfile {
    * by default; this records an explicit opt-out so it is respected.
    */
   aiChoiceMade?: boolean
+  /**
+   * 'paypal' while everyday spending is the average from the user's PayPal activity, 'you' once
+   * they changed it. Absent on the sample and older records.
+   */
+  dailySpendOrigin?: 'paypal' | 'you'
 }
 export interface Transaction {
   id: string

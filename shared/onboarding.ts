@@ -119,6 +119,13 @@ export function draftFlows(preview: ImportPreview, existing: ScheduledFlow[]): S
   ]
 }
 
+/**
+ * Worth's own estimate of a date: projected from PayPal activity and not set by the user. Origin
+ * and certainty stay apart: a PayPal item whose date the user set is no longer "about".
+ */
+export const estimated = (flow: Pick<ScheduledFlow, 'origin' | 'userDate'>) =>
+  flow.origin === 'paypal' && !flow.userDate
+
 /** What the plan holds by where it came from: "How your month was built". Active items only. */
 export function originCounts(flows: ScheduledFlow[]) {
   const active = flows.filter((flow) => flow.active)
@@ -129,8 +136,10 @@ export function originCounts(flows: ScheduledFlow[]) {
     plans: new Set(
       paypal.filter((flow) => flow.kind === 'installment').map((flow) => flow.planId ?? flow.id),
     ).size,
-    /** Items the user added; anything without an origin was entered by hand before P3a. */
-    added: active.filter((flow) => flow.origin !== 'paypal'),
+    /** Items the user added. */
+    added: active.filter((flow) => flow.origin === 'you'),
+    /** Items from before origins were recorded: Worth can't say where they came from. */
+    earlier: active.filter((flow) => !flow.origin),
   }
 }
 

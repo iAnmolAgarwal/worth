@@ -2,7 +2,7 @@
 // PayPal Pay in 4 plans in progress, and how the month was built, by origin.
 import { CalendarClock, CircleCheck, FileUp, KeyRound, Wallet } from 'lucide-react'
 import { addDays, getUpcomingFlows, planCollisions } from '../shared/finance'
-import { dayPhrase, originCounts } from '../shared/onboarding'
+import { dayPhrase, estimated, originCounts } from '../shared/onboarding'
 import type { Comparison, ScheduledFlow } from '../shared/types'
 import type { AppState } from './contract'
 import {
@@ -109,7 +109,10 @@ export function NextThirtyDays({ state, onShowAll }: { state: AppState; onShowAl
     const note = plan ? notes.get(`${planId}|${date}`) : undefined
     const parts =
       flow.kind === 'installment'
-        ? [`about ${dayLabel(date)}`, number ? `Payment ${number} of ${plan!.total}` : 'Payment']
+        ? [
+            `${estimated(flow) ? 'about ' : ''}${dayLabel(date)}`,
+            number ? `Payment ${number} of ${plan!.total}` : 'Payment',
+          ]
         : [
             dayLabel(date),
             flow.kind === 'income' ? 'Payday' : kindLabel(flow.kind),
@@ -171,16 +174,24 @@ export function NextThirtyDays({ state, onShowAll }: { state: AppState; onShowAl
   )
 }
 
+/** Whether a plan's dates are Worth's estimate: plans from PayPal whose dates the user didn't set. */
+const planEstimated = (state: AppState, planId: string) => {
+  const flow = state.profile.flows.find((item) => (item.planId ?? item.id) === planId)
+  return Boolean(flow && estimated(flow))
+}
+
 /** "PayPal Pay in 4: 2 in progress · next about Oct 17": under the hero on a phone. */
 export function PlanSummaryLine({ state }: { state: AppState }) {
   const plans = allPlans(state)
   if (!plans.length) return null
-  const next = plans.map((plan) => plan.next).sort()[0]!
+  const first = [...plans].sort((a, b) => a.next.localeCompare(b.next))[0]!
   return (
     <p className="plan-line show-m">
       <CalendarClock className="ico" aria-hidden="true" />
       <span>
-        <b>PayPal Pay in 4:</b> {plans.length} in progress · next about {shortDate(next)}
+        <b>PayPal Pay in 4:</b> {plans.length} in progress · next{' '}
+        {planEstimated(state, first.planId) ? 'about ' : ''}
+        {shortDate(first.next)}
       </span>
     </p>
   )
@@ -250,7 +261,9 @@ export function PlanCards({ state, room }: { state: AppState; room?: Comparison 
                 </span>
               )}
               <span>
-                {plan.left === 1 ? 'Last' : 'Next'} payment about <b>{dayLabel(plan.next)}</b>
+                {plan.left === 1 ? 'Last' : 'Next'} payment{' '}
+                {planEstimated(state, plan.planId) ? 'about ' : ''}
+                <b>{dayLabel(plan.next)}</b>
               </span>
             </div>
             {notes.has(plan.planId) && <TimelineNote>{notes.get(plan.planId)!}</TimelineNote>}
@@ -294,7 +307,23 @@ export function MonthBuilt({
     counts.bills && count(counts.bills, 'bill or subscription', 'bills and subscriptions'),
     counts.plans && count(counts.plans, 'Pay in 4 plan', 'Pay in 4 plans'),
   ].filter(Boolean)
-  const added = [...new Set(counts.added.map((flow) => displayName(flow.name)))]
+  const names = (flows: ScheduledFlow[]) => {
+    const all = [...new Set(flows.map((flow) => displayName(flow.name)))]
+    return `${all.slice(0, 3).join(', ')}${all.length > 3 ? ` and ${all.length - 3} more` : ''}`
+  }
+  // Worded per kind: only a bill or subscription is "paid outside PayPal".
+  const paidOut = counts.added.filter(
+    (flow) => flow.kind === 'bill' || flow.kind === 'subscription',
+  )
+  const pay = counts.added.filter((flow) => flow.kind === 'income')
+  const plansAdded = counts.added.filter((flow) => flow.kind === 'installment')
+  const added = [
+    paidOut.length && `${names(paidOut)}, paid outside PayPal`,
+    pay.length && `${names(pay)}, pay you added`,
+    plansAdded.length && `${names(plansAdded)}, with dates you set`,
+    counts.earlier.length && `${names(counts.earlier)}, from before`,
+  ].filter(Boolean)
+  const dailyFromPayPal = profile.dailySpendOrigin === 'paypal'
   const row = (Icon: typeof FileUp, you: boolean, title: string, text: string) => (
     <div className="row plain">
       <span className={`disc sm${you ? ' you' : ' plan'}`} aria-hidden="true">
@@ -320,21 +349,23 @@ export function MonthBuilt({
           FileUp,
           false,
           'From your PayPal activity',
-          `${found.length ? `${found.join(', ')}, and e` : 'E'}veryday spending of about ${money(profile.dailySpendCents)} a day, from ${profile.coverageDays} days of activity.`,
+          dailyFromPayPal
+            ? `${found.length ? `${found.join(', ')}, and e` : 'E'}veryday spending of about ${money(profile.dailySpendCents)} a day, from ${profile.coverageDays} days of activity.`
+            : `${found.length ? found.join(', ') : 'Nothing repeating yet'}, from ${profile.coverageDays} days of activity.`,
         )}
         {row(
           KeyRound,
           true,
-          'You added',
+          'Added by you',
           added.length
-            ? `${added.slice(0, 3).join(', ')}${added.length > 3 ? ` and ${added.length - 3} more` : ''}, paid outside PayPal`
+            ? `${added.join('; ')}.`
             : 'Nothing yet. Add any bill you pay outside PayPal in your plan.',
         )}
         {row(
           Wallet,
           true,
           'You entered',
-          `Money available ${profile.snapshotDate === state.today ? 'today' : `on ${dayLabel(profile.snapshotDate)}`}: ${money(profile.balanceCents)} · cushion ${money(profile.cushionCents)}`,
+          `Money available ${profile.snapshotDate === state.today ? 'today' : `on ${dayLabel(profile.snapshotDate)}`}: ${money(profile.balanceCents)} · cushion ${money(profile.cushionCents)}${dailyFromPayPal ? '' : ` · everyday spending ${money(profile.dailySpendCents)} a day`}`,
         )}
       </div>
       <p className="actions" style={{ marginTop: 'var(--s-3)' }}>

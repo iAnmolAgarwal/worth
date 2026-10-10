@@ -251,6 +251,11 @@ export function PlanWizard({
       balanceCents: readMoney(balance, 'Money available'),
       cushionCents: readMoney(cushion, 'Cushion'),
       dailySpendCents: readMoney(dailySpend, 'Everyday spending'),
+      // Everyday spending stays credited to PayPal only while it is the import's own average.
+      ...(state.profile.dailySpendOrigin &&
+      readMoney(dailySpend, 'Everyday spending') !== state.profile.dailySpendCents
+        ? { dailySpendOrigin: 'you' as const }
+        : {}),
       timezone: timezone.trim(),
       flows: flows.map((flow) => readFlow(flow)),
       reflectedPurchaseIds: reflectedIds.filter((id) =>
@@ -794,7 +799,7 @@ function FlowCard({
             <DateStepper
               label={flow.kind === 'income' ? 'Next payday' : 'Next due date'}
               value={flow.nextDate || today}
-              onChange={(nextDate) => onChange({ nextDate })}
+              onChange={(nextDate) => onChange({ nextDate, userDate: true })}
             />
             {flow.kind !== 'income' && (
               <Field label="Type">
@@ -930,6 +935,8 @@ function InstalmentPlans({
   const [amount, setAmount] = useState('')
   const [left, setLeft] = useState('3')
   const [first, setFirst] = useState(addDays(today, 14))
+  /** The next payment Worth estimated for a plan from the import; a different date is the user's. */
+  const [estimate, setEstimate] = useState<string>()
   const [every, setEvery] = useState<'14' | 'month'>('14')
   const [error, setError] = useState('')
   /** Set while the form holds a plan the import found, so the plan is recorded as from PayPal. */
@@ -945,6 +952,7 @@ function InstalmentPlans({
     setAmount((plan.paymentCents / 100).toFixed(2))
     setLeft(String(Math.max(1, 4 - plan.payments.length)))
     setFirst(next)
+    setEstimate(next)
     setEvery('14')
     setError('')
     setFromImport(true)
@@ -987,6 +995,7 @@ function InstalmentPlans({
           active: true,
           confirmed: true,
           origin: fromImport ? ('paypal' as const) : ('you' as const),
+          ...(fromImport && first === estimate ? {} : { userDate: true }),
         }
       }),
     )

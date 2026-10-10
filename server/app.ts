@@ -158,6 +158,7 @@ const profileSchema = z
     aiConsent: z.boolean(),
     userEdited: z.boolean().optional(),
     aiChoiceMade: z.boolean().optional(),
+    dailySpendOrigin: z.enum(['paypal', 'you']).optional(),
     flows: z
       .array(
         z
@@ -178,6 +179,7 @@ const profileSchema = z
             paidOn: date.optional(),
             origin: z.enum(['paypal', 'you']).optional(),
             planTotalCents: cents.optional(),
+            userDate: z.boolean().optional(),
           })
           .strict(),
       )
@@ -1890,6 +1892,7 @@ export function createApp(options: AppOptions = {}) {
         source: 'import',
         balanceCents: 0,
         dailySpendCents: preview.suggestedDailySpendCents,
+        dailySpendOrigin: 'paypal',
         flows: preview.recurring,
         aiConsent: false,
         reflectedPurchaseIds: [],
