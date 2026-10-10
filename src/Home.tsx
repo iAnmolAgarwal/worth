@@ -15,7 +15,7 @@ import { getUpcomingFlows, planCollisions } from '../shared/finance'
 import type { Product, SavedItem } from '../shared/types'
 import type { AppState, Purchase } from './contract'
 import { isActive } from './contract'
-import { ASSESSMENT_ONLY, MAY_FIT_NOW, SAMPLE_WHO } from './copy'
+import { ASSESSMENT_ONLY, MAY_FIT_NOW, SAMPLE_WHO, sampleHolds } from './copy'
 import { countedHold, ReservationNote } from './Reservation'
 import { FundsDialog } from './Saved'
 import {
@@ -451,7 +451,7 @@ export function Home({
           <div className="stack">
             {state.profile.source === 'demo' && (
               <Alert tone="info" icon={Info}>
-                You’re viewing {SAMPLE_WHO} with a paycheck, rent and one PayPal Pay in 4 plan.{' '}
+                You’re viewing {SAMPLE_WHO} with {sampleHolds(plans.length)}.{' '}
                 {onImport && (
                   <button type="button" className="link inline" onClick={onImport}>
                     Use your own PayPal activity

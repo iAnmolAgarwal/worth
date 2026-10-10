@@ -437,7 +437,13 @@ export default function App() {
             ))}
           </nav>
           <div className="right">
-            <span className="env-wrap">
+            <span
+              className="env-wrap"
+              onBlur={(event) => {
+                // Focus leaving the chip and its details, by Tab or otherwise, closes them.
+                if (!event.currentTarget.contains(event.relatedTarget as Node)) setEnvOpen(false)
+              }}
+            >
               <button
                 type="button"
                 className="env env-btn"
@@ -451,23 +457,23 @@ export default function App() {
                     setEnvOpen(false)
                   }
                 }}
-                onBlur={(event) => {
-                  if (!event.currentTarget.parentElement?.contains(event.relatedTarget as Node))
-                    setEnvOpen(false)
-                }}
               >
                 {sample}
               </button>
               {envOpen && (
-                <span className="env-pop" id="env-details" role="status">
+                <span className="env-pop" id="env-details">
                   <span className="env-about">
                     {demo
                       ? `This is ${SAMPLE_WHO}. No real money moves, and ${paypalModeLine(state.config.paypal)}.`
                       : `This is the PayPal activity you imported. ${paypalModeLine(state.config.paypal)}.`}
                   </span>
-                  {env.split(' · ').map((part) => (
-                    <span key={part}>{part}</span>
-                  ))}
+                  {/* The sentence above already says it is sample data. */}
+                  {env
+                    .split(' · ')
+                    .filter((part) => !(demo && part === 'Sample data'))
+                    .map((part) => (
+                      <span key={part}>{part}</span>
+                    ))}
                   {demo && (
                     <button
                       type="button"

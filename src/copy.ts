@@ -35,3 +35,8 @@ export const SAMPLE_WHO = 'Maya’s sample month: a made-up PayPal shopper'
 /** Whether checkout reaches the PayPal sandbox; without sandbox keys it is simulated, never live. */
 export const paypalModeLine = (mode: 'sandbox' | 'demo') =>
   mode === 'sandbox' ? 'PayPal checkout runs in the PayPal sandbox' : 'PayPal checkout is simulated'
+/** What the sample month holds; plan edits can change the count, so it is read from state. */
+export const sampleHolds = (plans: number) =>
+  plans === 0
+    ? 'a paycheck and bills'
+    : `a paycheck, bills and ${plans === 1 ? 'one PayPal Pay in 4 plan' : `${plans} PayPal Pay in 4 plans`}`
