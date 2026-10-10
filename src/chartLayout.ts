@@ -4,7 +4,18 @@
  * layout (`chartModel`) is testable against real forecasts.
  */
 import type { ForecastEvent, ForecastPoint, InstalmentDetail } from '../shared/types'
-import { dayLabel, shortDate, signed } from './format'
+import { dayLabel, money, shortDate, signed } from './format'
+
+/**
+ * Room between a balance and the cushion, naming the cushion so the gap never reads as a second
+ * balance: "$650.52 more than your $300.00 cushion".
+ */
+export function cushionGap(value: number, cushion: number) {
+  if (value === cushion) return `exactly your ${money(cushion)} cushion`
+  return value > cushion
+    ? `${money(value - cushion)} more than your ${money(cushion)} cushion`
+    : `${money(cushion - value)} short of your ${money(cushion)} cushion`
+}
 
 /** Bills and plan payments at least this large get a rule on the chart. */
 export const BIG_BILL_CENTS = 10_000
@@ -659,13 +670,14 @@ export function chartModel(input: ChartInput) {
     soft: [...soft, ...buyLine.map((box) => ({ ...box, cost: 120 }))],
     bounds,
   }
-  // The low point: always labelled, clear of the line, the story rules and every mark. When the
-  // two-line pill has no clean spot (a phone with both Pay in 4 lines), it drops to one line; the
-  // date is in the comparison rows and the readout.
-  const lowTop = `Lowest ${signed(values[lowIndex]!)}`
-  const lowSpec = (bottom: string): LabelSpec => {
+  // The low point: always labelled, clear of the line, the story rules and every mark, and named
+  // "Lowest point" so it never reads as the selected day. When the two-line pill has no clean spot
+  // it tries a narrower stack (amount over "Lowest point"), then one line; the date is in the
+  // summary, the comparison rows and the readout.
+  const lowAmount = signed(values[lowIndex]!)
+  const lowSpec = ({ top, bottom }: { top: string; bottom: string }): LabelSpec => {
     const w =
-      Math.ceil(Math.max(textWidth(lowTop, 12, 700), bottom ? textWidth(bottom, 11, 500) : 0)) + 20
+      Math.ceil(Math.max(textWidth(top, 12, 700), bottom ? textWidth(bottom, 11, 500) : 0)) + 20
     const h = bottom ? 36 : 22
     return {
       id: 'low',
@@ -676,21 +688,26 @@ export function chartModel(input: ChartInput) {
       candidates: lowCandidates(low, w, h, plot),
     }
   }
-  const date = dayLabel(points[lowIndex]!.date)
+  const wide = { top: `Lowest point ${lowAmount}`, bottom: dayLabel(points[lowIndex]!.date) }
+  const stacked = { top: lowAmount, bottom: 'Lowest point' }
+  const single = { top: `Lowest point ${lowAmount}`, bottom: '' }
   const tries = [
-    { bottom: date, ctx },
-    { bottom: '', ctx },
-    { bottom: date, ctx: lenient },
-    { bottom: '', ctx: lenient },
+    { text: wide, ctx },
+    { text: stacked, ctx },
+    { text: single, ctx },
+    { text: wide, ctx: lenient },
+    { text: stacked, ctx: lenient },
+    { text: single, ctx: lenient },
   ]
   const fits = (attempt: (typeof tries)[number]) =>
-    placeLabels([{ ...lowSpec(attempt.bottom), required: false }], attempt.ctx).length > 0
+    placeLabels([{ ...lowSpec(attempt.text), required: false }], attempt.ctx).length > 0
   // With Pay in 4 open, the comparison rows under the plot state this low with its date, so when
   // no spot is clear of both lines the pill is left out rather than drawn across them.
   const fit =
-    tries.slice(0, 2).find(fits) ?? (p4Values ? null : (tries.slice(2).find(fits) ?? tries[0]!))
-  const lowBottom = fit?.bottom ?? ''
-  const lowPlaced = fit ? placeLabels([lowSpec(lowBottom)], fit.ctx) : []
+    tries.slice(0, 3).find(fits) ?? (p4Values ? null : (tries.slice(3).find(fits) ?? tries[0]!))
+  const lowTop = fit?.text.top ?? single.top
+  const lowBottom = fit?.text.bottom ?? ''
+  const lowPlaced = fit ? placeLabels([lowSpec(fit.text)], fit.ctx) : []
   // The purchase, in the lane above the plot.
   const buySpec = (text: string): LabelSpec => {
     const w = Math.ceil(textWidth(text, 12, 700)) + 4

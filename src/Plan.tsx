@@ -1222,7 +1222,7 @@ function Review({
           </h2>
           <p className="meta">
             {shortDate(preview.points[0]!.date)} to {shortDate(preview.points.at(-1)!.date)}, before
-            any purchase
+            any purchase. Each day shows its low, counting bills before pay.
           </p>
           <BalanceChart
             points={preview.points.map((point) => ({
@@ -1230,7 +1230,7 @@ function Review({
               minimumCents: point.baselineMinimumCents,
             }))}
             cushionCents={preview.cushionCents}
-            label={`Projected balance before any purchase. Lowest ${signed(preview.baselineLowestCents)}.`}
+            label={`Projected balance before any purchase, at each day’s low. Lowest point ${signed(preview.baselineLowestCents)}.`}
           />
         </section>
       )}

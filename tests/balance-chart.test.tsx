@@ -3,8 +3,10 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it } from 'vitest'
 import { BalanceChart } from '../src/BalanceChart'
+import { ChartTile } from '../src/Decision'
 import {
   chartModel,
+  cushionGap,
   eventRules,
   geometry,
   hitsLine,
@@ -22,7 +24,7 @@ import {
 import { compareOptions } from '../shared/finance'
 import { createDemoState, PRODUCTS } from '../shared/seed'
 import type { Comparison, OptionResult } from '../shared/types'
-import { dayLabel } from '../src/format'
+import { dayLabel, signed } from '../src/format'
 
 const TODAY = '2026-10-03'
 
@@ -273,7 +275,22 @@ describe('BalanceChart', () => {
     const table = screen.getByRole('table')
     expect(within(table).getAllByRole('row')).toHaveLength(option.points.length + 1)
     expect(within(table).getByRole('rowheader', { name: 'Thu, Oct 22' })).toBeTruthy()
-    expect(table.textContent).toContain('at your cushion')
+    expect(table.querySelector('caption')!.textContent).toContain(
+      'Projected balance each day at its low, counting bills before pay, against your $300.00 cushion.',
+    )
+    expect(within(table).getByRole('columnheader', { name: 'Balance (day’s low)' })).toBeTruthy()
+    // One number per day: the cushion column says where the day sits, never a second amount.
+    const low = within(table).getByRole('rowheader', { name: 'Thu, Oct 22' }).closest('tr')!
+    expect([...low.cells].map((cell) => cell.textContent)).toEqual([
+      'Thu, Oct 22',
+      '$300.00',
+      'At cushion',
+      'Biweekly paycheck +$2,100.00',
+    ])
+    for (const row of within(table).getAllByRole('row').slice(1))
+      expect((row as HTMLTableRowElement).cells[2]!.textContent).toMatch(
+        /^(Above|At cushion|Below)$/,
+      )
   })
 
   const lineButton = (name: RegExp) =>
@@ -376,10 +393,10 @@ describe('BalanceChart', () => {
     const live = document.querySelector('[aria-live="polite"]')!
     // Focus starts on the lowest day.
     expect(scrubber.getAttribute('aria-valuetext')).toBe('Thu, Oct 22')
-    expect(live.textContent).toContain('Thu, Oct 22. Lowest $300.00, at your cushion.')
+    expect(live.textContent).toContain('Thu, Oct 22. Day’s low $300.00. Biweekly paycheck')
     await user.keyboard('{ArrowRight}')
     expect(scrubber.getAttribute('aria-valuetext')).toBe('Fri, Oct 23')
-    expect(live.textContent).toMatch(/^Fri, Oct 23\. Lowest \$/)
+    expect(live.textContent).toMatch(/^Fri, Oct 23\. Day’s low \$[\d,.]+\. /)
     await user.keyboard('{PageDown}')
     expect(scrubber.getAttribute('aria-valuetext')).toBe('Fri, Oct 16')
     await user.keyboard('{Home}')
@@ -417,10 +434,10 @@ describe('BalanceChart', () => {
     )
     expect(rows.map((row) => row.textContent)).toEqual(['Pay in full', 'Pay in 4'])
     expect(document.querySelector('.bchart-compare')!.textContent).toMatch(
-      /Pay in fulllowest −\$458\.99 on Thu, Oct 22, \$758\.99 below your cushion/,
+      /Pay in fulllowest point −\$458\.99 on Thu, Oct 22, \$758\.99 short of your \$300\.00 cushion/,
     )
     expect(document.querySelector('.bchart-compare')!.textContent).toMatch(
-      /Pay in 4lowest \$[\d,.]+ on \w{3}, \w{3} \d+, \$[\d,.]+ below your cushion/,
+      /Pay in 4lowest point \$[\d,.]+ on \w{3}, \w{3} \d+, \$[\d,.]+ short of your \$300\.00 cushion/,
     )
     // Scrubbing onto an instalment day keeps its numbered badge clear of the beacon.
     const scrubber = screen.getByRole('slider', { name: /Balance by day/ })
@@ -436,5 +453,63 @@ describe('BalanceChart', () => {
     await user.click(screen.getByText('View as table'))
     expect(screen.getByRole('columnheader', { name: 'With Pay in 4' })).toBeTruthy()
     expect(screen.getByRole('table').textContent).toContain('payment 2 of 4')
+  })
+})
+
+describe('chart wording', () => {
+  it('names the cushion in every gap, so it never reads as a second balance', () => {
+    expect(cushionGap(95_052, 30_000)).toBe('$650.52 more than your $300.00 cushion')
+    expect(cushionGap(30_000, 30_000)).toBe('exactly your $300.00 cushion')
+    expect(cushionGap(-45_899, 30_000)).toBe('$758.99 short of your $300.00 cushion')
+  })
+
+  it('words the selected day and the overall lowest point distinctly', async () => {
+    const user = userEvent.setup()
+    const camera = comparison('camera')
+    const wait = camera.wait
+    if (!wait.date) throw new Error('Expected a wait date')
+    const { container } = render(<ChartTile c={camera} k="wait" />)
+    expect(container.querySelector('.meta')!.textContent).toMatch(
+      /^Your balance each day, \w{3} \d+ to \w{3} \d+\. Each day shows its low, counting bills before pay\.$/,
+    )
+    expect(container.querySelector('.bchart-key')!.textContent).toContain('Balance (day’s low)')
+    const svg = screen.getByRole('img', { name: /^Projected balance/ })
+    expect(svg.getAttribute('aria-label')).toMatch(
+      /^Projected balance if you wait until .+, at each day’s low\. Lowest point \$[\d,.]+ on .+, \$[\d,.]+ more than your \$300\.00 cushion\./,
+    )
+    expect(container.querySelector('.bchart-lowpill')!.textContent).toMatch(/Lowest point/)
+    // The overall minimum: "Lowest point:", its date and the gap to the named cushion.
+    const summary = [...container.querySelectorAll('p.meta')].at(-1)!.textContent!
+    expect(summary).toMatch(
+      new RegExp(
+        `^Lowest point: \\$720\\.53 on ${dayLabel(wait.lowestDate)} \\(\\$420\\.53 more than your \\$300\\.00 cushion\\)`,
+      ),
+    )
+    // A selected day: "Selected:", one balance at the day's low, and no cushion gap.
+    const scrubber = screen.getByRole('slider', { name: /Balance by day/ })
+    act(() => scrubber.focus())
+    await user.keyboard('{Home}')
+    const readout = container.querySelector('.bchart-readout')!
+    const first = wait.points[0]!
+    expect(readout.querySelector('.r1')!.textContent).toBe(
+      `Selected: ${dayLabel(first.date)}${signed(first.minimumCents)}at the day’s low`,
+    )
+    expect(readout.textContent).not.toMatch(/Lowest point|cushion/)
+    expect(summary).not.toMatch(/Selected|day’s low/)
+  })
+
+  it('flags a selected day below the cushion in words only', () => {
+    const camera = comparison('camera')
+    const { container } = render(<ChartTile c={camera} k="buyToday" />)
+    const scrubber = screen.getByRole('slider', { name: /Balance by day/ })
+    act(() => scrubber.focus())
+    // Focus starts on the lowest day, which buying today takes under the cushion.
+    const vs = container.querySelector('.bchart-readout .vs')!
+    expect(vs.textContent).toBe('at the day’s low · below your cushion')
+    expect(vs.classList.contains('neg')).toBe(true)
+    const live = document.querySelector('[aria-live="polite"]')!
+    expect(live.textContent).toMatch(
+      /^\w{3}, \w{3} \d+\. Day’s low −\$[\d,.]+, below your cushion\./,
+    )
   })
 })
