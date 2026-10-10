@@ -193,7 +193,9 @@ export function Activity({
             {shortDate(t.date)} ·{' '}
             {t.source === 'purchase'
               ? `${bought?.paymentPlan?.product === 'payIn4' ? 'Pay in 4' : 'Payment'} to ${
-                  state.products.find((p) => p.id === bought?.productId)?.merchant ?? 'the store'
+                  bought?.reportedBy ??
+                  state.products.find((p) => p.id === bought?.productId)?.merchant ??
+                  'the store'
                 } · PayPal`
               : KIND_TEXT[t.kind]}
             {t.status === 'excluded' ? ' · not counted' : ''}
@@ -418,6 +420,11 @@ export function Activity({
       {detail && (
         <TransactionDialog
           transaction={detail}
+          purchase={
+            detail.source === 'purchase'
+              ? state.purchases.find((p) => `purchase-${p.id}` === detail.id)
+              : undefined
+          }
           busy={busy}
           error={error}
           onClose={() => {
@@ -482,12 +489,14 @@ const CATEGORIES = [
 ]
 function TransactionDialog({
   transaction: t,
+  purchase,
   busy,
   error,
   onClose,
   onSave,
 }: {
   transaction: Transaction
+  purchase?: Purchase
   busy: boolean
   error: string
   onClose: () => void
@@ -525,6 +534,12 @@ function TransactionDialog({
           <dt>Amount</dt>
           <dd className="num">{signed(t.amountCents, t.amountCents > 0)}</dd>
         </div>
+        {purchase?.reportedBy && purchase.quotedCents !== undefined && (
+          <div>
+            <dt>{purchase.reportedBy}’s quoted price</dt>
+            <dd className="num">{money(purchase.quotedCents)}</dd>
+          </div>
+        )}
         <div>
           <dt>Date</dt>
           <dd>{shortDate(t.date, { weekday: 'short', year: 'numeric' })}</dd>

@@ -24,7 +24,7 @@ import type { AppState, Purchase, SavePlan, SaveTarget } from './contract'
 import { alternativeTarget, decisionRequestFrom, saveRequest } from './contract'
 import { Decision, type DecisionRequest, type Explanation } from './Decision'
 import { envLabel } from './engine'
-import { dayLabel, fullDate } from './format'
+import { dayLabel, fullDate, money } from './format'
 import { Home, HomeSkeleton } from './Home'
 import { ImportDialog } from './Import'
 import { PlanPage, PlanWizard } from './Plan'
@@ -243,6 +243,20 @@ export default function App() {
     // Runs once, when the first state arrives.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [Boolean(state)])
+  // A store told Worth about a payment after its own PayPal checkout (C4): say so once. The server
+  // then forgets the notice; this tab never repeats it while that request is on its way.
+  const noticed = useRef(new Set<string>())
+  useEffect(() => {
+    const fresh = (state?.purchases ?? []).filter(
+      (p) => p.reportNotice && p.reportedBy && !noticed.current.has(p.id),
+    )
+    if (!fresh.length) return
+    for (const purchase of fresh) noticed.current.add(purchase.id)
+    const latest = fresh[0]!
+    // oxlint-disable-next-line react/set-state-in-effect
+    setToast(`${latest.reportedBy} told Worth about your ${money(latest.amountCents)} payment.`)
+    void api('/handoff/notices/seen', { purchaseIds: fresh.map((p) => p.id) }).catch(() => {})
+  }, [state])
   useEffect(() => {
     if (!toast) return
     const timer = setTimeout(() => setToast(''), 6000)
