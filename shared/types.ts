@@ -749,6 +749,18 @@ export interface ImportPreview {
   converted: string[]
   /** Possible existing Pay in 4 or Pay Later plans. Their rows are never ordinary spending. */
   instalmentPlans: InstalmentPlanProposal[]
+  /**
+   * Rows taken as a payment a store already reported to Worth (C4), so not imported again. Matched
+   * by amount and date only, so the preview names each one.
+   */
+  storeMatches?: {
+    row: number
+    name: string
+    date: string
+    amountCents: number
+    store: string
+    item: string
+  }[]
 }
 
 /**

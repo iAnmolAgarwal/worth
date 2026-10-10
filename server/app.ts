@@ -1506,6 +1506,8 @@ export function createApp(options: AppOptions = {}) {
   })
   /** The shopper has seen "<store> told Worth about your payment" for these purchases (C4). */
   app.post('/api/handoff/notices/seen', (req, res) => {
+    // Like every hand-off route, it isn't there while the hand-off is off (contract §1).
+    if (!handoff) throw new HttpError(404, 'Not found.', 'NOT_FOUND')
     const { purchaseIds } = z
       .object({ purchaseIds: z.array(identifier).min(1).max(20) })
       .strict()
@@ -1939,6 +1941,15 @@ export function createApp(options: AppOptions = {}) {
   function mergeTransactions(existing: Transaction[], incoming: Transaction[]) {
     return [...new Map([...existing, ...incoming].map((t) => [t.id, t])).values()]
   }
+  /** The store behind each Activity row a store reported (C4), for the CSV match's wording. */
+  function storeNames(id: string) {
+    return Object.fromEntries(
+      store
+        .purchases(id)
+        .filter((purchase) => purchase.reportedBy)
+        .map((purchase) => [`purchase-${purchase.id}`, purchase.reportedBy!]),
+    )
+  }
   function transactionLimitMessage(total: number) {
     return `This import would keep ${total.toLocaleString('en-US')} transactions, but a session holds at most ${config.maxTransactions.toLocaleString('en-US')}. Import a shorter date range.`
   }
@@ -1950,6 +1961,7 @@ export function createApp(options: AppOptions = {}) {
       today: today(data.profile.timezone),
       dateOrder,
       foreignPayments: data.foreignPayments,
+      storeNames: storeNames(sessionId(res)),
     })
     const total = mergeTransactions(existing, preview.transactions).length
     if (total > config.maxTransactions)
@@ -1966,6 +1978,7 @@ export function createApp(options: AppOptions = {}) {
       today: today(data.profile.timezone),
       dateOrder,
       foreignPayments: data.foreignPayments,
+      storeNames: storeNames(sessionId(res)),
     })
     if (preview.needsDateOrder)
       throw new HttpError(

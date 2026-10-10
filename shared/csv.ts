@@ -645,6 +645,8 @@ export interface ParseOptions {
   dateOrder?: DateOrder
   /** Foreign-currency payments from earlier imports; resolved ones are not raised again. */
   foreignPayments?: ForeignPayment[]
+  /** The store that reported each store-reported Activity row, by row ID (C4). */
+  storeNames?: Record<string, string>
 }
 
 export function parsePayPalCsv(
@@ -739,14 +741,13 @@ export function parsePayPalCsv(
       )
       .map((transaction) => [transaction.referenceId!.replace(/^paypal:/, ''), transaction]),
   )
-  // Payments stores reported, each matched by at most one row of this file.
+  // Payments stores reported, each matched by at most one transaction in this file.
   const storeReported = existing.filter(
     (transaction) =>
       transaction.source === 'purchase' &&
       transaction.referenceId?.startsWith(STORE_REFERENCE) &&
       transaction.status !== 'excluded',
   )
-  const storeMatched = new Set<string>()
   const occurrences = new Map<string, number>()
   let noIds = 0
   // The caller passes today in the user's time zone; New York is only the standalone default.
@@ -830,6 +831,41 @@ export function parsePayPalCsv(
     })
   }
 
+  // 1b. A payment a store already reported to Worth is counted once: the shopper's export names
+  // it with their own transaction ID, never the store's capture ID, so the same amount within a
+  // day (the capture time is UTC; the export uses the account's local date) is taken as that
+  // payment. Each report takes one row: one naming the store first, then the nearest date, then
+  // the file's order. Every row of the chosen transaction (pending, then settled) goes with it.
+  const storeName = (payment: Transaction) => options.storeNames?.[payment.id] ?? 'A store'
+  const reportedRows = new Map<number, Transaction>()
+  const reportedIds = new Set<string>()
+  for (const payment of storeReported) {
+    const store = storeName(payment).toLowerCase()
+    const candidates = rows
+      .filter(
+        (row) =>
+          !reportedRows.has(row.rowNumber) &&
+          !(row.nativeId && reportedIds.has(row.nativeId)) &&
+          !(row.nativeId && knownById.has(`paypal:${row.nativeId}`)) &&
+          row.currency === 'USD' &&
+          row.status !== 'excluded' &&
+          row.amount === payment.amountCents &&
+          Math.abs(dateDistance(payment.date, row.date)) <= 1 &&
+          (row.payLater ||
+            ['expense', 'installment'].includes(classify(row.name, row.type, row.amount).kind)),
+      )
+      .map((row) => ({
+        row,
+        named: row.name.toLowerCase().includes(store) ? 0 : 1,
+        days: Math.abs(dateDistance(payment.date, row.date)),
+      }))
+      .sort((a, b) => a.named - b.named || a.days - b.days || a.row.rowNumber - b.row.rowNumber)
+    const chosen = candidates[0]?.row
+    if (!chosen) continue
+    reportedRows.set(chosen.rowNumber, payment)
+    if (chosen.nativeId) reportedIds.add(chosen.nativeId)
+  }
+
   // 2. Record a row once, under the identity it was exported with.
   const identify = (row: Row) => {
     const fingerprint = hash(
@@ -894,25 +930,26 @@ export function parsePayPalCsv(
       return
     }
     const previous = knownById.get(id)
-    // A store already told Worth about this payment: the same amount within a day (the store's
-    // capture time is UTC; the export uses the account's local date) is that payment, counted once.
-    const reported =
-      !previous &&
-      status !== 'excluded' &&
-      currency === 'USD' &&
-      ['expense', 'installment'].includes(classification.kind)
-        ? storeReported.find(
-            (payment) =>
-              !storeMatched.has(payment.id) &&
-              payment.amountCents === amount &&
-              Math.abs(dateDistance(payment.date, date)) <= 1,
-          )
-        : undefined
+    const reported = override.amount === undefined ? reportedRows.get(rowNumber) : undefined
     if (reported) {
-      storeMatched.add(reported.id)
+      const store = storeName(reported)
+      const cents = (-amount / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })
       result.warnings.push(
-        `Row ${rowNumber}: ${(-amount / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })} on ${date} is the payment a store already reported to Worth (${reported.name}), so it is counted once.`,
+        `Row ${rowNumber}: matched “${row.name}” ${cents} on ${date} to ${store}’s report of ${reported.name}, so it is counted once.`,
       )
+      ;(result.storeMatches ??= []).push({
+        row: rowNumber,
+        name: row.name,
+        date,
+        amountCents: amount,
+        store,
+        item: reported.name,
+      })
+      result.duplicates++
+      return
+    }
+    // Another row of a transaction taken as a store's payment, such as its settled copy.
+    if (!previous && nativeId && reportedIds.has(nativeId)) {
       result.duplicates++
       return
     }

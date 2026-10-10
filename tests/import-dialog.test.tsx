@@ -198,3 +198,36 @@ describe('import preview details', () => {
     expect((importButton as HTMLButtonElement).disabled).toBe(false)
   })
 })
+
+describe('a payment a store reported (C4)', () => {
+  it('names the row it counted once, in view, not only in the collapsed list', async () => {
+    const user = userEvent.setup()
+    const warning =
+      'Row 2: matched “Corner Shoes” $129.00 on 2026-10-01 to Larkspur Supply’s report of Travel backpack, so it is counted once.'
+    apiMock.mockImplementation(async () =>
+      preview({
+        duplicates: 1,
+        warnings: [warning],
+        storeMatches: [
+          {
+            row: 2,
+            name: 'Corner Shoes',
+            date: '2026-10-01',
+            amountCents: -12900,
+            store: 'Larkspur Supply',
+            item: 'Travel backpack',
+          },
+        ],
+      }),
+    )
+    render(
+      <ImportDialog state={makeState()} onClose={vi.fn()} onUpdate={vi.fn()} onReview={vi.fn()} />,
+    )
+    await pasteAndPreview(user)
+    const note = await screen.findByText(/Matched “Corner Shoes” \$129\.00 on Oct 1/)
+    expect(note.textContent).toContain('to Larkspur Supply’s report of Travel backpack')
+    expect(note.closest('details')).toBeNull()
+    // Said once: the same warning isn't repeated under "Needs attention".
+    expect(screen.queryByText(warning)).toBeNull()
+  })
+})
