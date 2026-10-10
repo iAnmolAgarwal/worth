@@ -1994,7 +1994,12 @@ export function createApp(options: AppOptions = {}) {
       )
     if (!preview.transactions.length && !preview.duplicates && !preview.unresolved.length)
       throw new HttpError(400, 'No supported transactions found.', 'EMPTY_IMPORT')
-    const merged = mergeTransactions(retained, preview.transactions)
+    // Keep each store-report match (C4), so a later import never takes another payment for it.
+    const matched = new Map((preview.storeMatches ?? []).map((m) => [m.reportId, m.importId]))
+    const kept = retained.map((t) =>
+      matched.has(t.id) ? { ...t, matchedImportId: matched.get(t.id)! } : t,
+    )
+    const merged = mergeTransactions(kept, preview.transactions)
     if (merged.length > config.maxTransactions)
       throw new HttpError(400, transactionLimitMessage(merged.length), 'TOO_MANY_TRANSACTIONS')
     const switching = data.profile.source === 'demo'

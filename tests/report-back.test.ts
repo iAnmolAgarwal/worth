@@ -314,6 +314,10 @@ describe('POST /api/handoff/outcome: recording (contract §5)', () => {
     expect(seen.status).toBe(200)
     expect((seen.body as AppState).purchases[0]).not.toHaveProperty('reportNotice')
     expect((await post(agent, '/api/handoff/notices/seen', { purchaseIds: [] })).status).toBe(400)
+    const tooMany = Array.from({ length: 21 }, (_, i) => `p${i}`)
+    expect((await post(agent, '/api/handoff/notices/seen', { purchaseIds: tooMany })).status).toBe(
+      400,
+    )
   })
 })
 
@@ -643,6 +647,36 @@ describe('a later PayPal CSV import (contract §5)', () => {
     ])
     expect(after.transactions.map((t) => t.name)).toContain('Corner cafe')
     expect(after.purchases.filter((p) => p.reportedBy)).toHaveLength(1)
+  })
+
+  it('keeps the match, so a later import counts another same-amount payment', async () => {
+    const { app, agent, store } = setup()
+    await shopper(agent)
+    await report(app)
+    const id = store.quote(QID, clock.value.getTime())!.sessionId
+    const data = store.get(id)!
+    data.profile.source = 'import'
+    data.transactions = data.transactions.filter((t) => t.source === 'purchase')
+    store.save(id, data)
+    const header = 'Date,Name,Type,Status,Currency,Amount,Transaction ID'
+    const larkspur =
+      '2026-10-03,Larkspur Supply,Express Checkout Payment,Pending,USD,-1199.00,BUY-1'
+    const first = await post(agent, '/api/import/commit', {
+      csv: [header, larkspur, larkspur.replace('Pending', 'Completed')].join('\n'),
+    })
+    expect(first.status).toBe(200)
+    const reportedRow = (first.body as AppState).transactions.find((t) => t.source === 'purchase')!
+    expect(reportedRow.matchedImportId).toBe('paypal:BUY-1')
+    // Another store, same amount, same day: a second purchase, counted.
+    const second = await post(agent, '/api/import/commit', {
+      csv: [
+        header,
+        '2026-10-03,Gift Shop,Express Checkout Payment,Completed,USD,-1199.00,GIFT-9',
+      ].join('\n'),
+    })
+    expect(second.status).toBe(200)
+    const payments = (second.body as AppState).transactions.filter((t) => t.amountCents === -119900)
+    expect(payments.map((t) => t.id).sort()).toEqual(['paypal:GIFT-9', reportedRow.id].sort())
   })
 
   it('sets the purchase aside with the sample plan when the import replaces it', async () => {

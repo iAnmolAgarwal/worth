@@ -72,6 +72,11 @@ export interface Transaction {
   source: 'demo' | 'import' | 'purchase'
   color?: string
   referenceId?: string
+  /**
+   * On a payment a store reported (C4): the imported PayPal transaction an earlier CSV import took
+   * as this payment, so no later import matches the report again.
+   */
+  matchedImportId?: string
 }
 export interface Product {
   id: string
@@ -760,6 +765,10 @@ export interface ImportPreview {
     amountCents: number
     store: string
     item: string
+    /** The store-reported Activity row it matched. */
+    reportId: string
+    /** The row's own transaction ID, kept on that Activity row when the import is committed. */
+    importId: string
   }[]
 }
 

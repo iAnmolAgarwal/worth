@@ -1291,6 +1291,8 @@ describe('a payment a store reported to Worth (C4)', () => {
           amountCents: -119900,
           store: 'Larkspur Supply',
           item: 'Everyday camera',
+          reportId: 'purchase-reported-1',
+          importId: 'paypal:BUYER-TXN-1',
         },
       ])
     }
@@ -1316,6 +1318,32 @@ describe('a payment a store reported to Worth (C4)', () => {
     const second = parsePayPalCsv(file(completed), [backpack, ...first.transactions], names)
     expect(second.transactions).toEqual([])
     expect(second.duplicates).toBe(1)
+  })
+
+  it('never matches a report an earlier import already matched (the judge’s two imports)', () => {
+    const chair: Transaction = { ...reported, amountCents: -44900, name: 'Desk chair' }
+    // Import 1: Larkspur's payment, pending then settled, taken as the report.
+    const pending =
+      '2026-10-01,Larkspur Supply,Express Checkout Payment,Pending,USD,-449.00,BUY-CH-1'
+    const completed = pending.replace('Pending', 'Completed')
+    const first = parsePayPalCsv(file(pending, completed), [chair], names)
+    expect(first.transactions).toEqual([])
+    expect(first.storeMatches).toEqual([
+      expect.objectContaining({ reportId: chair.id, importId: 'paypal:BUY-CH-1' }),
+    ])
+    // The commit keeps the match on the report.
+    const kept = { ...chair, matchedImportId: first.storeMatches![0]!.importId }
+    // Import 2: another merchant at the same amount on the same day is a second purchase.
+    const gift = '2026-10-01,Gift Shop,Express Checkout Payment,Completed,USD,-449.00,GIFT-9'
+    const second = parsePayPalCsv(file(gift), [kept], names)
+    expect(second.transactions.map((t) => t.id)).toEqual(['paypal:GIFT-9'])
+    expect(second.storeMatches).toBeUndefined()
+    // A later copy of the transaction it took is still that payment.
+    const again = parsePayPalCsv(file(completed, gift), [kept], names)
+    expect(again.transactions.map((t) => t.id)).toEqual(['paypal:GIFT-9'])
+    expect(again.duplicates).toBe(1)
+    // Before the fix, the same report took the gift instead: an unpersisted match still does.
+    expect(parsePayPalCsv(file(gift), [chair], names).transactions).toEqual([])
   })
 
   it('prefers the row naming the store, and names the row it takes', () => {

@@ -741,12 +741,22 @@ export function parsePayPalCsv(
       )
       .map((transaction) => [transaction.referenceId!.replace(/^paypal:/, ''), transaction]),
   )
-  // Payments stores reported, each matched by at most one transaction in this file.
+  // Payments stores reported and no import has matched yet, each matched by at most one
+  // transaction in this file. A committed match is kept on the report (`matchedImportId`): that
+  // report is never matched again, and later rows of the transaction it took are duplicates.
   const storeReported = existing.filter(
     (transaction) =>
       transaction.source === 'purchase' &&
       transaction.referenceId?.startsWith(STORE_REFERENCE) &&
-      transaction.status !== 'excluded',
+      transaction.status !== 'excluded' &&
+      !transaction.matchedImportId,
+  )
+  const storeTaken = new Set(
+    existing.flatMap((transaction) =>
+      transaction.source === 'purchase' && transaction.matchedImportId
+        ? [transaction.matchedImportId]
+        : [],
+    ),
   )
   const occurrences = new Map<string, number>()
   let noIds = 0
@@ -847,6 +857,7 @@ export function parsePayPalCsv(
           !reportedRows.has(row.rowNumber) &&
           !(row.nativeId && reportedIds.has(row.nativeId)) &&
           !(row.nativeId && knownById.has(`paypal:${row.nativeId}`)) &&
+          !(row.nativeId && storeTaken.has(`paypal:${row.nativeId}`)) &&
           row.currency === 'USD' &&
           row.status !== 'excluded' &&
           row.amount === payment.amountCents &&
@@ -930,6 +941,11 @@ export function parsePayPalCsv(
       return
     }
     const previous = knownById.get(id)
+    // A later copy of a transaction an earlier import took as a store's payment.
+    if (!previous && storeTaken.has(id)) {
+      result.duplicates++
+      return
+    }
     const reported = override.amount === undefined ? reportedRows.get(rowNumber) : undefined
     if (reported) {
       const store = storeName(reported)
@@ -944,6 +960,8 @@ export function parsePayPalCsv(
         amountCents: amount,
         store,
         item: reported.name,
+        reportId: reported.id,
+        importId: id,
       })
       result.duplicates++
       return

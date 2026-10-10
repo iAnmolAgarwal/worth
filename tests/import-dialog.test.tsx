@@ -216,6 +216,8 @@ describe('a payment a store reported (C4)', () => {
             amountCents: -12900,
             store: 'Larkspur Supply',
             item: 'Travel backpack',
+            reportId: 'purchase-p1',
+            importId: 'paypal:SHOES-1',
           },
         ],
       }),
