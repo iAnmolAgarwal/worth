@@ -144,7 +144,12 @@ describe('HTTP sessions, profiles, and calculations', () => {
     expect((await post(agent, '/api/reset').set('Origin', 'https://attacker.example')).status).toBe(
       403,
     )
-    expect((await state(agent)).config).toEqual({ ai: 'demo', paypal: 'demo', alternatives: 'off' })
+    expect((await state(agent)).config).toEqual({
+      ai: 'demo',
+      paypal: 'demo',
+      alternatives: 'off',
+      handoff: 'off',
+    })
     const cookie = (await request(app).get('/api/state')).headers['set-cookie'][0]
     expect(cookie).toContain('HttpOnly')
     expect(cookie).toContain('SameSite=Lax')

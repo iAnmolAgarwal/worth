@@ -169,6 +169,7 @@ describe('GET /api/alternatives', () => {
     expect((await agent.get('/api/health')).body).toEqual({
       ok: true,
       service: 'worth',
+      handoff: 'off',
       channel3: 'ok',
     })
     const response = await agent.get('/api/alternatives?productId=camera')
