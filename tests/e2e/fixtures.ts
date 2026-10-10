@@ -161,7 +161,18 @@ export function claims(token: string): QuotePayload {
   return JSON.parse(Buffer.from(token.split('.')[0]!, 'base64url').toString('utf8'))
 }
 
-export const CAMERA = 'From Larkspur Supply · Everyday camera · $1,199.00'
+/**
+ * /check shows the store's camera at the store's price, with its edit: in the rail's card on wide
+ * screens, in the item row above the answer on phones.
+ */
+export async function expectCamera(page: Page) {
+  const item = page.locator('.decision-rail .product, .item-row')
+  await expect(item).toHaveCount(1)
+  await expect(item).toBeVisible()
+  await expect(item).toContainText('Everyday camera')
+  await expect(item).toContainText('$1,199.00')
+  await expect(item.getByRole('button', { name: 'Not right? Edit' })).toBeVisible()
+}
 
 const tokenOf = (href: string | null) => decodeURIComponent(new URL(href!).hash.slice(3))
 

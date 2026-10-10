@@ -4,7 +4,8 @@ import { analyse, expect, origins, test } from './fixtures'
 /**
  * The decision page's layout after the user's end-to-end feedback (items 3 to 6), measured from
  * real boxes: option bodies take at most two lines, the stress row is one line, the Pay in 4 cards
- * line up block for block, and Something cheaper swaps the rail's item for similar items.
+ * line up block for block, and Something cheaper swaps the rail's item for similar items. Item 2:
+ * /check leads with the answer in one light-blue block, and says what the item is once.
  */
 
 /** Lines a box holds at its own line height. */
@@ -173,4 +174,82 @@ test('the Decision page names the third card Something cheaper too', async ({ pa
     'fits today if you skip the everyday camera',
   )
   await expect(group).not.toContainText('Spend less')
+})
+
+test('/check leads with the answer and says what the item is once', async ({ page }) => {
+  await analyse(page, 'chair')
+  const h1 = page.locator('h1:visible')
+  await expect(h1).toHaveCount(1)
+  await expect(h1).toHaveText('Wait until Fri, Oct 30')
+  // The verdict, bold, and the engine's sentence, regular, alone in the chip's light blue.
+  const block = page.locator('.verdict-block')
+  await expect(block.locator('> *')).toHaveCount(2)
+  await expect(block).toHaveCSS('background-color', 'rgb(240, 242, 249)')
+  await expect(h1).toHaveCSS('font-weight', '700')
+  await expect(block.locator('.lead')).toHaveCSS('font-weight', '400')
+  await expect(block.locator('.lead')).toContainText('You stay $440.01 above your $300.00 cushion')
+  await expect(page.getByText(/compare it below|From Larkspur Supply/)).toHaveCount(0)
+  // One edit, beside the price, wherever the item shows.
+  const edit = page.getByRole('button', { name: 'Not right? Edit' })
+  await expect(edit).toHaveCount(1)
+  const blockBox = (await block.boundingBox())!
+  if ((page.viewportSize()?.width ?? 0) < 1024) {
+    // Phones: a compact item row above the answer, and no second card further down.
+    const row = page.locator('.item-row')
+    await expect(row).toContainText('Desk chair')
+    await expect(row).toContainText('$449.00 · Larkspur Supply')
+    await expect(row.getByRole('button', { name: 'Not right? Edit' })).toBeVisible()
+    await expect(page.locator('.decision-rail .product')).toHaveCount(0)
+    const rowBox = (await row.boundingBox())!
+    expect(rowBox.y + rowBox.height).toBeLessThan(blockBox.y)
+    // The item, the answer and the first option all show before any scroll.
+    const first = (await page.getByRole('radio').first().boundingBox())!
+    expect(first.y).toBeLessThan(page.viewportSize()!.height - 120)
+  } else {
+    const card = page.locator('.decision-rail .tile').first()
+    await expect(card.locator('.price-row')).toContainText('$449.00')
+    await expect(
+      card.locator('.price-row').getByRole('button', { name: 'Not right? Edit' }),
+    ).toBeVisible()
+    await expect(page.locator('.item-row')).toHaveCount(0)
+    // The rail's card lines up with the answer's block.
+    expect(Math.abs((await card.boundingBox())!.y - blockBox.y)).toBeLessThanOrEqual(2)
+  }
+  // The store's Pay in 4 answer sits in the comparison box, under its heading.
+  await expect(
+    page
+      .getByRole('button', { name: /Compare with PayPal Pay in 4/ })
+      .getByText('Larkspur Supply offers PayPal Pay in 4 for this amount.'),
+  ).toBeVisible()
+})
+
+test('the Decision page leads with the answer too, with the item and its edit on the right', async ({
+  page,
+}) => {
+  await page.goto(`${origins.worth}/#decision?product=camera`)
+  const h1 = page.locator('h1:visible')
+  await expect(h1).toHaveCount(1)
+  const block = page.locator('.verdict-block')
+  await expect(block.locator('> *')).toHaveCount(2)
+  await expect(block).toHaveCSS('background-color', 'rgb(240, 242, 249)')
+  await expect(h1).toHaveCSS('font-weight', '700')
+  await expect(page.getByRole('group', { name: 'How Worth read your question' })).toHaveCount(0)
+  await expect(page.getByText('Everyday camera, $1,199.00')).toHaveCount(0)
+  const edit = page.getByRole('button', { name: 'Not right? Edit' })
+  await expect(edit).toHaveCount(1)
+  if ((page.viewportSize()?.width ?? 0) < 1024) {
+    const row = page.locator('.item-row')
+    await expect(row).toContainText('$1,199.00 · Larkspur Supply · today')
+    expect((await row.boundingBox())!.y).toBeLessThan((await block.boundingBox())!.y)
+  } else {
+    const card = page.locator('.decision-rail .tile').first()
+    await expect(card.locator('.price-row')).toContainText('$1,199.00 · today')
+    await expect(card.getByRole('button', { name: 'Not right? Edit' })).toBeVisible()
+    expect(
+      Math.abs((await card.boundingBox())!.y - (await block.boundingBox())!.y),
+    ).toBeLessThanOrEqual(2)
+  }
+  // Editing opens in place and focuses the item's name.
+  await edit.click()
+  await expect(page.locator('form.readas-edit').getByLabel('Item')).toBeFocused()
 })

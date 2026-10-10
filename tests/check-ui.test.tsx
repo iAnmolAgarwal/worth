@@ -85,6 +85,21 @@ function visit(hash = `#q=${TOKEN}`) {
   window.history.replaceState(null, '', `/check${hash}`)
   return render(<App />)
 }
+/** The rail's item card, where the price and its edit live on wide screens. */
+const itemCard = () => within(screen.getByRole('complementary', { name: 'Item and reasons' }))
+const answer = () => screen.findByRole('heading', { level: 1 })
+/** Narrow screens (below 1024 px), where the item leads the page instead of the rail. */
+function narrowScreen() {
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn().mockImplementation((query: string) => ({
+      matches: query === '(max-width: 1023px)',
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  )
+}
 const calls = (path: string) => apiMock.mock.calls.filter(([p]) => p === path)
 const storeLinks = () =>
   screen.queryAllByRole('link').filter((link) => link.getAttribute('href')?.startsWith(STORE))
@@ -130,7 +145,7 @@ describe('reading the store’s token', () => {
     const reload = vi.spyOn(leave, 'reload').mockImplementation(() => undefined)
     route({ '/handoff/open': opened() })
     visit()
-    await screen.findByRole('group', { name: /From Larkspur Supply/ })
+    await answer()
     window.location.hash = `#q=${TOKEN}x`
     await waitFor(() => expect(reload).toHaveBeenCalledTimes(1))
     window.location.hash = '#home'
@@ -152,24 +167,39 @@ describe('reading the store’s token', () => {
 })
 
 describe('a verified quote on /check', () => {
-  it('shows where the item is from, then the normal decision for that item and price', async () => {
+  it('leads with the answer, with the item, its price and its edit in the rail card', async () => {
     route({ '/handoff/open': opened() })
     visit()
-    const from = await screen.findByRole('group', {
-      name: 'From Larkspur Supply · Everyday camera · $1,199.00',
-    })
-    expect(within(from).getByRole('button', { name: 'Not right? Edit' })).toBeTruthy()
     // The decision is the engine's own, for the store's price, with the store's Pay in 4 answer.
-    expect(
-      await screen.findByRole('heading', { level: 1, name: /Wait until Fri, Oct 23/ }),
-    ).toBeTruthy()
+    const verdict = await screen.findByRole('heading', { level: 1, name: /Wait until Fri, Oct 23/ })
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
+    // The answer's block holds the verdict and the engine's sentence, nothing else.
+    const block = screen.getByRole('region', { name: /Wait until Fri, Oct 23/ })
+    expect(block.contains(verdict)).toBe(true)
+    expect(block.querySelectorAll('h1, p.lead')).toHaveLength(2)
+    expect(block.childElementCount).toBe(2)
+    expect(within(block).queryByRole('button')).toBeNull()
     expect(calls('/compare')[0]![1]).toEqual({
       amountCents: 119900,
       itemName: 'Everyday camera',
       qid: QUOTE.qid,
     })
-    expect(screen.getByText('Larkspur Supply offers PayPal Pay in 4 for this amount.')).toBeTruthy()
-    expect(screen.getAllByText('Sold by Larkspur Supply').length).toBeGreaterThan(0)
+    // The old chip and its Pay in 4 line are gone; the item card says it once.
+    expect(screen.queryByRole('group', { name: /From Larkspur Supply/ })).toBeNull()
+    expect(screen.queryByText(/compare it below/)).toBeNull()
+    expect(screen.getAllByRole('button', { name: 'Not right? Edit' })).toHaveLength(1)
+    expect(itemCard().getByText('Everyday camera')).toBeTruthy()
+    expect(itemCard().getByText('Sold by Larkspur Supply')).toBeTruthy()
+    expect(itemCard().getByText('$1,199.00')).toBeTruthy()
+    expect(itemCard().getByRole('button', { name: 'Not right? Edit' })).toBeTruthy()
+    // On wide screens the item lives in the rail only.
+    expect(document.querySelector('.item-row')).toBeNull()
+    // The store's own Pay in 4 answer sits inside the comparison box, under its heading.
+    const p4 = screen.getByRole('button', { name: /Compare with PayPal Pay in 4/ })
+    expect(
+      within(p4).getByText('Larkspur Supply offers PayPal Pay in 4 for this amount.'),
+    ).toBeTruthy()
+    expect(screen.getAllByText(/offers PayPal Pay in 4 for this amount/)).toHaveLength(1)
     // No Buy button in Worth: the way to pay is back at the store.
     expect(screen.queryByRole('button', { name: /buy/i })).toBeNull()
     const back = screen.getAllByRole('link', { name: 'Back to Larkspur Supply' })
@@ -213,7 +243,7 @@ describe('a verified quote on /check', () => {
   it('offers no consent where another Worth session opened the link first', async () => {
     route({ '/handoff/open': opened({ canConsent: false }) })
     visit()
-    await screen.findByRole('group', { name: /From Larkspur Supply/ })
+    await answer()
     expect(screen.queryByRole('checkbox')).toBeNull()
     // The decision still works there, compared like an item typed in.
     expect(await screen.findByRole('heading', { level: 1, name: /Wait until/ })).toBeTruthy()
@@ -272,17 +302,18 @@ describe('a verified quote on /check', () => {
     await userEvent.clear(price)
     await userEvent.type(price, '1250')
     await userEvent.click(screen.getByRole('button', { name: 'Check again' }))
+    // The item card shows the price entered, with the note on what changed right under it.
+    expect(await itemCard().findByText('$1,250.00')).toBeTruthy()
+    expect(itemCard().getByText(/Larkspur Supply’s price was \$1,199\.00/)).toBeTruthy()
+    expect(itemCard().getByText(/Worth is checking the price you entered/)).toBeTruthy()
     expect(
-      await screen.findByRole('group', { name: 'You entered · Everyday camera · $1,250.00' }),
-    ).toBeTruthy()
-    expect(screen.getByText(/Larkspur Supply’s price was \$1,199\.00/)).toBeTruthy()
-    expect(
-      screen.getByText(
+      itemCard().getByText(
         /Larkspur Supply won’t show Worth’s answer, because you changed the price\./,
       ),
     ).toBeTruthy()
-    // The store's Pay in 4 answer was for its own price, so it no longer applies.
-    expect(screen.getByText('If this store offers PayPal Pay in 4, compare it below.')).toBeTruthy()
+    // The store's Pay in 4 answer was for its own price, so the box no longer quotes it.
+    expect(screen.queryByText(/PayPal Pay in 4 for this amount/)).toBeNull()
+    expect(screen.queryByText(/If this store offers/)).toBeNull()
     await waitFor(() =>
       expect(calls('/compare').at(-1)![1]).toEqual({
         amountCents: 125000,
@@ -296,12 +327,10 @@ describe('a verified quote on /check', () => {
     expect(calls('/handoff/return')).toEqual([
       ['/handoff/return', { qid: QUOTE.qid, amountCents: 125000 }],
     ])
-    await userEvent.click(screen.getByRole('button', { name: 'Use the store’s price' }))
-    expect(
-      await screen.findByRole('group', {
-        name: 'From Larkspur Supply · Everyday camera · $1,199.00',
-      }),
-    ).toBeTruthy()
+    await userEvent.click(itemCard().getByRole('button', { name: 'Use the store’s price' }))
+    expect(await itemCard().findByText('$1,199.00')).toBeTruthy()
+    expect(screen.queryByText(/Worth is checking the price you entered/)).toBeNull()
+    expect(screen.getByText('Larkspur Supply offers PayPal Pay in 4 for this amount.')).toBeTruthy()
   })
 
   it('starts the video replay toast when the quote asked for it and the sample persona took it', async () => {
@@ -316,7 +345,7 @@ describe('a verified quote on /check', () => {
     sessionStorage.setItem('worth.check.qid', QUOTE.qid)
     route({ [`/handoff/quotes/${QUOTE.qid}`]: () => ({ quote: { ...QUOTE, consent: true } }) })
     visit('')
-    expect(await screen.findByRole('group', { name: /From Larkspur Supply/ })).toBeTruthy()
+    expect(await answer()).toBeTruthy()
     expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(true)
     expect(calls('/handoff/open')).toHaveLength(0)
   })
@@ -373,21 +402,94 @@ describe('Save for <date> on /check (contract §4)', () => {
 })
 
 describe('Pay in 4 wording (contract §3.2)', () => {
-  it('names the store only when it said eligible and the amount is in range', () => {
+  it('names the store only when it answered and the amount is its own and in range', () => {
     expect(payLaterLine(QUOTE, 119900)).toBe(
       'Larkspur Supply offers PayPal Pay in 4 for this amount.',
     )
-    expect(payLaterLine({ ...QUOTE, payLater: 'unknown' }, 119900)).toBe(
-      'If this store offers PayPal Pay in 4, compare it below.',
-    )
+    // No answer from the store, or a price it wasn't asked about: nothing is said.
+    expect(payLaterLine({ ...QUOTE, payLater: 'unknown' }, 119900)).toBeUndefined()
     expect(payLaterLine({ ...QUOTE, payLater: 'not-offered' }, 119900)).toBe(
       'Larkspur Supply doesn’t offer PayPal Pay in 4 for this amount.',
     )
-    expect(payLaterLine(QUOTE, 125000)).toBe(
-      'If this store offers PayPal Pay in 4, compare it below.',
-    )
+    expect(payLaterLine(QUOTE, 125000)).toBeUndefined()
     expect(payLaterLine({ ...QUOTE, amountCents: 250000 }, 250000)).toBeUndefined()
     expect(payLaterLine({ ...QUOTE, amountCents: 999 }, 999)).toBeUndefined()
+  })
+})
+
+describe('the answer and the item on /check (feedback 2)', () => {
+  it('moves focus into the edit form, and back to the edit when it closes', async () => {
+    route({ '/handoff/open': opened() })
+    visit()
+    await answer()
+    await userEvent.click(itemCard().getByRole('button', { name: 'Not right? Edit' }))
+    expect(document.activeElement).toBe(itemCard().getByLabelText('Item'))
+    await userEvent.click(itemCard().getByRole('button', { name: 'Cancel' }))
+    expect(document.activeElement).toBe(itemCard().getByRole('button', { name: 'Not right? Edit' }))
+    await userEvent.click(itemCard().getByRole('button', { name: 'Not right? Edit' }))
+    const price = itemCard().getByLabelText(/^Total price, USD/)
+    await userEvent.clear(price)
+    await userEvent.type(price, '1250')
+    await userEvent.click(itemCard().getByRole('button', { name: 'Check again' }))
+    expect(await itemCard().findByText('$1,250.00')).toBeTruthy()
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        itemCard().getByRole('button', { name: 'Not right? Edit' }),
+      ),
+    )
+  })
+
+  it('puts the store’s “doesn’t offer” answer inside the Pay in 4 box', async () => {
+    route({ '/handoff/open': opened({ payLater: 'not-offered' }) })
+    visit()
+    await answer()
+    const box = document.querySelector('.disclosure') as HTMLElement
+    expect(
+      within(box).getByText('Larkspur Supply doesn’t offer PayPal Pay in 4 for this amount.'),
+    ).toBeTruthy()
+    expect(screen.getAllByText(/offer PayPal Pay in 4 for this amount/)).toHaveLength(1)
+  })
+
+  it('says nothing about the store’s Pay in 4 when it gave no answer', async () => {
+    route({ '/handoff/open': opened({ payLater: 'unknown' }) })
+    visit()
+    await answer()
+    expect(screen.getByRole('button', { name: /Compare with PayPal Pay in 4/ })).toBeTruthy()
+    expect(screen.queryByText(/PayPal Pay in 4 for this amount|compare it below/)).toBeNull()
+  })
+
+  it('leads with a compact item row on narrow screens, and drops the rail’s item card', async () => {
+    narrowScreen()
+    route({ '/handoff/open': opened() })
+    visit()
+    const verdict = await answer()
+    const row = document.querySelector('.item-row') as HTMLElement
+    expect(row).toBeTruthy()
+    // The row comes before the answer, with the item, its price, the store and the edit.
+    expect(row.compareDocumentPosition(verdict) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(row).getByText('Everyday camera')).toBeTruthy()
+    expect(within(row).getByText('$1,199.00')).toBeTruthy()
+    expect(within(row).getByText(/Larkspur Supply/)).toBeTruthy()
+    expect(row.querySelector('img')?.getAttribute('src')).toBe(QUOTE.imageUrl)
+    // Said once: no second card in the rail, and one edit on the page.
+    expect(screen.queryByText('Sold by Larkspur Supply')).toBeNull()
+    expect(screen.getAllByRole('button', { name: 'Not right? Edit' })).toHaveLength(1)
+    // The way back to the store stays in the rail for tablets, which have no action bar.
+    const rail = within(screen.getByRole('complementary', { name: 'Item and reasons' }))
+    expect(rail.getByRole('link', { name: 'Back to Larkspur Supply' })).toBeTruthy()
+    // Editing happens in the row, and the note on the price entered stays there.
+    await userEvent.click(within(row).getByRole('button', { name: 'Not right? Edit' }))
+    const price = within(row).getByLabelText(/^Total price, USD/)
+    await userEvent.clear(price)
+    await userEvent.type(price, '1250')
+    await userEvent.click(within(row).getByRole('button', { name: 'Check again' }))
+    const edited = await waitFor(() => {
+      const next = document.querySelector('.item-row') as HTMLElement
+      expect(within(next).getByText('$1,250.00')).toBeTruthy()
+      return next
+    })
+    expect(within(edited).getByText(/Worth is checking the price you entered/)).toBeTruthy()
+    expect(within(edited).getByRole('button', { name: 'Use the store’s price' })).toBeTruthy()
   })
 })
 
@@ -495,7 +597,7 @@ describe('/check error states (contract §3.4)', () => {
     expect(storeLinks()).toHaveLength(0)
     limited = false
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
-    expect(await screen.findByRole('group', { name: /From Larkspur Supply/ })).toBeTruthy()
+    expect(await answer()).toBeTruthy()
     expect(calls('/handoff/open')).toHaveLength(2)
   })
 })

@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useId,
   useRef,
   useState,
@@ -45,7 +46,7 @@ import { cushionGap } from './chartLayout'
 import { boughtOn, cx, dayLabel, fromMoney, fullDate, money, shortDate, signed } from './format'
 import { PayPalMessage } from './paypal'
 import type { PayPalSdkInstance } from './paypalSdk'
-import { Alert, Button, Dialog, Disc, Field, Pill, ReadAsChip, Ring, type Tone } from './ui'
+import { Alert, Button, Dialog, Disc, Field, Pill, Ring, type Tone } from './ui'
 
 export type OptionKey = 'buyToday' | 'wait' | 'spendLess'
 export type DecisionRequest = {
@@ -64,10 +65,17 @@ export type DecisionRequest = {
 }
 /**
  * A store's item from a signed hand-off (/check). The store sells it, so the way back to the
- * store replaces Worth's actions, and the store's line with its own edit replaces the Read-as chip.
+ * store replaces Worth's actions, and the item card with its own edit replaces the Read-as chip.
  */
 export interface DecisionHandoff {
-  intro: ReactNode
+  /** "Not right? Edit", beside the item's price. */
+  edit: ReactNode
+  /** The edit form, in place of the item's price while the shopper corrects it. */
+  editor?: ReactNode
+  /** Under the item's price after an edit: the store's price and the way back to it. */
+  note?: ReactNode
+  /** The store's own Pay in 4 answer for this amount, under the Pay in 4 heading. */
+  payLater?: string
   /** The actions for this answer: the way back to the store, and Save for a wait plan's day. */
   actions: (notes: boolean, c: Comparison) => ReactNode
   /** Under the answer, once: the report-back choice. */
@@ -366,11 +374,14 @@ function PayIn4Panel({
   open,
   onToggle,
   instance,
+  note,
 }: {
   c: Comparison
   open: boolean
   onToggle: () => void
   instance?: PayPalSdkInstance
+  /** The store's own Pay in 4 answer, as a second line under the heading. */
+  note?: string
 }) {
   const panelId = useId()
   const p4 = c.payIn4
@@ -393,6 +404,7 @@ function PayIn4Panel({
             <span className="meta">
               {p4.available ? 'Not available for this amount' : p4.reason}
             </span>
+            {note && <span className="meta p4-store">{note}</span>}
           </span>
         </div>
       </div>
@@ -430,6 +442,7 @@ function PayIn4Panel({
             4 payments {amounts.size > 1 ? 'from' : 'of'}{' '}
             {money(p4.instalments.at(-1)!.amountCents)}, {PAY_IN_4_SPACING} from today
           </span>
+          {note && <span className="meta p4-store">{note}</span>}
         </span>
         <ChevronDown className="ico chev" aria-hidden="true" />
       </button>
@@ -570,6 +583,8 @@ export function Decision({
   const [picked, setPicked] = useState<OptionKey>()
   const [p4Open, setP4Open] = useState(false)
   const [editing, setEditing] = useState(false)
+  /** Set as the edit form closes, so "Not right? Edit" takes focus back. */
+  const refocus = useRef(false)
   const [confirmBuy, setConfirmBuy] = useState(false)
   const [recheck, setRecheck] = useState(false)
   const radios = useRef<(HTMLButtonElement | null)[]>([])
@@ -624,7 +639,6 @@ export function Decision({
   }
   const p4 = c.payIn4.available ? c.payIn4 : undefined
   const selectedOption = optionOf(c, selected) ?? c.buyToday
-  const readAs = explanation?.readAs ?? `${c.itemName} · ${money(c.amountCents)} · today`
   const bought = product
     ? state.purchases.find(
         (p) => p.productId === product.id && p.status === 'completed' && !p.archived,
@@ -844,6 +858,89 @@ export function Decision({
       )}
     </div>
   )
+  const edit = (
+    <button
+      type="button"
+      className="link edit-item"
+      // A new answer shows the skeleton first, so focus returns when the button mounts again.
+      ref={(element) => {
+        if (!element || !refocus.current) return
+        refocus.current = false
+        element.focus()
+      }}
+      onClick={() => setEditing(true)}
+    >
+      Not right? Edit
+    </button>
+  )
+  const closeEditor = () => {
+    refocus.current = true
+    setEditing(false)
+  }
+  const item: ItemView = handoff
+    ? {
+        name: c.itemName,
+        amountCents: c.amountCents,
+        image: handoff.imageUrl,
+        seller: `Sold by ${handoff.merchant}`,
+        store: handoff.merchant,
+        edit: handoff.edit,
+        editor: handoff.editor,
+        note: handoff.note,
+      }
+    : {
+        name: product?.name ?? c.itemName,
+        amountCents: c.amountCents,
+        image: product?.image,
+        seller: product
+          ? `Sold by ${product.merchant} · demo\u00a0store`
+          : c.source
+            ? `At ${c.source.merchantName} · ${c.source.priceSource === 'channel3' ? 'price read by Channel3, confirmed by you' : 'price you entered'}`
+            : 'Checkout is for demo store items',
+        store: product?.merchant ?? c.source?.merchantName,
+        when: 'today',
+        edit,
+        editor: editing ? (
+          <EditPurchase
+            name={c.itemName}
+            amountCents={c.amountCents}
+            focusFirst
+            onCancel={closeEditor}
+            onSubmit={(next) => {
+              closeEditor()
+              setPicked(undefined)
+              setOverride(
+                product && next.amountCents === product.priceCents
+                  ? { productId: product.id }
+                  : active.sourceUrl
+                    ? {
+                        ...next,
+                        sourceUrl: active.sourceUrl,
+                        // Any change here is the shopper's own price.
+                        priceSource:
+                          active.priceSource === 'channel3' &&
+                          next.amountCents === active.amountCents
+                            ? 'channel3'
+                            : 'user',
+                      }
+                    : next,
+              )
+            }}
+          />
+        ) : undefined,
+        link: c.source && (
+          <a
+            className="caption"
+            href={c.source.sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ display: 'inline-flex', gap: 4, alignItems: 'center', marginTop: 8 }}
+          >
+            Open the store page <ExternalLink size={14} aria-hidden="true" />
+            <span className="sr"> (opens in a new tab)</span>
+          </a>
+        ),
+      }
   const railActions = handoff
     ? handoff.actions(true, c)
     : product
@@ -871,50 +968,17 @@ export function Decision({
               <ArrowLeft size={16} aria-hidden="true" />
               {backLabel}
             </button>
-            {handoff ? (
-              handoff.intro
-            ) : (
-              <p className="meta strong hide-m" style={{ margin: 0 }}>
-                {c.itemName}, {money(c.amountCents)}
-                {c.source ? ` · ${c.source.merchantName}` : ''}
+            {/* Narrow screens drop the rail's item card far below, so the item leads here. */}
+            {narrow && <ItemCard item={item} compact />}
+            {/* The answer is the headline: one calm block, the verdict and the engine's sentence. */}
+            <section className="verdict-block" aria-labelledby="verdict-head">
+              <h1 className="title" id="verdict-head">
+                {verdictTitle(c)}
+              </h1>
+              <p className="lead">
+                <AnswerDetail c={c} />
               </p>
-            )}
-            <h1 className="title">{verdictTitle(c)}</h1>
-            {!editing && !handoff && (
-              <div>
-                <ReadAsChip value={readAs} onAction={() => setEditing(true)} />
-              </div>
-            )}
-            {editing && (
-              <EditPurchase
-                name={c.itemName}
-                amountCents={c.amountCents}
-                onCancel={() => setEditing(false)}
-                onSubmit={(next) => {
-                  setEditing(false)
-                  setPicked(undefined)
-                  setOverride(
-                    product && next.amountCents === product.priceCents
-                      ? { productId: product.id }
-                      : active.sourceUrl
-                        ? {
-                            ...next,
-                            sourceUrl: active.sourceUrl,
-                            // Any change here is the shopper's own price.
-                            priceSource:
-                              active.priceSource === 'channel3' &&
-                              next.amountCents === active.amountCents
-                                ? 'channel3'
-                                : 'user',
-                          }
-                        : next,
-                  )
-                }}
-              />
-            )}
-            <p className="lead">
-              <AnswerDetail c={c} />
-            </p>
+            </section>
             {hold && (
               <ReservationNote
                 purchase={hold}
@@ -978,6 +1042,7 @@ export function Decision({
             open={p4Open}
             onToggle={() => setP4Open(!p4Open)}
             instance={instance}
+            note={handoff?.payLater}
           />
           <ChartTile c={c} k={selected} payIn4={p4Open ? p4 : undefined} scaleWith={p4} />
         </div>
@@ -985,42 +1050,17 @@ export function Decision({
           {/* Something cheaper swaps the item for the similar items; the actions stay. */}
           {listShown && !narrow ? (
             <>
+              {/* The item, its edit and any note stay above the similar items. */}
+              <ItemCard item={item} compact />
               {list}
               <div className="rail-actions bare">{railActions}</div>
             </>
+          ) : narrow ? (
+            // The item leads the page here, so only the actions stay (tablets have no bar).
+            railActions && <div className="rail-actions solo">{railActions}</div>
           ) : (
             <div className="tile">
-              <div className="product">
-                {product && <img src={product.image} alt={product.name} />}
-                {handoff?.imageUrl && <img src={handoff.imageUrl} alt={c.itemName} />}
-                <div>
-                  <div className="pt">{product?.name ?? c.itemName}</div>
-                  <div className="meta">
-                    {handoff
-                      ? `Sold by ${handoff.merchant}`
-                      : product
-                        ? `Sold by ${product.merchant} · demo\u00a0store`
-                        : c.source
-                          ? `At ${c.source.merchantName} · ${c.source.priceSource === 'channel3' ? 'price read by Channel3, confirmed by you' : 'price you entered'}`
-                          : 'Checkout is for demo store items'}
-                  </div>
-                  <div className="num strong" style={{ fontWeight: 700, marginTop: 4 }}>
-                    {money(c.amountCents)}
-                  </div>
-                </div>
-              </div>
-              {c.source && (
-                <a
-                  className="caption"
-                  href={c.source.sourceUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ display: 'inline-flex', gap: 4, alignItems: 'center', marginTop: 8 }}
-                >
-                  Open the store page <ExternalLink size={14} aria-hidden="true" />
-                  <span className="sr"> (opens in a new tab)</span>
-                </a>
-              )}
+              <ItemCard item={item} />
               {railActions && <div className="rail-actions">{railActions}</div>}
             </div>
           )}
@@ -1139,6 +1179,75 @@ export function StressLow({
   )
 }
 
+/** The item being judged, with its edit: what the old Read-as chip and /check's chip said. */
+interface ItemView {
+  name: string
+  amountCents: number
+  image?: string
+  /** Under the name in the rail's card. */
+  seller: string
+  /** After the price in the compact row. */
+  store?: string
+  /** When it would be bought, as Worth read it. */
+  when?: string
+  edit: ReactNode
+  /** The edit form, in place of the edit while it is open. */
+  editor?: ReactNode
+  note?: ReactNode
+  link?: ReactNode
+}
+/**
+ * The item and its edit, on the right: the rail's card on wide screens, or a compact row (above
+ * the answer on narrow screens, above similar items in the rail).
+ */
+function ItemCard({ item, compact }: { item: ItemView; compact?: boolean }) {
+  const extra = (item.editor || item.note) && (
+    <div className="product-edit">
+      {item.editor}
+      {item.note}
+    </div>
+  )
+  if (compact)
+    return (
+      <div className="tile item-row">
+        <div className="item-top">
+          {item.image && <img src={item.image} alt="" />}
+          <div>
+            <div className="pt">{item.name}</div>
+            <div className="meta">
+              <span className="num strong">{money(item.amountCents)}</span>
+              {item.store && ` · ${item.store}`}
+              {item.when && ` · ${item.when}`}
+            </div>
+            {!item.editor && item.edit}
+          </div>
+        </div>
+        {extra}
+        {item.link}
+      </div>
+    )
+  return (
+    <>
+      <div className="product">
+        {item.image && <img src={item.image} alt={item.name} />}
+        <div>
+          <div className="pt">{item.name}</div>
+          <div className="meta">{item.seller}</div>
+          <div className="price-row">
+            <span>
+              <span className="num strong">{money(item.amountCents)}</span>
+              {item.when && <span className="meta"> · {item.when}</span>}
+            </span>
+            {!item.editor && item.edit}
+          </div>
+        </div>
+      </div>
+      {extra}
+      {item.link}
+    </>
+  )
+}
+
 /** Below 1024 px the rail drops under the main column, so a rail-only list moves up instead. */
 const NARROW = '(max-width: 1023px)'
 function useNarrow() {
@@ -1231,6 +1340,7 @@ export function EditPurchase({
   name,
   amountCents,
   submitLabel = 'Check again',
+  focusFirst,
   onSubmit,
   onCancel,
 }: {
@@ -1238,9 +1348,17 @@ export function EditPurchase({
   /** Empty when the shopper types the price themselves. */
   amountCents?: number
   submitLabel?: string
+  /** Opened from a button that has now gone, so focus moves into the form. */
+  focusFirst?: boolean
   onSubmit: (next: { itemName: string; amountCents: number }) => void
   onCancel?: () => void
 }) {
+  const first = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (focusFirst) first.current?.focus()
+    // Once, as the form opens.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [item, setItem] = useState(name)
   const [amount, setAmount] = useState(amountCents ? (amountCents / 100).toFixed(2) : '')
   const [error, setError] = useState('')
@@ -1258,6 +1376,7 @@ export function EditPurchase({
     >
       <Field label="Item">
         <input
+          ref={first}
           className="input"
           value={item}
           maxLength={100}
