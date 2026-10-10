@@ -6,7 +6,7 @@ const SECRET = Buffer.alloc(32, 3).toString('base64url')
 const PROD = {
   NODE_ENV: 'production',
   MERCHANT_ORIGIN: 'https://larkspur.example',
-  WORTH_ORIGIN: 'https://worth-paypal.onrender.com',
+  WORTH_ORIGIN: 'https://worth.onrender.com',
   HANDOFF_SECRET: SECRET,
   TRUST_PROXY: '2',
   PORT: '10000',
@@ -37,7 +37,7 @@ describe('store configuration', () => {
     const config = loadMerchantConfig(PROD)
     expect(config).toMatchObject({
       origin: 'https://larkspur.example',
-      worthOrigin: 'https://worth-paypal.onrender.com',
+      worthOrigin: 'https://worth.onrender.com',
       port: 10000,
       host: '0.0.0.0',
       trustProxy: 2,
