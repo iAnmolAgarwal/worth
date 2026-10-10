@@ -924,7 +924,7 @@ export function Ask({
                   ref={input}
                   value={message}
                   maxLength={2000}
-                  placeholder="Ask about a purchase or paste a product link"
+                  placeholder="Ask, or paste a product link"
                   onChange={(event) => setMessage(event.target.value)}
                 />
                 <button className="send" type="submit" aria-label="Send" disabled={busy}>

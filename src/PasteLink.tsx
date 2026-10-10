@@ -5,7 +5,7 @@ import { checkProductLink, LINK_TITLE_MAX, productTitle, storeDomain } from '../
 import type { ProductLookup } from '../shared/types'
 import { api, ApiError } from './api'
 import type { DecisionRequest } from './Decision'
-import { fromMoney, money } from './format'
+import { currencyAmount, fromMoney, money } from './format'
 import { Button, Field } from './ui'
 
 /**
@@ -21,6 +21,8 @@ type Read =
 
 /** What the card says when it asks for the price itself. */
 const MANUAL_HEADING = 'We couldn’t read that page. What’s the price?'
+/** Channel3 knew the product, but had no price for this store. */
+const FOUND_HEADING = 'We found it, but not its price. What’s the price?'
 const MANUAL_NOTE: Record<Extract<Read, { step: 'manual' }>['why'], string> = {
   unread: 'Enter the item and its total price from the store page.',
   currency: '',
@@ -108,7 +110,9 @@ export function LinkCheck({
       ? `Is ${money(read.product.priceCents)} right?`
       : read.why === 'currency' && product?.currency
         ? `That page shows a price in ${product.currency}. What’s the price in US dollars?`
-        : MANUAL_HEADING
+        : read.why === 'unread' && product
+          ? FOUND_HEADING
+          : MANUAL_HEADING
   return (
     <section
       className="tile link-check"
@@ -130,6 +134,15 @@ export function LinkCheck({
           {read.step === 'manual' && MANUAL_NOTE[read.why] && (
             <p className="meta">{MANUAL_NOTE[read.why]}</p>
           )}
+          {/* The other currency's price, for reference only; it never fills the USD field. */}
+          {read.step === 'manual' &&
+            read.why === 'currency' &&
+            product?.priceCents &&
+            product.currency && (
+              <p className="meta">
+                Listed at {currencyAmount(product.priceCents, product.currency)}
+              </p>
+            )}
         </div>
       </div>
       {product && (
