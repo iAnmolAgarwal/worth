@@ -163,6 +163,20 @@ describe('the one-time notice', () => {
     await waitFor(() => expect(seen).toEqual([{ purchaseIds: ['p-store-2', 'p-store'] }]))
   })
 
+  it('clears more than 20 reports in calls of at most 20 ids', async () => {
+    const many = Array.from({ length: 23 }, (_, index) => reported({ id: `p-${index}` }))
+    const seen = serve(makeState(many)) as { purchaseIds: string[] }[]
+    render(<App />)
+    expect(
+      await screen.findByText(
+        'Larkspur Supply told Worth about 23 payments. They’re in your Activity.',
+      ),
+    ).toBeTruthy()
+    await waitFor(() => expect(seen).toHaveLength(2))
+    expect(seen.map((call) => call.purchaseIds.length)).toEqual([20, 3])
+    expect(seen.flatMap((call) => call.purchaseIds).sort()).toEqual(many.map((p) => p.id).sort())
+  })
+
   it('says nothing for Worth’s own purchases or a notice already seen', async () => {
     const own = reported({ reportedBy: undefined, reportNotice: undefined })
     const seenBefore = reported({ id: 'p-old', reportNotice: undefined })

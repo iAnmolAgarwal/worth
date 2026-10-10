@@ -260,7 +260,11 @@ export default function App() {
         ? `${who} told Worth about your ${money(fresh[0]!.amountCents)} payment.`
         : `${who} told Worth about ${fresh.length} payments. They’re in your Activity.`,
     )
-    void api('/handoff/notices/seen', { purchaseIds: fresh.map((p) => p.id) }).catch(() => {})
+    // The server takes at most 20 per call, so every report this notice named is cleared in batches.
+    for (let start = 0; start < fresh.length; start += 20)
+      void api('/handoff/notices/seen', {
+        purchaseIds: fresh.slice(start, start + 20).map((p) => p.id),
+      }).catch(() => {})
   }, [state])
   useEffect(() => {
     if (!toast) return
