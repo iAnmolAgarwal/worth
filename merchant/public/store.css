@@ -371,8 +371,8 @@ body.lk {
 .lk-buy__error[hidden] {
   display: none;
 }
-/* The Worth control's slot: placement and width only; <worth-check> brings its own look. A clear
-   14px gap (gap 10px + 4px) keeps it apart from the PayPal button above. */
+/* With PayPal, <worth-check mode="swipe"> wraps PayPal's button in .lk-buy__paypal and brings its
+   own look. Without PayPal, this slot holds the outline link alone: placement and width only. */
 .lk-buy__worth {
   order: 1;
   display: flex;

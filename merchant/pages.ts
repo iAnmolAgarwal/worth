@@ -139,9 +139,16 @@ export function productPage(view: ProductView, options: PageOptions) {
   const amount = (product.priceCents / 100).toFixed(2)
   const worthHref = `${view.worthOrigin}/check#q=${quote.token}`
   const refresh = `/api/worth-quote?productId=${encodeURIComponent(product.id)}${options.replay ? '&replay=video' : ''}`
+  const worthAttributes = `href="${esc(worthHref)}" merchant="${esc(STORE_NAME)}" amount="${esc(amount)}" refresh-url="${esc(refresh)}"`
+  // Without JavaScript, the plain same-tab link inside <worth-check> still goes to Worth. In swipe
+  // mode it sits in a slot the element never draws, so with JavaScript only PayPal's button shows.
+  const noScript = (slot = '') =>
+    `<a class="worth-check"${slot} href="${esc(worthHref)}">Analyse with Worth</a>`
+  // With PayPal, <worth-check mode="swipe"> wraps PayPal's own button and docks Worth's W tab on its
+  // right edge (shared/worthSwipe.ts); without it, the outline link has the row to itself.
   const paypal = view.paypalClientId
     ? `<div class="lk-buy__paypal" data-slot="paypal">
-        <paypal-button class="lk-buy__button" type="pay" hidden></paypal-button>
+        <worth-check mode="swipe" ${worthAttributes}><paypal-button class="lk-buy__button" type="pay" hidden></paypal-button>${noScript(' slot="fallback"')}</worth-check>
         <p class="lk-buy__status" role="status">Loading PayPal…</p>
       </div>
       <div class="lk-buy__message">
@@ -166,9 +173,13 @@ export function productPage(view: ProductView, options: PageOptions) {
       data-client-id="${esc(view.paypalClientId ?? '')}">
       ${paypal}
       ${view.worthLine ? `<p class="lk-buy__worth-result">${esc(view.worthLine)}</p>` : ''}
-      <div class="lk-buy__worth" data-slot="worth-check">
-        <worth-check href="${esc(worthHref)}" merchant="${esc(STORE_NAME)}" amount="${esc(amount)}" refresh-url="${esc(refresh)}"><a class="worth-check" href="${esc(worthHref)}">Analyse with Worth</a></worth-check>
-      </div>
+      ${
+        view.paypalClientId
+          ? ''
+          : `<div class="lk-buy__worth" data-slot="worth-check">
+        <worth-check ${worthAttributes}>${noScript()}</worth-check>
+      </div>`
+      }
       <p class="lk-buy__error" role="alert" hidden></p>
     </section>
     <dl class="lk-facts">
