@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { payIn4Offer } from '../shared/payLater'
 import { loadPayPalSdk, type PayPalSdkInstance } from './paypalSdk'
 
 export type SdkStatus = 'off' | 'loading' | 'ready' | 'error'
@@ -43,18 +44,12 @@ export function useEligibility(instance: PayPalSdkInstance | undefined, amountCe
       .findEligibleMethods({ currencyCode: 'USD', amount: (amountCents / 100).toFixed(2) })
       .then((methods) => {
         if (cancelled) return
-        const later = methods.isEligible('paylater')
-        const product = later ? methods.getDetails?.('paylater')?.productCode : undefined
+        // PayPal's v6 code for Pay in 4 is PAY_LATER_SHORT_TERM; PAYLATER doesn't say which product.
+        const payIn4 = payIn4Offer(methods)
         setState({
           key,
           paypal: methods.isEligible('paypal') ? 'eligible' : 'not-eligible',
-          payIn4: !later
-            ? 'not-eligible'
-            : product === undefined
-              ? 'unknown'
-              : product === 'PAY_IN_4'
-                ? 'eligible'
-                : 'not-eligible',
+          payIn4: payIn4 === undefined ? 'unknown' : payIn4 ? 'eligible' : 'not-eligible',
         })
       })
       .catch(() => !cancelled && setState({ key, paypal: 'unknown', payIn4: 'unknown' }))

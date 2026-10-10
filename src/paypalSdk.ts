@@ -29,7 +29,7 @@ export interface PayPalPaymentSession {
 }
 export interface PayPalEligibility {
   isEligible(method: 'paypal' | 'paylater'): boolean
-  /** Pay Later details, such as `{ productCode: 'PAY_IN_4', countryCode: 'US' }`. */
+  /** Pay Later details: `{ productCode: 'PAY_LATER_SHORT_TERM', countryCode: 'US' }` is Pay in 4. */
   getDetails?(method: 'paylater'): { productCode?: string; countryCode?: string } | undefined
 }
 export interface PayPalSdkInstance {
