@@ -41,6 +41,16 @@ export function weekGroups<T extends { date: string }>(items: T[], today: string
 
 /** The plan name without "· Pay in 4": the store. */
 const merchantOf = (plan: Pick<RunningPlan, 'name'>) => plan.name.split('·')[0]!.trim()
+/** The item, from a plan named "Larkspur Supply · Headphones · Pay in 4". */
+const itemOf = (name: string) => {
+  const parts = name.split('·').map((part) => part.trim())
+  return parts.length === 3 ? parts[1] : undefined
+}
+/** A plan payment on the timeline reads by its item when the export named it: "Headphones · Pay in 4". */
+const rowName = (flow: ScheduledFlow) => {
+  const item = flow.kind === 'installment' ? itemOf(flow.name) : undefined
+  return item ? `${item} · Pay in 4` : displayName(flow.name)
+}
 
 /** Timeline notes for plan payments that land next to a bill, keyed by plan and date. */
 function collisionNotes(state: AppState) {
@@ -116,7 +126,7 @@ export function NextThirtyDays({ state, onShowAll }: { state: AppState; onShowAl
           }
         />
         <div className="body">
-          <div className="t">{displayName(flow.name)}</div>
+          <div className="t">{rowName(flow)}</div>
           <div className="s">
             {parts[0]}{' '}
             <span className="soft">
@@ -203,6 +213,10 @@ export function PlanCards({ state, room }: { state: AppState; room?: Comparison 
       {plans.map((plan) => {
         const paid = plan.total ? plan.total - plan.left : undefined
         const merchant = merchantOf(plan)
+        const item = itemOf(plan.name)
+        const total = state.profile.flows.find(
+          (flow) => (flow.planId ?? flow.id) === plan.planId && flow.planTotalCents,
+        )?.planTotalCents
         return (
           <article className="pcard" key={plan.planId} aria-label={`${merchant} Pay in 4 plan`}>
             <div className="top">
@@ -212,7 +226,9 @@ export function PlanCards({ state, room }: { state: AppState; room?: Comparison 
               <div className="who">
                 <div className="merchant">{displayName(merchant)}</div>
                 <div className="sub">
-                  {plan.left} {plan.left === 1 ? 'payment' : 'payments'} left
+                  {item || total
+                    ? [item, total && money(total)].filter(Boolean).join(' · ')
+                    : `${plan.left} ${plan.left === 1 ? 'payment' : 'payments'} left`}
                 </div>
               </div>
               <div className="each">

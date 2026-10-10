@@ -177,6 +177,7 @@ const profileSchema = z
             planId: identifier.optional(),
             paidOn: date.optional(),
             origin: z.enum(['paypal', 'you']).optional(),
+            planTotalCents: cents.optional(),
           })
           .strict(),
       )

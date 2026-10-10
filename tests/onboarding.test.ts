@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { createApp } from '../server/app.ts'
 import { Store } from '../server/store.ts'
 import { parsePayPalCsv } from '../shared/csv.ts'
-import { compareOptions, planCollisions } from '../shared/finance.ts'
+import { addDays, compareOptions, planCollisions } from '../shared/finance.ts'
 import {
   dayPhrase,
   draftFlows,
@@ -46,7 +46,7 @@ const rent: ScheduledFlow = {
   id: 'you-rent',
   name: 'Maple Court rent',
   amountCents: 165000,
-  nextDate: '2026-10-16',
+  nextDate: '2026-10-22',
   cadence: 'monthly',
   kind: 'bill',
   category: 'Other',
@@ -71,40 +71,79 @@ describe('the bundled sample PayPal export', () => {
     )
     expect(preview.recurring).toHaveLength(5)
     expect(
-      preview.instalmentPlans.map((plan) => [plan.name, plan.purchaseCents, plan.paymentCents]),
+      preview.instalmentPlans.map((plan) => [
+        plan.name,
+        plan.title,
+        plan.purchaseCents,
+        plan.paymentCents,
+      ]),
     ).toEqual([
-      ['Northline Outfitters', 18000, 4500],
-      ['PayPal Pay in 4', null, 6250],
-      ['Larkspur Supply', 29988, 7497],
+      ['Northline Outfitters', 'Running shoes', 18000, 4500],
+      ['PayPal Pay in 4', undefined, null, 6250],
+      ['Larkspur Supply', 'Headphones', 29988, 7497],
     ])
     // Everyday spending leaves out the repeats and the plans.
     expect(preview.suggestedDailySpendCents).toBeGreaterThan(2000)
     expect(preview.suggestedDailySpendCents).toBeLessThan(4000)
   })
 
-  it('moves by whole weeks so it always ends in the week before today', () => {
+  it('moves to end yesterday, as a fresh download would', () => {
     expect(shiftSampleExport(SAMPLE, '2026-10-06')).toBe(SAMPLE)
-    expect(shiftSampleExport(SAMPLE, '2026-10-12')).toBe(SAMPLE)
-    const later = shiftSampleExport(SAMPLE, '2026-11-12')
-    expect(later.split('\n')[1]).toMatch(/^"11\/09\/2026"/)
-    const earlier = shiftSampleExport(SAMPLE, '2026-10-03')
-    expect(earlier.split('\n')[1]).toMatch(/^"09\/28\/2026"/)
-    // Shifted, it still reads the same: no future rows, the payday still on a Friday.
-    for (const today of ['2026-11-12', '2026-10-03', '2027-01-20']) {
+    expect(shiftSampleExport(SAMPLE, '2026-11-12').split('\n')[1]).toMatch(/^"11\/11\/2026"/)
+    expect(shiftSampleExport(SAMPLE, '2026-10-03').split('\n')[1]).toMatch(/^"10\/02\/2026"/)
+    expect(
+      SAMPLE.split('\n')[1]!.startsWith(
+        `"${SAMPLE_EXPORT_END.slice(5, 7)}/${SAMPLE_EXPORT_END.slice(8)}/2026"`,
+      ),
+    ).toBe(true)
+  })
+
+  // A Saturday, a Wednesday, the day before a Friday payday, a month on and next year.
+  it.each(['2026-10-10', '2026-10-14', '2026-10-29', '2026-11-12', '2027-02-28'])(
+    'builds the same believable month on %s',
+    (today) => {
       const preview = parsePayPalCsv(shiftSampleExport(SAMPLE, today), [], { today })
       expect(preview.errors).toEqual([])
-      expect(preview.instalmentPlans).toHaveLength(3)
+      const dates = preview.transactions.map((item) => item.date).sort()
+      // The file ends yesterday, with a Northwind payday on or before that.
+      expect(dates.at(-1)).toBe(addDays(today, -1))
+      const paydays = preview.transactions.filter((item) => item.kind === 'income')
+      expect(paydays.at(-1)!.date <= dates.at(-1)!).toBe(true)
+      const plans = draftPlans(preview.instalmentPlans)
+      // The $62.50 plan still needs an answer.
+      expect(
+        plans.filter((plan) => plan.merchant === null && plan.left === undefined),
+      ).toHaveLength(1)
+      const flows = plans
+        .map((plan) => (plan.merchant ? plan : { ...plan, left: 0 }))
+        .flatMap((plan) => planFlows(plan, today))
+      const larkspur = flows.filter((flow) => flow.name.startsWith('Larkspur Supply'))
+      // Rent from the bank, due the day before Larkspur's next payment.
+      const due = { ...rent, nextDate: addDays(larkspur[0]!.nextDate, -1) }
       const pay = preview.recurring.find((flow) => flow.kind === 'income')!
-      expect(new Date(`${pay.nextDate}T12:00:00Z`).getUTCDay()).toBe(5)
-    }
-    expect(SAMPLE).toContain(
-      `"${SAMPLE_EXPORT_END.slice(5, 7)}/${SAMPLE_EXPORT_END.slice(8)}/2026"`,
-    )
-  })
+      expect(pay.nextDate < due.nextDate).toBe(true)
+      const profile = {
+        ...compareProfile(today),
+        balanceCents: 180000,
+        dailySpendCents: preview.suggestedDailySpendCents,
+        flows: [...draftFlows(preview, []), due, ...flows],
+      }
+      const room = compareOptions(profile, [], { amountCents: 0, today })
+      expect(room.spendLess.maxPriceCents).toBeGreaterThanOrEqual(25000)
+      expect(room.spendLess.maxPriceCents).toBeLessThanOrEqual(60000)
+      const notes = planCollisions(profile, [], today).filter(({ bill }) => bill.kind === 'bill')
+      expect(notes).toHaveLength(1)
+      expect(notes[0]!.payment).toMatchObject({ date: larkspur[0]!.nextDate, amountCents: 7497 })
+      expect(dayPhrase(notes[0]!.bill.daysFromInstalment, notes[0]!.bill.name)).toBe(
+        'the day after Maple Court rent',
+      )
+    },
+  )
 })
 
 describe('the review draft', () => {
-  const preview = parsePayPalCsv(SAMPLE, [], { today: TODAY })
+  // The sample as the app loads it on Sat, Oct 10: ending Fri, Oct 9.
+  const preview = parsePayPalCsv(shiftSampleExport(SAMPLE, TODAY), [], { today: TODAY })
 
   it('estimates what is left of each plan and asks about the one without a purchase', () => {
     const plans = draftPlans(preview.instalmentPlans)
@@ -114,7 +153,7 @@ describe('the review draft', () => {
       ['Larkspur Supply', 2, 2],
     ])
     const larkspur = plans[2]!
-    expect(planDates(larkspur, TODAY)).toEqual(['2026-10-17', '2026-10-31'])
+    expect(planDates(larkspur, TODAY)).toEqual(['2026-10-23', '2026-11-06'])
     // A plan whose payments are all in the file is done.
     const done = draftPlans([
       {
@@ -129,23 +168,25 @@ describe('the review draft', () => {
     const [northline, undated, larkspur] = draftPlans(preview.instalmentPlans)
     expect(planFlows(larkspur!, TODAY)).toMatchObject([
       {
-        name: 'Larkspur Supply · Pay in 4',
+        name: 'Larkspur Supply · Headphones · Pay in 4',
         amountCents: 7497,
-        nextDate: '2026-10-17',
+        nextDate: '2026-10-23',
         origin: 'paypal',
+        planTotalCents: 29988,
       },
       {
-        name: 'Larkspur Supply · Pay in 4',
+        name: 'Larkspur Supply · Headphones · Pay in 4',
         amountCents: 7497,
-        nextDate: '2026-10-31',
+        nextDate: '2026-11-06',
         origin: 'paypal',
+        planTotalCents: 29988,
       },
     ])
     expect(planFlows({ ...northline!, included: false }, TODAY)).toEqual([])
     expect(planFlows(undated!, TODAY)).toEqual([])
     expect(planFlows({ ...undated!, left: 0 }, TODAY)).toEqual([])
     expect(planFlows({ ...undated!, left: 1 }, TODAY)).toMatchObject([
-      { name: 'Earlier purchase · Pay in 4', amountCents: 6250, nextDate: '2026-10-16' },
+      { name: 'Earlier purchase · Pay in 4', amountCents: 6250, nextDate: '2026-10-20' },
     ])
   })
 
@@ -167,7 +208,7 @@ describe('the review draft', () => {
     }
     const found = planCollisions(profile, [], TODAY).filter(({ bill }) => bill.kind === 'bill')
     expect(found).toHaveLength(1)
-    expect(found[0]!.payment).toMatchObject({ date: '2026-10-17', amountCents: 7497 })
+    expect(found[0]!.payment).toMatchObject({ date: '2026-10-23', amountCents: 7497 })
     expect(dayPhrase(found[0]!.bill.daysFromInstalment, found[0]!.bill.name)).toBe(
       'the day after Maple Court rent',
     )
@@ -193,7 +234,7 @@ describe('the review draft', () => {
   })
 })
 
-function compareProfile() {
+function compareProfile(today = TODAY) {
   return {
     name: 'Your plan',
     balanceCents: 260000,
@@ -201,8 +242,8 @@ function compareProfile() {
     dailySpendCents: 2800,
     currency: 'USD' as const,
     timezone: 'America/New_York',
-    snapshotDate: TODAY,
-    confirmedAt: `${TODAY}T16:00:00.000Z`,
+    snapshotDate: today,
+    confirmedAt: `${today}T16:00:00.000Z`,
     version: 1,
     confirmed: true,
     coverageDays: 90,

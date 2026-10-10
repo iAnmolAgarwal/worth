@@ -33,6 +33,8 @@ export interface ScheduledFlow {
    * PayPal still has estimated dates. Absent on items from before origins were recorded.
    */
   origin?: 'paypal' | 'you'
+  /** For a plan payment: the full price of the purchase the plan pays for, when it is known. */
+  planTotalCents?: number
 }
 export interface FinancialProfile {
   name: string
@@ -723,6 +725,8 @@ export interface InstalmentPlanProposal {
   id: string
   /** The merchant, or the row's own label when the purchase is not in the file. */
   name: string
+  /** What was bought, from the purchase row's Item Title, when the export has one. */
+  title?: string
   /** The purchase date, or the first payment seen. */
   startDate: string
   /** The full price, when the purchase row is in the file. */

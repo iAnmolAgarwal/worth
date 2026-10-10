@@ -1,15 +1,16 @@
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs'
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
 import { api } from '../src/api'
 import { Home } from '../src/Home'
+import { weekGroups } from '../src/Month'
 import { ImportReview, StartCard, type ChosenFile } from '../src/Onboarding'
 import { parsePayPalCsv } from '../shared/csv'
 import { compareOptions } from '../shared/finance'
-import { draftFlows, draftPlans, planFlows } from '../shared/onboarding'
+import { draftFlows, draftPlans, planFlows, shiftSampleExport } from '../shared/onboarding'
 import { createDemoState, PRODUCTS } from '../shared/seed'
 import type { AppState, FinancialProfile, ScheduledFlow } from '../shared/types'
 
@@ -21,13 +22,15 @@ vi.mock('../src/api', async (importOriginal) => {
 const TODAY = '2026-10-10'
 const apiMock = vi.mocked(api)
 const SAMPLE = readFileSync(`${process.cwd()}/src/sample/paypal-activity-sample.csv`, 'utf8')
-const FILE: ChosenFile = { csv: SAMPLE, name: 'Download.CSV' }
-const preview = parsePayPalCsv(SAMPLE, [], { today: TODAY })
+// The sample as the app loads it today: moved to end yesterday, Fri, Oct 9.
+const CSV = shiftSampleExport(SAMPLE, TODAY)
+const FILE: ChosenFile = { csv: CSV, name: 'Download.CSV' }
+const preview = parsePayPalCsv(CSV, [], { today: TODAY })
 const rent: ScheduledFlow = {
   id: 'you-rent',
   name: 'Maple Court rent',
   amountCents: 165000,
-  nextDate: '2026-10-16',
+  nextDate: '2026-10-22',
   cadence: 'monthly',
   kind: 'bill',
   category: 'Other',
@@ -158,7 +161,7 @@ describe('Check what Worth found', () => {
     await screen.findByText('Northwind Payroll')
     const paydays = screen.getByRole('region', { name: 'Paydays' })
     expect(within(paydays).getByText('1 from PayPal')).toBeTruthy()
-    expect(within(paydays).getByText(/Every other Friday · next about Fri, Oct 23/)).toBeTruthy()
+    expect(within(paydays).getByText(/Every other Tuesday · next about Tue, Oct 20/)).toBeTruthy()
     const bills = screen.getByRole('region', { name: 'Bills and subscriptions' })
     expect(within(bills).getAllByRole('checkbox')).toHaveLength(4)
     expect(
@@ -169,10 +172,10 @@ describe('Check what Worth found', () => {
     expect(within(bills).getAllByText('From PayPal')).toHaveLength(4)
     const plans = screen.getByRole('region', { name: 'PayPal Pay in 4 plans in progress (2)' })
     expect(
-      within(plans).getByText(/2 of 4 paid · \$74\.97 each · next about Sat, Oct 17/),
+      within(plans).getByText(/2 of 4 paid · \$74\.97 each · next about Fri, Oct 23/),
     ).toBeTruthy()
     expect(
-      within(plans).getByText(/3 of 4 paid · \$45\.00 each · last one about Sat, Oct 10/),
+      within(plans).getByText(/3 of 4 paid · \$45\.00 each · last one about Fri, Oct 16/),
     ).toBeTruthy()
     expect(within(plans).getByText(/PayPal sets the actual schedule/)).toBeTruthy()
     expect(screen.getByText(/About \$\d+\.\d\d a day/)).toBeTruthy()
@@ -189,7 +192,7 @@ describe('Check what Worth found', () => {
     await user.click(screen.getByRole('button', { name: 'Add a bill PayPal doesn’t see' }))
     await user.type(screen.getByRole('textbox', { name: 'Bill name' }), 'Maple Court rent')
     await user.type(screen.getByRole('textbox', { name: 'Bill amount' }), '1650')
-    for (let day = 0; day < 6; day++)
+    for (let day = 0; day < 12; day++)
       await user.click(screen.getByRole('button', { name: 'Next due date: a day later' }))
     await user.click(screen.getByRole('button', { name: 'Add bill' }))
     const bills = screen.getByRole('region', { name: 'Bills and subscriptions' })
@@ -197,7 +200,7 @@ describe('Check what Worth found', () => {
     expect(within(bills).getByText('You added')).toBeTruthy()
     // The collision note runs on the draft, before anything is saved.
     expect(
-      screen.getByText('Payment 3 of 4: $74.97 on Sat, Oct 17, the day after Maple Court rent.'),
+      screen.getByText('Payment 3 of 4: $74.97 on Fri, Oct 23, the day after Maple Court rent.'),
     ).toBeTruthy()
 
     // Untick a subscription that ended.
@@ -215,7 +218,7 @@ describe('Check what Worth found', () => {
     chip.focus()
     await user.keyboard('{Enter}')
     expect(chip.getAttribute('aria-checked')).toBe('true')
-    expect(screen.getByText(/Next about Fri, Oct 16\./)).toBeTruthy()
+    expect(screen.getByText(/Next about Tue, Oct 20\./)).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: 'Continue' }))
     await waitFor(() => expect(onDone).toHaveBeenCalled())
@@ -229,12 +232,12 @@ describe('Check what Worth found', () => {
     const byName = (name: string) => profile.flows.filter((flow) => flow.name === name)
     expect(byName('Maple Court rent')[0]).toMatchObject({ origin: 'you', amountCents: 165000 })
     expect(byName('Tidewave Music')[0]).toMatchObject({ origin: 'paypal', active: false })
-    expect(byName('Larkspur Supply · Pay in 4').map((flow) => flow.nextDate)).toEqual([
-      '2026-10-17',
-      '2026-10-31',
+    expect(byName('Larkspur Supply · Headphones · Pay in 4')).toMatchObject([
+      { nextDate: '2026-10-23', planTotalCents: 29988 },
+      { nextDate: '2026-11-06', planTotalCents: 29988 },
     ])
     expect(byName('Earlier purchase · Pay in 4')).toMatchObject([
-      { nextDate: '2026-10-16', amountCents: 6250, origin: 'paypal' },
+      { nextDate: '2026-10-20', amountCents: 6250, origin: 'paypal' },
     ])
   })
 
@@ -255,7 +258,7 @@ describe('Check what Worth found', () => {
     const plans = new Set(
       profile.flows.filter((flow) => flow.kind === 'installment').map((flow) => flow.name),
     )
-    expect([...plans]).toEqual(['Larkspur Supply · Pay in 4'])
+    expect([...plans]).toEqual(['Larkspur Supply · Headphones · Pay in 4'])
   })
 
   it('asks for today’s money before importing', async () => {
@@ -279,7 +282,7 @@ describe('Start with your PayPal activity', () => {
   it('runs the bundled sample export through the import', async () => {
     const user = userEvent.setup()
     const onFile = vi.fn()
-    render(<StartCard state={demoState()} plans={1} onFile={onFile} onEnterYourself={vi.fn()} />)
+    render(<StartCard state={demoState()} onFile={onFile} onEnterYourself={vi.fn()} />)
     const card = screen.getByRole('region', { name: 'Start with your PayPal activity' })
     expect(
       within(card)
@@ -300,7 +303,7 @@ describe('Start with your PayPal activity', () => {
   it('reads a chosen CSV and refuses one over 1 MB', async () => {
     const user = userEvent.setup()
     const onFile = vi.fn()
-    render(<StartCard state={demoState()} plans={1} onFile={onFile} onEnterYourself={vi.fn()} />)
+    render(<StartCard state={demoState()} onFile={onFile} onEnterYourself={vi.fn()} />)
     const input = screen.getByLabelText('Choose your PayPal activity CSV')
     await user.upload(input, new File(['x'.repeat(1_100_000)], 'big.csv', { type: 'text/csv' }))
     expect(screen.getByRole('alert').textContent).toContain('smaller than 1 MB')
@@ -308,19 +311,25 @@ describe('Start with your PayPal activity', () => {
     await waitFor(() => expect(onFile).toHaveBeenCalledWith({ csv: SAMPLE, name: 'Download.CSV' }))
   })
 
-  it('folds to one line on a phone, so the room-to-spend figure stays above the fold', async () => {
+  it('is one compact row: the actions first, the steps and privacy behind a disclosure', async () => {
     const user = userEvent.setup()
-    phone(true)
-    renderHome(demoState(), { onImportFile: vi.fn() })
-    const fold = screen.getByRole('button', { name: /Start with your PayPal activity/ })
-    expect(fold.getAttribute('aria-expanded')).toBe('false')
-    expect(document.getElementById('start-body')!.hidden).toBe(true)
+    const onFile = vi.fn()
+    renderHome(demoState(), { onImportFile: onFile })
     const hero = await screen.findByRole('region', { name: 'Room to spend today' })
     const card = screen.getByRole('region', { name: 'Start with your PayPal activity' })
     expect(card.compareDocumentPosition(hero) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    await user.click(fold)
-    expect(fold.getAttribute('aria-expanded')).toBe('true')
-    expect(document.getElementById('start-body')!.hidden).toBe(false)
+    expect(within(card).getByText(/^You’re viewing Maya’s sample month\./)).toBeTruthy()
+    const how = card.querySelector('details')!
+    expect(how.open).toBe(false)
+    expect(within(how).getByText('How to get the file from PayPal').tagName).toBe('SUMMARY')
+    expect(within(how).getAllByRole('listitem', { hidden: true })).toHaveLength(3)
+    expect(how.textContent).toContain('Raw CSV files aren’t saved')
+    await user.click(within(how).getByText('How to get the file from PayPal'))
+    expect(how.open).toBe(true)
+    // A CSV dropped anywhere on the card is read like a chosen one.
+    const file = new File([CSV], 'Download.CSV', { type: 'text/csv' })
+    fireEvent.drop(card, { dataTransfer: { files: [file] } })
+    await waitFor(() => expect(onFile).toHaveBeenCalledWith({ csv: CSV, name: 'Download.CSV' }))
   })
 
   it('opens the review at #import from the sample button in the app', async () => {
@@ -342,6 +351,28 @@ describe('Start with your PayPal activity', () => {
 })
 
 describe('the month-led Home for imported PayPal activity', () => {
+  it('groups days by calendar week, as PayPal Activity does', () => {
+    const days = [
+      '2026-10-07',
+      '2026-10-10',
+      '2026-10-11',
+      '2026-10-17',
+      '2026-10-24',
+      '2026-11-05',
+    ]
+    expect(
+      weekGroups(
+        days.map((date) => ({ date })),
+        '2026-10-07',
+      ).map((group) => [group.label, group.items.length]),
+    ).toEqual([
+      ['This week', 2],
+      ['Oct 11 – Oct 17', 2],
+      ['Oct 18 – Oct 24', 1],
+      ['Nov 1 – Nov 7', 1],
+    ])
+  })
+
   it('leads with the month from PayPal, the next 30 days by week and the plans in progress', async () => {
     renderHome(monthState())
     const hero = await screen.findByRole('region', {
@@ -354,7 +385,7 @@ describe('the month-led Home for imported PayPal activity', () => {
       within(next)
         .getAllByRole('heading', { level: 3 })
         .map((h) => h.textContent),
-    ).toEqual(['This week', 'Oct 11 – Oct 17', 'Oct 18 – Oct 24'])
+    ).toEqual(['Oct 11 – Oct 17', 'Oct 18 – Oct 24'])
     expect(within(next).getByText(/Payment 3 of 4 · from PayPal/)).toBeTruthy()
     expect(within(next).getByText('The day after Maple Court rent.')).toBeTruthy()
     expect(within(next).getByText(/Bill · monthly · you added/)).toBeTruthy()
@@ -366,7 +397,7 @@ describe('the month-led Home for imported PayPal activity', () => {
     expect(within(cards[1]!).getByText('2 of 4 paid')).toBeTruthy()
     expect(
       within(cards[1]!).getByText(
-        'Payment 3 of 4: $74.97 on Sat, Oct 17, the day after Maple Court rent.',
+        'Payment 3 of 4: $74.97 on Fri, Oct 23, the day after Maple Court rent.',
       ),
     ).toBeTruthy()
     const built = screen.getByRole('region', { name: 'How your month was built' })
@@ -381,7 +412,7 @@ describe('the month-led Home for imported PayPal activity', () => {
   it('orders a phone screen: the answer, the plan summary, the next days, then the composer', async () => {
     renderHome(monthState())
     const hero = await screen.findByRole('region', { name: /Your month from PayPal/ })
-    const line = screen.getByText(/in progress · next about Oct 10/).closest('p')!
+    const line = screen.getByText(/in progress · next about Oct 16/).closest('p')!
     const next = screen.getByRole('region', { name: 'Next 30 days' })
     const ask = screen.getByRole('region', { name: 'Thinking about buying something?' })
     const plans = screen.getByRole('region', { name: 'PayPal Pay in 4 plans in progress (2)' })
@@ -391,7 +422,7 @@ describe('the month-led Home for imported PayPal activity', () => {
         order[index - 1]!.compareDocumentPosition(order[index]!) & Node.DOCUMENT_POSITION_FOLLOWING,
       ).toBeTruthy()
     expect(line.className).toContain('show-m')
-    expect(line.textContent).toBe('PayPal Pay in 4: 2 in progress · next about Oct 10')
+    expect(line.textContent).toBe('PayPal Pay in 4: 2 in progress · next about Oct 16')
   })
 
   it('keeps Maya’s sample Home as it was', async () => {
