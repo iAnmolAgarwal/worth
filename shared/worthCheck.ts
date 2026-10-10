@@ -1,7 +1,9 @@
+import { payIn4Offer, type PayLaterAnswer } from './payLater.ts'
+
 /**
  * `<worth-check>`: the store's "Analyse with Worth" link, next to its PayPal button
- * (specs/handoff-contract.md §3.1–§3.2, C2). Dependency-free and framework-free: a store serves it
- * as a module script (the store's build emits it as worth-check.js) and themes it with CSS custom properties.
+ * (specs/handoff-contract.md §3.1–§3.2, C2). No framework and no runtime dependency: the store's
+ * build bundles it into worth-check.js, which a store serves as a module script.
  *
  * Attributes:
  * - `href`: the signed Worth link the store's server minted, `{WORTH_ORIGIN}/check#q={token}`;
@@ -18,10 +20,7 @@
 
 /** The part of PayPal's v6 SDK instance this element uses. */
 export interface EligibilitySource {
-  findEligibleMethods(options: { currencyCode: 'USD'; amount?: string }): Promise<{
-    isEligible(method: 'paylater'): boolean
-    getDetails?(method: 'paylater'): { productCode?: string } | undefined
-  }>
+  findEligibleMethods(options: { currencyCode: 'USD'; amount?: string }): Promise<PayLaterAnswer>
 }
 
 /** Refresh this long before the link expires. */
@@ -134,12 +133,12 @@ function safeHref(value: string | null) {
   }
 }
 
-/** Whether PayPal offers Pay in 4 (not another Pay Later product) for the amount. */
+/**
+ * Whether PayPal offers Pay in 4 for the amount, from the store's own SDK: true, false, or
+ * undefined when PayPal's answer doesn't say which Pay Later product it means.
+ */
 export async function payIn4Offered(source: EligibilitySource, amount: string) {
-  const methods = await source.findEligibleMethods({ currencyCode: 'USD', amount })
-  if (!methods.isEligible('paylater')) return false
-  const product = methods.getDetails?.('paylater')?.productCode
-  return product === undefined || product === 'PAY_IN_4'
+  return payIn4Offer(await source.findEligibleMethods({ currencyCode: 'USD', amount }))
 }
 
 export class WorthCheck extends HTMLElement {
@@ -152,7 +151,7 @@ export class WorthCheck extends HTMLElement {
   private link: HTMLAnchorElement
   private description: HTMLSpanElement
   private source?: EligibilitySource | Promise<EligibilitySource>
-  /** The store's SDK answer for the current amount, once known. */
+  /** The store's SDK answer for the current amount: undefined until known, or when unclear. */
   private offered?: boolean
   private refreshing?: Promise<void>
 

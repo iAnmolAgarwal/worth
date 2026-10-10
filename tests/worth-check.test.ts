@@ -12,16 +12,19 @@ function href(claims: { exp?: number; payLater?: { eligible: boolean } } = {}) {
   ).toString('base64url')
   return `${WORTH}/check#q=${body}.${'s'.repeat(43)}`
 }
-/** A fake PayPal SDK v6 instance answering for Pay Later. */
-function sdk(eligible: boolean, productCode?: string) {
+/** A fake PayPal SDK v6 instance answering for Pay Later, with v6's real product codes. */
+function sdk(eligible: boolean, productCode?: string, countryCode?: string) {
   const findEligibleMethods = vi.fn(async () => ({
     isEligible: (method: string) => method === 'paylater' && eligible,
-    getDetails: () => (productCode ? { productCode } : undefined),
+    getDetails: () =>
+      productCode ? { productCode, ...(countryCode ? { countryCode } : {}) } : undefined,
   }))
   return { findEligibleMethods } as EligibilitySource & {
     findEligibleMethods: typeof findEligibleMethods
   }
 }
+/** PayPal's v6 answer for US Pay in 4. */
+const payIn4 = () => sdk(true, 'PAY_LATER_SHORT_TERM', 'US')
 function mount(attributes: Record<string, string>) {
   const element = document.createElement('worth-check') as WorthCheck
   for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, value)
@@ -110,7 +113,7 @@ describe('Pay in 4 from the store’s own SDK (contract §3.2)', () => {
       amount: '1199.00',
       'refresh-url': '/api/worth-quote?productId=camera',
     })
-    const paypal = sdk(true, 'PAY_IN_4')
+    const paypal = payIn4()
     element.paypal = paypal
     await settle()
     expect(paypal.findEligibleMethods).toHaveBeenCalledWith({
@@ -128,7 +131,7 @@ describe('Pay in 4 from the store’s own SDK (contract §3.2)', () => {
       amount: '1199.00',
       'refresh-url': '/api/worth-quote?productId=camera',
     })
-    element.paypal = Promise.resolve(sdk(true))
+    element.paypal = Promise.resolve(payIn4())
     await vi.waitFor(() => expect(link(element).getAttribute('href')).toBe(fresh))
     const url = new URL(String(fetchMock.mock.calls[0]![0]))
     expect(url.origin).toBe(window.location.origin)
@@ -139,18 +142,44 @@ describe('Pay in 4 from the store’s own SDK (contract §3.2)', () => {
     expect(element.getAttribute('href')).toBe(fresh)
   })
 
-  it('sends payLater=false when PayPal offers another Pay Later product or nothing', async () => {
+  it('sends payLater=false only when PayPal offers no Pay Later at all', async () => {
     answer(href({ payLater: { eligible: false } }))
     const element = mount({
+      href: href({ payLater: { eligible: true } }),
+      amount: '5.00',
+      'refresh-url': '/q',
+    })
+    element.paypal = sdk(false)
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    expect(new URL(String(fetchMock.mock.calls[0]![0])).searchParams.get('payLater')).toBe('false')
+  })
+
+  it('leaves payLater unset for PAYLATER, another country or an unknown code', async () => {
+    expect(await payIn4Offered(payIn4(), '50.00')).toBe(true)
+    expect(await payIn4Offered(sdk(false), '5.00')).toBe(false)
+    for (const answerOf of [
+      () => sdk(true, 'PAYLATER', 'US'),
+      () => sdk(true, 'PAY_LATER_SHORT_TERM', 'GB'),
+      () => sdk(true, 'PAY_LATER_SHORT_TERM'),
+      () => sdk(true, 'PAY_IN_4', 'US'),
+      () => sdk(true),
+    ])
+      expect(await payIn4Offered(answerOf(), '2500.00')).toBeUndefined()
+    // A link signed without an answer stays as it is.
+    const quiet = mount({ href: href(), amount: '2500.00', 'refresh-url': '/q' })
+    quiet.paypal = sdk(true, 'PAYLATER', 'US')
+    await settle()
+    expect(fetchMock).not.toHaveBeenCalled()
+    // A link signed with an answer is refreshed without one, never with a false no.
+    answer(href())
+    const signed = mount({
       href: href({ payLater: { eligible: true } }),
       amount: '2500.00',
       'refresh-url': '/q',
     })
-    element.paypal = sdk(true, 'PAYPAL_CREDIT_INSTALLMENTS')
+    signed.paypal = sdk(true, 'PAYLATER', 'US')
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled())
-    expect(new URL(String(fetchMock.mock.calls[0]![0])).searchParams.get('payLater')).toBe('false')
-    expect(await payIn4Offered(sdk(false), '5.00')).toBe(false)
-    expect(await payIn4Offered(sdk(true), '50.00')).toBe(true)
+    expect(new URL(String(fetchMock.mock.calls[0]![0])).searchParams.has('payLater')).toBe(false)
   })
 
   it('does nothing without an SDK, an amount or a refresh URL, or when the SDK fails', async () => {
@@ -181,7 +210,7 @@ describe('Pay in 4 from the store’s own SDK (contract §3.2)', () => {
     ]) {
       respond()
       const element = mount({ href: original, amount: '1199.00', 'refresh-url': '/q' })
-      element.paypal = sdk(true)
+      element.paypal = payIn4()
       await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled())
       await settle()
       expect(link(element).getAttribute('href')).toBe(original)
@@ -195,7 +224,7 @@ describe('Pay in 4 from the store’s own SDK (contract §3.2)', () => {
       amount: '1199.00',
       'refresh-url': 'https://evil.example/q',
     })
-    element.paypal = sdk(true)
+    element.paypal = payIn4()
     await settle()
     expect(fetchMock).not.toHaveBeenCalled()
   })
