@@ -13,8 +13,10 @@ import type {
  * server, with the key from the environment; the browser only ever sees the parsed results.
  *
  * Channel3 is told only a generic kind of item and a price band, never who is asking or why.
- * Results are cached per query and $25 price bucket, and a recorded set of example results is
- * served whenever Channel3 cannot answer (no credits, rate limited, timed out, down).
+ * Searches run and are cached per query and $25 price bucket; the rows shown are then cut to the
+ * exact limit, so the list states the same "Up to" as the option it belongs to. A recorded set of
+ * example results is served whenever Channel3 cannot answer (no credits, rate limited, timed out,
+ * down).
  *
  * Channel3 asks that prices and offer links are never served from a cache without refreshing
  * them. Recorded rows, and cached rows older than 15 minutes, are re-read with the free
@@ -29,7 +31,7 @@ import type {
 export const CHANNEL3_API = 'https://api.trychannel3.com'
 /** Every product image Worth shows is hosted here; images on retailer hosts are dropped. */
 export const CHANNEL3_IMAGE_HOST = 'cdn.trychannel3.com'
-/** Price ceilings are rounded down to this step, so a search can be reused across nearby budgets. */
+/** Price ceilings are rounded up to this step, so a search can be reused across nearby budgets. */
 export const PRICE_BUCKET_CENTS = 2500
 /** The most results the panel shows. */
 export const MAX_ALTERNATIVES = 4
@@ -49,9 +51,12 @@ const LOOKUP_TIMEOUT_MS = 10_000
 const LOOKUP_MISS_MS = 60 * 60_000
 const KNOWN_MAX = 5000
 
-/** The search's price ceiling: the amount rounded down to $25. */
+/**
+ * The search's price ceiling: the limit rounded up to $25. Rows above the exact limit are dropped
+ * before anything is shown, so the bucket only widens the search, never the list.
+ */
 export const priceBucket = (cents: number) =>
-  Math.max(0, Math.floor(cents / PRICE_BUCKET_CENTS) * PRICE_BUCKET_CENTS)
+  Math.max(0, Math.ceil(cents / PRICE_BUCKET_CENTS) * PRICE_BUCKET_CENTS)
 /**
  * Results below a quarter of the ceiling are left out: they are rarely the same kind of item (a
  * $20 strap for a camera search) and catch offers listed at a placeholder price.
@@ -138,11 +143,11 @@ export interface PriceCheck {
   droppedByCents?: number
 }
 export interface Channel3Client {
-  /** Products like `query` priced at or below the bucketed ceiling. */
+  /** Products like `query` priced at or below `maxPriceCents`, searched by its $25 bucket. */
   search(query: string, maxPriceCents: number, options?: SearchOptions): Promise<Alternatives>
   /**
-   * Products like a Channel3 product this server has shown, priced at or below the bucketed
-   * ceiling. Any other ID returns nothing without a call.
+   * Products like a Channel3 product this server has shown, priced at or below `maxPriceCents`.
+   * Any other ID returns nothing without a call.
    */
   similar(productId: string, maxPriceCents: number, options?: SearchOptions): Promise<Alternatives>
   /**
@@ -389,6 +394,8 @@ export function createChannel3(options: Channel3Options = {}): Channel3Client {
     rows: Alternative[]
     at: number
   }
+  /** A found search, cut to the exact limit it was asked for; cached searches are shared. */
+  type Asked = { found: Found; limitCents: number }
   const cache = new Map<string, { value: Found; until: number }>()
   const inFlight = new Map<string, Promise<Found>>()
   /** Product reads: the product, null when Channel3 no longer has it. */
@@ -422,8 +429,8 @@ export function createChannel3(options: Channel3Options = {}): Channel3Client {
       ...candidates.filter((r) => r.query === query),
       ...(kind === 'search' ? candidates.filter((r) => said.has(head(r))) : []),
     ]) {
-      // A few spare rows, since some may have changed by the time they are re-read.
-      const rows = parseProducts(recorded.response, band, MAX_ALTERNATIVES + 2)
+      // As many rows as a live search keeps; present() cuts them to the exact limit.
+      const rows = parseProducts(recorded.response, band, REQUEST_LIMIT)
       if (rows.length) return { status: 'fixture', query, band, rows, at: 0 }
     }
     return { status: 'off', query, band, rows: [], at: 0 }
@@ -499,22 +506,25 @@ export function createChannel3(options: Channel3Options = {}): Channel3Client {
    * A re-read row keeps its current price and link (or is dropped if it no longer fits); a row that
    * cannot be re-read is listed without them.
    */
-  async function present(found: Found): Promise<Alternatives> {
+  async function present({ found, limitCents }: Asked): Promise<Alternatives> {
     const base = {
       status: found.status,
       query: found.query,
-      maxPriceCents: found.band.maxPriceCents,
+      maxPriceCents: limitCents,
     }
     if (found.status === 'off') return { ...base, items: [] }
+    const band = { ...found.band, maxPriceCents: Math.min(found.band.maxPriceCents, limitCents) }
+    const rows = found.rows.filter((row) => row.priceCents <= band.maxPriceCents)
     if (found.status === 'ok' && now() - found.at < FRESH_MS) {
-      remember(found.rows)
-      return { ...base, items: found.rows.slice(0, MAX_ALTERNATIVES) }
+      remember(rows)
+      return { ...base, items: rows.slice(0, MAX_ALTERNATIVES) }
     }
+    // A few spare rows, since some may have changed by the time they are re-read.
     const checked = await Promise.all(
-      found.rows.map(async (row) => {
+      rows.slice(0, MAX_ALTERNATIVES + 2).map(async (row) => {
         const fresh = await product(row.id)
         if (fresh === undefined) return { unverified: unverifiedRow(row) }
-        const item = fresh ? parseProducts({ products: [fresh] }, found.band, 1)[0] : undefined
+        const item = fresh ? parseProducts({ products: [fresh] }, band, 1)[0] : undefined
         return item ? { item: { ...item, id: row.id } } : {}
       }),
     )
@@ -549,7 +559,8 @@ export function createChannel3(options: Channel3Options = {}): Channel3Client {
   ): Promise<Found> {
     const bucket = priceBucket(maxPriceCents)
     const band = { minPriceCents: priceFloor(bucket), maxPriceCents: bucket }
-    if (mode === 'off' || bucket < PRICE_BUCKET_CENTS)
+    // Under $25 there is nothing worth searching for.
+    if (mode === 'off' || maxPriceCents < PRICE_BUCKET_CENTS)
       return { status: 'off', query, band, rows: [], at: 0 }
     if (!live || now() < blockedUntil) return fixtureFor(kind, query, band)
     const key = `${kind}:${query}:${bucket}`
@@ -569,7 +580,8 @@ export function createChannel3(options: Channel3Options = {}): Channel3Client {
           status: 'ok',
           query,
           band,
-          rows: parseProducts(raw, band),
+          // Every row in the bucket, so the cut to an exact limit below it still leaves four.
+          rows: parseProducts(raw, band, REQUEST_LIMIT),
           at: now(),
         }
         cache.delete(key)
@@ -657,16 +669,22 @@ export function createChannel3(options: Channel3Options = {}): Channel3Client {
   return {
     lookup,
     search: async (query, maxPriceCents, searchOptions = {}) =>
-      present(await find('search', query, maxPriceCents, searchOptions)),
+      present({
+        found: await find('search', query, maxPriceCents, searchOptions),
+        limitCents: maxPriceCents,
+      }),
     async similar(productId, maxPriceCents, searchOptions = {}) {
       if (!known.has(productId))
         return {
           status: 'off',
           query: productId,
-          maxPriceCents: priceBucket(maxPriceCents),
+          maxPriceCents,
           items: [],
         }
-      return present(await find('similar', productId, maxPriceCents, searchOptions))
+      return present({
+        found: await find('similar', productId, maxPriceCents, searchOptions),
+        limitCents: maxPriceCents,
+      })
     },
     async checkPrice(productId, savedPriceCents) {
       const fresh = await product(productId)

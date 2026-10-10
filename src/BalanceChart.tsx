@@ -404,8 +404,8 @@ export function BalanceChart({
           <span>
             <i className="k-p4" />
             {payIn4?.instalments[0]
-              ? `Pay in 4 from ${shortDate(payIn4.instalments[0].date)} · illustrative`
-              : 'Pay in 4 · illustrative'}
+              ? `Pay in 4 from ${shortDate(payIn4.instalments[0].date)}`
+              : 'Pay in 4'}
           </span>
         )}
         <span>

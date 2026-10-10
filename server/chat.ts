@@ -540,7 +540,7 @@ function alternativesText(
     return `${fits}${above} Tell me what kind of item you’d like under ${money(ceilingOf(outcome))}, such as headphones or a desk chair, and Worth will look for some from other stores.`.trim()
   if (!shown)
     return `${fits}${above} Worth couldn’t find similar items from other stores right now.`.trim()
-  return `${fits}${above} Here are similar items under ${money(shown.maxPriceCents)} from other stores, found through Channel3${shown.status === 'fixture' ? ' (example results recorded earlier)' : ''}. Prices may change, and Worth doesn’t sell these items.`.trim()
+  return `${fits}${above} Here are similar items up to ${money(shown.maxPriceCents)} from other stores, found through Channel3${shown.status === 'fixture' ? ' (example results recorded earlier)' : ''}. Prices may change, and Worth doesn’t sell these items.`.trim()
 }
 /** The most a search for this request may show: the person's own limit when it is lower. */
 const ceilingOf = (outcome: AlternativesOutcome) =>
@@ -1358,7 +1358,7 @@ class Turn {
     this.guards.push({
       id: 'search_limit',
       label: this.alternatives.result
-        ? `Searched under ${money(this.alternatives.result.maxPriceCents)}, within the ${money(this.alternatives.roomCents)} that keeps your cushion today; the limit is never Claude’s`
+        ? `Searched up to ${money(this.alternatives.result.maxPriceCents)}, within the ${money(this.alternatives.roomCents)} that keeps your cushion today; the limit is never Claude’s`
         : `Search limit: the ${money(this.alternatives.roomCents)} that keeps your cushion today, never a figure from Claude`,
       passed: true,
     })

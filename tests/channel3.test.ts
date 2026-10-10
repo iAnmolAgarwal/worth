@@ -138,9 +138,11 @@ describe('Channel3 response parsing (recorded live fixture)', () => {
       source: 'channel3',
     })
   })
-  it('rounds the ceiling down to $25 and leaves out results under a quarter of it', () => {
-    expect(priceBucket(44001)).toBe(42500)
-    expect(priceBucket(2499)).toBe(0)
+  it('rounds the search ceiling up to $25 and leaves out results under a quarter of it', () => {
+    expect(priceBucket(44001)).toBe(45000)
+    expect(priceBucket(42500)).toBe(42500)
+    expect(priceBucket(2499)).toBe(2500)
+    expect(priceFloor(45000)).toBe(11200)
     expect(priceFloor(42500)).toBe(10600)
     expect(priceFloor(2500)).toBe(600)
   })
@@ -152,7 +154,9 @@ describe('Channel3 client', () => {
     const { c3 } = client({ fetch: channel3.fetch })
     const result = await c3.search('interchangeable lens camera', 44001)
     expect(result.status).toBe('ok')
-    expect(result.maxPriceCents).toBe(42500)
+    // The list states the exact limit, and every row is within it.
+    expect(result.maxPriceCents).toBe(44001)
+    for (const item of result.items) expect(item.priceCents).toBeLessThanOrEqual(44001)
     expect(result.items.length).toBeGreaterThan(0)
     expect(result.unverified).toBeUndefined()
     const [call] = channel3.calls
@@ -164,7 +168,7 @@ describe('Channel3 client', () => {
       query: 'interchangeable lens camera',
       limit: 12,
       filters: {
-        price: { min_price: 106, max_price: 425 },
+        price: { min_price: 112, max_price: 450 },
         availability: ['InStock'],
         conditions: ['new'],
       },
@@ -172,13 +176,53 @@ describe('Channel3 client', () => {
     })
     expect(JSON.stringify(result)).not.toContain('c3-test-key')
   })
+  it('shows only rows at or below the exact limit, never the rest of the $25 bucket', async () => {
+    const channel3 = fakeFetch()
+    const { c3 } = client({ fetch: channel3.fetch })
+    const wide = await c3.search('interchangeable lens camera', 45000)
+    const top = wide.items.reduce((a, b) => (b.priceCents > a.priceCents ? b : a))
+    const limit = top.priceCents - 1
+    const narrow = await c3.search('interchangeable lens camera', limit)
+    expect(narrow.maxPriceCents).toBe(limit)
+    expect(narrow.items.map((item) => item.id)).not.toContain(top.id)
+    for (const item of narrow.items) expect(item.priceCents).toBeLessThanOrEqual(limit)
+  })
+  it('keeps every row in the bucket, so rows between the limit and $450 never crowd out ones that fit', async () => {
+    const product = (id: string, price: number) => ({
+      id,
+      title: `Desk chair ${id}`,
+      offers: [offer(price, { url: `https://buy.trychannel3.com/${id}` })],
+    })
+    // Channel3 lists the dearer chairs first: four above $440.01 but inside the $450 bucket.
+    const raw = {
+      products: [
+        product('over1', 449),
+        product('over2', 448.5),
+        product('over3', 445),
+        product('over4', 440.02),
+        product('fits1', 440.01),
+        product('fits2', 399),
+        product('fits3', 250),
+      ],
+    }
+    const channel3 = fakeFetch([raw])
+    const { c3 } = client({ fetch: channel3.fetch })
+    const result = await c3.search('desk chair', 44001)
+    expect(result.status).toBe('ok')
+    expect(result.maxPriceCents).toBe(44001)
+    expect(result.items.map((item) => item.id)).toEqual(['fits1', 'fits2', 'fits3'])
+    // The same cached search, cut at a higher limit in the bucket, shows the dearer rows too.
+    const wider = await c3.search('desk chair', 44900)
+    expect(channel3.searches()).toHaveLength(1)
+    expect(wider.items.map((item) => item.id)).toEqual(['over1', 'over2', 'over3', 'over4'])
+  })
   it('caches per query and $25 bucket for six hours, and shares one request in flight', async () => {
     const channel3 = fakeFetch()
     const { c3, advance } = client({ fetch: channel3.fetch })
     await Promise.all([c3.search('desk chair', 44001), c3.search('desk chair', 43000)])
-    await c3.search('desk chair', 42500)
+    await c3.search('desk chair', 45000)
     expect(channel3.searches()).toHaveLength(1)
-    await c3.search('desk chair', 40000)
+    await c3.search('desk chair', 42500)
     expect(channel3.searches()).toHaveLength(2)
     advance(6 * HOUR + 1)
     await c3.search('desk chair', 44001)
@@ -210,12 +254,8 @@ describe('Channel3 client', () => {
     advance(2 * MINUTE)
     const later = await c3.search('interchangeable lens camera', 44001)
     expect(channel3.searches()).toHaveLength(1)
-    expect(channel3.reads().map((c) => c.init.method)).toEqual([
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-    ])
+    // The four shown and two spares, each with a plain GET.
+    expect(channel3.reads().map((c) => c.init.method)).toEqual(Array(6).fill(undefined))
     expect(channel3.reads()[0]!.url).toContain('?country=US&currency=USD')
     // Current price and link; a product priced above the limit or gone is dropped; one that
     // cannot be read is listed without its price or link.
@@ -331,7 +371,7 @@ describe('Channel3 client', () => {
     expect(channel3.calls.at(-1)!.url).toBe('https://api.trychannel3.com/v1/similar')
     expect(JSON.parse(channel3.calls.at(-1)!.init.body as string)).toMatchObject({
       product_id: shown.items[0]!.id,
-      filters: { price: { max_price: 425 } },
+      filters: { price: { max_price: 450 } },
     })
   })
   it('checks a saved product’s price with the free product endpoint (price-drop helper)', async () => {

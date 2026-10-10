@@ -151,13 +151,13 @@ describe('Ask Worth leads with the refusal (round-3 #8)', () => {
 })
 
 describe('Ask Worth keeps to the stated budget (round-3 #8)', () => {
-  it('caps “Spend less” at the budget instead of what keeps the cushion', async () => {
+  it('caps “Something cheaper” at the budget instead of what keeps the cushion', async () => {
     const state = makeState()
     await ask(state, reply(state, 'I only want to spend $200. Can I get the camera?'))
     const options = await screen.findByRole('list', { name: 'Your options' })
     const spendLess = within(options)
       .getAllByRole('listitem')
-      .find((row) => row.textContent?.includes('Spend less'))!
+      .find((row) => row.textContent?.includes('Something cheaper'))!
     expect(spendLess.textContent).toContain('Up to $200.00 today · your budget')
     expect(spendLess.textContent).toContain('Within your budget')
     expect(options.textContent).not.toContain('$440.01')
@@ -168,7 +168,7 @@ describe('Ask Worth keeps to the stated budget (round-3 #8)', () => {
     await ask(state, reply(state, 'My budget is $500. Can I get the camera?'))
     const options = await screen.findByRole('list', { name: 'Your options' })
     expect(options.textContent).toContain('Up to $440.01 today')
-    expect(options.textContent).toContain('At your limit')
+    expect(options.textContent).toContain('Fits today')
     expect(options.textContent).not.toContain('your budget')
   })
 

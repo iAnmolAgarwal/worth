@@ -1469,8 +1469,8 @@ export function createApp(options: AppOptions = {}) {
     throw new HttpError(status, message, code)
   })
   /**
-   * Similar items from other stores, priced at or below what fits today (the Spend less amount,
-   * rounded down to $25). Only a generic description and the price band reach Channel3. With
+   * Similar items from other stores, priced at or below what fits today (the Something cheaper
+   * amount, exactly). Only a generic description and the price band reach Channel3. With
    * nothing to show, the answer is status "off" and the panel stays hidden.
    */
   app.get('/api/alternatives', async (req, res) => {

@@ -472,7 +472,9 @@ describe('BalanceChart', () => {
     )
     const key = document.querySelector('.bchart-key') as HTMLElement
     expect(within(key).getByText('Pay in full')).toBeTruthy()
-    expect(within(key).getByText('Pay in 4 from Oct 3 · illustrative')).toBeTruthy()
+    // The schedule's footer says it is illustrative; the key just names the line.
+    expect(within(key).getByText('Pay in 4 from Oct 3')).toBeTruthy()
+    expect(key.textContent).not.toContain('illustrative')
     const svg = screen.getByRole('img', { name: /^Projected balance/ })
     expect(svg.querySelector('.bchart-p4')).toBeTruthy()
     const dots = svg.querySelectorAll('.bchart-inst')
