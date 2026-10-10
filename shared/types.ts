@@ -112,6 +112,28 @@ export interface SavedItem {
   url?: string
   /** Channel3's product ID for an item saved from "Similar items", so its price can be re-checked. */
   channel3Id?: string
+  /**
+   * The store page an item came from (C6): a pasted link, or the store's return link from its
+   * "Analyse with Worth" button. Shown as "Back to <store>" on the ready day; Worth never fetches it.
+   */
+  sourceUrl?: string
+  /** The store's name, or its domain when the store gave none. Only with `sourceUrl`. */
+  merchantName?: string
+  /** Who set the saved price. Only with `sourceUrl`. */
+  priceSource?: SavedPriceSource
+}
+/**
+ * component: the store's own Worth button sent it. channel3: Channel3 read it from the page and the
+ * shopper kept it. user: the shopper typed or changed it.
+ */
+export type SavedPriceSource = 'component' | 'channel3' | 'user'
+/** A saved Channel3-priced item's price, read again on its ready day (C6). */
+export interface SavedPriceCheck {
+  /** unavailable: the lookup failed, was limited or had no US dollar price; keep the saved one. */
+  status: 'same' | 'changed' | 'unavailable'
+  savedPriceCents: number
+  /** The store's price now, when it was read. */
+  priceCents?: number
 }
 /**
  * A similar product from another store, found through Channel3. Discovery only: Worth does not sell
