@@ -125,6 +125,12 @@ const HOLD_TYPE = /\b(?:holds?|authori[sz]ations?)\b/i
 /** PayPal's instalment products, named in a row's Type or Name. Deliberately narrow. */
 const PAY_LATER = /\bpay\s+in\s+(?:4|four)\b|\bpay\s+later\b/i
 const INSTALLMENT: Classification = { kind: 'installment', category: 'Pay in 4', color: '#c4bee0' }
+/**
+ * The Activity reference of a payment a store reported to Worth after its own PayPal capture
+ * (handoff-contract §5). The shopper's export names that payment with its own transaction ID, never
+ * the store's capture ID, so import matches it by amount and date instead.
+ */
+export const STORE_REFERENCE = 'store:'
 /** A plain bank transfer type with no other detail. */
 const BANK_TRANSFER_TYPE = /^(?:bank )?transfer$/
 
@@ -725,9 +731,22 @@ export function parsePayPalCsv(
   const knownById = new Map(existing.map((transaction) => [transaction.id, transaction]))
   const capturedPurchases = new Map(
     existing
-      .filter((transaction) => transaction.source === 'purchase' && transaction.referenceId)
+      .filter(
+        (transaction) =>
+          transaction.source === 'purchase' &&
+          transaction.referenceId &&
+          !transaction.referenceId.startsWith(STORE_REFERENCE),
+      )
       .map((transaction) => [transaction.referenceId!.replace(/^paypal:/, ''), transaction]),
   )
+  // Payments stores reported, each matched by at most one row of this file.
+  const storeReported = existing.filter(
+    (transaction) =>
+      transaction.source === 'purchase' &&
+      transaction.referenceId?.startsWith(STORE_REFERENCE) &&
+      transaction.status !== 'excluded',
+  )
+  const storeMatched = new Set<string>()
   const occurrences = new Map<string, number>()
   let noIds = 0
   // The caller passes today in the user's time zone; New York is only the standalone default.
@@ -875,6 +894,28 @@ export function parsePayPalCsv(
       return
     }
     const previous = knownById.get(id)
+    // A store already told Worth about this payment: the same amount within a day (the store's
+    // capture time is UTC; the export uses the account's local date) is that payment, counted once.
+    const reported =
+      !previous &&
+      status !== 'excluded' &&
+      currency === 'USD' &&
+      ['expense', 'installment'].includes(classification.kind)
+        ? storeReported.find(
+            (payment) =>
+              !storeMatched.has(payment.id) &&
+              payment.amountCents === amount &&
+              Math.abs(dateDistance(payment.date, date)) <= 1,
+          )
+        : undefined
+    if (reported) {
+      storeMatched.add(reported.id)
+      result.warnings.push(
+        `Row ${rowNumber}: ${(-amount / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })} on ${date} is the payment a store already reported to Worth (${reported.name}), so it is counted once.`,
+      )
+      result.duplicates++
+      return
+    }
     if (previous) {
       // A USD cost the user entered gives way to the conversion a later export shows.
       const replacesEntered =

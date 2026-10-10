@@ -1250,3 +1250,89 @@ describe('foreign payments across moments and imports', () => {
     expect(again.instalmentPlans).toEqual(first.instalmentPlans)
   })
 })
+
+describe('a payment a store reported to Worth (C4)', () => {
+  // The store's capture ID is the store's own; the shopper's export names the same payment with
+  // the shopper's transaction ID, so only amount and date can match it.
+  const reported: Transaction = {
+    id: 'purchase-reported-1',
+    referenceId: 'store:CAPTURE-STORE',
+    source: 'purchase',
+    amountCents: -119900,
+    date: '2026-10-01',
+    name: 'Everyday camera',
+    currency: 'USD',
+    kind: 'expense',
+    category: 'Shopping',
+    status: 'completed',
+  }
+  const file = (...rows: string[]) =>
+    ['Date,Name,Type,Status,Currency,Amount,Transaction ID', ...rows].join('\n')
+
+  it('counts the export’s row for it once, within a day either way, and says so', () => {
+    for (const date of ['2026-09-30', '2026-10-01', '2026-10-02']) {
+      const result = parsePayPalCsv(
+        file(`${date},Larkspur Supply,Express Checkout Payment,Completed,USD,-1199.00,BUYER-TXN-1`),
+        [reported],
+      )
+      expect(result.errors).toEqual([])
+      expect(result.transactions).toEqual([])
+      expect(result.duplicates).toBe(1)
+      expect(result.warnings.join(' ')).toContain(
+        'Row 2: $1,199.00 on ' + date + ' is the payment a store already reported to Worth',
+      )
+    }
+  })
+
+  it('matches each reported payment to one row only, and nothing else', () => {
+    const result = parsePayPalCsv(
+      file(
+        '2026-10-01,Larkspur Supply,Express Checkout Payment,Completed,USD,-1199.00,BUYER-TXN-1',
+        // A second payment of the same amount that day is a second payment.
+        '2026-10-01,Larkspur Supply,Express Checkout Payment,Completed,USD,-1199.00,BUYER-TXN-2',
+        '2026-10-03,Larkspur Supply,Express Checkout Payment,Completed,USD,-1199.00,BUYER-TXN-3',
+        '2026-10-01,Larkspur Supply,Express Checkout Payment,Completed,USD,-1199.01,BUYER-TXN-4',
+        '2026-10-01,Larkspur Supply,Express Checkout Payment,Denied,USD,-1199.00,BUYER-TXN-5',
+        '2026-10-01,Larkspur Supply,Refund,Completed,USD,1199.00,BUYER-TXN-6',
+      ),
+      [reported],
+    )
+    expect(result.errors).toEqual([])
+    expect(result.duplicates).toBe(1)
+    expect(result.transactions.map((t) => t.id).sort()).toEqual([
+      'paypal:BUYER-TXN-2',
+      'paypal:BUYER-TXN-3',
+      'paypal:BUYER-TXN-4',
+      'paypal:BUYER-TXN-5',
+      'paypal:BUYER-TXN-6',
+    ])
+  })
+
+  it('matches a Pay in 4 row for the same amount, and never Worth’s own capture by amount', () => {
+    const installment = parsePayPalCsv(
+      file('2026-10-01,Larkspur Supply,PayPal Pay in 4,Completed,USD,-1199.00,BUYER-P4'),
+      [reported],
+    )
+    expect(installment.duplicates).toBe(1)
+    expect(installment.transactions).toEqual([])
+    // Worth's own captures keep matching by their capture ID only.
+    const own = { ...reported, referenceId: 'CAPTURE-OWN' }
+    const result = parsePayPalCsv(
+      file(
+        '2026-10-01,Larkspur Supply,Express Checkout Payment,Completed,USD,-1199.00,BUYER-TXN-1',
+      ),
+      [own],
+    )
+    expect(result.duplicates).toBe(0)
+    expect(result.transactions).toHaveLength(1)
+  })
+
+  it('stays counted once when the same export is imported again', () => {
+    const row =
+      '2026-10-01,Larkspur Supply,Express Checkout Payment,Completed,USD,-1199.00,BUYER-TXN-1'
+    const first = parsePayPalCsv(file(row), [reported])
+    const again = parsePayPalCsv(file(row), [reported, ...first.transactions])
+    expect(again.transactions).toEqual([])
+    expect(again.duplicates).toBe(1)
+  })
+})

@@ -70,10 +70,11 @@ import { withoutWebsites } from './labels.ts'
 import { WindowLimiter } from './limits.ts'
 import { contentSecurityPolicy } from './csp.ts'
 import { itemSigner } from './remember.ts'
-import { createHandoff, withResult } from '../shared/handoff.ts'
+import { createHandoff, MAX_OUTCOME_BYTES, withResult } from '../shared/handoff.ts'
 import { isPlain } from '../shared/text.ts'
 import type { QuotePayload, Verdict } from '../shared/handoff.ts'
 import { confirmPlan, confirmRefund, PlanError, recordRefund } from './plans.ts'
+import { recordOutcome } from './outcome.ts'
 import { queryFor, roomToday } from './alternatives.ts'
 import { createChannel3, loadFixtures } from './channel3.ts'
 import type { Channel3Client } from './channel3.ts'
@@ -340,6 +341,11 @@ const HANDOFF_UNVERIFIED =
   'We couldn’t verify this link from the store. You can still check the item yourself.'
 /** Webhook deliveries accepted per sender IP per minute; each one costs a PayPal verification call. */
 const WEBHOOK_PER_MINUTE = 60
+/** Signed store reports accepted per merchant per minute (contract §7: after the signature). */
+const OUTCOMES_PER_MINUTE = 60
+/** The one body for a refused store report, whatever the reason: nothing about the check leaks. */
+const OUTCOME_REFUSED = { error: 'This report was not accepted.', code: 'OUTCOME_REJECTED' }
+const OUTCOME_NOT_FOUND = { error: 'Not found.', code: 'NOT_FOUND' }
 const SPENDING_REVIEW = 'Review your everyday spending:'
 const CLAUDE_LIMIT_REASON = {
   ip: 'You have reached this demo’s Claude limit for the hour',
@@ -416,6 +422,7 @@ export function createApp(options: AppOptions = {}) {
   const eligibilityCache = new Map<number, { value: PayIn4Eligibility; until: number }>()
   const webhookLimiter = new WindowLimiter(WEBHOOK_PER_MINUTE, 60_000)
   const handoffLimiter = new WindowLimiter(HANDOFF_PER_MINUTE, 60_000)
+  const outcomeLimiter = new WindowLimiter(OUTCOMES_PER_MINUTE, 60_000)
   const chatBusy = new Set<string>()
   const requestLimiter = new WindowLimiter(config.requestsPerMinute, 60_000)
   const sessionLimiter = new WindowLimiter(config.sessionIpHourlyLimit, 60 * 60_000)
@@ -1052,6 +1059,11 @@ export function createApp(options: AppOptions = {}) {
   })
   // Webhook signatures cover the exact bytes PayPal sent, so this route keeps the raw body.
   app.use('/api/paypal/webhook', express.raw({ type: () => true, limit: '64kb' }))
+  // A store's report is signed over its exact bytes, and is at most 2 KB.
+  app.use(
+    '/api/handoff/outcome',
+    express.raw({ type: () => true, limit: MAX_OUTCOME_BYTES, inflate: false }),
+  )
   app.use('/api/import', express.json({ limit: IMPORT_BODY_LIMIT }))
   // A hand-off token is at most 4 KB.
   app.use('/api/handoff', express.json({ limit: '8kb' }))
@@ -1158,6 +1170,35 @@ export function createApp(options: AppOptions = {}) {
     }
     return { sessionId: match.sessionId }
   }
+  /**
+   * The store's server reports its own completed PayPal capture (specs/handoff-contract.md §5).
+   * Server to server, so it sits before the browser-only checks and never reads or sets a session
+   * cookie. Checks run in the contract's order: size, timestamp, signature, shape, key ids, USD
+   * (verifyOutcome), then the per-merchant limit, then the quote. Every refusal has one generic
+   * body; the store learns nothing about the shopper beyond `recorded`.
+   */
+  app.post('/api/handoff/outcome', (req, res) => {
+    if (!handoff) return void res.status(404).json(OUTCOME_NOT_FOUND)
+    const raw = Buffer.isBuffer(req.body) ? req.body.toString('utf8') : ''
+    const verified = handoff.verifyOutcome(
+      raw,
+      req.get('Worth-Handoff-Timestamp'),
+      req.get('Worth-Handoff-Signature'),
+    )
+    if (!verified.ok)
+      return void res
+        .status(
+          ['bad_timestamp', 'bad_signature', 'unknown_key'].includes(verified.reason) ? 401 : 400,
+        )
+        .json(OUTCOME_REFUSED)
+    if (!outcomeLimiter.take(verified.payload.mid, now().getTime()))
+      return void res
+        .status(429)
+        .json({ error: 'Too many reports. Try again shortly.', code: 'RATE_LIMITED' })
+    const answer = recordOutcome(store, verified.payload, now())
+    if (answer.status === 'unknown') return void res.status(404).json(OUTCOME_NOT_FOUND)
+    res.json({ recorded: answer.recorded })
+  })
   app.use('/api', (req, res, next) => {
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
       const origin = req.get('origin')
@@ -1462,6 +1503,23 @@ export function createApp(options: AppOptions = {}) {
     // Anti-forwarding (§5): only a quote whose shopper came back through Worth can report a purchase.
     store.markQuoteReturned(quote.qid, sessionId(res), now().getTime())
     res.json({ url: withResult(quote.returnUrl, token) })
+  })
+  /** The shopper has seen "<store> told Worth about your payment" for these purchases (C4). */
+  app.post('/api/handoff/notices/seen', (req, res) => {
+    const { purchaseIds } = z
+      .object({ purchaseIds: z.array(identifier).min(1).max(20) })
+      .strict()
+      .parse(req.body)
+    const id = sessionId(res)
+    store.atomic(() => {
+      for (const purchaseId of purchaseIds) {
+        const purchase = store.purchase(purchaseId, id)
+        if (!purchase?.reportNotice) continue
+        const { reportNotice: _seen, ...rest } = purchase
+        store.putPurchase(id, rest)
+      }
+    })
+    res.json(state(id))
   })
   app.post('/api/compare', async (req, res) => {
     const input = compareSchema.parse(req.body)
@@ -2444,6 +2502,11 @@ export function createApp(options: AppOptions = {}) {
       })
     if (error instanceof SyntaxError)
       return void res.status(400).json({ error: 'Invalid JSON request.', code: 'INVALID_JSON' })
+    // A store report over 2 KB is refused like any other; with the hand-off off, it isn't there.
+    if (req.path === '/api/handoff/outcome' && error?.type)
+      return void (handoff
+        ? res.status(400).json(OUTCOME_REFUSED)
+        : res.status(404).json(OUTCOME_NOT_FOUND))
     // A store link too large to read is an unverifiable link, never a file upload.
     if (req.path.startsWith('/api/handoff/') && error?.type === 'entity.too.large')
       return void res.status(400).json({ error: HANDOFF_UNVERIFIED, code: 'HANDOFF_UNVERIFIED' })
