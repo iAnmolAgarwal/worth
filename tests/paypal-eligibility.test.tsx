@@ -23,8 +23,8 @@ describe('Pay in 4 from PayPal’s v6 eligibility answer', () => {
   it('reads PAY_LATER_SHORT_TERM in the US as Pay in 4', async () => {
     expect(await payIn4(instance(true, 'PAY_LATER_SHORT_TERM', 'US'))).toBe('eligible')
   })
-  it('reads no Pay Later at all as not eligible', async () => {
-    expect(await payIn4(instance(false))).toBe('not-eligible')
+  it('reads PayPal’s Pay Later no as unknown, as the store does', async () => {
+    expect(await payIn4(instance(false))).toBe('unknown')
   })
   it('leaves PAYLATER, another country, a missing or unknown code as unknown', async () => {
     for (const sdk of [

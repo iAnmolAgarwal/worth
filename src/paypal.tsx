@@ -45,11 +45,12 @@ export function useEligibility(instance: PayPalSdkInstance | undefined, amountCe
       .then((methods) => {
         if (cancelled) return
         // PayPal's v6 code for Pay in 4 is PAY_LATER_SHORT_TERM; PAYLATER doesn't say which product.
-        const payIn4 = payIn4Offer(methods)
+        // A no is unknown, as on the store: before the buyer logs in, PayPal's sandbox says no
+        // even where PayPal Messages offers Pay in 4 for the same amount.
         setState({
           key,
           paypal: methods.isEligible('paypal') ? 'eligible' : 'not-eligible',
-          payIn4: payIn4 === undefined ? 'unknown' : payIn4 ? 'eligible' : 'not-eligible',
+          payIn4: payIn4Offer(methods) ? 'eligible' : 'unknown',
         })
       })
       .catch(() => !cancelled && setState({ key, paypal: 'unknown', payIn4: 'unknown' }))
