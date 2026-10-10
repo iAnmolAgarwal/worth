@@ -78,27 +78,27 @@ async function toReadyDay(agent: Agent) {
 }
 
 describe('saving an item with its store link', () => {
-  it('keeps the link, the store’s name and the price source, and stores them', async () => {
+  it('keeps the link, the price source and the store named by its domain, and stores them', async () => {
     const { agent, store, sessionId } = setup()
     const saved = await saveLinked(agent)
     expect(saved.status).toBe(200)
     expect(saved.body.item).toMatchObject({
       kind: 'custom',
       sourceUrl: LINK,
-      merchantName: 'Larkspur Supply',
+      merchantName: 'shop.larkspur.example',
       priceSource: 'channel3',
       waitDate: READY,
     })
     const stored = store.get(sessionId())!.saved!.find((i) => i.id === saved.body.item.id)!
     expect(stored).toMatchObject({
       sourceUrl: LINK,
-      merchantName: 'Larkspur Supply',
+      merchantName: 'shop.larkspur.example',
       priceSource: 'channel3',
     })
     const state = (await agent.get('/api/state')).body as AppState
     expect(state.saved!.find((i) => i.id === saved.body.item.id)).toMatchObject({
       sourceUrl: LINK,
-      merchantName: 'Larkspur Supply',
+      merchantName: 'shop.larkspur.example',
       priceSource: 'channel3',
     })
   })
@@ -118,11 +118,24 @@ describe('saving an item with its store link', () => {
     })
   })
 
-  it('accepts the store button’s own price source for /check', async () => {
+  it('refuses the store button’s price source from the browser, as /api/compare does', async () => {
     const { agent } = setup()
     const saved = await saveLinked(agent, { priceSource: 'component' })
+    expect(saved.status).toBe(400)
+    expect(((await agent.get('/api/state')).body as AppState).saved!.some((i) => i.sourceUrl)).toBe(
+      false,
+    )
+  })
+
+  it('ignores the browser’s store name and names the store by the link', async () => {
+    const { agent } = setup()
+    const saved = await saveLinked(agent, {
+      sourceUrl: 'https://evil.example/p',
+      merchantName: 'PayPal',
+      priceSource: 'user',
+    })
     expect(saved.status).toBe(200)
-    expect(saved.body.item.priceSource).toBe('component')
+    expect(saved.body.item.merchantName).toBe('evil.example')
   })
 
   it.each([
@@ -196,6 +209,14 @@ describe('items saved before the store link (migration)', () => {
         sourceUrl: 'https://www.shop.example.com/p',
         priceSource: 'bogus' as never,
       },
+      {
+        ...base,
+        id: 'named',
+        name: 'Named by the browser',
+        sourceUrl: 'https://evil.example/p',
+        merchantName: 'PayPal',
+        priceSource: 'channel3',
+      },
     ]
     store.save(sessionId(), data)
     const saved = ((await agent.get('/api/state')).body as AppState).saved!
@@ -207,6 +228,8 @@ describe('items saved before the store link (migration)', () => {
       merchantName: 'shop.example.com',
       priceSource: 'user',
     })
+    // A store name the browser sent before names came from the link is replaced by the domain.
+    expect(byId.named!.merchantName).toBe('evil.example')
   })
 
   it('returns an item without a link exactly as stored', () => {
@@ -280,11 +303,14 @@ describe('the ready day’s price re-check', () => {
 
   it('reads only a price Channel3 read, never the shopper’s or the store button’s', async () => {
     const channel3 = fakeChannel3()
-    const { agent } = setup(channel3)
+    const { agent, store, sessionId } = setup(channel3)
     const user = (await saveLinked(agent, { priceSource: 'user' })).body.item
+    // Only the server sets "component", from a store's verified hand-off.
     const other = 'https://shop.larkspur.example/products/other'
-    const component = (await saveLinked(agent, { sourceUrl: other, priceSource: 'component' })).body
-      .item
+    const component = (await saveLinked(agent, { sourceUrl: other, priceSource: 'user' })).body.item
+    const data = store.get(sessionId())!
+    data.saved!.find((i) => i.id === component.id)!.priceSource = 'component'
+    store.save(sessionId(), data)
     const plain = (
       await agent
         .post('/api/saved')

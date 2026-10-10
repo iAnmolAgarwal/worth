@@ -60,6 +60,11 @@ const sourceLink = z
   .refine((value) => checkProductLink(value).ok, 'Use the store’s https product link.')
   .transform((value) => (checkProductLink(value) as { url: string }).url)
 const PRICE_SOURCES = ['component', 'channel3', 'user'] as const
+/**
+ * Price sources the browser may send, as /api/compare takes them. "component" is set only by the
+ * server, from a store's verified hand-off (#22), never from the browser.
+ */
+const CLIENT_PRICE_SOURCES = ['channel3', 'user'] as const
 const catalogSave = z
   .object({
     kind: z.literal('catalog'),
@@ -93,6 +98,7 @@ const customSave = z
       .optional(),
     /** The store page this item came from: a pasted link or the store's return link (C6). */
     sourceUrl: sourceLink.optional(),
+    /** Accepted for the browser's convenience but ignored: the store is named by the link's domain. */
     merchantName: z
       .string()
       .trim()
@@ -100,7 +106,7 @@ const customSave = z
       .max(80)
       .refine(plain, 'Use a plain-text name')
       .optional(),
-    priceSource: z.enum(PRICE_SOURCES).optional(),
+    priceSource: z.enum(CLIENT_PRICE_SOURCES).optional(),
   })
   .strict()
   .refine(
@@ -147,8 +153,12 @@ function withSource(item: SavedItem): SavedItem {
   return {
     ...rest,
     sourceUrl: link.url,
+    // Only a store's verified hand-off names the store; anything else is named by its domain.
     merchantName:
-      typeof merchantName === 'string' && merchantName.trim() && isPlain(merchantName)
+      priceSource === 'component' &&
+      typeof merchantName === 'string' &&
+      merchantName.trim() &&
+      isPlain(merchantName)
         ? merchantName.trim().slice(0, 80)
         : storeDomain(link.host),
     priceSource: PRICE_SOURCES.includes(priceSource as SavedPriceSource)
@@ -264,7 +274,8 @@ export function addSaved(data: SessionData, input: SaveInput, today: string, now
       ...(input.sourceUrl
         ? {
             sourceUrl: input.sourceUrl,
-            merchantName: input.merchantName ?? storeDomain(new URL(input.sourceUrl).hostname),
+            // Named from the link, as /api/compare does: the browser's store name is ignored.
+            merchantName: storeDomain(new URL(input.sourceUrl).hostname),
             priceSource: input.priceSource!,
           }
         : {}),
