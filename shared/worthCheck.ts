@@ -216,7 +216,14 @@ export class WorthCheck extends HTMLElement {
 
   private async onClick(event: MouseEvent) {
     // A new-tab click and a fresh link both go as they are; the browser follows the real link.
-    if (!this.stale() || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey)
+    if (
+      !this.stale() ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    )
       return
     event.preventDefault()
     await this.refresh()

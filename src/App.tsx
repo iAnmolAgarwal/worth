@@ -18,7 +18,7 @@ import type { InstalmentPlanProposal, Product, SavedItem } from '../shared/types
 import { Activity } from './Activity'
 import { api } from './api'
 import { Ask } from './Ask'
-import { Check, handoffToken } from './Check'
+import { Check, handoffToken, reloadForNewToken } from './Check'
 import { Checkout } from './Checkout'
 import type { AppState, Purchase, SavePlan, SaveTarget } from './contract'
 import { alternativeTarget, decisionRequestFrom, saveRequest } from './contract'
@@ -180,6 +180,7 @@ export default function App() {
     // oxlint-disable-next-line react/set-state-in-effect
     void load()
     const onHash = () => {
+      if (reloadForNewToken()) return
       setRoute(parseRoute())
       setMenu(false)
       setEnvOpen(false)

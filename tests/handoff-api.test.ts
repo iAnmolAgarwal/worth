@@ -76,6 +76,8 @@ describe('GET /check', () => {
     expect((await request(app).get('/check')).headers['referrer-policy']).toBe('no-referrer')
     expect((await request(app).get('/')).headers['referrer-policy']).toBe('same-origin')
     expect((await request(app).get('/api/state')).headers['referrer-policy']).toBe('same-origin')
+    expect((await request(app).get('/check/')).headers['referrer-policy']).toBe('no-referrer')
+    expect((await request(app).get('/checkout')).headers['referrer-policy']).toBe('same-origin')
   })
 
   it('allows the store origin for product images in the production policy', async () => {
@@ -206,6 +208,13 @@ describe('POST /api/handoff/open (contract §3.3)', () => {
         expect(text).not.toContain(leak)
       expect(store.db.prepare('SELECT COUNT(*) AS n FROM handoff_quotes').get()).toEqual({ n: 0 })
     })
+
+  it('answers a body over 8 KB with the unverified message, not the CSV one', async () => {
+    const { agent } = setup()
+    const response = await post(agent, '/api/handoff/open', { token: 'A'.repeat(9000) })
+    expect(response.status).toBe(400)
+    expect(response.body).toEqual(unverified)
+  })
 
   it('refuses a body that isn’t just a token string', async () => {
     const { agent } = setup()

@@ -129,6 +129,23 @@ describe('hand-off tokens (contract §2)', () => {
     expect(handoff.verifyQuote(flipped)).toEqual({ ok: false, reason: 'bad_signature' })
   })
 
+  it('accepts one spelling of a signature: the last character’s spare bits can’t vary', () => {
+    clock.value = NOW * 1000
+    const token = handoff.signQuote(input)
+    const [body, sig] = token.split('.') as [string, string]
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+    const last = alphabet.indexOf(sig.at(-1)!)
+    // 43 characters carry 258 bits for a 256-bit MAC; the low 2 bits of the last one are spare.
+    for (const spare of [1, 2, 3]) {
+      const variant = `${body}.${sig.slice(0, -1)}${alphabet[last ^ spare]}`
+      expect(Buffer.from(variant.split('.')[1]!, 'base64url')).toEqual(
+        Buffer.from(sig, 'base64url'),
+      )
+      expect(handoff.verifyQuote(variant)).toEqual({ ok: false, reason: 'bad_signature' })
+    }
+    expect(handoff.verifyQuote(token).ok).toBe(true)
+  })
+
   it('rejects a token signed with another key', () => {
     const wrong = forge(payload, 'quote', secretBytes(OTHER_SECRET)!)
     expect(handoff.verifyQuote(wrong)).toEqual({ ok: false, reason: 'bad_signature' })

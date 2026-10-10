@@ -270,6 +270,16 @@ describe('refreshing near expiry', () => {
     go.mockRestore()
   })
 
+  it('lets a modified click on a stale link go as a plain link, Alt included', () => {
+    for (const modifier of ['altKey', 'metaKey', 'ctrlKey', 'shiftKey']) {
+      const element = mount({ href: href({ exp: NOW + 30 }), 'refresh-url': '/q' })
+      const click = new MouseEvent('click', { bubbles: true, cancelable: true, [modifier]: true })
+      link(element).dispatchEvent(click)
+      expect(click.defaultPrevented, modifier).toBe(false)
+    }
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('lets a fresh link go as a plain link', () => {
     const element = mount({ href: href(), 'refresh-url': '/q' })
     const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })

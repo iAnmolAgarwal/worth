@@ -35,8 +35,20 @@ export function handoffToken() {
   return captured.token
 }
 
-/** Leaves Worth for the store; a seam so tests can watch it. */
-export const leave = { to: (url: string) => window.location.assign(url) }
+/** Leaves Worth for the store, or reloads for a new link; a seam so tests can watch it. */
+export const leave = {
+  to: (url: string) => window.location.assign(url),
+  reload: () => window.location.reload(),
+}
+/**
+ * A new `#q=` while the page is already open (a pasted or second store link) is a same-document
+ * navigation, so the token read on load is stale. Reloading reads and clears the new one.
+ */
+export function reloadForNewToken(location: Pick<Location, 'pathname' | 'hash'> = window.location) {
+  if (location.pathname !== '/check' || !location.hash.startsWith('#q=')) return false
+  leave.reload()
+  return true
+}
 /** One request per token, shared by React's development double mount. */
 const opening = new Map<string, Promise<HandoffOpened>>()
 /** The last quote shown, so returning to /check from another screen needs no request. */

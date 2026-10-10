@@ -4,7 +4,13 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
 import { api, ApiError } from '../src/api'
-import { leave, payLaterLine, resetHandoff, takeHandoffToken } from '../src/Check'
+import {
+  leave,
+  payLaterLine,
+  reloadForNewToken,
+  resetHandoff,
+  takeHandoffToken,
+} from '../src/Check'
 import { compareOptions } from '../shared/finance'
 import { createDemoState, PRODUCTS } from '../shared/seed'
 import type { AppState, HandoffQuote } from '../shared/types'
@@ -118,6 +124,19 @@ describe('reading the store’s token', () => {
       takeHandoffToken({ pathname: '/check', search: '', hash: '#home' }, { replaceState: none }),
     ).toBeUndefined()
     expect(none).not.toHaveBeenCalled()
+  })
+
+  it('reloads for a new #q= while /check is already open, and only then', async () => {
+    const reload = vi.spyOn(leave, 'reload').mockImplementation(() => undefined)
+    route({ '/handoff/open': opened() })
+    visit()
+    await screen.findByRole('group', { name: /From Larkspur Supply/ })
+    window.location.hash = `#q=${TOKEN}x`
+    await waitFor(() => expect(reload).toHaveBeenCalledTimes(1))
+    window.location.hash = '#home'
+    await screen.findAllByRole('link', { name: 'Home' })
+    expect(reload).toHaveBeenCalledTimes(1)
+    expect(reloadForNewToken({ pathname: '/', hash: `#q=${TOKEN}` })).toBe(false)
   })
 
   it('clears the fragment before the quote is even verified', async () => {

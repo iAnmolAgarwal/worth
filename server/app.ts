@@ -1020,7 +1020,8 @@ export function createApp(options: AppOptions = {}) {
     }
     res.setHeader('X-Content-Type-Options', 'nosniff')
     // /check is where a store's hand-off lands; no referrer leaves it, even on the way back.
-    res.setHeader('Referrer-Policy', req.path === '/check' ? 'no-referrer' : 'same-origin')
+    const check = req.path === '/check' || req.path.startsWith('/check/')
+    res.setHeader('Referrer-Policy', check ? 'no-referrer' : 'same-origin')
     res.setHeader('X-Frame-Options', 'DENY')
     // The full policy needs the built app; Vite's development server injects inline scripts.
     res.setHeader(
@@ -2355,6 +2356,9 @@ export function createApp(options: AppOptions = {}) {
       })
     if (error instanceof SyntaxError)
       return void res.status(400).json({ error: 'Invalid JSON request.', code: 'INVALID_JSON' })
+    // A store link too large to read is an unverifiable link, never a file upload.
+    if (req.path.startsWith('/api/handoff/') && error?.type === 'entity.too.large')
+      return void res.status(400).json({ error: HANDOFF_UNVERIFIED, code: 'HANDOFF_UNVERIFIED' })
     if (error?.type === 'entity.too.large')
       return void res
         .status(413)

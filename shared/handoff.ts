@@ -51,11 +51,15 @@ function hmac(key: Buffer, message: string) {
   return createHmac('sha256', key).update(message, 'utf8').digest()
 }
 
-/** Constant-time equality for a base64url signature, with the length checked first. */
+/**
+ * Constant-time equality of the canonical base64url signature strings, with the length checked
+ * first. Comparing strings, not decoded bytes, keeps one spelling per token: the unused low bits
+ * of the last character can't make a second string verify.
+ */
 export function signatureMatches(given: string, expected: Buffer) {
-  if (!BASE64URL.test(given)) return false
-  const bytes = Buffer.from(given, 'base64url')
-  return bytes.length === expected.length && timingSafeEqual(bytes, expected)
+  const want = Buffer.from(expected.toString('base64url'), 'utf8')
+  const got = Buffer.from(given, 'utf8')
+  return got.length === want.length && timingSafeEqual(got, want)
 }
 
 /** `<payload>.<sig>` for one direction. */
