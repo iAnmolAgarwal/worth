@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createHandoff } from '../../shared/handoff.ts'
 import { reportOutcome } from '../../merchant/reportBack.ts'
+import { utcTime } from '../../merchant/app.ts'
+import { outcomeSchema } from '../../shared/handoff.ts'
 
 const handoff = createHandoff({
   secret: Buffer.alloc(32, 1),
@@ -120,5 +122,16 @@ describe('report-back sender', () => {
     const logged = JSON.stringify(t.log.mock.calls)
     expect(logged).not.toContain('q_AAAA')
     expect(logged).not.toContain('Signature')
+  })
+})
+
+describe('the capture time the store sends', () => {
+  it('passes PayPal’s UTC time through and converts an offset, so Worth’s schema takes it', () => {
+    expect(utcTime('2026-10-23T15:04:05Z')).toBe('2026-10-23T15:04:05Z')
+    expect(utcTime('2026-10-23T11:04:05-04:00')).toBe('2026-10-23T15:04:05.000Z')
+    for (const value of ['2026-10-23T15:04:05Z', '2026-10-23T11:04:05-04:00'])
+      expect(outcomeSchema.shape.capturedAt.safeParse(utcTime(value)).success).toBe(true)
+    expect(utcTime('not a time')).toBeUndefined()
+    expect(utcTime(undefined)).toBeUndefined()
   })
 })
