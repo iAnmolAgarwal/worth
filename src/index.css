@@ -1468,6 +1468,31 @@ textarea.input {
   outline: none;
   box-shadow: none;
 }
+/* Paste-a-link (C5): the "Is $X right?" card in Ask Worth. */
+.link-check {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+.link-check h2:focus,
+.link-check h2:focus-visible {
+  /* Focus lands here when the card is ready, for screen readers; it is not a control. */
+  outline: none;
+  box-shadow: none;
+}
+.link-check .co-head .meta {
+  margin: var(--s-1) 0 0;
+}
+.link-check .readas-edit {
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  align-items: start;
+}
+.link-check > a {
+  align-self: flex-start;
+  display: inline-flex;
+  gap: var(--s-1);
+  align-items: center;
+}
 .alternatives .caption + .caption {
   margin-top: var(--s-1);
 }
@@ -2251,7 +2276,8 @@ textarea.input {
     display: none !important;
   }
   .form-grid,
-  .readas-edit {
+  .readas-edit,
+  .link-check .readas-edit {
     grid-template-columns: 1fr;
   }
   .saved-grid {

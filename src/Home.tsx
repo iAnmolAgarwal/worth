@@ -559,6 +559,9 @@ export function Home({
                 </h2>
               </div>
               <Composer onAsk={onAsk} placeholder="Can I afford a $1,199 camera?" id="home-q" />
+              <p className="caption" style={{ marginTop: 'var(--s-2)' }}>
+                Shopping at another store? Paste the product link and confirm the price.
+              </p>
               <div className="chips" style={{ marginTop: 'var(--s-3)' }}>
                 {HOME_SUGGESTIONS.map((text, index) => (
                   <button

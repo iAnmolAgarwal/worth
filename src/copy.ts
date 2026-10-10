@@ -17,6 +17,9 @@ export const claudeUses = (on: boolean): [string, string][] =>
 /** What reaches Channel3 when Worth looks for similar items. It applies with the assistant off too. */
 export const CHANNEL3_SHARED_DATA =
   'A generic kind of item (such as “desk chair”) and a price limit rounded down to $25, even when the assistant is off'
+/** What reaches Channel3 when someone pastes a product link (C5). Nothing from the page goes to Claude. */
+export const CHANNEL3_LINK_DATA =
+  'The link only, so Channel3 can read the product. Worth never opens it, and nothing from the page goes to the assistant'
 /**
  * Who's who in the demo: Worth is on the shopper's side and sells nothing; the sandbox merchant
  * stands in for any store that takes PayPal. Shown wherever the store and Worth meet.

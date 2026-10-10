@@ -1,8 +1,10 @@
 import { readFileSync } from 'node:fs'
+import { checkProductLink, productTitle, storeDomain } from '../shared/link.ts'
 import type {
   Alternative,
   Alternatives,
   AlternativesStatus,
+  ProductLookup,
   UnverifiedAlternative,
 } from '../shared/types.ts'
 
@@ -18,6 +20,10 @@ import type {
  * them. Recorded rows, and cached rows older than 15 minutes, are re-read with the free
  * GET /v1/products/{id} before they are shown; a row that cannot be re-read is shown without its
  * price or link.
+ *
+ * Pasted product links (C5) go to POST /v1/lookup. Worth never fetches the link itself; Channel3
+ * reads the page and returns its catalog product, and only the store's own offer is used. Lookups
+ * share the searches' daily budget, per-client allowance and back-off.
  */
 
 export const CHANNEL3_API = 'https://api.trychannel3.com'
@@ -37,6 +43,10 @@ const DAY_MS = 24 * 60 * 60_000
 /** Offers younger than this are shown as found; older ones are re-read before display. */
 const FRESH_MS = 15 * 60_000
 const PRODUCT_BACKOFF_MS = 30_000
+/** Channel3 reads the store page during a lookup; good reads took 3.6 to 7.8 s in our probe. */
+const LOOKUP_TIMEOUT_MS = 10_000
+/** A link Channel3 could not read is not asked about again for this long. */
+const LOOKUP_MISS_MS = 60 * 60_000
 const KNOWN_MAX = 5000
 
 /** The search's price ceiling: the amount rounded down to $25. */
@@ -76,10 +86,28 @@ export interface FixtureSearch {
   maxPriceCents: number
   response: RawSearch
 }
+export interface RawLookup {
+  product?: RawProduct | null
+}
+export interface FixtureLookup {
+  /** The link as pasted; matched after the same checks a live lookup makes. */
+  url: string
+  response: RawLookup
+}
 export interface Channel3Fixtures {
   recordedAt: string
   searches: FixtureSearch[]
+  /** Recorded lookups, served in fixture mode and when live lookups cannot run. */
+  lookups?: FixtureLookup[]
 }
+/**
+ * Why a link was not read. invalid: not a public https link. off: lookups are switched off.
+ * not-found: Channel3 has no product for the page. failed: Channel3 could not answer now.
+ * limit: this client's or the server's allowance is used up.
+ */
+export type LookupFailure = 'invalid' | 'off' | 'not-found' | 'failed' | 'limit'
+export type LookupResult =
+  { ok: true; product: ProductLookup } | { ok: false; reason: LookupFailure }
 
 export interface Channel3Options {
   apiKey?: string
@@ -122,6 +150,8 @@ export interface Channel3Client {
    * saved. Uses the free product endpoint; never spends search credits.
    */
   checkPrice(productId: string, savedPriceCents: number): Promise<PriceCheck>
+  /** The product on a pasted store page, read by Channel3; Worth never fetches the page. */
+  lookup(url: string, options?: SearchOptions): Promise<LookupResult>
   /** ok: live searches run. fixture: recorded examples are being served. off: hidden. */
   health(): AlternativesStatus
 }
@@ -256,6 +286,52 @@ export function parseProducts(
   return items
 }
 
+/**
+ * Turns a lookup response into what the shopper confirms. Only an offer on the pasted link's own
+ * host is used, preferring a USD price; another store's price is never shown as this one's. A
+ * product with no title is no product.
+ */
+export function parseLookup(
+  raw: RawLookup,
+  link: { url: string; host: string },
+  status: ProductLookup['status'] = 'ok',
+): ProductLookup | undefined {
+  const product = raw?.product
+  const name = productTitle(product?.title)
+  if (!product || !name) return undefined
+  const domain = storeDomain(link.host)
+  const priced = (Array.isArray(product.offers) ? product.offers : []).flatMap((offer) => {
+    const retailer = retailerName(offer?.domain)
+    const price = offer?.price?.price
+    const currency = offer?.price?.currency
+    // The same host, ignoring "www.": a suffix match would let "co.uk" match every UK store.
+    if (!retailer || retailer !== domain) return []
+    if (typeof price !== 'number' || !Number.isFinite(price) || typeof currency !== 'string')
+      return []
+    const cents = Math.round(price * 100)
+    if (cents <= 0 || cents > 100_000_000 || !/^[A-Z]{3}$/.test(currency)) return []
+    return [{ cents, currency, inStock: offer.availability === 'InStock' }]
+  })
+  const offer =
+    priced.find((o) => o.currency === 'USD' && o.inStock) ??
+    priced.find((o) => o.currency === 'USD') ??
+    priced[0]
+  const images = Array.isArray(product.images) ? product.images : []
+  const imageUrl = [...images.filter((i) => i?.is_main_image === true), ...images]
+    .flatMap((image) => [image?.cleaned_url, image?.url])
+    .map((url) => httpsUrl(url, onChannel3Cdn))
+    .find(Boolean)
+  return {
+    name,
+    ...(offer ? { priceCents: offer.cents, currency: offer.currency } : {}),
+    merchantName: domain,
+    merchantDomain: domain,
+    ...(imageUrl ? { imageUrl } : {}),
+    sourceUrl: link.url,
+    status,
+  }
+}
+
 /** A row whose price and link could not be re-read: shown as an example, never as current. */
 const unverifiedRow = ({ id, title, retailer, brand, imageUrl }: Alternative) =>
   ({
@@ -359,14 +435,18 @@ export function createChannel3(options: Channel3Options = {}): Channel3Client {
     day.count++
     return true
   }
-  async function request(path: string, init: RequestInit = {}): Promise<Response> {
+  async function request(
+    path: string,
+    init: RequestInit = {},
+    wait = timeoutMs,
+  ): Promise<Response> {
     const started = now()
     let response: Response
     try {
       response = await fetcher(`${CHANNEL3_API}${path}`, {
         ...init,
         headers: { 'x-api-key': options.apiKey!, 'content-type': 'application/json' },
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: AbortSignal.timeout(wait),
       })
     } catch (error) {
       const timeout = error instanceof Error && /timeout|abort/i.test(error.name)
@@ -506,7 +586,76 @@ export function createChannel3(options: Channel3Options = {}): Channel3Client {
     inFlight.set(key, promise)
     return promise
   }
+  /** Lookups by link: a found product for 15 minutes, a miss for an hour. */
+  const lookups = new Map<string, { value: LookupResult; until: number }>()
+  const lookupsInFlight = new Map<string, Promise<LookupResult>>()
+  const recordedLookups = options.fixtures?.lookups ?? []
+  function fixtureLookup(link: { url: string; host: string }): LookupResult | undefined {
+    for (const recorded of recordedLookups) {
+      const checked = checkProductLink(recorded.url)
+      if (!checked.ok || checked.url !== link.url) continue
+      const product = parseLookup(recorded.response, link, 'fixture')
+      return product ? { ok: true, product } : { ok: false, reason: 'not-found' }
+    }
+    return undefined
+  }
+  function rememberLookup(url: string, value: LookupResult, ttl: number) {
+    lookups.delete(url)
+    lookups.set(url, { value, until: now() + ttl })
+    while (lookups.size > CACHE_MAX) lookups.delete(lookups.keys().next().value!)
+  }
+  async function lookup(raw: string, searchOptions: SearchOptions = {}): Promise<LookupResult> {
+    const link = checkProductLink(raw)
+    if (!link.ok) return { ok: false, reason: 'invalid' }
+    if (mode === 'off') return { ok: false, reason: 'off' }
+    const recorded = fixtureLookup(link)
+    if (!live) return recorded ?? { ok: false, reason: mode === 'fixture' ? 'not-found' : 'off' }
+    const cached = lookups.get(link.url)
+    if (cached && cached.until > now()) return cached.value
+    if (now() < blockedUntil) return recorded ?? { ok: false, reason: 'failed' }
+    const pending = lookupsInFlight.get(link.url)
+    if (pending) return pending
+    if (searchOptions.allowLive && !searchOptions.allowLive())
+      return recorded ?? { ok: false, reason: 'limit' }
+    if (!underDailyLimit()) return recorded ?? { ok: false, reason: 'limit' }
+    const promise = (async (): Promise<LookupResult> => {
+      try {
+        const response = await request(
+          '/v1/lookup',
+          { method: 'POST', body: JSON.stringify({ url: link.url }) },
+          LOOKUP_TIMEOUT_MS,
+        )
+        if ([401, 402, 403, 429].includes(response.status))
+          throw new Channel3Error(response.status, `HTTP ${response.status}`)
+        if (!response.ok) {
+          // 404 and 422: no product page Channel3 knows; 500 and 504: it could not read this one.
+          const value: LookupResult = {
+            ok: false,
+            reason: response.status === 404 || response.status === 422 ? 'not-found' : 'failed',
+          }
+          rememberLookup(link.url, value, value.reason === 'not-found' ? LOOKUP_MISS_MS : FRESH_MS)
+          return value
+        }
+        const product = parseLookup((await response.json()) as RawLookup, link)
+        const value: LookupResult = product
+          ? { ok: true, product }
+          : { ok: false, reason: 'not-found' }
+        rememberLookup(link.url, value, product ? FRESH_MS : LOOKUP_MISS_MS)
+        return value
+      } catch (error) {
+        // A slow page is this link's problem; refused keys and rate limits pause every call.
+        if (error instanceof Channel3Error && error.status !== undefined) backOff(error)
+        else log({ event: 'channel3_lookup_unavailable', status: (error as Error).message })
+        return recorded ?? { ok: false, reason: 'failed' }
+      } finally {
+        lookupsInFlight.delete(link.url)
+      }
+    })()
+    lookupsInFlight.set(link.url, promise)
+    return promise
+  }
   return {
+    lookup,
     search: async (query, maxPriceCents, searchOptions = {}) =>
       present(await find('search', query, maxPriceCents, searchOptions)),
     async similar(productId, maxPriceCents, searchOptions = {}) {

@@ -11,6 +11,7 @@ import {
   TriangleAlert,
 } from 'lucide-react'
 import { addDays } from '../shared/finance'
+import { linkIn } from '../shared/link'
 import type {
   Assessment,
   ChatMessage,
@@ -38,6 +39,7 @@ import { optionStatus, type DecisionRequest, type Explanation } from './Decision
 import { claudeOn, envLabel, fits, missingFix, useComparison } from './engine'
 import { capitalize, cx, dayLabel, fromMoney, money, signed } from './format'
 import { countedHold, ReservationNote } from './Reservation'
+import { LinkCheck } from './PasteLink'
 import { Alert, Button, Field, Pill, ReadAsChip, Toggle, type Tone } from './ui'
 
 type OnSave = (target: SaveTarget, plan?: SavePlan) => Promise<SavedItem | undefined>
@@ -49,8 +51,17 @@ export function priceLabel(read: Interpretation, products: Product[]) {
     : money(read.amountCents)
 }
 
+/**
+ * A pasted link's turn (C5): the link, then its confirm card. Neither is ever sent to Claude.
+ * `url` is absent when the message held more than one link.
+ */
+type LinkTurn = {
+  url?: string
+  confirmed?: DecisionRequest & { amountCents: number; itemName: string }
+  cancelled?: boolean
+}
 /** `trace` is fixed when the answer arrives, so a later switch change never relabels it. */
-type Entry = ChatMessage & { reply?: ChatReply; id: number; trace?: string }
+type Entry = ChatMessage & { reply?: ChatReply; id: number; trace?: string; link?: LinkTurn }
 
 export const ASK_STARTERS = [
   'Can I afford a $1,199 camera?',
@@ -564,6 +575,37 @@ export function JudgeBadge({ state }: { state: AppState }) {
   )
 }
 
+/** A pasted link's answer: the confirm card, or what became of it. */
+function LinkAnswer({
+  turn,
+  onConfirm,
+  onCancel,
+  onOpen,
+}: {
+  turn: LinkTurn
+  onConfirm: (request: NonNullable<LinkTurn['confirmed']>) => void
+  onCancel: () => void
+  onOpen: (request: DecisionRequest) => void
+}) {
+  if (!turn.url)
+    return <p>Paste one product link at a time, and Worth will read it with Channel3.</p>
+  if (turn.cancelled) return <p className="meta">Cancelled. Nothing was checked.</p>
+  if (turn.confirmed)
+    return (
+      <div className="stack tight">
+        <p>
+          You confirmed {turn.confirmed.itemName} at {money(turn.confirmed.amountCents)}.
+        </p>
+        <div>
+          <Button variant="secondary" icon={ArrowRight} onClick={() => onOpen(turn.confirmed!)}>
+            See your options
+          </Button>
+        </div>
+      </div>
+    )
+  return <LinkCheck url={turn.url} onConfirm={onConfirm} onCancel={onCancel} />
+}
+
 export function Ask({
   state,
   initialPrompt,
@@ -614,12 +656,32 @@ export function Ask({
   const send = useCallback(
     async (text: string, explicit?: PurchaseContext) => {
       if (inFlight.current || !text.trim()) return
+      // A pasted link goes to Channel3's lookup and a confirm card, never to Claude (C5).
+      const pasted = linkIn(text)
+      if (pasted.kind !== 'none') {
+        const id = Date.now()
+        setError('')
+        setMessage('')
+        setEditing(undefined)
+        setEntries((prev) => [
+          ...prev,
+          { role: 'user', content: text, id, link: {} },
+          {
+            role: 'assistant',
+            content: '',
+            id: id + 1,
+            link: pasted.kind === 'one' ? { url: pasted.url } : {},
+          },
+        ])
+        return
+      }
       inFlight.current = true
       setBusy(true)
       setError('')
       setMessage('')
       setEditing(undefined)
       const history = entriesRef.current
+        .filter((entry) => !entry.link)
         .slice(-12)
         .map(({ role, content }) => ({ role, content: content.slice(0, 4000) }))
       setEntries((prev) => [...prev, { role: 'user', content: text, id: Date.now() }])
@@ -705,6 +767,8 @@ export function Ask({
       })
   }, [entries.length, busy, visible])
 
+  const update = (id: number, link: LinkTurn) =>
+    setEntries((prev) => prev.map((entry) => (entry.id === id ? { ...entry, link } : entry)))
   const lastId = entries.at(-1)?.id
   return (
     <div className="page ask-page">
@@ -756,21 +820,41 @@ export function Ask({
                       </span>
                       Worth
                     </div>
-                    <Answer
-                      entry={entry}
-                      state={state}
-                      busy={busy}
-                      last={entry.id === lastId}
-                      editing={editing === entry.id}
-                      onEdit={() => setEditing(entry.id)}
-                      onCancelEdit={() => setEditing(undefined)}
-                      onSend={(text, next) => void send(text, next)}
-                      onAnswer={() => input.current?.focus()}
-                      onOpenDecision={onOpenDecision}
-                      onOpenCheckout={onOpenCheckout}
-                      onNavigate={onNavigate}
-                      onSave={onSave}
-                    />
+                    {entry.link ? (
+                      <LinkAnswer
+                        turn={entry.link}
+                        onConfirm={(request) => {
+                          update(entry.id, { ...entry.link, confirmed: request })
+                          // Follow-up questions are about the confirmed item, as data only.
+                          setContext({
+                            amountCents: request.amountCents,
+                            itemName: request.itemName,
+                          })
+                          onOpenDecision(request)
+                        }}
+                        onCancel={() => {
+                          update(entry.id, { ...entry.link, cancelled: true })
+                          input.current?.focus()
+                        }}
+                        onOpen={onOpenDecision}
+                      />
+                    ) : (
+                      <Answer
+                        entry={entry}
+                        state={state}
+                        busy={busy}
+                        last={entry.id === lastId}
+                        editing={editing === entry.id}
+                        onEdit={() => setEditing(entry.id)}
+                        onCancelEdit={() => setEditing(undefined)}
+                        onSend={(text, next) => void send(text, next)}
+                        onAnswer={() => input.current?.focus()}
+                        onOpenDecision={onOpenDecision}
+                        onOpenCheckout={onOpenCheckout}
+                        onNavigate={onNavigate}
+                        onSave={onSave}
+                      />
+                    )}
                   </div>
                 ),
               )}
@@ -840,7 +924,7 @@ export function Ask({
                   ref={input}
                   value={message}
                   maxLength={2000}
-                  placeholder="Ask about a purchase"
+                  placeholder="Ask, or paste a product link"
                   onChange={(event) => setMessage(event.target.value)}
                 />
                 <button className="send" type="submit" aria-label="Send" disabled={busy}>

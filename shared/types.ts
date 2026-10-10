@@ -161,6 +161,34 @@ export interface Alternatives {
   /** Example rows that could not be re-read, shown without a price or link. */
   unverified?: UnverifiedAlternative[]
 }
+/**
+ * A product read from a pasted link by Channel3's lookup (C5). Untrusted: the title is shown only
+ * for the shopper to confirm or edit, and the price is never used until they confirm it.
+ */
+export interface ProductLookup {
+  /** The product title, plain text and at most 80 characters. */
+  name: string
+  /** The store's own price on that page; absent when Channel3 had none for this store. */
+  priceCents?: number
+  /** The price's currency, such as USD. Only USD prices are offered for confirmation. */
+  currency?: string
+  /** The store, named by its domain ("shop.example.com"). */
+  merchantName: string
+  merchantDomain: string
+  /** On Channel3's image CDN only. */
+  imageUrl?: string
+  /** The link as pasted (https, no fragment): the store's page, never an affiliate redirect. */
+  sourceUrl: string
+  /** fixture: a recorded example, not a live read. */
+  status: 'ok' | 'fixture'
+}
+/** Where a pasted-link item's details came from, carried through the decision for Saved (C6). */
+export interface ItemSource {
+  sourceUrl: string
+  merchantName: string
+  /** channel3: the shopper confirmed Channel3's price unchanged. user: they typed or changed it. */
+  priceSource: 'channel3' | 'user'
+}
 export interface PlanInstalment {
   date: string
   amountCents: number
@@ -392,6 +420,8 @@ export interface Comparison {
   /** Null while information is missing. Pay in 4 is never a recommendation. */
   recommendation: Recommendation | null
   assumptions: string[]
+  /** For an item from a pasted link: its store page, store and price source. */
+  source?: ItemSource
 }
 /** An agent token as Settings lists it. The token itself is shown once, when it is created. */
 export interface AgentToken {
