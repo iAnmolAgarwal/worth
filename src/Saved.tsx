@@ -83,9 +83,11 @@ const decisionFor = (item: SavedItem, amountCents = item.amountCents): DecisionR
 
 /** Who set a store item's saved price, in the card's words (C6). */
 const priceNote = (item: SavedItem) =>
-  item.priceSource === 'channel3'
-    ? 'price read by Channel3, confirmed by you'
-    : 'price you confirmed'
+  item.priceSource === 'component'
+    ? `price from ${storeName(item)}`
+    : item.priceSource === 'channel3'
+      ? 'price read by Channel3, confirmed by you'
+      : 'price you confirmed'
 
 const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
 
@@ -186,7 +188,9 @@ function SavedCard({
           <div className="s soft">
             {product?.merchant ??
               (item.sourceUrl
-                ? `${storeName(item)} · ${priceNote(item)}`
+                ? item.priceSource === 'component'
+                  ? sentence(priceNote(item))
+                  : `${storeName(item)} · ${priceNote(item)}`
                 : item.retailer
                   ? `${item.retailer} · ${ASSESSMENT_ONLY}`
                   : ASSESSMENT_ONLY)}

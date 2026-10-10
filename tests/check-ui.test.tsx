@@ -322,6 +322,54 @@ describe('a verified quote on /check', () => {
   })
 })
 
+describe('Save for <date> on /check (contract §4)', () => {
+  it('offers Save for the wait day and sends only the quote and the day', async () => {
+    route({
+      '/handoff/open': opened(),
+      '/handoff/save': () => ({ item: {}, state: makeState() }),
+    })
+    visit()
+    const [save] = await screen.findAllByRole('button', { name: 'Save for Fri, Oct 23' })
+    await userEvent.click(save!)
+    expect(calls('/handoff/save')).toEqual([
+      ['/handoff/save', { qid: QUOTE.qid, waitDate: '2026-10-23' }],
+    ])
+    expect(
+      await screen.findByText('Saved for Fri, Oct 23. Worth checks it again when you come back.'),
+    ).toBeTruthy()
+  })
+
+  it('sends a changed price as the shopper’s own', async () => {
+    route({
+      '/handoff/open': opened(),
+      '/handoff/save': () => ({ item: {}, state: makeState() }),
+    })
+    visit()
+    await userEvent.click(await screen.findByRole('button', { name: 'Not right? Edit' }))
+    const price = screen.getByLabelText(/^Total price, USD/)
+    await userEvent.clear(price)
+    await userEvent.type(price, '1250')
+    await userEvent.click(screen.getByRole('button', { name: 'Check again' }))
+    const [save] = await screen.findAllByRole('button', { name: /^Save for / })
+    await userEvent.click(save!)
+    expect(calls('/handoff/save')[0]![1]).toMatchObject({ qid: QUOTE.qid, amountCents: 125000 })
+    expect(calls('/handoff/save')[0]![1]).not.toHaveProperty('priceSource')
+  })
+
+  it('offers no Save when it fits today, or in a session that doesn’t hold the quote', async () => {
+    route({ '/handoff/open': opened({ amountCents: 2000 }) })
+    visit()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Buy today' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Save for / })).toBeNull()
+    cleanup()
+    resetHandoff()
+    route({ '/handoff/open': opened({ canConsent: false }) })
+    visit()
+    await screen.findByRole('heading', { level: 1, name: /Wait until/ })
+    expect(screen.queryByRole('button', { name: /^Save for / })).toBeNull()
+  })
+})
+
 describe('Pay in 4 wording (contract §3.2)', () => {
   it('names the store only when it said eligible and the amount is in range', () => {
     expect(payLaterLine(QUOTE, 119900)).toBe(

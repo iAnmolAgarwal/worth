@@ -56,7 +56,8 @@ export type DecisionRequest = {
  */
 export interface DecisionHandoff {
   intro: ReactNode
-  actions: (notes: boolean) => ReactNode
+  /** The actions for this answer: the way back to the store, and Save for a wait plan's day. */
+  actions: (notes: boolean, c: Comparison) => ReactNode
   /** Under the answer, once: the report-back choice. */
   footer?: ReactNode
   merchant: string
@@ -780,7 +781,7 @@ export function Decision({
     <Frame
       actions={
         handoff
-          ? handoff.actions(false)
+          ? handoff.actions(false, c)
           : product
             ? actions(false)
             : customActions(false) || undefined
@@ -946,7 +947,7 @@ export function Decision({
               </a>
             )}
             {handoff ? (
-              <div className="rail-actions">{handoff.actions(true)}</div>
+              <div className="rail-actions">{handoff.actions(true, c)}</div>
             ) : (
               <>
                 {product && <div className="rail-actions">{actions(true)}</div>}

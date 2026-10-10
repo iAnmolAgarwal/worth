@@ -71,7 +71,9 @@ export const sourceTarget = (source: ItemSource | undefined) =>
  * "channel3"; a store's price or the shopper's is checked as their own.
  */
 export const savedSource = (item: SavedItem) =>
-  item.sourceUrl
+  // A store's own price (/check) is compared as it was saved: the browser never claims "component",
+  // and the store's link isn't a pasted one to label as the shopper's.
+  item.sourceUrl && item.priceSource !== 'component'
     ? {
         sourceUrl: item.sourceUrl,
         priceSource: item.priceSource === 'channel3' ? ('channel3' as const) : ('user' as const),
