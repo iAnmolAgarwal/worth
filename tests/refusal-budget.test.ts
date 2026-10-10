@@ -101,6 +101,16 @@ describe('the refusal reads the user’s own words', () => {
     ['Can I max out my card for the camera?', 'no_credit'],
     ['Can I use PayPal Credit for the camera?', 'no_credit'],
     ['Can I use my savings cushion?', 'no_cushion'],
+    // Round 2 (judge B8 r2 #3).
+    ['Can I just be late on rent this month and get the $1,199 camera?', 'no_skipping'],
+    ['What if I skip my car insurance payment to buy the $1,199 camera?', 'no_skipping'],
+    ['Should I skip my next Pay in 4 payment?', 'no_skipping'],
+    ['Should I take money out of my emergency fund for the $1,199 camera?', 'no_cushion'],
+    ['Can I finance the $1,199 camera?', 'no_credit'],
+    ['Can I put the $1,199 camera on my Visa?', 'no_credit'],
+    ['Could I get a payday loan for the $1,199 camera?', 'no_credit'],
+    ['I will just pay my electric bill late, can I get the $1,199 camera', 'no_skipping'],
+    ['Why not pay rent late?', 'no_skipping'],
   ])('“%s” calls for %s (judge B8 #4)', (message, lead) => {
     expect(refusalFor(message)).toBe(lead)
   })
@@ -115,6 +125,16 @@ describe('the refusal reads the user’s own words', () => {
     'Can I put it on my card today? $40 headphones',
     'I borrowed my friend’s camera, should I buy my own?',
     'Can I put it on my PayPal?',
+    // Round 2 (judge B8 r2 #2): push without back/off, a negation, a card's points.
+    'Will the $1,199 camera push my rent payment too close?',
+    'I don’t want to borrow, can I afford the $1,199 camera?',
+    'Can I afford the $1,199 camera without using my cushion?',
+    'Can I afford it without touching my emergency fund?',
+    'Can I use my credit card points on the $1,199 camera?',
+    'I already paid rent, can I get the $1,199 camera?',
+    'Is it OK to skip buying the camera so rent is covered?',
+    'Should I skip buying the camera to make my rent payment?',
+    'Can I put it on my Visa debit card?',
     'What bills are coming up?',
     'Will the camera dip below my cushion?',
     'When is my credit card bill due?',
@@ -435,6 +455,34 @@ describe('Claude’s sentence never stretches a budget below the price (judge B8
     })
   })
 
+  it.each([
+    // Round 2 (judge B8 r2 #1): paraphrases a deny-list let through.
+    'Your {budget} budget will get you the {item}.',
+    'Your {budget} budget is all you need for the {item}.',
+    'Your {budget} budget buys the {item}.',
+    'Your budget covers the {price} camera.',
+    'The {item} at {price} is well under your budget.',
+    'You could stretch your {budget} budget to {max_spend}.',
+  ])('rejects “%s” when the budget is below the price', (sentence) => {
+    expect(checkSentence(sentence, below, 'tight')).toEqual({
+      ok: false,
+      reason: 'contradicts_result',
+    })
+  })
+
+  it('accepts what fits within a budget, at the budget itself', () => {
+    expect(below.max_spend?.value).toBe('$300')
+    expect(
+      checkSentence(
+        'Within your {budget} budget, up to {max_spend} keeps your cushion.',
+        below,
+        'tight',
+      ),
+    ).toEqual({ ok: true, text: 'Within your $300 budget, up to $300 keeps your cushion.' })
+    // Without a budget, the most that fits stays the engine's limit.
+    expect(purchasePlaceholders(camera, data).max_spend?.value).toBe('$440.01')
+  })
+
   it('accepts a sentence that keeps the budget below the price, and tells Claude which it is', () => {
     expect(below.budget?.about).toContain('below the price')
     expect(covers.budget?.about).toContain('covers the price')
@@ -558,5 +606,6 @@ describe('the comparison keeps a stated budget (judge B8 #7)', () => {
     expect((higher.body as Comparison).spendLess.maxPriceCents).toBe(44001)
     expect((await compareOn({ productId: 'camera', budgetCents: -1 })).status).toBe(400)
     expect((await compareOn({ productId: 'camera', budgetCents: 1.5 })).status).toBe(400)
+    expect((await compareOn({ productId: 'camera', budgetCents: 0 })).status).toBe(400)
   })
 })

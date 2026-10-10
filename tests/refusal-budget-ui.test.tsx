@@ -221,6 +221,16 @@ describe('the comparison keeps the stated budget (judge B8 #7)', () => {
       budgetCents: 30000,
     })
     expect(link('product=camera&budget=-5')).toEqual({ productId: 'camera' })
+    // Above what the server takes, it is dropped rather than shown as an error.
+    expect(link('product=camera&budget=999999999999')).toEqual({ productId: 'camera' })
+    expect(link('product=camera&budget=100000000')).toEqual({
+      productId: 'camera',
+      budgetCents: 100000000,
+    })
+    // A pasted link keeps the budget too.
+    expect(
+      link('amount=5000&item=Lamp&link=https%3A%2F%2Fshop.example.com%2Flamp&budget=3000'),
+    ).toMatchObject({ sourceUrl: 'https://shop.example.com/lamp', budgetCents: 3000 })
     expect(link('product=camera&budget=abc')).toEqual({ productId: 'camera' })
   })
 

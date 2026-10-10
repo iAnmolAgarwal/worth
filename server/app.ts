@@ -210,7 +210,7 @@ const compareSchema = z
      * A budget the person stated in Ask. It is their own claim, so it may only lower Spend less,
      * never raise it above what keeps the cushion.
      */
-    budgetCents: cents.optional(),
+    budgetCents: cents.min(1).optional(),
   })
   .strict()
   .refine(
