@@ -44,6 +44,8 @@ the model name and the Channel3 status).
 | `shared/collision.ts` | Which bill or other instalment a Pay in 4 payment lands next to, and the wording for it. |
 | `shared/csv.ts` | PayPal personal and business export parsing: headers, per-file date order, currency-conversion pairing, transfer/memo/hold rules, Pay in 4 proposals, transaction identity, recurring suggestions and the daily-spending estimate. |
 | `shared/seed.ts` | The relative-dated sample persona (Maya) and the server-owned demo catalog (Larkspur Supply). |
+| `shared/handoff.ts` | The store ↔ Worth hand-off: quote and result tokens signed with direction labels, strict schemas, origin and expiry checks, and outcome-report signatures. Server-only. |
+| `shared/worthCheck.ts`, `shared/worthCheckScript.ts` | The `<worth-check>` element a store places beside its PayPal button, and the same file with its types stripped for the store to serve. |
 | `shared/types.ts`, `shared/limits.ts`, `shared/text.ts` | API contracts, the one CSV size and row limit, and plain-text rules for saved names. |
 | `server/app.ts` | Sessions, validation, routes, ownership, plan rules, checkout reservation, capture, cancel, webhooks and reconciliation. |
 | `server/store.ts` | SQLite tables, atomic operations, uniqueness constraints, expiry and deletion. |
@@ -63,6 +65,7 @@ the model name and the Channel3 status).
 | `src/Checkout.tsx`, `src/paypal.tsx`, `src/paypalSdk.ts` | The checkout dialog and the SDK v6 loader, button, eligibility and Messages. |
 | `src/Saved.tsx`, `src/Alternatives.tsx`, `src/Activity.tsx`, `src/Reviews.tsx` | Saved items and wait plans, similar items, activity, and the "how did you pay" and refund reviews. |
 | `src/Plan.tsx`, `src/Import.tsx`, `src/ForeignPayments.tsx` | The four-step plan editor, CSV import preview and unresolved foreign payments. |
+| `src/Check.tsx` | `/check`: a store's verified item, the decision for it, report-back consent and Back to the store. |
 | `src/ConnectAgent.tsx` | Settings → Connect an agent: create, copy and revoke MCP tokens. |
 | `shared/link.ts`, `src/PasteLink.tsx` | Pasted product links: link checks, title cleaning and the "Is $X right?" card with its manual fallback. |
 
@@ -200,6 +203,17 @@ plan, and expire with the plan or after 30 days. Three tools map existing engine
 `prepare_order` (the same `checkoutGuards`, returning an approval link and never capturing) and
 `list_saved_plans`. Orders an agent requested are labelled in Activity. The MCP path makes no
 Anthropic call. Limits, refusals and setup are in [MCP.md](MCP.md).
+
+## Store hand-off (/check)
+
+A store that takes PayPal places `<worth-check>` beside its PayPal button. The link opens Worth's `/check` in the same tab with a quote the store's server signed; Worth advises and sends the shopper back, and the store sells and creates its own PayPal order. The binding contract is `specs/handoff-contract.md` in the project workspace.
+
+- **Tokens.** `<payload>.<sig>`: base64url JSON and an HMAC-SHA256 over `worth-handoff.v1.<direction>.<payload>` with `HANDOFF_SECRET`, so a quote can't be replayed as a result or the reverse. `shared/handoff.ts` checks, in order: size (4 KB) and format, `kid`/`mid`, the signature in constant time, `v`, a strict schema, `returnUrl` and `imageUrl` on `MERCHANT_ORIGIN`, USD, a lifetime of at most 900 s, expiry and a future `iat` with 60 s of skew. Item and store names lose hidden characters and are capped at 120 and 60 characters.
+- **Intake.** The token rides in `#q=`, so it never reaches a log or a `Referer`; `/check` sends `Referrer-Policy: no-referrer`, and the client removes the fragment before calling `POST /api/handoff/open`. A verified quote is bound to the session that opened it first for 24 hours (`handoff_quotes`), with report-back consent off until the shopper ticks it (`POST /api/handoff/consent`). A first visit gets the sample plan, and `replay: "video"` applies the demo clock only to it.
+- **Errors.** An unverifiable link shows one message and an empty item form, never the link's contents or a way back. An expired or non-USD quote, whose signature and origin checked out, offers the plain link back to the store.
+- **Decision.** The normal comparison runs for the store's price, with the store's own Pay in 4 answer (`payLater` from its SDK) in place of Worth's PayPal check. "Not right? Edit" makes the price user-claimed; the store's answer then no longer applies.
+- **Back to the store.** `POST /api/handoff/return` computes the verdict from the plan on the server and signs a result token (`buy_today`, `wait` or `spend_less`, with the date it fits) that carries no amounts or plan data. The store may show one line for it and never changes price, cart or order because of it.
+- **Claude.** Store text never reaches Claude from the hand-off; an item name reaches it only if the shopper asks about it, through the same quoted path as anything typed.
 
 ## Similar items from other stores (Channel3)
 
