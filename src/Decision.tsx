@@ -31,6 +31,7 @@ import {
   purchasePlans,
   useComparison,
 } from './engine'
+import { cushionGap } from './chartLayout'
 import { boughtOn, cx, dayLabel, fromMoney, fullDate, money, shortDate, signed } from './format'
 import { PayPalMessage } from './paypal'
 import type { PayPalSdkInstance } from './paypalSdk'
@@ -198,7 +199,7 @@ function OptionCard({
       </span>
       <span className="kv">
         <span className="k">
-          {k === 'spendLess' ? 'Most you can spend today' : 'Lowest balance'}
+          {k === 'spendLess' ? 'Most you can spend today' : 'Lowest point'}
         </span>
         <span className={cx('v num', k !== 'spendLess' && below && 'bad')}>
           {k === 'spendLess' ? money(c.spendLess.maxPriceCents) : signed(option.lowestBalanceCents)}
@@ -221,7 +222,7 @@ function chartTitle(c: Comparison, k: OptionKey) {
   return `If you spend ${money(c.spendLess.maxPriceCents)} today`
 }
 
-function ChartTile({
+export function ChartTile({
   c,
   k,
   payIn4,
@@ -236,7 +237,6 @@ function ChartTile({
   const option = optionOf(c, k) ?? c.buyToday
   const cause = option.lowPointCause
   const payday = paydayOn(option.points, option.lowestDate)
-  const above = option.lowestBalanceCents >= c.cushionCents
   const title = chartTitle(c, k)
   return (
     <section className="tile" aria-labelledby="chart-title">
@@ -244,7 +244,8 @@ function ChartTile({
         {title}
       </h2>
       <div className="meta">
-        Your lowest balance each day, {shortDate(c.window.start)} to {shortDate(c.window.end)}
+        Your balance each day, {shortDate(c.window.start)} to {shortDate(c.window.end)}. Each day
+        shows its low, with that day’s bills taken out before pay arrives.
       </div>
       <BalanceChart
         points={option.points}
@@ -263,17 +264,13 @@ function ChartTile({
               point.events.some((event) => event.kind === 'income'),
           )?.date,
         }}
-        label={`Projected balance ${title.replace(/^If/, 'if')}. Lowest point ${signed(option.lowestBalanceCents)} on ${fullDate(option.lowestDate)}, which ${option.lowestBalanceCents === c.cushionCents ? 'is exactly' : above ? 'stays above' : 'is below'} your ${money(c.cushionCents)} cushion.`}
+        label={`Projected balance ${title.replace(/^If/, 'if')}. Each day shows its low, with that day’s bills taken out before pay arrives. Lowest point ${signed(option.lowestBalanceCents)} on ${fullDate(option.lowestDate)}, ${cushionGap(option.lowestBalanceCents, c.cushionCents)}.`}
       />
       {/* With Pay in 4 open, the chart's own two-row comparison already states both lows. */}
       {!payIn4 && (
         <p className="meta" style={{ marginTop: 12, color: 'var(--c-text-strong)' }}>
-          Lowest <b className="num">{signed(option.lowestBalanceCents)}</b> on{' '}
-          {dayLabel(option.lowestDate)} (
-          {option.lowestBalanceCents === c.cushionCents
-            ? 'exactly your cushion'
-            : `${money(Math.abs(option.lowestBalanceCents - c.cushionCents))} ${above ? 'above' : 'below'} your cushion`}
-          )
+          Lowest point: <b className="num">{signed(option.lowestBalanceCents)}</b> on{' '}
+          {dayLabel(option.lowestDate)} ({cushionGap(option.lowestBalanceCents, c.cushionCents)})
           {cause && cause.date === option.lowestDate && payday
             ? `: ${lower(cause.name)} leaves before your paycheck lands that day.`
             : cause
@@ -395,7 +392,7 @@ function PayIn4Panel({
         <Alert tone={breach ? 'bad' : 'ok'} icon={breach ? TriangleAlert : CircleCheck} live>
           <b>{fullLabelDate(p4.label, p4.points, c.cushionCents)}.</b>
           <br />
-          Lowest <span className="num">{signed(p4.lowestBalanceCents)}</span> on{' '}
+          Lowest point <span className="num">{signed(p4.lowestBalanceCents)}</span> on{' '}
           {dayLabel(p4.lowestDate)}
           {paydayOn(p4.points, p4.lowestDate) ? ', before payday' : ''}.
         </Alert>

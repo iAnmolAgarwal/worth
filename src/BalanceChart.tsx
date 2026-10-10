@@ -15,6 +15,7 @@ import {
   BIG_BILL_CENTS,
   byWeight,
   chartModel,
+  cushionGap,
   dateTicks,
   dockLeft,
   isBill,
@@ -69,13 +70,6 @@ const eventText = (event: ForecastEvent) =>
   `${event.name} ${signed(event.amountCents, event.amountCents > 0)}`
 const joinAnd = (items: string[]) =>
   items.length < 2 ? (items[0] ?? '') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`
-
-function cushionText(value: number, cushion: number) {
-  if (value === cushion) return 'at your cushion'
-  return value > cushion
-    ? `${money(value - cushion)} above your cushion`
-    : `${money(cushion - value)} below your cushion`
-}
 
 /** On wide charts the day card docks under the plot at this width, shifted toward its rule. */
 const DOCK_WIDTH = 340
@@ -180,12 +174,12 @@ export function BalanceChart({
     const point = points[index]!
     const value = values[index]!
     const parts = [
-      `${dayLabel(point.date)}. Lowest ${signed(value)}, ${cushionText(value, cushionCents)}.`,
+      `${dayLabel(point.date)}. Day’s low ${signed(value)}${value < cushionCents ? ', below your cushion' : ''}.`,
       ...namedOn(point).map((event) => `${eventText(event)}.`),
     ]
     const spending = spendingOn(point)
     if (spending) parts.push(`Everyday spending ${signed(spending)}.`)
-    if (p4Values) parts.push(`With Pay in 4, lowest ${signed(p4Values[index]!)}.`)
+    if (p4Values) parts.push(`With Pay in 4, day’s low ${signed(p4Values[index]!)}.`)
     return parts.join(' ')
   }
   const ruleStory = (index: number) => {
@@ -223,8 +217,7 @@ export function BalanceChart({
         ? `Your lowest point comes just before this paycheck lands. It ${lift}.`
         : `This paycheck ${lift}.`
     }
-    if (after < cushionCents)
-      return `You end this day ${money(cushionCents - after)} below your cushion.`
+    if (after < cushionCents) return 'You end this day below your cushion.'
     return ''
   }
   const describeRule = (index: number) => {
@@ -388,7 +381,7 @@ export function BalanceChart({
       <div className="bchart-key" aria-hidden="true">
         <span>
           <i className="k-line" />
-          {p4Values ? 'Pay in full' : 'Lowest balance each day'}
+          {p4Values ? 'Pay in full' : 'Balance (day’s low)'}
         </span>
         {p4Values && (
           <span>
@@ -808,8 +801,8 @@ export function BalanceChart({
                 {row.name}
               </dt>
               <dd>
-                lowest <b>{signed(row.value)}</b> on {dayLabel(points[row.index]!.date)},{' '}
-                {cushionText(row.value, cushionCents)}
+                lowest point <b>{signed(row.value)}</b> on {dayLabel(points[row.index]!.date)},{' '}
+                {cushionGap(row.value, cushionCents)}
               </dd>
             </div>
           ))}
@@ -889,10 +882,10 @@ function Readout({
   return (
     <div className="bchart-readout bchart-slot" aria-hidden="true">
       <div className="r1">
-        <span className="d">{dayLabel(point.date)}</span>
+        <span className="d">Selected: {dayLabel(point.date)}</span>
         <b className={value < cushionCents ? 'neg' : undefined}>{signed(value)}</b>
         <span className={`vs${value < cushionCents ? ' neg' : ''}`}>
-          lowest that day · {cushionText(value, cushionCents)}
+          at the day’s low{value < cushionCents ? ' · below your cushion' : ''}
         </span>
       </div>
       <div className="r2">
@@ -904,8 +897,8 @@ function Readout({
         {p4 !== undefined && (
           <span className={`p4${p4 < cushionCents ? ' neg' : ''}`}>
             {instalment
-              ? `Pay in 4: payment ${instalment.number} of 4 ${signed(-instalment.amountCents)}, lowest `
-              : 'With Pay in 4, lowest '}
+              ? `Pay in 4: payment ${instalment.number} of 4 ${signed(-instalment.amountCents)}, day’s low `
+              : 'With Pay in 4, day’s low '}
             {signed(p4)}
           </span>
         )}
@@ -1040,7 +1033,7 @@ function RuleCard({
       <dl className="bc-after">
         {income && lowest !== after && (
           <div>
-            <dt>Lowest that day</dt>
+            <dt>Day’s low</dt>
             <dd className={lowest < cushionCents ? 'neg' : undefined}>{signed(lowest)}</dd>
           </div>
         )}
@@ -1054,7 +1047,7 @@ function RuleCard({
   )
 }
 
-/** The chart as a table: every day's lowest balance, how it sits against the cushion, and why. */
+/** The chart as a table: every day's low balance, how it sits against the cushion, and why. */
 function ChartTable({
   points,
   values,
@@ -1080,13 +1073,14 @@ function ChartTable({
       >
         <table>
           <caption className="sr">
-            Lowest projected balance each day against your {money(cushionCents)} cushion.
+            Projected balance each day at its low, with that day’s bills taken out before pay
+            arrives, against your {money(cushionCents)} cushion.
             {spend ? ` Each day also includes about ${money(-spend)} of everyday spending.` : ''}
           </caption>
           <thead>
             <tr>
               <th scope="col">Day</th>
-              <th scope="col">{p4 ? 'Pay in full: lowest' : 'Lowest balance'}</th>
+              <th scope="col">{p4 ? 'Pay in full (day’s low)' : 'Balance (day’s low)'}</th>
               <th scope="col">Against your cushion</th>
               <th scope="col">What happens</th>
               {p4 && <th scope="col">With Pay in 4</th>}
@@ -1100,7 +1094,13 @@ function ChartTable({
                 <tr key={point.date} className={value < cushionCents ? 'below' : undefined}>
                   <th scope="row">{dayLabel(point.date)}</th>
                   <td className="num">{signed(value)}</td>
-                  <td>{cushionText(value, cushionCents)}</td>
+                  <td>
+                    {value === cushionCents
+                      ? 'At cushion'
+                      : value > cushionCents
+                        ? 'Above'
+                        : 'Below'}
+                  </td>
                   <td>{namedOn(point).map(eventText).join(', ') || '—'}</td>
                   {p4 && (
                     <td className="num">
