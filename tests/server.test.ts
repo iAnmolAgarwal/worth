@@ -1130,15 +1130,14 @@ describe('Pay in 4 eligibility from PayPal (case 29)', () => {
     })
     expect(gateway.eligibility).toHaveBeenCalledTimes(2)
   })
-  it('shows Pay in 4 as unavailable when PayPal does not offer Pay Later', async () => {
+  it('reads PayPal’s Pay Later no as unknown: the range decides (contract §3.2)', async () => {
     const { gateway } = fakePayPal()
     gateway.eligibility = vi.fn(async () => ({ payLater: false }))
     const { agent } = setup({ paypal: gateway })
     await simpleProfile(agent)
-    expect(await compare(agent, 'headphones')).toEqual({
-      available: false,
-      reason: 'Not available for this amount',
-      eligibility: 'unavailable',
+    expect(await compare(agent, 'headphones')).toMatchObject({
+      available: true,
+      eligibility: 'range-only',
     })
   })
   it('falls back to the amount range when the PayPal check fails, and retries soon', async () => {
@@ -1161,7 +1160,7 @@ describe('Pay in 4 eligibility from PayPal (case 29)', () => {
     await simpleProfile(agent)
     expect(await compare(agent, 'headphones')).toMatchObject({ eligibility: 'range-only' })
   })
-  it('raises “Confirm your plan” only after a capture PayPal could have offered Pay Later for', async () => {
+  it('raises “Confirm your plan” after a capture PayPal may have offered Pay Later for', async () => {
     const offered = fakePayPal()
     const withPayLater = setup({ paypal: offered.gateway })
     await simpleProfile(withPayLater.agent)
@@ -1176,8 +1175,11 @@ describe('Pay in 4 eligibility from PayPal (case 29)', () => {
     await simpleProfile(without.agent)
     const b = await post(without.agent, '/api/checkout/create', { productId: 'headphones' })
     const paid = await post(without.agent, `/api/checkout/${b.body.purchase.id}/capture`)
-    expect(paid.body.state.reviews).toEqual([])
-    expect(paid.body.purchase.paymentPlan).toEqual({ product: 'full' })
+    // PayPal's no is unknown, not a no (§3.2), so the shopper is still asked how they paid.
+    expect(paid.body.state.reviews).toEqual([
+      expect.objectContaining({ kind: 'confirmPlan', purchaseId: b.body.purchase.id }),
+    ])
+    expect(paid.body.purchase.paymentPlan).toBeUndefined()
   })
 })
 

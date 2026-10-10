@@ -204,6 +204,8 @@ const compareSchema = z
     priceSource: z.enum(['channel3', 'user']).optional(),
     /** A store's quote this session opened on /check: its Pay in 4 answer replaces Worth's. */
     qid: qidSchema.optional(),
+    /** A saved item of this session's: one with a store link is judged by the range alone. */
+    savedId: identifier.optional(),
   })
   .strict()
   .refine(
@@ -808,7 +810,8 @@ export function createApp(options: AppOptions = {}) {
     if (cached && cached.until > time) return cached.value
     let value: PayIn4Eligibility
     try {
-      value = (await paypal.eligibility(amountCents)).payLater ? 'paypal' : 'unavailable'
+      // Only a yes is PayPal's word (contract §3.2); a no before the buyer logs in is unknown.
+      value = (await paypal.eligibility(amountCents)).payLater ? 'paypal' : 'range-only'
     } catch {
       value = 'range-only'
     }
@@ -1239,7 +1242,8 @@ export function createApp(options: AppOptions = {}) {
   function quoteEligibility(quote: StoredQuote, amountCents: number): PayIn4Eligibility {
     if (!payIn4InRange(amountCents)) return 'unavailable'
     if (!quote.payLater || amountCents !== quote.amountCents) return 'range-only'
-    return quote.payLater.eligible ? 'paypal' : 'unavailable'
+    // Only a yes is signed now (§3.2); an older quote's signed no reads as unknown too.
+    return quote.payLater.eligible ? 'paypal' : 'range-only'
   }
   function quoteView(quote: StoredQuote, canConsent: boolean): HandoffQuote {
     return {
@@ -1249,9 +1253,10 @@ export function createApp(options: AppOptions = {}) {
       amountCents: quote.amountCents,
       returnUrl: quote.returnUrl,
       ...(quote.imageUrl ? { imageUrl: quote.imageUrl } : {}),
-      payLater: !quote.payLater
+      // A signed no is unknown, like an absent answer (§3.2); a yes outside the range isn't an offer.
+      payLater: !quote.payLater?.eligible
         ? 'unknown'
-        : quote.payLater.eligible && payIn4InRange(quote.amountCents)
+        : payIn4InRange(quote.amountCents)
           ? 'offered'
           : 'not-offered',
       consent: canConsent && quote.consent,
@@ -1340,7 +1345,6 @@ export function createApp(options: AppOptions = {}) {
       consent: false,
     }
   }
-  /** The quote again after a reload of /check, for the session that opened it. */
   /**
    * "Save for <date>" on /check (contract §4). The client sends only the quote and the plan's day;
    * the link, the store's name and the price come from the verified quote this session holds, so
@@ -1382,11 +1386,13 @@ export function createApp(options: AppOptions = {}) {
         sourceUrl: quote.returnUrl,
         merchantName: quote.merchant,
         priceSource: edited ? 'user' : 'component',
+        qid: quote.qid,
       },
     )
     store.save(id, data)
     res.json({ item, state: state(id) })
   })
+  /** The quote again after a reload of /check, for the session that opened it. */
   app.get('/api/handoff/quotes/:qid', (req, res) => {
     handoffLimit(req)
     const quote = sessionQuote(res, qidSchema.parse(req.params.qid))
@@ -1463,9 +1469,15 @@ export function createApp(options: AppOptions = {}) {
     const quote = input.qid ? sessionQuote(res, input.qid) : undefined
     // PayPal's eligibility check runs first; the session is read afterwards so it is current. It
     // answers for Worth's own demo merchant, so another store's item is judged by the range only.
+    // A saved item from a store page (a /check save or a pasted link) is another store's item too.
+    const savedFromStore =
+      input.savedId !== undefined &&
+      (dataFor(res).saved ?? []).some(
+        (item) => item.id === input.savedId && item.status !== 'removed' && item.sourceUrl,
+      )
     const eligibility = quote
       ? quoteEligibility(quote, amountCents)
-      : input.sourceUrl
+      : input.sourceUrl || savedFromStore
         ? payIn4InRange(amountCents)
           ? 'range-only'
           : 'unavailable'

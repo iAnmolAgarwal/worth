@@ -278,6 +278,8 @@ export interface QuoteSource {
   sourceUrl: string
   merchantName: string
   priceSource: Extract<SavedPriceSource, 'component' | 'user'>
+  /** The quote's ID, so the store's report of that purchase can clear this item (C4). */
+  qid: string
 }
 
 /**
@@ -350,6 +352,7 @@ export function addSaved(
           amountCents: item.amountCents,
           merchantName: item.merchantName,
           priceSource: item.priceSource,
+          ...(item.qid ? { qid: item.qid } : {}),
         }
       : {}
     Object.assign(same, {

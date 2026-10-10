@@ -121,6 +121,11 @@ export interface SavedItem {
   merchantName?: string
   /** Who set the saved price. Only with `sourceUrl`. */
   priceSource?: SavedPriceSource
+  /**
+   * The store quote an item saved from /check came from (contract §5): when the store reports that
+   * quote's purchase, this item leaves Saved.
+   */
+  qid?: string
 }
 /**
  * component: the store's own Worth button sent it. channel3: Channel3 read it from the page and the
