@@ -187,6 +187,35 @@ describe('Channel3 client', () => {
     expect(narrow.items.map((item) => item.id)).not.toContain(top.id)
     for (const item of narrow.items) expect(item.priceCents).toBeLessThanOrEqual(limit)
   })
+  it('keeps every row in the bucket, so rows between the limit and $450 never crowd out ones that fit', async () => {
+    const product = (id: string, price: number) => ({
+      id,
+      title: `Desk chair ${id}`,
+      offers: [offer(price, { url: `https://buy.trychannel3.com/${id}` })],
+    })
+    // Channel3 lists the dearer chairs first: four above $440.01 but inside the $450 bucket.
+    const raw = {
+      products: [
+        product('over1', 449),
+        product('over2', 448.5),
+        product('over3', 445),
+        product('over4', 440.02),
+        product('fits1', 440.01),
+        product('fits2', 399),
+        product('fits3', 250),
+      ],
+    }
+    const channel3 = fakeFetch([raw])
+    const { c3 } = client({ fetch: channel3.fetch })
+    const result = await c3.search('desk chair', 44001)
+    expect(result.status).toBe('ok')
+    expect(result.maxPriceCents).toBe(44001)
+    expect(result.items.map((item) => item.id)).toEqual(['fits1', 'fits2', 'fits3'])
+    // The same cached search, cut at a higher limit in the bucket, shows the dearer rows too.
+    const wider = await c3.search('desk chair', 44900)
+    expect(channel3.searches()).toHaveLength(1)
+    expect(wider.items.map((item) => item.id)).toEqual(['over1', 'over2', 'over3', 'over4'])
+  })
   it('caches per query and $25 bucket for six hours, and shares one request in flight', async () => {
     const channel3 = fakeFetch()
     const { c3, advance } = client({ fetch: channel3.fetch })
@@ -225,12 +254,8 @@ describe('Channel3 client', () => {
     advance(2 * MINUTE)
     const later = await c3.search('interchangeable lens camera', 44001)
     expect(channel3.searches()).toHaveLength(1)
-    expect(channel3.reads().map((c) => c.init.method)).toEqual([
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-    ])
+    // The four shown and two spares, each with a plain GET.
+    expect(channel3.reads().map((c) => c.init.method)).toEqual(Array(6).fill(undefined))
     expect(channel3.reads()[0]!.url).toContain('?country=US&currency=USD')
     // Current price and link; a product priced above the limit or gone is dropped; one that
     // cannot be read is listed without its price or link.

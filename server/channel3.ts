@@ -429,8 +429,8 @@ export function createChannel3(options: Channel3Options = {}): Channel3Client {
       ...candidates.filter((r) => r.query === query),
       ...(kind === 'search' ? candidates.filter((r) => said.has(head(r))) : []),
     ]) {
-      // A few spare rows, since some may have changed by the time they are re-read.
-      const rows = parseProducts(recorded.response, band, MAX_ALTERNATIVES + 2)
+      // As many rows as a live search keeps; present() cuts them to the exact limit.
+      const rows = parseProducts(recorded.response, band, REQUEST_LIMIT)
       if (rows.length) return { status: 'fixture', query, band, rows, at: 0 }
     }
     return { status: 'off', query, band, rows: [], at: 0 }
@@ -519,8 +519,9 @@ export function createChannel3(options: Channel3Options = {}): Channel3Client {
       remember(rows)
       return { ...base, items: rows.slice(0, MAX_ALTERNATIVES) }
     }
+    // A few spare rows, since some may have changed by the time they are re-read.
     const checked = await Promise.all(
-      rows.map(async (row) => {
+      rows.slice(0, MAX_ALTERNATIVES + 2).map(async (row) => {
         const fresh = await product(row.id)
         if (fresh === undefined) return { unverified: unverifiedRow(row) }
         const item = fresh ? parseProducts({ products: [fresh] }, band, 1)[0] : undefined
@@ -579,7 +580,8 @@ export function createChannel3(options: Channel3Options = {}): Channel3Client {
           status: 'ok',
           query,
           band,
-          rows: parseProducts(raw, band),
+          // Every row in the bucket, so the cut to an exact limit below it still leaves four.
+          rows: parseProducts(raw, band, REQUEST_LIMIT),
           at: now(),
         }
         cache.delete(key)
