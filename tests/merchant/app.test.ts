@@ -1,0 +1,500 @@
+import { describe, expect, it, vi } from 'vitest'
+import request from 'supertest'
+import { createMerchantApp } from '../../merchant/app.ts'
+import { createHandoff } from '../../merchant/handoff-stub.ts'
+import { PayPalError, type PayPalGateway, type PayPalOrder } from '../../server/paypal.ts'
+import { PRODUCTS } from '../../shared/seed.ts'
+
+const SECRET = Buffer.alloc(32, 9)
+const ORIGIN = 'https://larkspur.example'
+const WORTH = 'https://worth.example'
+const T0 = 1_791_000_000
+
+function setup(
+  options: { paypal?: Partial<PayPalGateway> | null; reportReplies?: Response[] } = {},
+) {
+  let clock = T0 * 1000
+  const created: Parameters<PayPalGateway['create']>[0][] = []
+  const orderFor = (
+    source: { id: string; amountCents: number },
+    captured = false,
+  ): PayPalOrder => ({
+    id: 'ORDER1',
+    status: captured ? 'COMPLETED' : 'PAYER_ACTION_REQUIRED',
+    purchase_units: [
+      {
+        reference_id: source.id,
+        custom_id: source.id,
+        amount: { currency_code: 'USD', value: (source.amountCents / 100).toFixed(2) },
+        payee: { merchant_id: 'MERCHANT1' },
+        ...(captured
+          ? {
+              payments: {
+                captures: [
+                  {
+                    id: 'CAP1',
+                    status: 'COMPLETED',
+                    amount: { currency_code: 'USD', value: (source.amountCents / 100).toFixed(2) },
+                    create_time: '2026-10-23T15:04:05Z',
+                  },
+                ],
+              },
+            }
+          : {}),
+      },
+    ],
+  })
+  const paypal = {
+    create: vi.fn(async (source: Parameters<PayPalGateway['create']>[0]) => {
+      created.push(source)
+      return orderFor(source)
+    }),
+    capture: vi.fn(async () => orderFor(created.at(-1)!, true)),
+    get: vi.fn(async () => orderFor(created.at(-1)!, true)),
+    getRefund: vi.fn(),
+    verify: vi.fn(async () => true),
+    eligibility: vi.fn(),
+    ...options.paypal,
+  } as unknown as PayPalGateway
+  const replies = options.reportReplies ?? [Response.json({ recorded: true })]
+  const reports: { url: string; init: RequestInit }[] = []
+  const fetch = vi.fn(async (url: string | URL | Request, init: RequestInit = {}) => {
+    reports.push({ url: String(url), init })
+    return replies.shift() ?? Response.json({})
+  })
+  const app = createMerchantApp({
+    env: {},
+    config: {
+      origin: ORIGIN,
+      worthOrigin: WORTH,
+      handoffSecret: SECRET,
+      paypalClientId: 'public-client-id',
+    },
+    ...(options.paypal === null ? {} : { paypal }),
+    now: () => clock,
+    report: {
+      fetch: fetch as unknown as typeof globalThis.fetch,
+      sleep: async () => {},
+      log: () => {},
+    },
+  })
+  const worth = createHandoff({ secret: SECRET, merchantId: 'larkspur', now: () => clock })
+  return {
+    app,
+    paypal,
+    created,
+    reports,
+    worth,
+    tick: (seconds: number) => {
+      clock += seconds * 1000
+    },
+  }
+}
+
+/** The quote token from the Analyse link on a page. */
+function quoteToken(html: string) {
+  const match = html.match(/href="https:\/\/worth\.example\/check#q=([^"]+)"/)
+  return match?.[1]
+}
+const json = { 'Content-Type': 'application/json', Origin: ORIGIN }
+
+describe('store pages', () => {
+  it('serves a health check, the security headers and the store’s own CSP', async () => {
+    const { app } = setup()
+    const res = await request(app).get('/healthz').expect(200)
+    expect(res.body).toEqual({ ok: true, service: 'larkspur', paypal: 'sandbox' })
+    const page = await request(app).get('/')
+    const csp = page.headers['content-security-policy'] as string
+    expect(csp).toContain("default-src 'self'")
+    expect(csp).toContain("script-src 'self' https://www.paypal.com https://www.sandbox.paypal.com")
+    expect(csp).toContain("frame-ancestors 'none'")
+    expect(csp).not.toMatch(/'unsafe-eval'|script-src[^;]*'unsafe-inline'/)
+    // Nothing but the store and PayPal's hosts.
+    const hosts = csp.match(/https:\/\/[^\s;]+/g) ?? []
+    expect(hosts.every((h) => /paypal(objects)?\.com$/.test(h))).toBe(true)
+    expect(page.headers['x-frame-options']).toBe('DENY')
+    expect(page.headers['referrer-policy']).toBe('same-origin')
+    expect(page.headers['cache-control']).toBe('no-store')
+  })
+
+  it('lists every demo product with its catalog price and a fictional-store footer', async () => {
+    const { app } = setup()
+    const html = (await request(app).get('/').expect(200)).text
+    for (const product of PRODUCTS) {
+      expect(html).toContain(`href="/p/${product.id}"`)
+      expect(html).toContain(product.name)
+      expect(html).toContain(product.image)
+    }
+    expect(html).toContain('$1,199.00')
+    expect(html).toContain('Demo store · PayPal sandbox · nothing ships')
+    expect(html).toContain('<title>Larkspur Supply</title>')
+  })
+
+  it('keeps ?replay=video on catalog links', async () => {
+    const { app } = setup()
+    const html = (await request(app).get('/?replay=video')).text
+    expect(html).toContain('href="/p/camera?replay=video"')
+  })
+
+  it('renders a product page with PayPal’s button and message, and the Worth mount point', async () => {
+    const { app } = setup()
+    const res = await request(app).get('/p/camera').expect(200)
+    expect(res.headers['set-cookie']?.[0]).toMatch(
+      /^lk_session=[A-Za-z0-9_-]{43}; .*HttpOnly; SameSite=Lax/,
+    )
+    const html = res.text
+    expect(html).toContain('<h1 class="lk-product__name">Everyday camera</h1>')
+    expect(html).toContain('<p class="lk-product__price">$1,199.00</p>')
+    expect(html).toContain('<paypal-button class="lk-buy__button" type="pay" hidden>')
+    expect(html).toContain(
+      '<paypal-message auto-bootstrap="true" amount="1199.00" currency-code="USD"',
+    )
+    expect(html).toContain('data-client-id="public-client-id"')
+    expect(html).toMatch(
+      /<a class="worth-check" href="https:\/\/worth\.example\/check#q=[^"]+">Analyse with Worth<\/a>/,
+    )
+    expect(html).not.toContain('lk-buy__worth-result')
+  })
+
+  it('says when PayPal is not configured and 404s an unknown product', async () => {
+    const { app } = setup({ paypal: null })
+    const off = createMerchantApp({ env: {}, config: { origin: ORIGIN, handoffSecret: SECRET } })
+    expect((await request(off).get('/p/camera')).text).toContain('PayPal sandbox is not configured')
+    await request(app).get('/p/nope').expect(404)
+    await request(app).get('/p/..%2Fetc').expect(404)
+  })
+})
+
+describe('quotes for Worth', () => {
+  it('signs the store’s own catalog price into the quote at render', async () => {
+    const { app, worth } = setup()
+    const token = quoteToken((await request(app).get('/p/camera')).text)
+    const quote = worth.open('quote', token)
+    expect(quote).toMatchObject({
+      v: 1,
+      kid: '1',
+      mid: 'larkspur',
+      item: 'Everyday camera',
+      productId: 'camera',
+      amountCents: 119900,
+      currency: 'USD',
+      merchant: 'Larkspur Supply',
+      returnUrl: `${ORIGIN}/p/camera`,
+      imageUrl: `${ORIGIN}/images/camera.jpg`,
+      iat: T0,
+      exp: T0 + 900,
+    })
+    expect(quote!.qid).toMatch(/^q_[A-Za-z0-9_-]{22}$/)
+    expect(quote).not.toHaveProperty('replay')
+    expect(quote).not.toHaveProperty('payLater')
+  })
+
+  it('carries replay into the quote and its return URL', async () => {
+    const { app, worth } = setup()
+    const token = quoteToken((await request(app).get('/p/camera?replay=video')).text)
+    expect(worth.open('quote', token)).toMatchObject({
+      replay: 'video',
+      returnUrl: `${ORIGIN}/p/camera?replay=video`,
+    })
+  })
+
+  it('mints a fresh quote on request, with the store SDK’s Pay Later answer', async () => {
+    const { app, worth, tick } = setup()
+    tick(600)
+    const res = await request(app)
+      .get('/api/worth-quote?productId=headphones&payLater=true')
+      .expect(200)
+    expect(res.headers['cache-control']).toBe('no-store')
+    expect(res.body.exp).toBe(T0 + 600 + 900)
+    expect(res.body.href).toBe(`${WORTH}/check#q=${res.body.token}`)
+    expect(worth.open('quote', res.body.token)).toMatchObject({
+      productId: 'headphones',
+      amountCents: 34900,
+      payLater: { eligible: true, source: 'merchant-sdk' },
+    })
+    const no = await request(app).get('/api/worth-quote?productId=headphones&payLater=false')
+    expect(worth.open('quote', no.body.token)).toMatchObject({ payLater: { eligible: false } })
+    await request(app).get('/api/worth-quote?productId=nope').expect(404)
+    await request(app).get('/api/worth-quote?productId=camera&payLater=maybe').expect(400)
+  })
+
+  it('expires: a quote is not valid 15 minutes and a minute later', async () => {
+    const { app, worth, tick } = setup()
+    const token = quoteToken((await request(app).get('/p/camera')).text)
+    tick(961)
+    expect(worth.open('quote', token)).toBeUndefined()
+  })
+})
+
+describe('Worth’s result beside the PayPal button', () => {
+  async function visit(t: ReturnType<typeof setup>, productId = 'camera') {
+    const agent = request.agent(t.app)
+    const token = quoteToken((await agent.get(`/p/${productId}`)).text)
+    const qid = t.worth.open('quote', token)!.qid as string
+    return { agent, qid }
+  }
+  const result = (qid: string, extra: Record<string, unknown> = {}) => ({
+    v: 1,
+    kid: '1',
+    mid: 'larkspur',
+    qid,
+    verdict: 'wait',
+    fitsOn: '2026-10-23',
+    iat: T0,
+    exp: T0 + 900,
+    ...extra,
+  })
+
+  it('shows one line for a valid result for this shopper’s quote', async () => {
+    const t = setup()
+    const { agent, qid } = await visit(t)
+    const wait = await agent.get(`/p/camera?worth=${t.worth.sign('result', result(qid))}`)
+    expect(wait.text).toContain('<p class="lk-buy__worth-result">Worth: fits on Fri, Oct 23</p>')
+    expect(wait.text.match(/lk-buy__worth-result/g)).toHaveLength(1)
+    const today = t.worth.sign('result', result(qid, { verdict: 'buy_today', fitsOn: undefined }))
+    expect((await agent.get(`/p/camera?worth=${today}`)).text).toContain('Worth: fits today')
+    // The price and the quote are the store's own either way.
+    expect(wait.text).toContain('<p class="lk-product__price">$1,199.00</p>')
+  })
+
+  it('shows nothing for an invalid, expired, foreign or other-product result', async () => {
+    const t = setup()
+    const { agent, qid } = await visit(t)
+    const cases = [
+      `${t.worth.sign('result', result(qid)).slice(0, -3)}abc`,
+      t.worth.sign('quote', result(qid)),
+      t.worth.sign('result', result('q_BBBBBBBBBBBBBBBBBBBBBB')),
+      t.worth.sign('result', result(qid, { iat: T0 - 2000, exp: T0 - 1100 })),
+      'garbage',
+    ]
+    for (const token of cases)
+      expect((await agent.get(`/p/camera?worth=${token}`)).text).not.toContain(
+        'lk-buy__worth-result',
+      )
+    // Another shopper cannot reuse it, and it does not apply to another product.
+    const valid = t.worth.sign('result', result(qid))
+    expect((await request(t.app).get(`/p/camera?worth=${valid}`)).text).not.toContain('Worth:')
+    expect((await agent.get(`/p/chair?worth=${valid}`)).text).not.toContain('Worth:')
+  })
+})
+
+describe('PayPal orders on the store', () => {
+  it('creates the order at the catalog price with the quote’s reference', async () => {
+    const t = setup()
+    const agent = request.agent(t.app)
+    const qid = t.worth.open('quote', quoteToken((await agent.get('/p/camera')).text))!.qid
+    const res = await agent.post('/api/orders').set(json).send({ productId: 'camera' }).expect(201)
+    expect(res.body).toEqual({ orderId: 'ORDER1' })
+    expect(t.created[0]).toMatchObject({
+      productId: 'camera',
+      name: 'Everyday camera',
+      amountCents: 119900,
+      qid,
+    })
+    expect(t.created[0]!.id).toMatch(new RegExp(`^${qid}\\.[A-Za-z0-9_-]{8}$`))
+  })
+
+  it('never takes a price from the browser and refuses unknown products', async () => {
+    const t = setup()
+    await request(t.app)
+      .post('/api/orders')
+      .set(json)
+      .send({ productId: 'camera', amountCents: 100 })
+      .expect(400)
+    await request(t.app).post('/api/orders').set(json).send({ productId: 'nope' }).expect(400)
+    expect(t.paypal.create).not.toHaveBeenCalled()
+  })
+
+  it('refuses cross-origin and non-JSON writes', async () => {
+    const t = setup()
+    await request(t.app)
+      .post('/api/orders')
+      .set({ ...json, Origin: 'https://evil.example' })
+      .send({ productId: 'camera' })
+      .expect(403)
+    await request(t.app)
+      .post('/api/orders')
+      .set({ ...json, 'Sec-Fetch-Site': 'cross-site' })
+      .send({ productId: 'camera' })
+      .expect(403)
+    await request(t.app)
+      .post('/api/orders')
+      .set({ Origin: ORIGIN, 'Content-Type': 'text/plain' })
+      .send('productId=camera')
+      .expect(415)
+  })
+
+  it('captures, answers COMPLETED, and reports back to Worth without waiting', async () => {
+    const t = setup()
+    const agent = request.agent(t.app)
+    const qid = t.worth.open('quote', quoteToken((await agent.get('/p/camera')).text))!.qid
+    await agent.post('/api/orders').set(json).send({ productId: 'camera' }).expect(201)
+    const res = await agent.post('/api/orders/ORDER1/capture').set(json).send({}).expect(200)
+    expect(res.body).toEqual({ status: 'COMPLETED', orderId: 'ORDER1' })
+    expect(t.paypal.capture).toHaveBeenCalledWith('ORDER1', `capture-${t.created[0]!.id}`)
+    await t.app.locals.lastReport
+    expect(t.reports).toHaveLength(1)
+    expect(t.reports[0]!.url).toBe(`${WORTH}/api/handoff/outcome`)
+    expect(JSON.parse(String(t.reports[0]!.init.body))).toEqual({
+      v: 1,
+      kid: '1',
+      mid: 'larkspur',
+      qid,
+      orderId: 'ORDER1',
+      captureId: 'CAP1',
+      amountCents: 119900,
+      currency: 'USD',
+      status: 'COMPLETED',
+      capturedAt: '2026-10-23T15:04:05Z',
+    })
+  })
+
+  it('completes checkout even when Worth is down', async () => {
+    const t = setup({
+      reportReplies: [503, 503, 503].map((status) => new Response('', { status })),
+    })
+    const agent = request.agent(t.app)
+    await agent.get('/p/camera')
+    await agent.post('/api/orders').set(json).send({ productId: 'camera' })
+    const res = await agent.post('/api/orders/ORDER1/capture').set(json).send({}).expect(200)
+    expect(res.body.status).toBe('COMPLETED')
+    expect(await t.app.locals.lastReport).toBe('failed')
+    expect(t.reports).toHaveLength(3)
+  })
+
+  it('only captures an order this shopper started', async () => {
+    const t = setup()
+    const agent = request.agent(t.app)
+    await agent.get('/p/camera')
+    await agent.post('/api/orders').set(json).send({ productId: 'camera' })
+    await request(t.app).post('/api/orders/ORDER1/capture').set(json).send({}).expect(404)
+    await agent.post('/api/orders/OTHER/capture').set(json).send({}).expect(404)
+    expect(t.paypal.capture).not.toHaveBeenCalled()
+  })
+
+  it('turns a decline into a clear message and other PayPal failures into a 502', async () => {
+    const declined = setup({
+      paypal: {
+        capture: vi.fn(async () => {
+          throw new PayPalError(422, 'INSTRUMENT_DECLINED')
+        }),
+      },
+    })
+    const agent = request.agent(declined.app)
+    await agent.get('/p/camera')
+    await agent.post('/api/orders').set(json).send({ productId: 'camera' })
+    const res = await agent.post('/api/orders/ORDER1/capture').set(json).send({}).expect(422)
+    expect(res.body.code).toBe('DECLINED')
+    expect(declined.reports).toHaveLength(0)
+
+    const down = setup({
+      paypal: {
+        create: vi.fn(async () => {
+          throw new PayPalError(0, 'TIMEOUT')
+        }),
+      },
+    })
+    const failed = await request(down.app)
+      .post('/api/orders')
+      .set(json)
+      .send({ productId: 'camera' })
+    expect(failed.status).toBe(502)
+    expect(failed.body.code).toBe('PAYPAL_UNAVAILABLE')
+  })
+
+  it('rejects an order whose amount does not match the catalog', async () => {
+    const t = setup({
+      paypal: {
+        create: vi.fn(async (source: { id: string }) => ({
+          id: 'ORDER1',
+          status: 'CREATED',
+          purchase_units: [
+            {
+              reference_id: source.id,
+              custom_id: source.id,
+              amount: { currency_code: 'USD', value: '1.00' },
+              payee: { merchant_id: 'M' },
+            },
+          ],
+        })),
+      },
+    })
+    const res = await request(t.app).post('/api/orders').set(json).send({ productId: 'camera' })
+    expect(res.status).toBe(500)
+  })
+})
+
+describe('store webhook', () => {
+  const event = (type = 'PAYMENT.CAPTURE.COMPLETED', id = 'WH-1') =>
+    JSON.stringify({
+      id,
+      event_type: type,
+      resource: { id: 'CAP1', supplementary_data: { related_ids: { order_id: 'ORDER1' } } },
+    })
+
+  it('refuses unverified deliveries', async () => {
+    const t = setup({ paypal: { verify: vi.fn(async () => false) } })
+    await request(t.app)
+      .post('/api/paypal/webhook')
+      .set('Content-Type', 'application/json')
+      .send(event())
+      .expect(401)
+  })
+
+  it('reports a verified capture once, re-reading the order from PayPal', async () => {
+    const t = setup()
+    const agent = request.agent(t.app)
+    const qid = t.worth.open('quote', quoteToken((await agent.get('/p/camera')).text))!.qid
+    await agent.post('/api/orders').set(json).send({ productId: 'camera' })
+    const res = await request(t.app)
+      .post('/api/paypal/webhook')
+      .set('Content-Type', 'application/json')
+      .send(event())
+      .expect(200)
+    expect(res.body).toEqual({ received: true })
+    expect(t.paypal.verify).toHaveBeenCalledWith(expect.any(Object), event())
+    expect(t.paypal.get).toHaveBeenCalledWith('ORDER1')
+    await t.app.locals.lastReport
+    expect(JSON.parse(String(t.reports[0]!.init.body))).toMatchObject({ qid, captureId: 'CAP1' })
+    // The same event again, and the capture path after a sent report, send nothing more.
+    const again = await request(t.app)
+      .post('/api/paypal/webhook')
+      .set('Content-Type', 'application/json')
+      .send(event())
+    expect(again.body).toEqual({ received: true, duplicate: true })
+    await request(t.app)
+      .post('/api/paypal/webhook')
+      .set('Content-Type', 'application/json')
+      .send(event('PAYMENT.CAPTURE.COMPLETED', 'WH-2'))
+    expect(t.reports).toHaveLength(1)
+  })
+
+  it('ignores other events and orders that are not the store’s', async () => {
+    const t = setup({
+      paypal: {
+        get: vi.fn(async () => ({
+          id: 'ORDER1',
+          status: 'COMPLETED',
+          purchase_units: [
+            {
+              reference_id: 'p-1',
+              custom_id: 'p-1',
+              amount: { currency_code: 'USD', value: '1.00' },
+            },
+          ],
+        })),
+      },
+    })
+    const other = await request(t.app)
+      .post('/api/paypal/webhook')
+      .set('Content-Type', 'application/json')
+      .send(event('CHECKOUT.ORDER.APPROVED'))
+    expect(other.body).toEqual({ received: true, ignored: true })
+    const foreign = await request(t.app)
+      .post('/api/paypal/webhook')
+      .set('Content-Type', 'application/json')
+      .send(event('PAYMENT.CAPTURE.COMPLETED', 'WH-3'))
+    expect(foreign.body).toEqual({ received: true, ignored: true })
+    expect(t.reports).toHaveLength(0)
+  })
+})

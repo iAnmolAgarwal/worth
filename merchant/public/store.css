@@ -1,0 +1,261 @@
+/*
+ * Larkspur Supply: a neutral placeholder look. Every colour, size and font is a token below, and
+ * the markup only uses lk- block/element classes, so a new design is a swap of this file.
+ */
+:root {
+  --lk-font: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --lk-font-display: var(--lk-font);
+  --lk-bg: #fafaf8;
+  --lk-surface: #ffffff;
+  --lk-ink: #1c1c1a;
+  --lk-ink-muted: #5f5f5a;
+  --lk-line: #e4e3df;
+  --lk-accent: #3b5bdb;
+  --lk-error: #b42318;
+  --lk-success: #1e6b3a;
+  --lk-radius: 10px;
+  --lk-gap: 24px;
+  --lk-gutter: 16px;
+  --lk-max: 1120px;
+  --lk-text: 16px;
+  --lk-text-small: 14px;
+  --lk-title: clamp(28px, 4vw, 40px);
+  --lk-swatch: #eeeeea;
+}
+
+* {
+  box-sizing: border-box;
+}
+body.lk {
+  margin: 0;
+  font-family: var(--lk-font);
+  font-size: var(--lk-text);
+  line-height: 1.5;
+  color: var(--lk-ink);
+  background: var(--lk-bg);
+}
+:where(.lk) a {
+  color: inherit;
+}
+:where(.lk) img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+/* Header */
+.lk-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  max-width: var(--lk-max);
+  margin: 0 auto;
+  padding: 20px var(--lk-gutter);
+  border-bottom: 1px solid var(--lk-line);
+}
+.lk-header__brand {
+  font-family: var(--lk-font-display);
+  font-size: 20px;
+  font-weight: 650;
+  text-decoration: none;
+}
+.lk-header__tag {
+  font-size: var(--lk-text-small);
+  color: var(--lk-ink-muted);
+}
+
+.lk-main {
+  max-width: var(--lk-max);
+  margin: 0 auto;
+  padding: 32px var(--lk-gutter) 48px;
+}
+
+/* Catalog */
+.lk-catalog__title {
+  margin: 0 0 var(--lk-gap);
+  font-family: var(--lk-font-display);
+  font-size: var(--lk-title);
+  font-weight: 600;
+  line-height: 1.15;
+}
+.lk-catalog__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
+  gap: var(--lk-gap);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.lk-card__link {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-decoration: none;
+}
+.lk-card__image {
+  aspect-ratio: 4 / 3;
+  width: 100%;
+  object-fit: cover;
+  margin-bottom: 8px;
+  border-radius: var(--lk-radius);
+  background: var(--lk-swatch);
+}
+.lk-card__category {
+  font-size: var(--lk-text-small);
+  color: var(--lk-ink-muted);
+}
+.lk-card__name {
+  font-weight: 600;
+}
+.lk-card__link:hover .lk-card__name,
+.lk-card__link:focus-visible .lk-card__name {
+  text-decoration: underline;
+}
+
+/* Product */
+.lk-product {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 40px;
+  align-items: start;
+}
+.lk-product__back {
+  grid-column: 1 / -1;
+  font-size: var(--lk-text-small);
+}
+.lk-product__media {
+  border-radius: var(--lk-radius);
+  overflow: hidden;
+  background: var(--lk-swatch);
+}
+.lk-product__image {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}
+.lk-product__category {
+  margin: 0;
+  font-size: var(--lk-text-small);
+  color: var(--lk-ink-muted);
+}
+.lk-product__name {
+  margin: 4px 0 8px;
+  font-family: var(--lk-font-display);
+  font-size: var(--lk-title);
+  font-weight: 600;
+  line-height: 1.15;
+}
+.lk-product__price {
+  margin: 0 0 16px;
+  font-size: 22px;
+  font-weight: 600;
+}
+.lk-product__description {
+  margin: 0 0 var(--lk-gap);
+  color: var(--lk-ink-muted);
+}
+
+/* Checkout: PayPal's own button and message, then the Worth mount point. */
+.lk-buy {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--lk-line);
+  border-radius: var(--lk-radius);
+  background: var(--lk-surface);
+}
+.lk-buy[hidden] {
+  display: none;
+}
+.lk-buy__paypal {
+  min-height: 48px;
+}
+.lk-buy__button {
+  display: block;
+  width: 100%;
+}
+.lk-buy__status {
+  margin: 0;
+  font-size: var(--lk-text-small);
+  color: var(--lk-ink-muted);
+}
+.lk-buy__status[hidden],
+.lk-buy__error[hidden] {
+  display: none;
+}
+.lk-buy__message {
+  min-height: 20px;
+}
+.lk-buy__worth-result {
+  margin: 0;
+  font-size: var(--lk-text-small);
+  font-weight: 600;
+  color: var(--lk-success);
+}
+.lk-buy__worth {
+  padding-top: 12px;
+  border-top: 1px solid var(--lk-line);
+}
+.worth-check {
+  font-size: var(--lk-text-small);
+  font-weight: 600;
+  color: var(--lk-accent);
+}
+.lk-buy__error {
+  margin: 0;
+  font-size: var(--lk-text-small);
+  color: var(--lk-error);
+}
+
+/* Thank-you state after a completed capture */
+.lk-thanks {
+  padding: 20px;
+  border: 1px solid var(--lk-line);
+  border-radius: var(--lk-radius);
+  background: var(--lk-surface);
+}
+.lk-thanks[hidden] {
+  display: none;
+}
+.lk-thanks__title {
+  margin: 0 0 8px;
+  font-size: 20px;
+}
+.lk-thanks__body,
+.lk-thanks__ref {
+  margin: 0 0 8px;
+  color: var(--lk-ink-muted);
+}
+
+.lk-empty__title {
+  font-size: var(--lk-title);
+}
+
+/* Footer */
+.lk-footer {
+  max-width: var(--lk-max);
+  margin: 0 auto;
+  padding: 24px var(--lk-gutter) 40px;
+  border-top: 1px solid var(--lk-line);
+  font-size: var(--lk-text-small);
+  color: var(--lk-ink-muted);
+}
+.lk-footer__note {
+  margin: 0 0 4px;
+  font-weight: 600;
+  color: var(--lk-ink);
+}
+.lk-footer__fine {
+  margin: 0;
+}
+
+@media (max-width: 760px) {
+  .lk-product {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+  }
+  .lk-main {
+    padding-top: 20px;
+  }
+}
