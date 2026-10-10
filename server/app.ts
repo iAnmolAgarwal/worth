@@ -71,6 +71,7 @@ import { WindowLimiter } from './limits.ts'
 import { contentSecurityPolicy } from './csp.ts'
 import { itemSigner } from './remember.ts'
 import { createHandoff, withResult } from '../shared/handoff.ts'
+import { isPlain } from '../shared/text.ts'
 import type { QuotePayload, Verdict } from '../shared/handoff.ts'
 import { confirmPlan, confirmRefund, PlanError, recordRefund } from './plans.ts'
 import { queryFor, roomToday } from './alternatives.ts'
@@ -387,6 +388,10 @@ export function createApp(options: AppOptions = {}) {
         now: () => now().getTime(),
       })
     : undefined
+  /** The hand-off's store for Saved: its items keep its name; in dev its localhost link is allowed. */
+  const savedStore = handoff
+    ? { origin: handoff.merchantOrigin, allowLocal: !config.production }
+    : {}
   const app = express()
   app.disable('x-powered-by')
   // Behind a proxy, req.ip must be the client address the proxy appended, not the proxy itself.
@@ -506,7 +511,7 @@ export function createApp(options: AppOptions = {}) {
     }
     const purchases = livePurchases(id).map(publicPurchase)
     const day = sessionToday(data)
-    const saved = publicSaved(data.saved, day, purchases)
+    const saved = publicSaved(data.saved, day, purchases, savedStore)
     const projection = fundsProjection(data, purchases, day)
     const { saved: _saved, createdAt: _created, keep30: _keep, demoClock, ...rest } = data
     return {
@@ -1336,6 +1341,52 @@ export function createApp(options: AppOptions = {}) {
     }
   }
   /** The quote again after a reload of /check, for the session that opened it. */
+  /**
+   * "Save for <date>" on /check (contract §4). The client sends only the quote and the plan's day;
+   * the link, the store's name and the price come from the verified quote this session holds, so
+   * only here does an item get priceSource "component". A price the shopper changed on /check is
+   * saved as theirs ("user"), with the store's link and name still from the quote.
+   */
+  app.post('/api/handoff/save', (req, res) => {
+    handoffLimit(req)
+    const input = z
+      .object({
+        qid: qidSchema,
+        waitDate: date,
+        amountCents: cents.min(1).optional(),
+        itemName: z
+          .string()
+          .trim()
+          .min(1)
+          .max(120)
+          .refine(isPlain, 'Use a plain-text name')
+          .optional(),
+      })
+      .strict()
+      .parse(req.body)
+    const quote = sessionQuote(res, input.qid)
+    const edited = input.amountCents !== undefined && input.amountCents !== quote.amountCents
+    const id = sessionId(res)
+    const data = dataFor(res)
+    const item = addSaved(
+      data,
+      {
+        kind: 'custom',
+        name: input.itemName ?? quote.item,
+        amountCents: edited ? input.amountCents! : quote.amountCents,
+        waitDate: input.waitDate,
+      },
+      sessionToday(data),
+      now(),
+      {
+        sourceUrl: quote.returnUrl,
+        merchantName: quote.merchant,
+        priceSource: edited ? 'user' : 'component',
+      },
+    )
+    store.save(id, data)
+    res.json({ item, state: state(id) })
+  })
   app.get('/api/handoff/quotes/:qid', (req, res) => {
     handoffLimit(req)
     const quote = sessionQuote(res, qidSchema.parse(req.params.qid))
