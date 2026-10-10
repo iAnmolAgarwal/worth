@@ -82,6 +82,7 @@ import {
   migratePlanned,
   plannedSchema,
   publicSaved,
+  recheckSaved,
   removeSaved,
   saveSchema,
   SavedError,
@@ -1435,6 +1436,24 @@ export function createApp(options: AppOptions = {}) {
     const moved = migratePlanned(data, planned, sessionToday(data), now())
     store.save(id, data)
     res.json({ moved, state: state(id) })
+  })
+  /**
+   * The ready day's price re-check for a saved item whose price Channel3 read (C6). The Saved
+   * screen asks once when it opens on or after the plan's day, never on a timer. It is the same
+   * lookup as a pasted link, sharing its cache, the daily budget and this client's hourly share.
+   */
+  app.post('/api/saved/:id/recheck', async (req, res) => {
+    z.object({}).strict().parse(req.body)
+    const data = dataFor(res)
+    res.json(
+      await recheckSaved(
+        data,
+        String(req.params.id).slice(0, 100),
+        sessionToday(data),
+        now(),
+        (url) => channel3.lookup(url, liveSearches(req)),
+      ),
+    )
   })
   app.post('/api/saved/:id/remove', (req, res) => {
     z.object({}).strict().parse(req.body)

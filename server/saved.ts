@@ -2,10 +2,18 @@ import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import { addDays, WAIT_SEARCH_DAYS } from '../shared/finance.ts'
 import { PRODUCTS } from '../shared/seed.ts'
-import type { FinancialProfile, Purchase, SavedItem } from '../shared/types.ts'
+import type {
+  FinancialProfile,
+  Purchase,
+  SavedItem,
+  SavedPriceCheck,
+  SavedPriceSource,
+} from '../shared/types.ts'
 import type { SessionData } from './store.ts'
 import { storeLink } from './channel3.ts'
+import type { LookupResult } from './channel3.ts'
 import { isPlain } from '../shared/text.ts'
+import { checkProductLink, LINK_MAX_LENGTH, storeDomain } from '../shared/link.ts'
 
 /** Saved items one session may keep at once. */
 export const MAX_SAVED = 20
@@ -42,6 +50,21 @@ const cleanLink = (value: string) => {
     return false
   }
 }
+/**
+ * A store page kept with a saved item (C6): https, at most 2,048 characters, no user name or
+ * password, on a public domain name. Worth only ever links to it; it never fetches it.
+ */
+const sourceLink = z
+  .string()
+  .max(LINK_MAX_LENGTH)
+  .refine((value) => checkProductLink(value).ok, 'Use the store’s https product link.')
+  .transform((value) => (checkProductLink(value) as { url: string }).url)
+const PRICE_SOURCES = ['component', 'channel3', 'user'] as const
+/**
+ * Price sources the browser may send, as /api/compare takes them. "component" is set only by the
+ * server, from a store's verified hand-off (#22), never from the browser.
+ */
+const CLIENT_PRICE_SOURCES = ['channel3', 'user'] as const
 const catalogSave = z
   .object({
     kind: z.literal('catalog'),
@@ -73,8 +96,25 @@ const customSave = z
       .string()
       .regex(/^[A-Za-z0-9_-]{1,64}$/)
       .optional(),
+    /** The store page this item came from: a pasted link or the store's return link (C6). */
+    sourceUrl: sourceLink.optional(),
+    /** Accepted for the browser's convenience but ignored: the store is named by the link's domain. */
+    merchantName: z
+      .string()
+      .trim()
+      .min(1)
+      .max(80)
+      .refine(plain, 'Use a plain-text name')
+      .optional(),
+    priceSource: z.enum(CLIENT_PRICE_SOURCES).optional(),
   })
   .strict()
+  .refine(
+    (input) =>
+      Boolean(input.sourceUrl) === Boolean(input.priceSource) &&
+      (!input.merchantName || Boolean(input.sourceUrl)),
+    'Send a store link with its price source.',
+  )
 export const saveSchema = z
   .discriminatedUnion('kind', [catalogSave, customSave])
   .refine(
@@ -98,6 +138,34 @@ export const plannedSchema = z
   })
   .strict()
   .refine((input) => Object.keys(input.planned).length <= 50, 'Too many planned items.')
+
+/**
+ * A stored item's store link as it is shown (C6). Items saved before C6 have none and are left as
+ * they are; a link that no longer passes the checks is dropped with its store details, a missing
+ * store name falls back to the link's domain, and a missing price source counts as the shopper's.
+ */
+function withSource(item: SavedItem): SavedItem {
+  const { sourceUrl, merchantName, priceSource, ...rest } = item
+  if (sourceUrl === undefined && merchantName === undefined && priceSource === undefined)
+    return item
+  const link = typeof sourceUrl === 'string' ? checkProductLink(sourceUrl) : undefined
+  if (!link?.ok) return rest
+  return {
+    ...rest,
+    sourceUrl: link.url,
+    // Only a store's verified hand-off names the store; anything else is named by its domain.
+    merchantName:
+      priceSource === 'component' &&
+      typeof merchantName === 'string' &&
+      merchantName.trim() &&
+      isPlain(merchantName)
+        ? merchantName.trim().slice(0, 80)
+        : storeDomain(link.host),
+    priceSource: PRICE_SOURCES.includes(priceSource as SavedPriceSource)
+      ? (priceSource as SavedPriceSource)
+      : 'user',
+  }
+}
 
 /** The session's saved items, created from an older session's catalog wishlist on first use. */
 export function savedOf(data: SessionData, now: Date): SavedItem[] {
@@ -133,6 +201,7 @@ export function publicSaved(
   return (
     (items ?? [])
       .filter((item) => item.status !== 'removed')
+      .map(withSource)
       .map((item): SavedItem => {
         const bought =
           item.kind === 'catalog' &&
@@ -202,6 +271,14 @@ export function addSaved(data: SessionData, input: SaveInput, today: string, now
       ...(input.retailer ? { retailer: input.retailer } : {}),
       ...(input.url ? { url: input.url } : {}),
       ...(input.channel3Id ? { channel3Id: input.channel3Id } : {}),
+      ...(input.sourceUrl
+        ? {
+            sourceUrl: input.sourceUrl,
+            // Named from the link, as /api/compare does: the browser's store name is ignored.
+            merchantName: storeDomain(new URL(input.sourceUrl).hostname),
+            priceSource: input.priceSource!,
+          }
+        : {}),
       ...plan,
     }
   const same = items.find(
@@ -212,14 +289,32 @@ export function addSaved(data: SessionData, input: SaveInput, today: string, now
         ? existing.productId === item.productId
         : item.channel3Id
           ? existing.channel3Id === item.channel3Id
-          : existing.name.toLowerCase() === item.name.toLowerCase() &&
-            existing.amountCents === item.amountCents &&
-            existing.url === item.url),
+          : item.sourceUrl
+            ? existing.sourceUrl === item.sourceUrl
+            : !existing.sourceUrl &&
+              existing.name.toLowerCase() === item.name.toLowerCase() &&
+              existing.amountCents === item.amountCents &&
+              existing.url === item.url),
   )
   if (same) {
     // Saving again replaces the plan: a later "Save for later" clears an earlier date.
     const { option: _o, waitDate: _w, ...rest } = same
-    Object.assign(same, { ...rest, ...plan, status: 'active', createdAt: item.createdAt })
+    // The same store page saved again keeps the name, price and source just confirmed.
+    const source = item.sourceUrl
+      ? {
+          name: item.name,
+          amountCents: item.amountCents,
+          merchantName: item.merchantName,
+          priceSource: item.priceSource,
+        }
+      : {}
+    Object.assign(same, {
+      ...rest,
+      ...source,
+      ...plan,
+      status: 'active',
+      createdAt: item.createdAt,
+    })
     if (!plan.option) delete same.option
     if (!plan.waitDate) delete same.waitDate
     return same
@@ -232,6 +327,37 @@ export function addSaved(data: SessionData, input: SaveInput, today: string, now
     )
   data.saved = prune([...items, item])
   return item
+}
+
+/**
+ * The ready day's price re-check for an item whose price Channel3 read (C6): one lookup of its
+ * store page, through the caller's lookup path, limits and cache. Anything but a live US dollar
+ * price for that store (a failure, the limit, a recorded example) keeps the saved price.
+ */
+export async function recheckSaved(
+  data: SessionData,
+  id: string,
+  today: string,
+  now: Date,
+  lookup: (url: string) => Promise<LookupResult>,
+): Promise<SavedPriceCheck> {
+  const stored = savedOf(data, now).find((saved) => saved.id === id && saved.status !== 'removed')
+  if (!stored) throw new SavedError(404, 'Saved item not found.', 'NOT_FOUND')
+  const item = withSource(stored)
+  if (item.priceSource !== 'channel3' || !item.sourceUrl)
+    throw new SavedError(409, 'Only a price Channel3 read can be checked again.', 'NOT_RECHECKABLE')
+  if (!item.waitDate || item.waitDate > today)
+    throw new SavedError(409, 'Prices are checked again on the plan’s day.', 'NOT_READY')
+  const savedPriceCents = item.amountCents
+  const result = await lookup(item.sourceUrl)
+  const product = result.ok ? result.product : undefined
+  if (!product || product.status !== 'ok' || product.currency !== 'USD' || !product.priceCents)
+    return { status: 'unavailable', savedPriceCents }
+  return {
+    status: product.priceCents === savedPriceCents ? 'same' : 'changed',
+    savedPriceCents,
+    priceCents: product.priceCents,
+  }
 }
 
 export function removeSaved(data: SessionData, id: string, now: Date) {

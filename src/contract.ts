@@ -4,7 +4,13 @@
  */
 import { checkProductLink } from '../shared/link'
 import { plainText } from '../shared/text'
-import type { Alternative, Purchase, SavedItem } from '../shared/types'
+import type {
+  Alternative,
+  ItemSource,
+  Purchase,
+  SavedItem,
+  SavedPriceSource,
+} from '../shared/types'
 import type { DecisionRequest } from './Decision'
 
 export type {
@@ -33,6 +39,10 @@ export type SaveTarget =
       retailer?: string
       url?: string
       channel3Id?: string
+      /** The store page it came from, with the store's name and who set the price (C6). */
+      sourceUrl?: string
+      merchantName?: string
+      priceSource?: SavedPriceSource
     }
 /**
  * A Channel3 row saved for later (spec item 15): a custom item, "Assessment only — not sold in the
@@ -47,6 +57,26 @@ export const alternativeTarget = (item: Alternative): SaveTarget => ({
   url: item.url,
   channel3Id: item.id,
 })
+/** A pasted-link decision's store page, name and price source, as saved with the item (C6). */
+export const sourceTarget = (source: ItemSource | undefined) =>
+  source
+    ? {
+        sourceUrl: source.sourceUrl,
+        merchantName: source.merchantName,
+        priceSource: source.priceSource,
+      }
+    : {}
+/**
+ * The store page a saved item came from, to compare it again (C6). Only Channel3's own read stays
+ * "channel3"; a store's price or the shopper's is checked as their own.
+ */
+export const savedSource = (item: SavedItem) =>
+  item.sourceUrl
+    ? {
+        sourceUrl: item.sourceUrl,
+        priceSource: item.priceSource === 'channel3' ? ('channel3' as const) : ('user' as const),
+      }
+    : {}
 export type SavePlan = { option?: SavedItem['option']; waitDate?: string }
 /** The POST /api/saved body: a plan date always belongs to the wait option. */
 export function saveRequest(target: SaveTarget, plan: SavePlan = {}) {
