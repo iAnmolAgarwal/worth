@@ -308,7 +308,9 @@ describe('where the similar items appear', () => {
         onImport={vi.fn()}
       />,
     )
-    const section = screen.getByRole('region', { name: 'Similar items (Channel3)' })
+    const section = screen.getByRole('region', {
+      name: 'Similar items and pasted links (Channel3)',
+    })
     expect(section.textContent).toContain(
       'A generic kind of item (such as “desk chair”) and a price limit rounded down to $25',
     )

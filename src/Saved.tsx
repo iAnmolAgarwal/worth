@@ -22,6 +22,7 @@ import { ClaudeSwitch, JudgeBadge } from './Ask'
 import { ConnectAgent } from './ConnectAgent'
 import {
   ASSESSMENT_ONLY,
+  CHANNEL3_LINK_DATA,
   CHANNEL3_SHARED_DATA,
   CLAUDE_SHARED_DATA,
   claudeUses,
@@ -902,13 +903,17 @@ export function Settings({
             <div className="sec-head">
               <h2 className="h-section" id="set-channel3">
                 <Store size={18} aria-hidden="true" style={{ verticalAlign: -3, marginRight: 8 }} />
-                Similar items (Channel3)
+                Similar items and pasted links (Channel3)
               </h2>
             </div>
             <dl className="kvlist">
               <div>
                 <dt>Sent to Channel3</dt>
                 <dd>{CHANNEL3_SHARED_DATA}</dd>
+              </div>
+              <div>
+                <dt>A product link you paste</dt>
+                <dd>{CHANNEL3_LINK_DATA}</dd>
               </div>
               <div>
                 <dt>Your name, plan or other words</dt>

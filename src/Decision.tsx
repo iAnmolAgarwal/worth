@@ -7,12 +7,13 @@ import {
   ChevronDown,
   CircleAlert,
   CircleCheck,
+  ExternalLink,
   ListChecks,
   Sparkles,
   TriangleAlert,
 } from 'lucide-react'
 import { PAY_IN_4_DATES_NOTE, PAY_IN_4_SPACING } from '../shared/collision'
-import { confirmedSchedule } from '../shared/finance'
+import { confirmedSchedule, PAY_IN_4_MAX_CENTS, PAY_IN_4_MIN_CENTS } from '../shared/finance'
 import type { Alternative, ForecastPoint, OptionResult, Product } from '../shared/types'
 import { AlternativesPanel } from './Alternatives'
 import { BalanceChart } from './BalanceChart'
@@ -36,7 +37,14 @@ import type { PayPalSdkInstance } from './paypalSdk'
 import { Alert, Button, Dialog, Disc, Field, Pill, ReadAsChip, Ring, type Tone } from './ui'
 
 export type OptionKey = 'buyToday' | 'wait' | 'spendLess'
-export type DecisionRequest = { productId?: string; amountCents?: number; itemName?: string }
+export type DecisionRequest = {
+  productId?: string
+  amountCents?: number
+  itemName?: string
+  /** An item from a pasted link (C5): its store page and who set the confirmed price. */
+  sourceUrl?: string
+  priceSource?: 'channel3' | 'user'
+}
 /** What Claude contributed to the answer this view came from, if it came from Ask. */
 export interface Explanation {
   lead?: string
@@ -324,6 +332,8 @@ function PayIn4Panel({
 }) {
   const panelId = useId()
   const p4 = c.payIn4
+  // Another store's item: Worth can't know whether that store offers Pay in 4 (C5).
+  const heading = c.source ? 'If this store offers PayPal Pay in 4' : 'Compare with PayPal Pay in 4'
   // PayPal's server-side check (payIn4.eligibility) decides. The browser SDK has no buyer
   // context, so it is used only to render PayPal Messages and the button.
   const available = p4.available && p4.eligibility !== 'unavailable'
@@ -336,7 +346,7 @@ function PayIn4Panel({
           </span>
           <span>
             <span className="h-section" style={{ display: 'block', color: 'var(--c-text-2)' }}>
-              Compare with PayPal Pay in 4
+              {heading}
             </span>
             <span className="meta">
               {p4.available ? 'Not available for this amount' : p4.reason}
@@ -371,7 +381,7 @@ function PayIn4Panel({
         <Disc icon={CalendarDays} kind="plan" />
         <span>
           <span className="h-section" style={{ display: 'block' }}>
-            Compare with PayPal Pay in 4
+            {heading}
           </span>
           <span className="meta">
             4 payments {amounts.size > 1 ? 'from' : 'of'}{' '}
@@ -440,11 +450,16 @@ function PayIn4Panel({
           </Alert>
         )}
         {/* Mounted only when opened, so PayPal is asked for terms only on request. */}
-        {open && <PayPalMessage instance={instance} amountCents={c.amountCents} />}
+        {/* PayPal's message is Worth's demo store's own offer, so it shows only for its items. */}
+        {open && !c.source && <PayPalMessage instance={instance} amountCents={c.amountCents} />}
         <p className="caption">
           {PAY_IN_4_DATES_NOTE} PayPal sets the exact terms at checkout. Pay in 4 is shown for
           comparison only; Worth never recommends it.
-          {rangeOnly ? ' Availability is decided by PayPal at checkout.' : ''}
+          {c.source
+            ? ` Shown for amounts PayPal Pay in 4 covers, ${money(PAY_IN_4_MIN_CENTS)} to ${money(PAY_IN_4_MAX_CENTS)}; ${c.source.merchantName} and PayPal decide at checkout.`
+            : rangeOnly
+              ? ' Availability is decided by PayPal at checkout.'
+              : ''}
         </p>
       </div>
     </div>
@@ -768,6 +783,7 @@ export function Decision({
             </button>
             <p className="meta strong hide-m" style={{ margin: 0 }}>
               {c.itemName}, {money(c.amountCents)}
+              {c.source ? ` · ${c.source.merchantName}` : ''}
             </p>
             <h1 className="title">{verdictTitle(c)}</h1>
             {!editing && (
@@ -786,7 +802,18 @@ export function Decision({
                   setOverride(
                     product && next.amountCents === product.priceCents
                       ? { productId: product.id }
-                      : next,
+                      : active.sourceUrl
+                        ? {
+                            ...next,
+                            sourceUrl: active.sourceUrl,
+                            // Any change here is the shopper's own price.
+                            priceSource:
+                              active.priceSource === 'channel3' &&
+                              next.amountCents === active.amountCents
+                                ? 'channel3'
+                                : 'user',
+                          }
+                        : next,
                   )
                 }}
               />
@@ -872,13 +899,27 @@ export function Decision({
                 <div className="meta">
                   {product
                     ? `Sold by ${product.merchant} · demo\u00a0store`
-                    : 'Checkout is for demo store items'}
+                    : c.source
+                      ? `At ${c.source.merchantName} · ${c.source.priceSource === 'channel3' ? 'price read by Channel3, confirmed by you' : 'price you entered'}`
+                      : 'Checkout is for demo store items'}
                 </div>
                 <div className="num strong" style={{ fontWeight: 700, marginTop: 4 }}>
                   {money(c.amountCents)}
                 </div>
               </div>
             </div>
+            {c.source && (
+              <a
+                className="caption"
+                href={c.source.sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ display: 'inline-flex', gap: 4, alignItems: 'center', marginTop: 8 }}
+              >
+                Open the store page <ExternalLink size={14} aria-hidden="true" />
+                <span className="sr"> (opens in a new tab)</span>
+              </a>
+            )}
             {product && <div className="rail-actions">{actions(true)}</div>}
             {custom && <div className="rail-actions">{customActions(true)}</div>}
           </div>

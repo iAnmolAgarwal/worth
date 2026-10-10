@@ -14,6 +14,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react'
+import { checkProductLink } from '../shared/link'
 import type { InstalmentPlanProposal, Product, SavedItem } from '../shared/types'
 import { Activity } from './Activity'
 import { api } from './api'
@@ -275,6 +276,10 @@ export default function App() {
       else {
         params.set('amount', String(request.amountCents))
         params.set('item', request.itemName ?? 'Your purchase')
+        if (request.sourceUrl && request.priceSource) {
+          params.set('link', request.sourceUrl)
+          params.set('price', request.priceSource)
+        }
       }
       params.set('from', from)
       if (explanation)
@@ -337,9 +342,17 @@ export default function App() {
     const product = params.get('product')
     if (product) return { productId: product }
     const amount = Number(params.get('amount'))
-    return Number.isSafeInteger(amount) && amount > 0
-      ? { amountCents: amount, itemName: (params.get('item') ?? 'Your purchase').slice(0, 150) }
-      : undefined
+    if (!Number.isSafeInteger(amount) || amount <= 0) return undefined
+    const item = {
+      amountCents: amount,
+      itemName: (params.get('item') ?? 'Your purchase').slice(0, 150),
+    }
+    // A pasted link's page travels with it (C5), only when it is still a public https link.
+    const link = checkProductLink(params.get('link') ?? '')
+    const price = params.get('price')
+    return link.ok && (price === 'channel3' || price === 'user')
+      ? { ...item, sourceUrl: link.url, priceSource: price }
+      : item
   }, [screen, params])
 
   if (!state)
