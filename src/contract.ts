@@ -67,14 +67,23 @@ export const sourceTarget = (source: ItemSource | undefined) =>
       }
     : {}
 /**
- * The store page a saved item came from, to compare it again (C6). Only Channel3's own read stays
- * "channel3"; a store's price or the shopper's is checked as their own.
+ * The store page a saved item came from, to compare it again (C6). The saved item's ID always
+ * travels, so the server reads its link itself and judges Pay in 4 by the range alone, never by
+ * Worth's own PayPal answer. The link is also sent, for its label, only when it is a public page
+ * whose price was Channel3's or the shopper's: a store's own price (/check) is never sent as the
+ * shopper's, and a local store's link in development isn't a page anyone can open.
  */
 export const savedSource = (item: SavedItem) =>
   item.sourceUrl
     ? {
-        sourceUrl: item.sourceUrl,
-        priceSource: item.priceSource === 'channel3' ? ('channel3' as const) : ('user' as const),
+        savedId: item.id,
+        ...(item.priceSource !== 'component' && checkProductLink(item.sourceUrl).ok
+          ? {
+              sourceUrl: item.sourceUrl,
+              priceSource:
+                item.priceSource === 'channel3' ? ('channel3' as const) : ('user' as const),
+            }
+          : {}),
       }
     : {}
 export type SavePlan = { option?: SavedItem['option']; waitDate?: string }
@@ -96,9 +105,12 @@ export function decisionRequestFrom(
   if (product) return { productId: product }
   const amount = Number(params.get('amount'))
   if (!Number.isSafeInteger(amount) || amount <= 0) return undefined
+  const saved = params.get('saved')
   const item = {
     amountCents: amount,
     itemName: (params.get('item') ?? 'Your purchase').slice(0, 150),
+    // A saved store item: the server reads its link by ID (and ignores an ID it doesn't hold).
+    ...(saved && /^[A-Za-z0-9_-]{1,100}$/.test(saved) ? { savedId: saved } : {}),
   }
   const link = checkProductLink(params.get('link') ?? '')
   if (!link.ok) return item

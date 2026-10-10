@@ -1,10 +1,10 @@
 import { useEffect, useState, type MouseEvent } from 'react'
-import { CircleAlert, Clock, Info } from 'lucide-react'
+import { Bookmark, CircleAlert, Clock, Info } from 'lucide-react'
 import { payIn4InRange } from '../shared/finance'
-import type { AppState, HandoffOpened, HandoffQuote } from '../shared/types'
+import type { AppState, HandoffOpened, HandoffQuote, SavedItem } from '../shared/types'
 import { api, ApiError } from './api'
 import { Decision, EditPurchase, type DecisionRequest } from './Decision'
-import { money } from './format'
+import { dayLabel, money } from './format'
 import type { PayPalSdkInstance } from './paypalSdk'
 import { Alert, Button } from './ui'
 
@@ -216,6 +216,7 @@ export function Check({
         quote={view.quote}
         state={state}
         instance={instance}
+        onUpdate={onUpdate}
         onToast={onToast}
         onNavigate={onNavigate}
       />
@@ -290,12 +291,14 @@ function Quote({
   quote,
   state,
   instance,
+  onUpdate,
   onToast,
   onNavigate,
 }: {
   quote: HandoffQuote
   state: AppState
   instance?: PayPalSdkInstance
+  onUpdate: (next: AppState) => void
   onToast: (message: string) => void
   onNavigate: (hash: string) => void
 }) {
@@ -304,6 +307,9 @@ function Quote({
   const [editing, setEditing] = useState(false)
   const [consent, setConsent] = useState(quote.consent)
   const [leaving, setLeaving] = useState(false)
+  const [saving, setSaving] = useState(false)
+  /** The day this quote was saved for, once saved. */
+  const [savedFor, setSavedFor] = useState<string>()
   const itemName = claimed?.itemName ?? quote.item
   const amountCents = claimed?.amountCents ?? quote.amountCents
   // Only the session holding the quote can use it; another one compares like a typed-in item.
@@ -334,6 +340,30 @@ function Quote({
       // The plain link still goes back; the store then shows no Worth line.
     }
     leave.to(url)
+  }
+  /**
+   * Save for the wait plan's day (contract §4). Only the quote and the day are sent; the server
+   * takes the link, the store's name and its price from the quote. A changed price or name is
+   * sent as the shopper's own, and saved as such.
+   */
+  async function save(waitDate: string) {
+    if (saving) return
+    setSaving(true)
+    try {
+      const result = await api<{ item: SavedItem; state: AppState }>('/handoff/save', {
+        qid: quote.qid,
+        waitDate,
+        ...(priceChanged ? { amountCents } : {}),
+        ...(itemName !== quote.item ? { itemName } : {}),
+      })
+      onUpdate(result.state)
+      setSavedFor(waitDate)
+      onToast(`Saved for ${dayLabel(waitDate)}. Find it in Saved.`)
+    } catch (error) {
+      onToast((error as Error).message)
+    } finally {
+      setSaving(false)
+    }
   }
   async function choose(next: boolean) {
     setConsent(next)
@@ -425,7 +455,7 @@ function Quote({
         footer,
         merchant: quote.merchant,
         imageUrl: quote.imageUrl,
-        actions: (notes) => (
+        actions: (notes, c) => (
           <>
             <StoreLink
               href={quote.returnUrl}
@@ -433,6 +463,18 @@ function Quote({
               onClick={(event) => void back(event)}
               busy={leaving}
             />
+            {quote.canConsent && c.recommendation === 'wait' && c.wait.date && (
+              <Button
+                block
+                variant="secondary"
+                icon={Bookmark}
+                loading={saving}
+                disabled={savedFor === c.wait.date}
+                onClick={() => void save(c.wait.date!)}
+              >
+                {savedFor === c.wait.date ? 'Saved' : `Save for ${dayLabel(c.wait.date)}`}
+              </Button>
+            )}
             {notes && (
               <p className="caption" style={{ textAlign: 'center' }}>
                 You pay on {quote.merchant}’s own checkout. Worth never sees or changes your order.

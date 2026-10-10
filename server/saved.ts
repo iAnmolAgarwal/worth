@@ -140,25 +140,50 @@ export const plannedSchema = z
   .refine((input) => Object.keys(input.planned).length <= 50, 'Too many planned items.')
 
 /**
+ * The hand-off's one store (MERCHANT_ORIGIN). Its items keep the store's own name; in development
+ * only, its link passes the save check even on localhost, so a local store's items can be saved.
+ * It is never a reason to look a link up (only Channel3-read prices are re-checked).
+ */
+export interface StoreOrigin {
+  origin?: string
+  allowLocal?: boolean
+}
+
+/** A saved link's check: a public https store page, or exactly the hand-off's store in dev. */
+function savedLink(sourceUrl: string, store: StoreOrigin) {
+  const link = checkProductLink(sourceUrl)
+  if (link.ok || !store.allowLocal || !store.origin) return link
+  try {
+    const url = new URL(sourceUrl)
+    return url.origin === store.origin && !url.username && !url.password
+      ? { ok: true as const, url: url.toString(), host: url.hostname }
+      : link
+  } catch {
+    return link
+  }
+}
+
+/**
  * A stored item's store link as it is shown (C6). Items saved before C6 have none and are left as
  * they are; a link that no longer passes the checks is dropped with its store details, a missing
  * store name falls back to the link's domain, and a missing price source counts as the shopper's.
  */
-function withSource(item: SavedItem): SavedItem {
+function withSource(item: SavedItem, store: StoreOrigin = {}): SavedItem {
   const { sourceUrl, merchantName, priceSource, ...rest } = item
   if (sourceUrl === undefined && merchantName === undefined && priceSource === undefined)
     return item
-  const link = typeof sourceUrl === 'string' ? checkProductLink(sourceUrl) : undefined
+  const link = typeof sourceUrl === 'string' ? savedLink(sourceUrl, store) : undefined
   if (!link?.ok) return rest
+  // Only a store's verified hand-off names the store (its own price, or one the shopper changed
+  // on /check); anything else is named by its domain.
+  const verified =
+    priceSource === 'component' ||
+    (Boolean(store.origin) && new URL(link.url).origin === store.origin)
   return {
     ...rest,
     sourceUrl: link.url,
-    // Only a store's verified hand-off names the store; anything else is named by its domain.
     merchantName:
-      priceSource === 'component' &&
-      typeof merchantName === 'string' &&
-      merchantName.trim() &&
-      isPlain(merchantName)
+      verified && typeof merchantName === 'string' && merchantName.trim() && isPlain(merchantName)
         ? merchantName.trim().slice(0, 80)
         : storeDomain(link.host),
     priceSource: PRICE_SOURCES.includes(priceSource as SavedPriceSource)
@@ -197,11 +222,12 @@ export function publicSaved(
   items: SavedItem[] | undefined,
   today: string,
   purchases: Purchase[],
+  store: StoreOrigin = {},
 ): SavedItem[] {
   return (
     (items ?? [])
       .filter((item) => item.status !== 'removed')
-      .map(withSource)
+      .map((item) => withSource(item, store))
       .map((item): SavedItem => {
         const bought =
           item.kind === 'catalog' &&
@@ -245,10 +271,28 @@ function prune(items: SavedItem[]) {
 }
 
 /**
+ * A store item's link, name and price source set by the server from a verified hand-off quote
+ * (/check, contract §4): the only way an item gets priceSource "component".
+ */
+export interface QuoteSource {
+  sourceUrl: string
+  merchantName: string
+  priceSource: Extract<SavedPriceSource, 'component' | 'user'>
+  /** The quote's ID, so the store's report of that purchase can clear this item (C4). */
+  qid: string
+}
+
+/**
  * Saves an item, or updates the same item's option and plan date. A catalog item's name and price
  * always come from the server catalog; a custom item keeps the assessed name and amount.
  */
-export function addSaved(data: SessionData, input: SaveInput, today: string, now: Date) {
+export function addSaved(
+  data: SessionData,
+  input: SaveInput,
+  today: string,
+  now: Date,
+  quote?: QuoteSource,
+) {
   const items = savedOf(data, now)
   checkDate(input.waitDate, today)
   const plan = {
@@ -271,14 +315,16 @@ export function addSaved(data: SessionData, input: SaveInput, today: string, now
       ...(input.retailer ? { retailer: input.retailer } : {}),
       ...(input.url ? { url: input.url } : {}),
       ...(input.channel3Id ? { channel3Id: input.channel3Id } : {}),
-      ...(input.sourceUrl
-        ? {
-            sourceUrl: input.sourceUrl,
-            // Named from the link, as /api/compare does: the browser's store name is ignored.
-            merchantName: storeDomain(new URL(input.sourceUrl).hostname),
-            priceSource: input.priceSource!,
-          }
-        : {}),
+      ...(quote
+        ? quote
+        : input.sourceUrl
+          ? {
+              sourceUrl: input.sourceUrl,
+              // Named from the link, as /api/compare does: the browser's store name is ignored.
+              merchantName: storeDomain(new URL(input.sourceUrl).hostname),
+              priceSource: input.priceSource!,
+            }
+          : {}),
       ...plan,
     }
   const same = items.find(
@@ -306,6 +352,7 @@ export function addSaved(data: SessionData, input: SaveInput, today: string, now
           amountCents: item.amountCents,
           merchantName: item.merchantName,
           priceSource: item.priceSource,
+          ...(item.qid ? { qid: item.qid } : {}),
         }
       : {}
     Object.assign(same, {

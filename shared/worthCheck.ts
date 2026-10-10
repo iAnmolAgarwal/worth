@@ -253,7 +253,9 @@ export class WorthCheck extends HTMLElement {
     } catch {
       return
     }
-    if (linkClaims(this.getAttribute('href'))?.payLater !== this.offered) await this.refresh()
+    // Only a yes is ever signed, so only a yes on one side and not the other needs a new link.
+    if ((linkClaims(this.getAttribute('href'))?.payLater === true) !== (this.offered === true))
+      await this.refresh()
   }
 
   /** Asks the store for a fresh link, passing the store's SDK answer when known. */
@@ -272,7 +274,7 @@ export class WorthCheck extends HTMLElement {
     try {
       const url = new URL(endpoint, document.baseURI)
       if (url.origin !== window.location.origin) return
-      if (this.offered !== undefined) url.searchParams.set('payLater', String(this.offered))
+      if (this.offered === true) url.searchParams.set('payLater', 'true')
       const response = await fetch(url, {
         credentials: 'same-origin',
         headers: { Accept: 'application/json' },

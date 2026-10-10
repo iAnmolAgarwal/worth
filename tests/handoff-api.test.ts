@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import request from 'supertest'
 import { createApp } from '../server/app.ts'
 import { Store } from '../server/store.ts'
+import { publicSaved } from '../server/saved.ts'
 import type { PayPalGateway } from '../server/paypal.ts'
 import type { ChatProvider } from '../server/chat.ts'
 import { createHandoff, signToken, secretBytes } from '../shared/handoff.ts'
@@ -143,14 +144,14 @@ describe('POST /api/handoff/open (contract §3.3)', () => {
     expect(again.store.quote(quote.qid, clock.value.getTime())).toBeUndefined()
   })
 
-  it('shows the store’s Pay in 4 answer as offered, not offered or unknown', async () => {
+  it('shows the store’s Pay in 4 answer as offered or unknown: a signed no is unknown', async () => {
     const offered = setup()
     expect((await opened(offered.agent)).quote.payLater).toBe('offered')
     const declined = setup()
     expect(
       (await opened(declined.agent, { payLater: { eligible: false, source: 'merchant-sdk' } }))
         .quote.payLater,
-    ).toBe('not-offered')
+    ).toBe('unknown')
     const unknown = setup()
     expect((await opened(unknown.agent, { payLater: undefined })).quote.payLater).toBe('unknown')
     // Over $2,000 PayPal's answer can't be an offer of Pay in 4.
@@ -451,11 +452,11 @@ describe('POST /api/handoff/return (contract §4)', () => {
     expect(same.verified).toMatchObject({ ok: true, payload: { verdict: 'wait' } })
   })
 
-  it('omits payIn4Fits when the store said Pay in 4 isn’t offered', async () => {
+  it('judges Pay in 4 by the range when the store signed a no, as for no answer (§3.2)', async () => {
     const { agent } = setup()
     await opened(agent, { payLater: { eligible: false, source: 'merchant-sdk' } })
     const { verified } = await result(agent)
-    expect(verified?.ok && verified.payload.payIn4Fits).toBeUndefined()
+    expect(verified?.ok && typeof verified.payload.payIn4Fits).toBe('boolean')
   })
 
   it('keeps an existing query and returns the plain link when the plan needs details first', async () => {
@@ -499,7 +500,7 @@ describe('the decision for a store’s item', () => {
     expect(eligibility).toHaveBeenCalledTimes(1)
   })
 
-  it('shows Pay in 4 as unavailable when the store said it isn’t offered', async () => {
+  it('reads a store’s signed no as unknown: range only (§3.2)', async () => {
     const { agent } = setup()
     await opened(agent, { payLater: { eligible: false, source: 'merchant-sdk' } })
     const response = await post(agent, '/api/compare', {
@@ -507,7 +508,7 @@ describe('the decision for a store’s item', () => {
       amountCents: 119900,
       qid: quote.qid,
     })
-    expect(response.body.payIn4).toMatchObject({ available: false, eligibility: 'unavailable' })
+    expect(response.body.payIn4).toMatchObject({ available: true, eligibility: 'range-only' })
   })
 
   it('treats a quote without an answer as range only', async () => {
@@ -527,5 +528,244 @@ describe('the decision for a store’s item', () => {
     const other = request.agent(app)
     const response = await post(other, '/api/compare', { amountCents: 119900, qid: quote.qid })
     expect(response.status).toBe(404)
+  })
+})
+
+describe('POST /api/handoff/save (contract §4, Save for <date>)', () => {
+  const WAIT = '2026-10-23'
+  /** Saved items with a store link: Maya's sample has her own saved items too. */
+  const savedOf = async (agent: Agent) =>
+    ((await state(agent)).saved ?? []).filter((item) => item.sourceUrl)
+
+  it('saves the store’s item with its link, name and price, as the store’s price', async () => {
+    const { agent } = setup()
+    await opened(agent)
+    const response = await post(agent, '/api/handoff/save', { qid: quote.qid, waitDate: WAIT })
+    expect(response.status).toBe(200)
+    expect(response.body.item).toMatchObject({
+      kind: 'custom',
+      name: 'Everyday camera',
+      amountCents: 119900,
+      option: 'wait',
+      waitDate: WAIT,
+      sourceUrl: `${STORE}/p/camera`,
+      merchantName: 'Larkspur Supply',
+      priceSource: 'component',
+    })
+    const [saved] = await savedOf(agent)
+    expect(saved).toMatchObject({
+      sourceUrl: `${STORE}/p/camera`,
+      merchantName: 'Larkspur Supply',
+      priceSource: 'component',
+      status: 'active',
+    })
+    // Saving again updates the same item rather than adding another.
+    await post(agent, '/api/handoff/save', { qid: quote.qid, waitDate: '2026-10-24' })
+    const items = await savedOf(agent)
+    expect(items).toHaveLength(1)
+    expect(items[0]!.waitDate).toBe('2026-10-24')
+  })
+
+  it('saves a price the shopper changed as theirs, still linked to the store', async () => {
+    const { agent } = setup()
+    await opened(agent)
+    const response = await post(agent, '/api/handoff/save', {
+      qid: quote.qid,
+      waitDate: WAIT,
+      amountCents: 125000,
+      itemName: 'Everyday camera with lens',
+    })
+    expect(response.body.item).toMatchObject({
+      name: 'Everyday camera with lens',
+      amountCents: 125000,
+      priceSource: 'user',
+      sourceUrl: `${STORE}/p/camera`,
+    })
+    // The store is the verified one, so it keeps its own name.
+    expect((await savedOf(agent))[0]).toMatchObject({
+      priceSource: 'user',
+      merchantName: 'Larkspur Supply',
+    })
+    // The store's own price sent back is not a change.
+    const same = setup()
+    await opened(same.agent)
+    const kept = await post(same.agent, '/api/handoff/save', {
+      qid: quote.qid,
+      waitDate: WAIT,
+      amountCents: 119900,
+    })
+    expect(kept.body.item.priceSource).toBe('component')
+  })
+
+  it('takes only the quote and the day: the browser never sets the source', async () => {
+    const { agent } = setup()
+    await opened(agent)
+    for (const extra of [
+      { priceSource: 'component' },
+      { sourceUrl: `${STORE}/p/other` },
+      { merchantName: 'Someone else' },
+    ])
+      expect(
+        (await post(agent, '/api/handoff/save', { qid: quote.qid, waitDate: WAIT, ...extra }))
+          .status,
+      ).toBe(400)
+    // The ordinary save refuses "component" too (C6).
+    const plain = await post(agent, '/api/saved', {
+      kind: 'custom',
+      name: 'Everyday camera',
+      amountCents: 119900,
+      sourceUrl: `${STORE}/p/camera`,
+      priceSource: 'component',
+    })
+    expect(plain.status).toBe(400)
+    expect(await savedOf(agent)).toHaveLength(0)
+  })
+
+  it('saves only a quote this session holds, with the hand-off on', async () => {
+    const { app, agent } = setup()
+    await opened(agent)
+    const other = request.agent(app)
+    await opened(other)
+    expect(
+      (await post(other, '/api/handoff/save', { qid: quote.qid, waitDate: WAIT })).status,
+    ).toBe(404)
+    expect(
+      (
+        await post(agent, '/api/handoff/save', {
+          qid: 'q_ZZZZZZZZZZZZZZZZZZZZZZ',
+          waitDate: WAIT,
+        })
+      ).status,
+    ).toBe(404)
+    // A day outside the plan's window is refused like any saved plan.
+    expect(
+      (await post(agent, '/api/handoff/save', { qid: quote.qid, waitDate: '2027-01-01' })).status,
+    ).toBe(400)
+    const off = setup({
+      config: { ...config, handoffSecret: undefined, merchantOrigin: undefined },
+    })
+    expect(
+      (await post(off.agent, '/api/handoff/save', { qid: quote.qid, waitDate: WAIT })).status,
+    ).toBe(404)
+  })
+
+  it('stores the quote’s qid on the saved item, so its reported purchase can clear it (§5)', async () => {
+    const { agent } = setup()
+    await opened(agent)
+    const { item } = (await post(agent, '/api/handoff/save', { qid: quote.qid, waitDate: WAIT }))
+      .body
+    expect(item.qid).toBe(quote.qid)
+    expect((await savedOf(agent))[0]!.qid).toBe(quote.qid)
+  })
+
+  it('judges a saved store item’s Pay in 4 by the range, never by Worth’s own PayPal', async () => {
+    const { agent, eligibility } = setup()
+    await opened(agent)
+    const { item } = (await post(agent, '/api/handoff/save', { qid: quote.qid, waitDate: WAIT }))
+      .body
+    const compare = await post(agent, '/api/compare', {
+      amountCents: 119900,
+      itemName: 'Everyday camera',
+      savedId: item.id,
+    })
+    expect(compare.status).toBe(200)
+    expect(compare.body.payIn4).toMatchObject({ available: true, eligibility: 'range-only' })
+    expect(eligibility).not.toHaveBeenCalled()
+    // A saved item without a store link, or an ID this session doesn't hold, is Worth's own.
+    await post(agent, '/api/compare', { amountCents: 119900, itemName: 'X', savedId: 'nope' })
+    expect(eligibility).toHaveBeenCalledTimes(1)
+  })
+
+  it('does the same for an edited store item saved with a local link in development', async () => {
+    const LOCAL = 'http://localhost:8788'
+    const local = createHandoff({
+      secret: SECRET,
+      mid: 'larkspur',
+      merchantOrigin: LOCAL,
+      now: () => clock.value.getTime(),
+    })
+    const dev = setup({ config: { ...config, merchantOrigin: LOCAL } })
+    await open(
+      dev.agent,
+      local.signQuote({ ...quote, returnUrl: `${LOCAL}/p/camera`, imageUrl: undefined }),
+    )
+    const { item } = (
+      await post(dev.agent, '/api/handoff/save', {
+        qid: quote.qid,
+        waitDate: WAIT,
+        amountCents: 125000,
+      })
+    ).body
+    expect(item.priceSource).toBe('user')
+    const compare = await post(dev.agent, '/api/compare', {
+      amountCents: 125000,
+      itemName: 'Everyday camera',
+      savedId: item.id,
+    })
+    expect(compare.body.payIn4).toMatchObject({ eligibility: 'range-only' })
+    expect(dev.eligibility).not.toHaveBeenCalled()
+  })
+
+  it('never re-reads the store’s price through the lookup', async () => {
+    const { agent } = setup()
+    await opened(agent)
+    const { item } = (await post(agent, '/api/handoff/save', { qid: quote.qid, waitDate: WAIT }))
+      .body
+    // Refused for the store's own price before any day or lookup is considered.
+    const recheck = await post(agent, `/api/saved/${item.id}/recheck`, {})
+    expect(recheck.status).toBe(409)
+    expect(recheck.body.code).toBe('NOT_RECHECKABLE')
+  })
+
+  it('in development, allows exactly the local store origin for a saved link', async () => {
+    const LOCAL = 'http://localhost:8788'
+    const local = createHandoff({
+      secret: SECRET,
+      mid: 'larkspur',
+      merchantOrigin: LOCAL,
+      now: () => clock.value.getTime(),
+    })
+    const dev = setup({ config: { ...config, merchantOrigin: LOCAL } })
+    const token = local.signQuote({
+      ...quote,
+      returnUrl: `${LOCAL}/p/camera`,
+      imageUrl: `${LOCAL}/images/camera.jpg`,
+    })
+    expect((await open(dev.agent, token)).status).toBe(200)
+    await post(dev.agent, '/api/handoff/save', { qid: quote.qid, waitDate: WAIT })
+    expect((await savedOf(dev.agent))[0]).toMatchObject({
+      sourceUrl: `${LOCAL}/p/camera`,
+      merchantName: 'Larkspur Supply',
+      priceSource: 'component',
+    })
+    // Only that origin: another local link a browser saves is still refused.
+    const pasted = await post(dev.agent, '/api/saved', {
+      kind: 'custom',
+      name: 'Lamp',
+      amountCents: 4500,
+      sourceUrl: 'http://localhost:9999/p/lamp',
+      priceSource: 'user',
+    })
+    expect(pasted.status).toBe(400)
+  })
+
+  it('outside development, never shows a local link, even the store’s', () => {
+    const item = {
+      id: 'a',
+      kind: 'custom' as const,
+      name: 'Everyday camera',
+      amountCents: 119900,
+      createdAt: '2026-10-03T12:00:00.000Z',
+      status: 'active' as const,
+      sourceUrl: 'http://localhost:8788/p/camera',
+      merchantName: 'Larkspur Supply',
+      priceSource: 'component' as const,
+    }
+    const LOCAL = 'http://localhost:8788'
+    const shown = (allowLocal: boolean) =>
+      publicSaved([item], '2026-10-03', [], { origin: LOCAL, allowLocal })[0]!
+    expect(shown(true)).toMatchObject({ sourceUrl: `${LOCAL}/p/camera`, priceSource: 'component' })
+    expect(shown(false).sourceUrl).toBeUndefined()
+    expect(shown(false).priceSource).toBeUndefined()
   })
 })

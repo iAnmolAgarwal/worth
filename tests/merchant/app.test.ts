@@ -266,8 +266,10 @@ describe('quotes for Worth', () => {
       amountCents: 34900,
       payLater: { eligible: true, source: 'merchant-sdk' },
     })
+    // Only a yes is signed; a no reads as unknown and leaves payLater out (contract §3.2).
     const no = await request(app).get('/api/worth-quote?productId=headphones&payLater=false')
-    expect(worth.open('quote', no.body.token)).toMatchObject({ payLater: { eligible: false } })
+    expect(no.status).toBe(200)
+    expect(worth.open('quote', no.body.token)).not.toHaveProperty('payLater')
     await request(app).get('/api/worth-quote?productId=nope').expect(404)
     await request(app).get('/api/worth-quote?productId=camera&payLater=maybe').expect(400)
   })

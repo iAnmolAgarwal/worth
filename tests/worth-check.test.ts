@@ -160,6 +160,14 @@ describe('Pay in 4 from the store’s own SDK (contract §3.2)', () => {
     expect(new URL(String(fetchMock.mock.calls[0]![0])).searchParams.has('payLater')).toBe(false)
   })
 
+  it('doesn’t refresh a link without an answer when PayPal says no', async () => {
+    const element = mount({ href: href(), amount: '1199.00', 'refresh-url': '/q' })
+    element.paypal = sdk(false)
+    await settle()
+    await settle()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('leaves payLater unset for PAYLATER, another country or an unknown code', async () => {
     expect(await payIn4Offered(payIn4(), '50.00')).toBe(true)
     expect(await payIn4Offered(sdk(false), '5.00')).toBeUndefined()

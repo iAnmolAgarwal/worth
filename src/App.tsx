@@ -286,6 +286,7 @@ export default function App() {
         params.set('amount', String(request.amountCents))
         params.set('item', request.itemName ?? 'Your purchase')
         if (request.sourceUrl) params.set('link', request.sourceUrl)
+        if (request.savedId) params.set('saved', request.savedId)
       }
       params.set('from', from)
       // Channel3's price counts as read only in this tab's memory, never from the URL (C5).

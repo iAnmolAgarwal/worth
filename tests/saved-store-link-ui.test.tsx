@@ -124,6 +124,35 @@ describe('the saved card', () => {
   })
 })
 
+describe('an item saved from a store’s hand-off (/check)', () => {
+  it('says the price came from the store, and links back on the ready day', async () => {
+    const state = makeState([
+      linked({ priceSource: 'component', status: 'active', waitDate: '2026-10-30' }),
+    ])
+    render(<Saved {...props} state={state} />)
+    expect(screen.getAllByText('Price from Larkspur Supply').length).toBeGreaterThan(0)
+    expect(screen.queryByText(/confirmed by you|you confirmed/)).toBeNull()
+    cleanup()
+    const ready = makeState([linked({ priceSource: 'component' })])
+    route(ready, new Error('unused'))
+    render(<Saved {...props} state={ready} />)
+    expect(screen.getByRole('link', { name: /Back to Larkspur Supply/ }).getAttribute('href')).toBe(
+      LINK,
+    )
+    // The store's own price is never read again through the lookup.
+    await screen.findByText(/Checked just now/)
+    expect(recheckCalls()).toHaveLength(0)
+    // Its comparison runs at the saved price, names the saved item so the server judges Pay in 4
+    // by the range, and never claims the store's price as the shopper's.
+    const compare = apiMock.mock.calls.find(([path]) => path === '/compare')
+    expect(compare?.[1]).toEqual({
+      amountCents: 12900,
+      itemName: 'Trailhead Daypack 28L',
+      savedId: 'saved-pack',
+    })
+  })
+})
+
 describe('the ready day for an item from another store', () => {
   it('links back to the store instead of any checkout in Worth', async () => {
     const state = makeState([linked({ priceSource: 'user' })])
@@ -158,6 +187,7 @@ describe('the ready day for an item from another store', () => {
       {
         amountCents: 10900,
         itemName: 'Trailhead Daypack 28L',
+        savedId: 'saved-pack',
         sourceUrl: LINK,
         priceSource: 'channel3',
       },

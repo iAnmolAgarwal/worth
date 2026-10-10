@@ -49,6 +49,8 @@ export type DecisionRequest = {
   priceSource?: 'channel3' | 'user'
   /** A store's quote opened on /check, so the comparison uses the store's Pay in 4 answer. */
   qid?: string
+  /** A saved item with a store link: the server reads the link and judges Pay in 4 by range. */
+  savedId?: string
 }
 /**
  * A store's item from a signed hand-off (/check). The store sells it, so the way back to the
@@ -56,7 +58,8 @@ export type DecisionRequest = {
  */
 export interface DecisionHandoff {
   intro: ReactNode
-  actions: (notes: boolean) => ReactNode
+  /** The actions for this answer: the way back to the store, and Save for a wait plan's day. */
+  actions: (notes: boolean, c: Comparison) => ReactNode
   /** Under the answer, once: the report-back choice. */
   footer?: ReactNode
   merchant: string
@@ -780,7 +783,7 @@ export function Decision({
     <Frame
       actions={
         handoff
-          ? handoff.actions(false)
+          ? handoff.actions(false, c)
           : product
             ? actions(false)
             : customActions(false) || undefined
@@ -946,7 +949,7 @@ export function Decision({
               </a>
             )}
             {handoff ? (
-              <div className="rail-actions">{handoff.actions(true)}</div>
+              <div className="rail-actions">{handoff.actions(true, c)}</div>
             ) : (
               <>
                 {product && <div className="rail-actions">{actions(true)}</div>}
