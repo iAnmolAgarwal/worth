@@ -1336,11 +1336,13 @@ describe('iteration 2 fixes', () => {
     const group = await screen.findByRole('radiogroup', { name: 'Your options' })
     expect(within(group).getByText('Below cushion')).toBeTruthy()
     expect(within(group).getByText('Above cushion')).toBeTruthy()
-    expect(within(group).getByText('At your limit')).toBeTruthy()
-    expect(within(group).queryByText('Fits')).toBeNull()
-    // Buy today and Wait name their period minimum as the chart does; Spend less shows its limit.
+    // Something cheaper is the alternative, not a competing verdict: up to its limit fits today.
+    expect(within(group).getByText('Fits today')).toBeTruthy()
+    expect(within(group).queryByText('At your limit')).toBeNull()
+    // Buy today and Wait name their period minimum as the chart does; Something cheaper its limit.
     expect(within(group).getAllByText('Lowest point')).toHaveLength(2)
-    expect(within(group).getByText('Most you can spend today')).toBeTruthy()
+    expect(within(group).getByText('Up to')).toBeTruthy()
+    expect(within(group).getByText('fits today if you skip the everyday camera')).toBeTruthy()
     expect(within(group).queryByText('Lowest balance')).toBeNull()
   })
 

@@ -1,9 +1,17 @@
-import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import {
+  useId,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type KeyboardEvent,
+  type ReactNode,
+} from 'react'
 import {
   ArrowLeft,
   Bookmark,
   CalendarCheck,
   CalendarDays,
+  ArrowRight,
   ChevronDown,
   CircleAlert,
   CircleCheck,
@@ -15,7 +23,7 @@ import {
 import { PAY_IN_4_DATES_NOTE, PAY_IN_4_SPACING } from '../shared/collision'
 import { confirmedSchedule, PAY_IN_4_MAX_CENTS, PAY_IN_4_MIN_CENTS } from '../shared/finance'
 import type { Alternative, OptionResult, Product } from '../shared/types'
-import { AlternativesPanel } from './Alternatives'
+import { AlternativesLoading, SimilarItems, useSimilarItems } from './Alternatives'
 import { BalanceChart } from './BalanceChart'
 import type { AppState, Comparison, PayIn4, SavePlan, SaveTarget } from './contract'
 import { sourceTarget } from './contract'
@@ -51,7 +59,7 @@ export type DecisionRequest = {
   qid?: string
   /** A saved item with a store link: the server reads the link and judges Pay in 4 by range. */
   savedId?: string
-  /** The budget the person stated in Ask; Spend less stays within it. */
+  /** The budget the person stated in Ask; Something cheaper stays within it. */
   budgetCents?: number
 }
 /**
@@ -92,22 +100,33 @@ function optionOf(c: Comparison, key: OptionKey): OptionResult | undefined {
   return c[key]
 }
 
-/** "Below cushion from Mon, Oct 12 (rent). Lowest Thu, Oct 15, before payday." */
-export function breachLine(option: OptionResult, cushion: number, short = false) {
+/** "Below cushion from Mon, Oct 12 (rent)": the day the balance first goes below the cushion. */
+export function breachLine(option: OptionResult, cushion: number) {
   const breach = firstBelow(option.points, cushion)
   if (!breach) return undefined
   const bill = billOn(breach)
-  const day =
-    breach.date === option.points[0]?.date
-      ? 'today'
-      : short
-        ? dayLabel(breach.date)
-        : dayLabel(breach.date)
-  const first = `Below cushion from ${day}${bill ? ` (${lower(bill)})` : ''}`
-  if (short) return first
-  if (breach.date === option.lowestDate)
-    return `${first}.${paydayOn(option.points, option.lowestDate) ? ' Lowest that day, before payday.' : ''}`
-  return `${first}. Lowest ${dayLabel(option.lowestDate)}${paydayOn(option.points, option.lowestDate) ? ', before payday' : ''}.`
+  const day = breach.date === option.points[0]?.date ? 'today' : dayLabel(breach.date)
+  return `Below cushion from ${day}${bill ? ` (${lower(bill)})` : ''}`
+}
+
+/**
+ * A miss small enough to name: the shortfall is at most a tenth of the price, so "Just $8.99
+ * under your cushion" says more than "below cushion" does.
+ */
+export const smallMiss = (option: OptionResult, amountCents: number) =>
+  option.headroomCents < 0 && -option.headroomCents * 10 <= amountCents
+
+/** The option cards' body: two lines at most, every number the engine's. */
+export function optionWhy(c: Comparison, k: OptionKey, option: OptionResult) {
+  if (k === 'spendLess')
+    return c.spendLess.maxPriceCents <= 0
+      ? 'Nothing fits today without going below your cushion.'
+      : `fits today if you skip the ${lower(c.itemName)}`
+  if (option.lowestBalanceCents >= c.cushionCents)
+    return `${dayLabel(option.lowestDate)}, ${money(option.headroomCents)} above cushion`
+  return smallMiss(option, c.amountCents)
+    ? `Just ${money(-option.headroomCents)} under your cushion on ${dayLabel(option.lowestDate)}`
+    : breachLine(option, c.cushionCents)
 }
 
 /** The verdict as a headline: what to do, before anything else. */
@@ -160,9 +179,12 @@ function OptionCard({
   tabIndex,
   onKeyDown,
   buttonRef,
+  similar,
 }: {
   c: Comparison
   k: OptionKey
+  /** Similar items under the limit exist, so the Something cheaper card offers them. */
+  similar?: boolean
   checked: boolean
   onSelect: () => void
   tabIndex: number
@@ -187,22 +209,16 @@ function OptionCard({
       </div>
     )
   }
-  const status =
-    k === 'spendLess' && c.spendLess.maxPriceCents <= 0
+  const cheaper = k === 'spendLess'
+  const status = !cheaper
+    ? optionStatus(option)
+    : c.spendLess.maxPriceCents <= 0
       ? ({ tone: 'info', text: 'Nothing fits' } as const)
-      : optionStatus(option)
+      : ({
+          tone: 'ok',
+          text: c.budgetCents !== undefined ? 'Within your budget' : 'Fits today',
+        } as const)
   const below = option.lowestBalanceCents < c.cushionCents
-  const fragile = fits(option) && option.stressLowestCents < c.cushionCents
-  const why =
-    k === 'spendLess'
-      ? c.spendLess.maxPriceCents <= 0
-        ? 'Nothing fits today without going below your cushion.'
-        : option.headroomCents === 0
-          ? `Leaves exactly your cushion on ${dayLabel(option.lowestDate)}`
-          : `${money(option.headroomCents)} above cushion on ${dayLabel(option.lowestDate)}`
-      : below
-        ? breachLine(option, c.cushionCents)
-        : `${dayLabel(option.lowestDate)}, ${money(option.headroomCents)} above cushion`
   return (
     <button
       type="button"
@@ -220,21 +236,17 @@ function OptionCard({
       </span>
       <span className="kv">
         <span className="k">
-          {k === 'spendLess'
-            ? c.budgetCents !== undefined
-              ? 'Your budget today'
-              : 'Most you can spend today'
-            : 'Lowest point'}
+          {cheaper ? (c.budgetCents !== undefined ? 'Your budget today' : 'Up to') : 'Lowest point'}
         </span>
-        <span className={cx('v num', k !== 'spendLess' && below && 'bad')}>
-          {k === 'spendLess' ? money(c.spendLess.maxPriceCents) : signed(option.lowestBalanceCents)}
+        <span className={cx('v num', !cheaper && below && 'bad')}>
+          {cheaper ? money(c.spendLess.maxPriceCents) : signed(option.lowestBalanceCents)}
         </span>
       </span>
-      <span className="why">{why}</span>
-      {fragile && (
-        <span className="tight">
-          <TriangleAlert className="ico" aria-hidden="true" />
-          Tight: dips below if spending runs 20% higher
+      <span className="why">{optionWhy(c, k, option)}</span>
+      {/* Choosing this card shows the list, so the "link" is the card's own action. */}
+      {cheaper && similar && (
+        <span className="opt-link">
+          See similar items <ArrowRight className="ico" aria-hidden="true" />
         </span>
       )}
     </button>
@@ -313,21 +325,32 @@ export function ChartTile({
   )
 }
 
+/** The relation to the nearest bill, always two lines: the gap, then the bill. */
 function nearText(
   near: Extract<PayIn4, { available: true }>['instalments'][number]['nearestBill'],
 ) {
-  if (!near) return <>No bill within about 3 days</>
+  if (!near)
+    return (
+      <>
+        <span className="rel">No bill within</span> <span className="bill">about 3 days</span>
+      </>
+    )
   // PayPal's own dates can run a day or two later than this schedule, so every gap is "about".
   const days = Math.abs(near.daysFromInstalment)
   const name = <b>{lower(near.name)}</b>
-  if (near.daysFromInstalment === 0) return <>About the same day as your {name}</>
-  return near.daysFromInstalment < 0 ? (
+  if (near.daysFromInstalment === 0)
+    return (
+      <>
+        <span className="rel">About the same day</span> <span className="bill">as {name}</span>
+      </>
+    )
+  return (
     <>
-      About {days} {days === 1 ? 'day' : 'days'} after {name}
-    </>
-  ) : (
-    <>
-      About {days} {days === 1 ? 'day' : 'days'} before {name}
+      <span className="rel">
+        About {days} {days === 1 ? 'day' : 'days'}{' '}
+        {near.daysFromInstalment < 0 ? 'after' : 'before'}
+      </span>{' '}
+      <span className="bill">{name}</span>
     </>
   )
 }
@@ -399,8 +422,7 @@ function PayIn4Panel({
           </span>
           <span className="meta">
             4 payments {amounts.size > 1 ? 'from' : 'of'}{' '}
-            {money(p4.instalments.at(-1)!.amountCents)}, {PAY_IN_4_SPACING} from today ·
-            illustrative
+            {money(p4.instalments.at(-1)!.amountCents)}, {PAY_IN_4_SPACING} from today
           </span>
         </span>
         <ChevronDown className="ico chev" aria-hidden="true" />
@@ -423,21 +445,26 @@ function PayIn4Panel({
                 <Ring part={item.number} />
                 <div>
                   <div className="amt num">{money(item.amountCents)}</div>
+                  {/* Always two lines, "Today" too, so every card's blocks line up. */}
                   <div className="when">
                     {item.date === c.today ? (
                       'Today'
                     ) : (
                       <>
-                        About <span className="nowrap">{dayLabel(item.date)}</span>
+                        <span className="about">About</span>{' '}
+                        <span className="nowrap">{dayLabel(item.date)}</span>
                       </>
                     )}
                   </div>
                 </div>
               </div>
               <div className="near">{nearText(item.nearestBill)}</div>
-              <div className="after num">
-                Lowest after: {signed(item.balanceCents)} on{' '}
-                <span className="nowrap">{dayLabel(item.lowestDate)}</span>
+              <div className="after">
+                <span className="lbl">Lowest after</span>
+                <span className="val num">
+                  <span className="nowrap">{signed(item.balanceCents)}</span> ·{' '}
+                  <span className="nowrap">{dayLabel(item.lowestDate)}</span>
+                </span>
               </div>
             </div>
           ))}
@@ -543,6 +570,18 @@ export function Decision({
   const product = active.productId
     ? state.products.find((item) => item.id === active.productId)
     : undefined
+  const narrow = useNarrow()
+  // Something cheaper's similar items, asked for under the card's own limit so both state one
+  // number. Fetched with the comparison, so the card offers them only when there are some.
+  const cheaperLimit = c && !fits(c.buyToday) ? c.spendLess.maxPriceCents : 0
+  const similar = useSimilarItems(
+    state,
+    c && cheaperLimit > 0
+      ? product
+        ? { productId: product.id, maxPriceCents: cheaperLimit }
+        : { itemName: c.itemName, amountCents: c.amountCents, maxPriceCents: cheaperLimit }
+      : null,
+  )
   if (error)
     return (
       <Frame>
@@ -787,6 +826,18 @@ export function Decision({
         </div>
       </Frame>
     )
+  const listShown =
+    selected === 'spendLess' && cheaperLimit > 0 && Boolean(similar.result || similar.loading)
+  const list = similar.result ? (
+    <SimilarItems state={state} result={similar.result} onSave={onSaveAlternative} />
+  ) : (
+    <AlternativesLoading />
+  )
+  const railActions = handoff
+    ? handoff.actions(true, c)
+    : product
+      ? actions(true)
+      : customActions(true) || undefined
   return (
     <Frame
       actions={
@@ -893,6 +944,7 @@ export function Decision({
                 checked={selected === key}
                 tabIndex={selected === key ? 0 : -1}
                 onSelect={() => setPicked(key)}
+                similar={Boolean(similar.result)}
                 onKeyDown={(event) => move(event, key)}
                 buttonRef={(element) => {
                   radios.current[index] = element
@@ -900,6 +952,8 @@ export function Decision({
               />
             ))}
           </div>
+          {/* Narrow screens: the list sits right under the cards that asked for it. */}
+          {listShown && narrow && list}
           {/* The Pay in 4 comparison sits right under the options, so its collisions are seen (#7). */}
           <PayIn4Panel
             c={c}
@@ -907,64 +961,51 @@ export function Decision({
             onToggle={() => setP4Open(!p4Open)}
             instance={instance}
           />
-          {/* Under Spend less: real items from other stores that fit today, for discovery only. */}
-          {selected === 'spendLess' &&
-            keys.includes('spendLess') &&
-            c.spendLess.maxPriceCents > 0 && (
-              <AlternativesPanel
-                state={state}
-                request={
-                  product
-                    ? { productId: product.id }
-                    : { itemName: c.itemName, amountCents: c.amountCents }
-                }
-                onSave={onSaveAlternative}
-              />
-            )}
           <ChartTile c={c} k={selected} payIn4={p4Open ? p4 : undefined} scaleWith={p4} />
         </div>
         <aside className="rail decision-rail" aria-label="Item and reasons">
-          <div className="tile">
-            <div className="product">
-              {product && <img src={product.image} alt={product.name} />}
-              {handoff?.imageUrl && <img src={handoff.imageUrl} alt={c.itemName} />}
-              <div>
-                <div className="pt">{product?.name ?? c.itemName}</div>
-                <div className="meta">
-                  {handoff
-                    ? `Sold by ${handoff.merchant}`
-                    : product
-                      ? `Sold by ${product.merchant} · demo\u00a0store`
-                      : c.source
-                        ? `At ${c.source.merchantName} · ${c.source.priceSource === 'channel3' ? 'price read by Channel3, confirmed by you' : 'price you entered'}`
-                        : 'Checkout is for demo store items'}
-                </div>
-                <div className="num strong" style={{ fontWeight: 700, marginTop: 4 }}>
-                  {money(c.amountCents)}
+          {/* Something cheaper swaps the item for the similar items; the actions stay. */}
+          {listShown && !narrow ? (
+            <>
+              {list}
+              <div className="rail-actions bare">{railActions}</div>
+            </>
+          ) : (
+            <div className="tile">
+              <div className="product">
+                {product && <img src={product.image} alt={product.name} />}
+                {handoff?.imageUrl && <img src={handoff.imageUrl} alt={c.itemName} />}
+                <div>
+                  <div className="pt">{product?.name ?? c.itemName}</div>
+                  <div className="meta">
+                    {handoff
+                      ? `Sold by ${handoff.merchant}`
+                      : product
+                        ? `Sold by ${product.merchant} · demo\u00a0store`
+                        : c.source
+                          ? `At ${c.source.merchantName} · ${c.source.priceSource === 'channel3' ? 'price read by Channel3, confirmed by you' : 'price you entered'}`
+                          : 'Checkout is for demo store items'}
+                  </div>
+                  <div className="num strong" style={{ fontWeight: 700, marginTop: 4 }}>
+                    {money(c.amountCents)}
+                  </div>
                 </div>
               </div>
+              {c.source && (
+                <a
+                  className="caption"
+                  href={c.source.sourceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ display: 'inline-flex', gap: 4, alignItems: 'center', marginTop: 8 }}
+                >
+                  Open the store page <ExternalLink size={14} aria-hidden="true" />
+                  <span className="sr"> (opens in a new tab)</span>
+                </a>
+              )}
+              {railActions && <div className="rail-actions">{railActions}</div>}
             </div>
-            {c.source && (
-              <a
-                className="caption"
-                href={c.source.sourceUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ display: 'inline-flex', gap: 4, alignItems: 'center', marginTop: 8 }}
-              >
-                Open the store page <ExternalLink size={14} aria-hidden="true" />
-                <span className="sr"> (opens in a new tab)</span>
-              </a>
-            )}
-            {handoff ? (
-              <div className="rail-actions">{handoff.actions(true, c)}</div>
-            ) : (
-              <>
-                {product && <div className="rail-actions">{actions(true)}</div>}
-                {custom && <div className="rail-actions">{customActions(true)}</div>}
-              </>
-            )}
-          </div>
+          )}
           <WhyThisAnswer explanation={explanation} />
           <Fold id="inputs" title="What went into this">
             <dl className="kvlist">
@@ -994,13 +1035,10 @@ export function Decision({
               <div>
                 <dt>If everyday spending runs 20% higher</dt>
                 <dd className="num">
-                  Lowest {signed(selectedOption.stressLowestCents)}
-                  <br />
-                  {selectedOption.stressLowestCents < c.cushionCents ? (
-                    <Pill tone="warn">Below cushion</Pill>
-                  ) : (
-                    <Pill tone="ok">Stays above</Pill>
-                  )}
+                  <StressLow
+                    lowestCents={selectedOption.stressLowestCents}
+                    cushionCents={c.cushionCents}
+                  />
                 </dd>
               </div>
             </dl>
@@ -1051,6 +1089,50 @@ export function Decision({
         </Dialog>
       )}
     </Frame>
+  )
+}
+
+/**
+ * "Lowest $620.01" on one line, the amount in a pill coloured by where it lands: above the cushion,
+ * exactly at it, or below it. An icon and hidden words say the same, never colour alone.
+ */
+export function StressLow({
+  lowestCents,
+  cushionCents,
+}: {
+  lowestCents: number
+  cushionCents: number
+}) {
+  const [tone, Icon, words]: [Tone, typeof CircleCheck, string] =
+    lowestCents > cushionCents
+      ? ['ok', CircleCheck, 'stays above your cushion']
+      : lowestCents === cushionCents
+        ? ['warn', CircleAlert, 'exactly your cushion']
+        : ['bad', TriangleAlert, 'below your cushion']
+  return (
+    <span className="stress-low">
+      Lowest{' '}
+      <span className={cx('amt-pill', tone)} data-tone={tone}>
+        <Icon className="ico" aria-hidden="true" />
+        {signed(lowestCents)}
+      </span>
+      <span className="sr">, {words}</span>
+    </span>
+  )
+}
+
+/** Below 1024 px the rail drops under the main column, so a rail-only list moves up instead. */
+const NARROW = '(max-width: 1023px)'
+function useNarrow() {
+  return useSyncExternalStore(
+    (changed) => {
+      if (typeof matchMedia !== 'function') return () => {}
+      const query = matchMedia(NARROW)
+      query.addEventListener('change', changed)
+      return () => query.removeEventListener('change', changed)
+    },
+    () => typeof matchMedia === 'function' && matchMedia(NARROW).matches,
+    () => false,
   )
 }
 

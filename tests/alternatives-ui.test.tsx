@@ -34,7 +34,7 @@ function makeState(alternatives: AppState['config']['alternatives'] = 'ok'): App
 const found = (status: Alternatives['status'] = 'ok'): Alternatives => ({
   status,
   query: 'interchangeable lens camera',
-  maxPriceCents: 42500,
+  maxPriceCents: 44001,
   items:
     status === 'off'
       ? []
@@ -103,7 +103,7 @@ describe('Similar items that fit today', () => {
     render(<AlternativesPanel state={makeState()} request={{ productId: 'camera' }} />)
     const panel = await screen.findByRole('region', { name: 'Similar items that fit today' })
     expect(apiMock).toHaveBeenCalledWith('/alternatives?productId=camera')
-    expect(within(panel).getByText('Under $425.00 · from other stores')).toBeTruthy()
+    expect(within(panel).getByText('Up to $440.01 · from other stores')).toBeTruthy()
     const links = within(panel).getAllByRole('link')
     expect(links).toHaveLength(2)
     const first = links[0]!
@@ -203,19 +203,77 @@ describe('where the similar items appear', () => {
     onSave: vi.fn(),
     onViewActivity: vi.fn(),
   }
-  it('shows them in the Decision view once Spend less is chosen', async () => {
+  it('swaps the rail’s item for them once Something cheaper is chosen, and back', async () => {
     const user = userEvent.setup()
     const state = makeState()
     route(state)
-    render(<Decision {...props} state={state} request={{ productId: 'camera' }} />)
+    const { container } = render(
+      <Decision {...props} state={state} request={{ productId: 'camera' }} />,
+    )
     const group = await screen.findByRole('radiogroup', { name: 'Your options' })
+    // Asked for under the card's own limit, so the list and the card state one number.
+    expect(apiMock).toHaveBeenCalledWith('/alternatives?productId=camera&maxPriceCents=44001')
+    const cheaper = within(group).getByRole('radio', { name: /Something cheaper/ })
+    expect(await within(cheaper).findByText('See similar items')).toBeTruthy()
     expect(screen.queryByRole('region', { name: 'Similar items that fit today' })).toBeNull()
-    await user.click(within(group).getAllByRole('radio')[2]!)
-    expect(await screen.findByRole('region', { name: 'Similar items that fit today' })).toBeTruthy()
-    expect(apiMock).toHaveBeenCalledWith('/alternatives?productId=camera')
+    const rail = container.querySelector('.decision-rail')!
+    expect(within(rail as HTMLElement).getByText(/Sold by Larkspur Supply/)).toBeTruthy()
+    await user.click(cheaper)
+    const list = await screen.findByRole('region', { name: 'Similar items that fit today' })
+    expect(rail.contains(list)).toBe(true)
+    expect(within(list).getByText('Up to $440.01 · from other stores')).toBeTruthy()
+    expect(within(cheaper).getByText('$440.01')).toBeTruthy()
+    expect(
+      within(list).getByText('From other stores · via Channel3 · prices may change'),
+    ).toBeTruthy()
+    expect(within(rail as HTMLElement).queryByText(/Sold by Larkspur Supply/)).toBeNull()
     // Beside other stores' items, the buy action names the demo store's own product.
     expect(screen.getAllByRole('button', { name: 'Buy the everyday camera anyway' }).length).toBe(2)
     expect(screen.queryByRole('button', { name: 'Buy today anyway' })).toBeNull()
+    // Buy today or Wait brings the item back.
+    await user.click(within(group).getByRole('radio', { name: /Buy today/ }))
+    expect(screen.queryByRole('region', { name: 'Similar items that fit today' })).toBeNull()
+    expect(within(rail as HTMLElement).getByText(/Sold by Larkspur Supply/)).toBeTruthy()
+  })
+  it('puts them right under the cards when the rail drops below (phones, tablets)', async () => {
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn().mockImplementation((query: string) => ({
+        matches: query === '(max-width: 1023px)',
+        media: query,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    )
+    const user = userEvent.setup()
+    const state = makeState()
+    route(state)
+    const { container } = render(
+      <Decision {...props} state={state} request={{ productId: 'camera' }} />,
+    )
+    const group = await screen.findByRole('radiogroup', { name: 'Your options' })
+    const cheaper = within(group).getByRole('radio', { name: /Something cheaper/ })
+    await within(cheaper).findByText('See similar items')
+    await user.click(cheaper)
+    const list = await screen.findByRole('region', { name: 'Similar items that fit today' })
+    expect(container.querySelector('.decision-rail')!.contains(list)).toBe(false)
+    expect(group.nextElementSibling).toBe(list)
+    // The rail keeps the item, below everything else.
+    expect(screen.getByText(/Sold by Larkspur Supply/)).toBeTruthy()
+  })
+  it('hides See similar items when Channel3 has none under the limit', async () => {
+    const state = makeState()
+    route(state, () => found('off'))
+    render(<Decision {...props} state={state} request={{ productId: 'camera' }} />)
+    const group = await screen.findByRole('radiogroup', { name: 'Your options' })
+    await waitFor(() =>
+      expect(apiMock).toHaveBeenCalledWith('/alternatives?productId=camera&maxPriceCents=44001'),
+    )
+    await new Promise((done) => setTimeout(done, 0))
+    expect(within(group).queryByText('See similar items')).toBeNull()
+    await userEvent.setup().click(within(group).getByRole('radio', { name: /Something cheaper/ }))
+    expect(screen.queryByRole('region', { name: 'Similar items that fit today' })).toBeNull()
+    expect(screen.getByText(/Sold by Larkspur Supply/)).toBeTruthy()
   })
   it('never offers them when the item fits today', async () => {
     const state = makeState()
@@ -291,7 +349,7 @@ describe('where the similar items appear', () => {
     expect(apiMock).toHaveBeenCalledWith('/alternatives?similarTo=DBouSIg')
     expect(within(more).getByText('Compact Mirrorless Body')).toBeTruthy()
     expect(
-      within(more).getByText(/Like the Interchangeable Lens Camera Body · under \$425.00/),
+      within(more).getByText(/Like the Interchangeable Lens Camera Body · up to \$440.01/),
     ).toBeTruthy()
     await waitFor(() => expect(document.activeElement?.textContent).toBe('More like this'))
     await user.click(within(more).getByRole('button', { name: 'Back' }))

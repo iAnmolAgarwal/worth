@@ -160,7 +160,7 @@ function requestFor(reply: ChatReply, state: AppState): DecisionRequest {
   const amountCents = reply.interpretation?.amountCents ?? assessment.amountCents
   const name = reply.interpretation ? itemLabel(reply.interpretation) : assessment.itemName
   const product = matchProduct(state.products, name, amountCents)
-  // The budget the person stated caps Spend less on the comparison too (judge B8 #7).
+  // The budget the person stated caps Something cheaper on the comparison too (judge B8 #7).
   const budget = reply.budgetCents !== undefined ? { budgetCents: reply.budgetCents } : {}
   return product
     ? { productId: product.id, ...budget }
@@ -208,14 +208,14 @@ function OptionRows({ c, at, budget }: { c: Comparison; at?: Assessment; budget?
     maxCents > 0
       ? {
           key: 'spendLess',
-          title: 'Spend less',
+          title: 'Something cheaper',
           sub: `Up to ${money(maxCents)} ${later ? `on ${day}` : 'today'}${withinBudget ? ' · your budget' : ''}`,
-          // Spending exactly the most you can keeps you at your limit, whichever day it is.
+          // As on the Decision page's Something cheaper card: up to this amount fits.
           pill: withinBudget
             ? (['ok', 'Within your budget'] as const)
-            : (['warn', 'At your limit'] as const),
+            : (['ok', later ? 'Fits that day' : 'Fits today'] as const),
         }
-      : { key: 'spendLess', title: 'Spend less', sub: `Nothing fits ${day}` },
+      : { key: 'spendLess', title: 'Something cheaper', sub: `Nothing fits ${day}` },
   ]
   // Spending less only matters when the item doesn't fit as it is, or is over the budget.
   const shown = fits(buy) && !overBudget ? rows.filter((row) => row.key !== 'spendLess') : rows

@@ -11,7 +11,7 @@ import { Pill } from './ui'
  * product this server has already shown ("More like this").
  */
 export type AlternativesRequest =
-  | { productId: string }
+  | { productId: string; maxPriceCents?: number }
   | { itemName: string; amountCents?: number; maxPriceCents?: number }
   | { similarTo: string }
 
@@ -156,7 +156,7 @@ export function AlternativesList({
             {title}
           </h2>
           <div className="meta">
-            {subtitle ?? `Under ${money(result.maxPriceCents)} · from other stores`}
+            {subtitle ?? `Up to ${money(result.maxPriceCents)} · from other stores`}
           </div>
         </div>
         {headerAction ?? (example && <Pill tone="info">Example results</Pill>)}
@@ -243,7 +243,7 @@ export function AlternativesList({
   )
 }
 
-function Loading() {
+export function AlternativesLoading() {
   return (
     <div className="tile" aria-hidden="true" data-testid="alternatives-loading">
       <div className="stack tight">
@@ -258,7 +258,7 @@ function Loading() {
 
 /**
  * Similar items with "More like this": choosing a row asks Channel3 for products like it, under
- * the same limit, and "Back" returns to the first list. Used under Spend less and in Ask.
+ * the same limit, and "Back" returns to the first list. Used for Something cheaper and in Ask.
  */
 export function SimilarItems({
   state,
@@ -292,7 +292,7 @@ export function SimilarItems({
         onSave={onSave}
       />
     )
-  if (loading) return <Loading />
+  if (loading) return <AlternativesLoading />
   const back = (
     <button type="button" className="link" onClick={() => pick(undefined)}>
       <ArrowLeft size={16} aria-hidden="true" />
@@ -310,7 +310,7 @@ export function SimilarItems({
           {back}
         </div>
         <p className="meta">
-          Channel3 found nothing else like it under {money(result.maxPriceCents)} just now.
+          Channel3 found nothing else like it up to {money(result.maxPriceCents)} just now.
         </p>
       </section>
     )
@@ -318,7 +318,7 @@ export function SimilarItems({
     <AlternativesList
       result={more}
       title="More like this"
-      subtitle={`Like the ${focus.title} · under ${money(more.maxPriceCents)}`}
+      subtitle={`Like the ${focus.title} · up to ${money(more.maxPriceCents)}`}
       headerAction={back}
       headingRef={heading}
       onSave={onSave}
@@ -327,9 +327,19 @@ export function SimilarItems({
 }
 
 /**
- * "Similar items that fit today" under the Spend less option. It asks the server, which sets the
- * price limit from the plan; when Channel3 is off or finds nothing, nothing is shown.
+ * "Similar items that fit today" for the Something cheaper option: what the server found under the
+ * option's own limit, or nothing when Channel3 is off or finds nothing.
  */
+export function useSimilarItems(state: AppState, request: AlternativesRequest | null) {
+  const enabled = state.config.alternatives !== undefined && state.config.alternatives !== 'off'
+  const { data, loading } = useAlternatives(
+    enabled && request ? request : null,
+    state.profile.version,
+  )
+  return { result: shownAlternatives(data), loading }
+}
+
+/** The similar items for a request on their own: hidden when Channel3 is off or finds nothing. */
 export function AlternativesPanel({
   state,
   request,
@@ -339,10 +349,7 @@ export function AlternativesPanel({
   request: AlternativesRequest
   onSave?: (item: Alternative) => void
 }) {
-  const enabled = state.config.alternatives !== undefined && state.config.alternatives !== 'off'
-  const { data, loading } = useAlternatives(enabled ? request : null, state.profile.version)
-  if (!enabled) return null
-  if (loading) return <Loading />
-  const shown = shownAlternatives(data)
-  return shown ? <SimilarItems state={state} result={shown} onSave={onSave} /> : null
+  const { result, loading } = useSimilarItems(state, request)
+  if (loading) return <AlternativesLoading />
+  return result ? <SimilarItems state={state} result={result} onSave={onSave} /> : null
 }

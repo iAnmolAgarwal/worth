@@ -1227,20 +1227,6 @@ textarea.input {
   color: var(--c-text-2);
   font-weight: var(--fw-medium);
 }
-.opt .tight {
-  display: flex;
-  gap: 6px;
-  align-items: flex-start;
-  font-size: var(--fs-meta);
-  line-height: var(--lh-meta);
-  font-weight: var(--fw-semibold);
-  color: var(--c-warning);
-}
-.opt .tight .ico {
-  margin-top: 2px;
-  width: 16px;
-  height: 16px;
-}
 .opt .v {
   font-size: var(--fs-amount-lg);
   line-height: var(--lh-amount-lg);
@@ -1255,6 +1241,26 @@ textarea.input {
   line-height: var(--lh-meta);
   color: var(--c-text-2);
   font-weight: var(--fw-medium);
+}
+/* Side by side, every card's body takes two lines, so the cards read evenly. */
+@media (min-width: 1280px), (min-width: 768px) and (max-width: 1023px) {
+  .opt .why {
+    min-height: calc(2 * var(--lh-meta));
+  }
+}
+.opt .opt-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: auto;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  font-weight: var(--fw-semibold);
+  color: var(--c-brand);
+}
+.opt .opt-link .ico {
+  width: 16px;
+  height: 16px;
 }
 
 /* ---------- Disclosure: Pay in 4 comparison ---------- */
@@ -1346,12 +1352,13 @@ textarea.input {
 .sched {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--s-3);
+  gap: var(--s-2);
 }
+/* Narrow side padding, so "About 2 days before" and "$1,624.77 · Thu, Nov 12" fit on one line. */
 .inst {
   border: 1px solid var(--c-border);
   border-radius: var(--r-lg);
-  padding: var(--s-4);
+  padding: var(--s-4) var(--s-3);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -1373,17 +1380,31 @@ textarea.input {
 .inst .top > div {
   min-width: 0;
 }
-/* "About" wraps above the date in a narrow card; the date itself stays on one line. */
+/* The date block is always two lines ("About" over the date; "Today" alone), so rings, amounts
+   and dates sit at the same place in every card. */
 .inst .when {
   font-size: var(--fs-meta);
   line-height: var(--lh-meta);
   color: var(--c-text-2);
   font-weight: var(--fw-medium);
+  min-height: calc(2 * var(--lh-meta));
 }
+.inst .when .about {
+  display: block;
+}
+/* The relation is two fixed lines: the gap, then the bill. */
 .inst .near {
   font-size: var(--fs-meta);
   line-height: var(--lh-meta);
   color: var(--c-text-strong);
+}
+/* Each part is its own line. A very long bill or a five-digit balance wraps rather than being cut,
+   since a hidden number is worse than an uneven card. */
+.inst .near .rel,
+.inst .near .bill,
+.inst .after .lbl,
+.inst .after .val {
+  display: block;
 }
 .inst .after {
   font-size: var(--fs-caption);
@@ -1392,6 +1413,11 @@ textarea.input {
   margin-top: auto;
   padding-top: var(--s-2);
   border-top: 1px solid var(--c-divider);
+}
+.inst .after .val {
+  color: var(--c-text-strong);
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
 }
 .ring {
   width: 40px;
@@ -1554,6 +1580,41 @@ textarea.input {
 }
 .kvlist dd .pill {
   margin-top: 4px;
+}
+/* "Lowest $620.01": the amount in a pill coloured by where it lands, all on one line. */
+.stress-low {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.amt-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--r-pill);
+  font-variant-numeric: tabular-nums;
+}
+.amt-pill .ico {
+  width: 14px;
+  height: 14px;
+}
+.amt-pill.ok {
+  background: var(--c-success-bg);
+  color: var(--c-success);
+}
+.amt-pill.warn {
+  background: var(--c-warning-bg);
+  color: var(--c-warning);
+}
+.amt-pill.bad {
+  background: var(--c-danger-bg);
+  color: var(--c-danger);
+}
+.rail-actions.bare {
+  margin-top: calc(-1 * var(--s-4));
 }
 .rail-actions {
   display: flex;
@@ -2794,7 +2855,6 @@ textarea.input {
 .nowrap {
   white-space: nowrap;
 }
-.inst .near,
 .opt .why,
 .lead,
 .verdict,
@@ -2887,6 +2947,22 @@ textarea.input {
 @media (min-width: 1024px) and (max-width: 1279px) {
   .sched {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+/* Phones: each payment is one row, so its date, relation and low each read as one line. */
+@media (max-width: 767px) {
+  .inst .when {
+    min-height: 0;
+  }
+  .inst .when .about,
+  .inst .near .rel,
+  .inst .near .bill,
+  .inst .after .lbl,
+  .inst .after .val {
+    display: inline;
+  }
+  .inst .after .lbl::after {
+    content: ' ';
   }
 }
 /* Phones: the verdict outranks the option titles under it. */

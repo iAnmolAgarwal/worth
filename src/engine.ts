@@ -169,7 +169,7 @@ export const optionTitle = (key: 'buyToday' | 'wait' | 'spendLess', c: Compariso
   key === 'buyToday'
     ? 'Buy today'
     : key === 'spendLess'
-      ? 'Spend less'
+      ? 'Something cheaper'
       : c.wait.date
         ? `Wait until ${dayLabel(c.wait.date)}`
         : 'Wait'
