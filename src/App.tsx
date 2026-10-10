@@ -27,6 +27,7 @@ import { envLabel } from './engine'
 import { dayLabel, fullDate, money } from './format'
 import { Home, HomeSkeleton } from './Home'
 import { ImportDialog } from './Import'
+import { ImportReview, type ChosenFile } from './Onboarding'
 import { PlanPage, PlanWizard } from './Plan'
 import { ConfirmPlanDialog, RefundDialog } from './Reviews'
 import { migratePlanned, Saved, Settings } from './Saved'
@@ -35,7 +36,16 @@ import { usePayPalSdk } from './paypal'
 import { Alert, Button, IconButton, Wordmark } from './ui'
 
 type Screen =
-  'home' | 'ask' | 'activity' | 'plan' | 'plan-edit' | 'saved' | 'settings' | 'decision' | 'check'
+  | 'home'
+  | 'ask'
+  | 'activity'
+  | 'plan'
+  | 'plan-edit'
+  | 'saved'
+  | 'settings'
+  | 'decision'
+  | 'check'
+  | 'import'
 const LEGACY: Record<string, Screen> = {
   overview: 'home',
   assistant: 'ask',
@@ -50,7 +60,7 @@ const NAV: { screen: Screen; label: string; tabLabel?: string; icon: LucideIcon;
     { screen: 'plan', label: 'Plan', icon: SlidersHorizontal, tab: true },
     { screen: 'saved', label: 'Saved', icon: Bookmark, tab: true },
   ]
-const DETAIL: Screen[] = ['decision', 'plan-edit', 'settings', 'check']
+const DETAIL: Screen[] = ['decision', 'plan-edit', 'settings', 'check', 'import']
 
 function parseRoute(): { screen: Screen; params: URLSearchParams } {
   const [path = '', query = ''] = window.location.hash.slice(1).split('?')
@@ -62,7 +72,7 @@ function parseRoute(): { screen: Screen; params: URLSearchParams } {
       ? 'plan-edit'
       : (LEGACY[path] ??
         ((
-          ['home', 'ask', 'activity', 'plan', 'saved', 'settings', 'decision'] as string[]
+          ['home', 'ask', 'activity', 'plan', 'saved', 'settings', 'decision', 'import'] as string[]
         ).includes(path)
           ? (path as Screen)
           : 'home'))
@@ -114,6 +124,8 @@ export default function App() {
   const [importing, setImporting] = useState(false)
   /** Pay in 4 plans the last import detected, offered pre-filled in the wizard. */
   const [importedPlans, setImportedPlans] = useState<InstalmentPlanProposal[]>([])
+  /** The PayPal export chosen on Home's first-run card, reviewed at #import (P3a). Memory only. */
+  const [chosenFile, setChosenFile] = useState<ChosenFile>()
   const [prompt, setPrompt] = useState<{ text: string; id: number }>()
   const [epoch, setEpoch] = useState(0)
   const [explanations, setExplanations] = useState<Record<string, Explanation>>({})
@@ -435,7 +447,9 @@ export default function App() {
         ? 'Edit your plan'
         : screen === 'check'
           ? 'Analyse with Worth'
-          : 'Settings and privacy'
+          : screen === 'import'
+            ? 'Check what Worth found'
+            : 'Settings and privacy'
   const checkoutProduct = checkout && state.products.find((p) => p.id === checkout.productId)
 
   return (
@@ -628,12 +642,39 @@ export default function App() {
             }
             onEditPlan={() => navigate('plan/edit')}
             onImport={() => setImporting(true)}
+            onImportFile={(file) => {
+              setChosenFile(file)
+              navigate('import')
+            }}
             onOpenCheckout={openCheckout}
             onConfirmPlan={(purchaseId) => setReview({ kind: 'plan', purchaseId })}
             onReviewRefund={(purchaseId, refundId) =>
               setReview({ kind: 'refund', purchaseId, refundId })
             }
             onUpdate={replaceState}
+          />
+        )}
+        {screen === 'import' && (
+          <ImportReview
+            state={state}
+            file={chosenFile}
+            onFile={setChosenFile}
+            onEnterYourself={() => navigate('plan/edit')}
+            onCancel={() => {
+              setChosenFile(undefined)
+              navigate('home')
+            }}
+            onImported={(next) => {
+              clearConversation()
+              replaceState(next)
+            }}
+            onDone={(next) => {
+              clearConversation()
+              replaceState(next)
+              setChosenFile(undefined)
+              setToast('Your month from PayPal is ready.')
+              navigate('home')
+            }}
           />
         )}
         <div hidden={screen !== 'ask'}>

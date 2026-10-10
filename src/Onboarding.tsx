@@ -1,0 +1,1106 @@
+import { useEffect, useRef, useState } from 'react'
+import type { DragEvent } from 'react'
+import {
+  CalendarCheck,
+  CalendarClock,
+  ChevronDown,
+  CircleAlert,
+  FileText,
+  FileUp,
+  Plus,
+  ReceiptText,
+} from 'lucide-react'
+import { planCollisions, todayInTimezone } from '../shared/finance'
+import { CSV_IMPORT_LIMITS, CSV_SIZE_MESSAGE, utf8Bytes } from '../shared/limits'
+import {
+  dayPhrase,
+  draftFlows,
+  draftPlans,
+  planDates,
+  planFlows,
+  planName,
+  shiftSampleExport,
+  type DraftPlan,
+} from '../shared/onboarding'
+import type {
+  Cadence,
+  DateOrder,
+  FinancialProfile,
+  ImportPreview,
+  ScheduledFlow,
+} from '../shared/types'
+import { api } from './api'
+import type { AppState } from './contract'
+import { isActive } from './contract'
+import { SAMPLE_WHO, sampleHolds } from './copy'
+import { cadenceLabel, flowIcon } from './engine'
+import { cx, dayLabel, displayName, money, shortDate } from './format'
+import { Alert, Button, DateStepper, Disc, Field, Ring } from './ui'
+
+/** A chosen PayPal activity export. The text stays in memory only; raw CSV files aren't saved. */
+export interface ChosenFile {
+  csv: string
+  name: string
+  /** The bundled, fictional sample export. */
+  sample?: boolean
+}
+
+export const SAMPLE_FILE_NAME = 'Sample PayPal export (fictional)'
+export const PRIVACY_LINE =
+  'You choose the file; there’s no PayPal login and no account link. Raw CSV files aren’t saved: Worth reads the file in this session.'
+const ESTIMATE_NOTE =
+  'Pay in 4 dates are Worth’s estimate from your PayPal activity, about every 2 weeks. PayPal sets the actual schedule.'
+
+/** Loads the bundled sample export, moved so it ends in the week before today. */
+export async function loadSampleExport(today: string): Promise<ChosenFile> {
+  const { default: csv } = await import('./sample/paypal-activity-sample.csv?raw')
+  return { csv: shiftSampleExport(csv, today), name: SAMPLE_FILE_NAME, sample: true }
+}
+
+/** The plan's real calendar day: the demo clock pins only Maya's sample, never an import. */
+const realToday = (state: AppState) =>
+  state.demoClock ? todayInTimezone(state.profile.timezone) : state.today
+
+function usePhone() {
+  const query = '(max-width: 767px)'
+  const [phone, setPhone] = useState(() => Boolean(window.matchMedia?.(query).matches))
+  useEffect(() => {
+    const list = window.matchMedia?.(query)
+    if (!list) return
+    const change = () => setPhone(list.matches)
+    list.addEventListener('change', change)
+    return () => list.removeEventListener('change', change)
+  }, [])
+  return phone
+}
+
+/** The three plain steps of PayPal's own Activity → Statements → Download. */
+function HowTo() {
+  return (
+    <ol className="howto">
+      <li>
+        <span>
+          Log in at <b>paypal.com</b> and open <b>Activity</b>.
+        </span>
+      </li>
+      <li>
+        <span>
+          Choose <b>Statements</b> <span aria-hidden="true">›</span> <b>Download</b>. It’s next to
+          the search box.
+        </span>
+      </li>
+      <li>
+        <span>
+          Pick <b>CSV</b> and the <b>last 90 days</b>, then save the file.
+        </span>
+      </li>
+    </ol>
+  )
+}
+
+/** The drop zone: drop a file on wide screens, or choose it (phone: "Choose the CSV you downloaded"). */
+function DropZone({
+  onFile,
+  disabled,
+}: {
+  onFile: (file: ChosenFile) => void
+  disabled?: boolean
+}) {
+  const [error, setError] = useState('')
+  const [over, setOver] = useState(false)
+  const [reading, setReading] = useState(false)
+  async function read(file: File | undefined) {
+    if (!file) return
+    setError('')
+    if (file.size > CSV_IMPORT_LIMITS.maxBytes)
+      return setError('Choose a CSV smaller than 1 MB. A recent 90-day export is a good start.')
+    setReading(true)
+    try {
+      const csv = await file.text()
+      if (utf8Bytes(csv) > CSV_IMPORT_LIMITS.maxBytes) return setError(CSV_SIZE_MESSAGE)
+      onFile({ csv, name: file.name })
+    } catch {
+      setError('This file could not be read. Try choosing it again.')
+    } finally {
+      setReading(false)
+    }
+  }
+  const drop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    setOver(false)
+    if (!disabled) void read(event.dataTransfer.files?.[0])
+  }
+  return (
+    <div
+      className={cx('drop', over && 'over')}
+      onDragOver={(event) => {
+        event.preventDefault()
+        setOver(true)
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={drop}
+    >
+      <span className="co-ic" aria-hidden="true">
+        <FileUp className="ico" />
+      </span>
+      <p className="t hide-m">Drop your PayPal activity CSV here</p>
+      <p className="t show-m">Choose the CSV you downloaded</p>
+      <p className="meta hide-m">or</p>
+      <label className={cx('btn btn-primary', (disabled || reading) && 'is-disabled')}>
+        <FileUp className="ico" aria-hidden="true" />
+        <span className="hide-m">Choose your PayPal CSV</span>
+        <span className="show-m">Choose the file</span>
+        <input
+          className="sr"
+          type="file"
+          accept=".csv,text/csv"
+          aria-label="Choose your PayPal activity CSV"
+          disabled={disabled || reading}
+          onChange={(event) => {
+            void read(event.target.files?.[0])
+            event.target.value = ''
+          }}
+        />
+      </label>
+      <p className="caption">English-language export in USD · up to 1 MB</p>
+      {error && (
+        <p className="field-error" role="alert">
+          <CircleAlert size={16} aria-hidden="true" style={{ flex: 'none', marginTop: 2 }} />
+          {error}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * "Start with your PayPal activity": the first-run card on Maya's sample Home (P3a, option A). On a
+ * phone it folds to one line, so the room-to-spend figure stays above the fold.
+ */
+export function StartCard({
+  state,
+  plans,
+  onFile,
+  onEnterYourself,
+}: {
+  state: AppState
+  /** Pay in 4 plans running in the sample, for its one-line description. */
+  plans: number
+  onFile: (file: ChosenFile) => void
+  onEnterYourself: () => void
+}) {
+  const phone = usePhone()
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const busy = state.purchases.some(isActive)
+  const folded = phone && !open
+  async function sample() {
+    setError('')
+    setLoading(true)
+    try {
+      onFile(await loadSampleExport(realToday(state)))
+    } catch {
+      setError('The sample export could not load. Try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+  return (
+    <section className="tile start-card" aria-labelledby="start-title">
+      <button
+        type="button"
+        className="start-fold show-m"
+        aria-expanded={!folded}
+        aria-controls="start-body"
+        onClick={() => setOpen(!open)}
+      >
+        <Disc icon={FileUp} kind="plan" />
+        <span className="body">
+          <span className="t">Start with your PayPal activity</span>
+          <span className="s">Or try a sample PayPal export</span>
+        </span>
+        <ChevronDown className="ico chev" aria-hidden="true" />
+      </button>
+      <div id="start-body" className="start-body" hidden={folded}>
+        <p className="eyebrow hide-m">
+          <FileUp className="ico" aria-hidden="true" /> A few minutes
+        </p>
+        <h2 className="start-title hide-m" id="start-title">
+          Start with your PayPal activity
+        </h2>
+        <p className="meta">
+          You’re viewing {SAMPLE_WHO} with {sampleHolds(plans)}. Bring your own PayPal activity and
+          Worth builds your month: paydays, bills, subscriptions and the Pay in 4 plans you’re
+          part-way through.
+        </p>
+        {busy && (
+          <Alert tone="warn" icon={CircleAlert}>
+            Finish or cancel your active checkout before importing PayPal activity.
+          </Alert>
+        )}
+        <div className="split">
+          <DropZone onFile={onFile} disabled={busy} />
+          <div className="stack tight">
+            <h3 className="h-section">Get the file from PayPal</h3>
+            <HowTo />
+          </div>
+        </div>
+        <p className="caption">{PRIVACY_LINE}</p>
+        <div className="alt-paths">
+          <Button
+            variant="secondary"
+            icon={FileText}
+            loading={loading}
+            disabled={busy || loading}
+            onClick={() => void sample()}
+          >
+            Try with a sample PayPal export
+          </Button>
+          <button type="button" className="link" onClick={onEnterYourself}>
+            Enter your bills yourself
+          </button>
+        </div>
+        {error && (
+          <p className="field-error" role="alert">
+            <CircleAlert size={16} aria-hidden="true" style={{ flex: 'none', marginTop: 2 }} />
+            {error}
+          </p>
+        )}
+      </div>
+    </section>
+  )
+}
+
+const ordinal = (day: number) => {
+  const tens = day % 100
+  const suffix =
+    tens >= 11 && tens <= 13 ? 'th' : (({ 1: 'st', 2: 'nd', 3: 'rd' } as const)[day % 10] ?? 'th')
+  return `${day}${suffix}`
+}
+/** "Monthly on the 13th · next about Tue, Oct 13"; dates Worth projected from PayPal say "about". */
+function schedule(flow: ScheduledFlow) {
+  const about = flow.origin === 'paypal' ? 'about ' : ''
+  const day = flow.anchorDay ?? Number(flow.nextDate.slice(8, 10))
+  const repeat =
+    flow.cadence === 'monthly'
+      ? `Monthly on the ${day === 'last' ? 'last day' : ordinal(day)}`
+      : cadenceLabel(flow)
+  return `${repeat} · next ${about}${dayLabel(flow.nextDate)}`
+}
+const CADENCES: [Cadence, string][] = [
+  ['weekly', 'Weekly'],
+  ['biweekly', 'Every other week'],
+  ['monthly', 'Monthly'],
+]
+function readCents(value: string): number | undefined {
+  const plain = value.trim().replace(/[$,\s]/g, '')
+  if (!/^\d+(?:\.\d{1,2})?$/.test(plain)) return undefined
+  const cents = Math.round(Number(plain) * 100)
+  return cents <= 100_000_000 ? cents : undefined
+}
+const asInput = (cents: number) => (cents / 100).toFixed(2)
+
+function OriginTag({ origin }: { origin?: ScheduledFlow['origin'] }) {
+  return (
+    <span className={cx('origin-tag', origin === 'paypal' && 'paypal')}>
+      {origin === 'paypal' ? 'From PayPal' : 'You added'}
+    </span>
+  )
+}
+
+function SectionHead({ id, title, count }: { id: string; title: string; count?: string }) {
+  return (
+    <div className="found-h">
+      <h2 className="h-section" id={id}>
+        {title}
+      </h2>
+      {count && (
+        <span className="pill sug">
+          <FileUp size={14} aria-hidden="true" /> {count}
+        </span>
+      )}
+    </div>
+  )
+}
+
+/** One reviewed row: tick to include, the amount and its origin, and a small inline edit. */
+function FoundRow({
+  flow,
+  disabled,
+  onChange,
+}: {
+  flow: ScheduledFlow
+  disabled: boolean
+  onChange: (flow: ScheduledFlow) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [amount, setAmount] = useState(asInput(flow.amountCents))
+  const [date, setDate] = useState(flow.nextDate)
+  const [error, setError] = useState('')
+  const name = displayName(flow.name)
+  const income = flow.kind === 'income'
+  function done() {
+    const cents = readCents(amount)
+    if (cents === undefined) return setError(`Enter an amount for ${name}, such as 65.00.`)
+    setError('')
+    // An edited item is still from PayPal; only its amount or date changed.
+    onChange({ ...flow, amountCents: cents, nextDate: date })
+    setEditing(false)
+  }
+  return (
+    <div className={cx('found-row', !flow.active && 'off')}>
+      <input
+        type="checkbox"
+        className="found-check"
+        checked={flow.active}
+        disabled={disabled}
+        aria-label={`Include ${name}`}
+        onChange={(event) => onChange({ ...flow, active: event.target.checked })}
+      />
+      <Disc icon={flowIcon(flow)} kind={income ? 'income' : undefined} />
+      <div className="body">
+        <div className="t">{name}</div>
+        <div className="s">
+          <span className="soft">{schedule(flow)}</span>
+        </div>
+      </div>
+      <div className="end">
+        <div className={cx('amt num', income && 'pos')}>
+          {income ? `+${money(flow.amountCents)}` : money(flow.amountCents)}
+        </div>
+        <span className="tagline">
+          <OriginTag origin={flow.origin} />
+          <button
+            type="button"
+            className="link edit-link"
+            disabled={disabled}
+            aria-expanded={editing}
+            aria-label={`${editing ? 'Close' : 'Edit'} ${name}`}
+            onClick={() => (editing ? done() : setEditing(true))}
+          >
+            {editing ? 'Done' : 'Edit'}
+          </button>
+        </span>
+      </div>
+      {editing && (
+        <fieldset className="found-edit">
+          <legend className="sr">Edit {name}</legend>
+          <div className="form-grid">
+            <Field label="Amount, USD" error={error || undefined}>
+              <span className="money-input">
+                <span aria-hidden="true">$</span>
+                <input
+                  className="input num"
+                  inputMode="decimal"
+                  value={amount}
+                  onChange={(event) => setAmount(event.target.value)}
+                />
+              </span>
+            </Field>
+            <DateStepper
+              label={income ? 'Next payday' : 'Next due date'}
+              value={date}
+              onChange={setDate}
+            />
+          </div>
+        </fieldset>
+      )}
+    </div>
+  )
+}
+
+/** "Add a bill PayPal doesn't see": rent from a bank, say. Recorded as "You added". */
+function AddBill({
+  today,
+  disabled,
+  onAdd,
+}: {
+  today: string
+  disabled: boolean
+  onAdd: (flow: ScheduledFlow) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState('')
+  const [amount, setAmount] = useState('')
+  const [date, setDate] = useState(today)
+  const [cadence, setCadence] = useState<Cadence>('monthly')
+  const [error, setError] = useState('')
+  function add() {
+    const cents = readCents(amount)
+    if (!name.trim()) return setError('Name the bill, such as “Rent”.')
+    if (!cents) return setError('Enter the bill’s amount, such as 1650.00.')
+    onAdd({
+      id: `you-${crypto.randomUUID()}`,
+      name: name.trim().slice(0, 100),
+      amountCents: cents,
+      nextDate: date,
+      cadence,
+      kind: 'bill',
+      category: 'Other',
+      ...(/\b(rent|mortgage)\b/i.test(name) ? { icon: 'home' } : {}),
+      confirmed: true,
+      active: true,
+      origin: 'you',
+    })
+    setName('')
+    setAmount('')
+    setDate(today)
+    setError('')
+    setOpen(false)
+  }
+  if (!open)
+    return (
+      <Button variant="secondary" icon={Plus} disabled={disabled} onClick={() => setOpen(true)}>
+        Add a bill PayPal doesn’t see
+      </Button>
+    )
+  return (
+    <fieldset className="tile stack tight add-bill" disabled={disabled}>
+      <legend className="h-section">Add a bill PayPal doesn’t see</legend>
+      <p className="meta">Rent paid from your bank, a loan, anything outside PayPal.</p>
+      <div className="form-grid">
+        <Field label="Bill name">
+          <input
+            className="input"
+            value={name}
+            maxLength={100}
+            placeholder="Rent"
+            onChange={(event) => setName(event.target.value)}
+          />
+        </Field>
+        <Field label="Bill amount">
+          <span className="money-input">
+            <span aria-hidden="true">$</span>
+            <input
+              className="input num"
+              inputMode="decimal"
+              value={amount}
+              onChange={(event) => setAmount(event.target.value)}
+            />
+          </span>
+        </Field>
+        <DateStepper label="Next due date" min={today} value={date} onChange={setDate} />
+      </div>
+      <div className="field">
+        <span id="bill-often">How often</span>
+        <div className="seg" role="radiogroup" aria-labelledby="bill-often">
+          {CADENCES.map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              role="radio"
+              aria-checked={cadence === value}
+              onClick={() => setCadence(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {error && (
+        <p className="field-error" role="alert">
+          <CircleAlert size={16} aria-hidden="true" style={{ flex: 'none', marginTop: 2 }} />
+          {error}
+        </p>
+      )}
+      <div className="actions">
+        <Button onClick={add}>Add bill</Button>
+        <Button variant="text" onClick={() => setOpen(false)}>
+          Cancel
+        </Button>
+      </div>
+    </fieldset>
+  )
+}
+
+/** The calm timeline note for a draft plan's first payment next to a bill, from planCollisions. */
+type Notes = Map<string, string>
+function collisionNotes(profile: FinancialProfile, plans: DraftPlan[], today: string): Notes {
+  const notes: Notes = new Map()
+  for (const { payment, bill } of planCollisions(profile, [], today)) {
+    // Bills only: a small subscription a few days away isn't worth a note.
+    if (bill.kind !== 'bill' || notes.has(payment.planId)) continue
+    const plan = plans.find((item) => payment.planId === `paypal-plan:${item.id}`.slice(0, 90))
+    if (!plan) continue
+    const number = plan.seen + planDates(plan, today).indexOf(payment.date) + 1
+    notes.set(
+      payment.planId,
+      `Payment ${number} of ${Math.max(4, plan.seen + (plan.left ?? 0))}: ${money(payment.amountCents)} on ${dayLabel(payment.date)}, ${dayPhrase(bill.daysFromInstalment, displayName(bill.name))}.`,
+    )
+  }
+  return notes
+}
+
+export function TimelineNote({ children }: { children: string }) {
+  return (
+    <p className="tl-note">
+      <CalendarClock className="ico" aria-hidden="true" />
+      <span>{children}</span>
+    </p>
+  )
+}
+
+/** One Pay in 4 plan in progress, or one to check when the file lacks its purchase. */
+function PlanRow({
+  plan,
+  today,
+  note,
+  disabled,
+  onChange,
+}: {
+  plan: DraftPlan
+  today: string
+  note?: string
+  disabled: boolean
+  onChange: (plan: DraftPlan) => void
+}) {
+  const dates = planDates(plan, today)
+  if (plan.merchant === null) {
+    const answers: [number, string][] = [
+      [1, '1 left'],
+      [2, '2 left'],
+      [0, 'All paid'],
+    ]
+    const label = `plan-${plan.id}`
+    return (
+      <div className="found-row plan check-plan">
+        <Disc icon={CalendarCheck} kind="plan" />
+        <div className="body">
+          <div className="t" id={label}>
+            One more to check: payments of {money(plan.paymentCents)}
+          </div>
+          <div className="s">
+            <span className="soft">
+              {plan.seen} Pay in 4 {plan.seen === 1 ? 'payment' : 'payments'} seen, the last on{' '}
+              {shortDate(plan.lastDate)}, but not the purchase. How many are left?
+            </span>
+          </div>
+          <div className="seg chips-seg" role="radiogroup" aria-labelledby={label}>
+            {answers.map(([left, text]) => (
+              <button
+                key={text}
+                type="button"
+                role="radio"
+                disabled={disabled}
+                aria-checked={plan.left === left}
+                onClick={() => onChange({ ...plan, left })}
+              >
+                {text}
+              </button>
+            ))}
+          </div>
+          {plan.left ? (
+            <p className="caption">
+              Next about {dayLabel(dates[0]!)}
+              {dates.length > 1 ? `, then ${dayLabel(dates[1]!)}` : ''}.
+            </p>
+          ) : null}
+          {note && <TimelineNote>{note}</TimelineNote>}
+        </div>
+      </div>
+    )
+  }
+  const total = Math.max(4, plan.seen + (plan.left ?? 0))
+  const name = displayName(plan.merchant)
+  return (
+    <div className={cx('found-row plan', !plan.included && 'off')}>
+      <input
+        type="checkbox"
+        className="found-check"
+        checked={plan.included}
+        disabled={disabled}
+        aria-label={`Include ${name} Pay in 4 plan`}
+        onChange={(event) => onChange({ ...plan, included: event.target.checked })}
+      />
+      <Ring part={plan.seen} of={total} />
+      <div className="body">
+        <div className="t">{name}</div>
+        <div className="s">
+          <span className="soft">
+            {plan.seen} of {total} paid · {money(plan.paymentCents)} each ·{' '}
+            {plan.left === 1 ? 'last one' : 'next'} about {dayLabel(dates[0]!)}
+          </span>
+        </div>
+        {note && plan.included && <TimelineNote>{note}</TimelineNote>}
+      </div>
+      <div className="end">
+        <div className="amt num">{money(plan.purchaseCents!)}</div>
+        <span className="origin-tag paypal">From PayPal</span>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * "Check what Worth found" (P3a, B's step 2 in one screen): what the PayPal export holds, ticked and
+ * tagged by origin, the Pay in 4 plans in progress with their timeline note, then the two numbers
+ * only the user knows. Continue imports the file and saves the confirmed plan.
+ */
+export function ImportReview({
+  state,
+  file,
+  onFile,
+  onEnterYourself,
+  onCancel,
+  onImported,
+  onDone,
+}: {
+  state: AppState
+  file?: ChosenFile
+  onFile: (file: ChosenFile) => void
+  onEnterYourself: () => void
+  onCancel: () => void
+  /** The import went in but the plan didn't save yet: the state to show meanwhile. */
+  onImported: (state: AppState) => void
+  onDone: (state: AppState) => void
+}) {
+  const today = realToday(state)
+  const heading = useRef<HTMLHeadingElement>(null)
+  const [preview, setPreview] = useState<ImportPreview>()
+  const [dateOrder, setDateOrder] = useState<DateOrder>()
+  const [loadError, setLoadError] = useState('')
+  const [flows, setFlows] = useState<ScheduledFlow[]>([])
+  const [plans, setPlans] = useState<DraftPlan[]>([])
+  const [daily, setDaily] = useState('')
+  const [editDaily, setEditDaily] = useState(false)
+  const [balance, setBalance] = useState('')
+  const [cushion, setCushion] = useState('')
+  const [error, setError] = useState<{ text: string; field?: string }>()
+  const [busy, setBusy] = useState(false)
+  /** After the import commits, a retry only saves the plan. */
+  const imported = useRef<AppState | undefined>(undefined)
+  const activeCheckout = state.purchases.some(isActive)
+  const imports = state.profile.source === 'import'
+  // Plans already in an imported profile stay as they are; the file can't add them twice.
+  const keptPlans = imports ? state.profile.flows.filter((f) => f.kind === 'installment') : []
+
+  useEffect(() => {
+    heading.current?.focus({ preventScroll: true })
+  }, [])
+  useEffect(() => {
+    if (!file) return
+    let cancelled = false
+    imported.current = undefined
+    api<ImportPreview>('/import/preview', { csv: file.csv, ...(dateOrder ? { dateOrder } : {}) })
+      .then((result) => {
+        if (cancelled) return
+        const existing = imports ? state.profile.flows : []
+        const known = new Set(keptPlans.map((flow) => flow.name.toLowerCase()))
+        setPreview(result)
+        setLoadError('')
+        setFlows(draftFlows(result, existing))
+        setPlans(
+          draftPlans(result.instalmentPlans).filter(
+            (plan) => !known.has(planName(plan).toLowerCase()),
+          ),
+        )
+        setDaily(asInput(result.suggestedDailySpendCents))
+      })
+      .catch((failure: Error) => !cancelled && setLoadError(failure.message))
+    return () => {
+      cancelled = true
+    }
+    // The preview depends on the file and the date order only.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [file, dateOrder])
+
+  if (!file)
+    return (
+      <div className="page plain">
+        <div className="wrap narrow stack">
+          <h1 className="title" ref={heading} tabIndex={-1}>
+            Bring your PayPal activity
+          </h1>
+          <div className="split">
+            <DropZone onFile={onFile} disabled={activeCheckout} />
+            <div className="stack tight">
+              <h2 className="h-section">Get the file from PayPal</h2>
+              <HowTo />
+            </div>
+          </div>
+          <p className="caption">{PRIVACY_LINE}</p>
+          <div className="alt-paths">
+            <Button
+              variant="secondary"
+              icon={FileText}
+              disabled={activeCheckout}
+              onClick={() => void loadSampleExport(today).then(onFile)}
+            >
+              Try with a sample PayPal export
+            </Button>
+            <button type="button" className="link" onClick={onEnterYourself}>
+              Enter your bills yourself
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+
+  const finalFlows = [...flows, ...keptPlans, ...plans.flatMap((plan) => planFlows(plan, today))]
+  const draft: FinancialProfile = {
+    ...state.profile,
+    balanceCents: readCents(balance) ?? 0,
+    cushionCents: readCents(cushion) ?? 0,
+    dailySpendCents: readCents(daily) ?? 0,
+    flows: finalFlows,
+    snapshotDate: today,
+    confirmed: true,
+    missingFields: [],
+  }
+  const notes = collisionNotes(draft, plans, today)
+  const paydays = flows.filter((flow) => flow.kind === 'income')
+  const bills = flows.filter((flow) => flow.kind !== 'income')
+  const fromPayPal = (items: { origin?: string }[]) =>
+    items.filter((item) => item.origin === 'paypal').length
+  const dated = plans.filter((plan) => plan.merchant !== null)
+  const toCheck = plans.filter((plan) => plan.merchant === null)
+  const blocked = Boolean(preview && (preview.errors.length || preview.needsDateOrder))
+  const update = (next: ScheduledFlow) => {
+    setError(undefined)
+    setFlows((all) => all.map((flow) => (flow.id === next.id ? next : flow)))
+  }
+  const updatePlan = (next: DraftPlan) => {
+    setError(undefined)
+    setPlans((all) => all.map((plan) => (plan.id === next.id ? next : plan)))
+  }
+
+  async function confirm() {
+    if (busy || !file || !preview) return
+    setError(undefined)
+    const balanceCents = readCents(balance)
+    const cushionCents = readCents(cushion)
+    const dailyCents = readCents(daily)
+    if (balanceCents === undefined)
+      return setError({
+        text: 'Enter your money available today, such as 1800.00.',
+        field: 'balance',
+      })
+    if (cushionCents === undefined)
+      return setError({
+        text: 'Enter a cushion: the least you want to keep, such as 300.00. It can be 0.',
+        field: 'cushion',
+      })
+    if (dailyCents === undefined)
+      return setError({ text: 'Enter your everyday spending a day, such as 35.00.' })
+    const open = toCheck.find((plan) => plan.left === undefined)
+    if (open)
+      return setError({
+        text: `Choose how many payments of ${money(open.paymentCents)} are left, or All paid.`,
+      })
+    setBusy(true)
+    try {
+      imported.current ??= (await api<AppState>('/import/commit', {
+        csv: file.csv,
+        ...(dateOrder ? { dateOrder } : {}),
+      })) as AppState
+      const base = imported.current
+      const profile: FinancialProfile = {
+        ...base.profile,
+        balanceCents,
+        cushionCents,
+        dailySpendCents: dailyCents,
+        flows: finalFlows,
+        snapshotDate: base.today,
+        confirmed: true,
+        confirmedAt: new Date().toISOString(),
+        // The server keeps any foreign-currency payment still to resolve.
+        missingFields: [],
+      }
+      const saved = (await api<AppState>('/profile', { profile }, 'PATCH')) as AppState
+      onDone(saved)
+    } catch (failure) {
+      if (imported.current) onImported(imported.current)
+      setError({ text: (failure as Error).message })
+      setBusy(false)
+    }
+  }
+
+  const range = preview?.transactions.length
+    ? `${shortDate(preview.transactions.at(-1)!.date)} – ${shortDate(preview.transactions[0]!.date)}`
+    : undefined
+  return (
+    <div className="page plain import-review">
+      <div className="wrap narrow">
+        <form onSubmit={(event) => event.preventDefault()} aria-busy={busy || !preview}>
+          <div className="sec-head">
+            <span className="meta">Step 2 of 3</span>
+            <button type="button" className="link" onClick={onCancel} disabled={busy}>
+              Cancel
+            </button>
+          </div>
+          <ol className="steps3" aria-label="Setup steps">
+            <li className="on">Bring your PayPal activity</li>
+            <li className="on" aria-current="step">
+              Check what Worth found
+            </li>
+            <li>Your month</li>
+          </ol>
+          <h1 className="title wizard-step-head" ref={heading} tabIndex={-1}>
+            Check what Worth found
+          </h1>
+          <p className="src">
+            <FileText className="ico" aria-hidden="true" />
+            <b>{file.name}</b>
+            {range && <span>· {range}</span>}
+            {preview && <span>· {preview.totalRows.toLocaleString('en-US')} rows</span>}
+          </p>
+          <p className="meta">
+            Untick anything that has ended, and add what you pay outside PayPal.
+          </p>
+
+          {activeCheckout && (
+            <Alert tone="warn" icon={CircleAlert} live>
+              Finish or cancel your active checkout before importing PayPal activity.
+            </Alert>
+          )}
+          {loadError && (
+            <Alert tone="bad" icon={CircleAlert} live>
+              {loadError}{' '}
+              <button type="button" className="link inline" onClick={onCancel}>
+                Choose another file
+              </button>
+            </Alert>
+          )}
+          {!preview && !loadError && (
+            <p className="meta" role="status">
+              Reading your PayPal activity…
+            </p>
+          )}
+          {preview && (preview.needsDateOrder || dateOrder) && (
+            <fieldset className="import-date-order" disabled={busy}>
+              <legend>How does this file write dates?</legend>
+              <p className="meta">
+                Every date here could be read two ways. Choose the order your PayPal account uses.
+              </p>
+              {(
+                [
+                  ['MM/DD', 'Month first, as in the US', '03/04/2026 is March 4'],
+                  ['DD/MM', 'Day first, as in the UK', '03/04/2026 is 3 April'],
+                ] as const
+              ).map(([order, label, example]) => (
+                <label className="check" key={order}>
+                  <input
+                    type="radio"
+                    name="review-date-order"
+                    checked={dateOrder === order}
+                    onChange={() => setDateOrder(order)}
+                  />
+                  <span>
+                    <strong>{label}</strong>
+                    <small>{example}</small>
+                  </span>
+                </label>
+              ))}
+            </fieldset>
+          )}
+          {preview && preview.errors.length > 0 && (
+            <div className="alert bad" role="alert">
+              <div className="alert-body">
+                <strong>This file has {preview.errors.length} rows Worth can’t read.</strong>
+                <ul>
+                  {preview.errors.slice(0, 5).map((issue, index) => (
+                    <li key={`${issue.row}-${index}`}>
+                      Row {issue.row}: {issue.message}
+                    </li>
+                  ))}
+                </ul>
+                <button type="button" className="link inline" onClick={onCancel}>
+                  Choose another file
+                </button>
+              </div>
+            </div>
+          )}
+
+          {preview && !blocked && (
+            <>
+              {preview.unresolved.length > 0 && (
+                <Alert tone="info" icon={CircleAlert}>
+                  {preview.unresolved.length} foreign-currency{' '}
+                  {preview.unresolved.length === 1 ? 'payment needs' : 'payments need'} a USD cost.
+                  You’ll resolve {preview.unresolved.length === 1 ? 'it' : 'them'} in Activity after
+                  this; until then Worth won’t show room to spend.
+                </Alert>
+              )}
+              <section aria-labelledby="found-paydays">
+                <SectionHead
+                  id="found-paydays"
+                  title="Paydays"
+                  count={fromPayPal(paydays) ? `${fromPayPal(paydays)} from PayPal` : undefined}
+                />
+                {paydays.length ? (
+                  <div className="rows">
+                    {paydays.map((flow) => (
+                      <FoundRow key={flow.id} flow={flow} disabled={busy} onChange={update} />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="meta">
+                    No repeating pay in this file. If your pay lands in a bank, you can add it in
+                    your plan later.
+                  </p>
+                )}
+              </section>
+              <section aria-labelledby="found-bills">
+                <SectionHead
+                  id="found-bills"
+                  title="Bills and subscriptions"
+                  count={fromPayPal(bills) ? `${fromPayPal(bills)} from PayPal` : undefined}
+                />
+                <div className="rows">
+                  {bills.map((flow) => (
+                    <FoundRow key={flow.id} flow={flow} disabled={busy} onChange={update} />
+                  ))}
+                </div>
+                <div style={{ marginTop: 'var(--s-3)' }}>
+                  <AddBill
+                    today={today}
+                    disabled={busy}
+                    onAdd={(flow) => {
+                      setError(undefined)
+                      setFlows((all) => [...all, flow])
+                    }}
+                  />
+                </div>
+              </section>
+              {plans.length > 0 && (
+                <section aria-labelledby="found-plans">
+                  <SectionHead
+                    id="found-plans"
+                    title={`PayPal Pay in 4 plans in progress (${dated.length})`}
+                    count="From PayPal"
+                  />
+                  <div className="rows">
+                    {[...dated, ...toCheck].map((plan) => (
+                      <PlanRow
+                        key={plan.id}
+                        plan={plan}
+                        today={today}
+                        note={notes.get(`paypal-plan:${plan.id}`.slice(0, 90))}
+                        disabled={busy}
+                        onChange={updatePlan}
+                      />
+                    ))}
+                  </div>
+                  <p className="caption">{ESTIMATE_NOTE}</p>
+                </section>
+              )}
+              <section aria-labelledby="found-daily">
+                <SectionHead id="found-daily" title="Everyday spending" count="From PayPal" />
+                <div className="found-row">
+                  <Disc icon={ReceiptText} />
+                  <div className="body">
+                    {editDaily ? (
+                      <Field label="Everyday spending, $ a day">
+                        <span className="money-input">
+                          <span aria-hidden="true">$</span>
+                          <input
+                            className="input num"
+                            inputMode="decimal"
+                            value={daily}
+                            onChange={(event) => setDaily(event.target.value)}
+                          />
+                        </span>
+                      </Field>
+                    ) : (
+                      <div className="t">About {money(readCents(daily) ?? 0)} a day</div>
+                    )}
+                    <div className="s">
+                      <span className="soft">
+                        Your average over {preview.coverageDays} days, leaving out the bills and
+                        plans above
+                      </span>
+                    </div>
+                  </div>
+                  <div className="end">
+                    <button
+                      type="button"
+                      className="link edit-link"
+                      aria-expanded={editDaily}
+                      aria-label={
+                        editDaily ? 'Done editing everyday spending' : 'Edit everyday spending'
+                      }
+                      onClick={() => setEditDaily(!editDaily)}
+                    >
+                      {editDaily ? 'Done' : 'Edit'}
+                    </button>
+                  </div>
+                </div>
+              </section>
+              <section aria-labelledby="found-yours">
+                <SectionHead id="found-yours" title="What only you know" />
+                <p className="meta">Past activity doesn’t set your money available, so enter it.</p>
+                <div className="form-grid" style={{ marginTop: 'var(--s-3)' }}>
+                  <Field
+                    label="Money available today"
+                    hint="Leave out credit limits and savings you won’t touch."
+                    error={error?.field === 'balance' ? error.text : undefined}
+                  >
+                    <span className="money-input">
+                      <span aria-hidden="true">$</span>
+                      <input
+                        className="input num"
+                        inputMode="decimal"
+                        value={balance}
+                        aria-invalid={error?.field === 'balance'}
+                        onChange={(event) => {
+                          setError(undefined)
+                          setBalance(event.target.value)
+                        }}
+                      />
+                    </span>
+                  </Field>
+                  <Field
+                    label="Cushion"
+                    hint="The least you want to keep in your account."
+                    error={error?.field === 'cushion' ? error.text : undefined}
+                  >
+                    <span className="money-input">
+                      <span aria-hidden="true">$</span>
+                      <input
+                        className="input num"
+                        inputMode="decimal"
+                        value={cushion}
+                        aria-invalid={error?.field === 'cushion'}
+                        onChange={(event) => {
+                          setError(undefined)
+                          setCushion(event.target.value)
+                        }}
+                      />
+                    </span>
+                  </Field>
+                </div>
+              </section>
+              <p className="caption" style={{ marginTop: 'var(--s-4)' }}>
+                {PRIVACY_LINE} Nothing is saved until you continue.
+              </p>
+            </>
+          )}
+          {error && !error.field && (
+            <p className="co-error" role="alert" style={{ marginTop: 16 }}>
+              <CircleAlert size={16} aria-hidden="true" style={{ flex: 'none', marginTop: 2 }} />
+              {error.text}
+            </p>
+          )}
+          {error?.field && (
+            <p className="sr" role="alert">
+              {error.text}
+            </p>
+          )}
+          <div className="wizard-foot">
+            <Button variant="secondary" onClick={onCancel} disabled={busy}>
+              Back
+            </Button>
+            <Button
+              onClick={() => void confirm()}
+              loading={busy}
+              disabled={!preview || blocked || activeCheckout}
+            >
+              Continue
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}

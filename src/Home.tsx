@@ -12,7 +12,7 @@ import {
 } from 'lucide-react'
 import { mainCollision, nearPhrase, planLabel } from '../shared/collision'
 import { getUpcomingFlows, planCollisions } from '../shared/finance'
-import type { Product, SavedItem } from '../shared/types'
+import type { Comparison, Product, SavedItem } from '../shared/types'
 import type { AppState, Purchase } from './contract'
 import { isActive } from './contract'
 import { ASSESSMENT_ONLY, MAY_FIT_NOW, SAMPLE_WHO, sampleHolds } from './copy'
@@ -29,6 +29,8 @@ import {
   useComparison,
 } from './engine'
 import { dayLabel, daysFrom, money, signed, displayName } from './format'
+import { MonthBuilt, NextThirtyDays, PlanCards, PlanSummaryLine } from './Month'
+import { StartCard, type ChosenFile } from './Onboarding'
 import { Alert, Button, Disc, Pill, SkeletonRow } from './ui'
 
 /** The camera starter comes first, so it shows at every width (judge fix #10). */
@@ -78,6 +80,9 @@ export function Composer({
 
 function HeroTile({
   state,
+  room,
+  loading,
+  month = false,
   onAsk,
   onPlan,
   onNavigate,
@@ -86,6 +91,10 @@ function HeroTile({
   fundsElsewhere = false,
 }: {
   state: AppState
+  room?: Comparison
+  loading: boolean
+  /** Imported PayPal activity: the hero reads as the user's month, estimated (P3a). */
+  month?: boolean
   onAsk: () => void
   onPlan: () => void
   onNavigate: (hash: string) => void
@@ -95,13 +104,10 @@ function HeroTile({
   fundsElsewhere?: boolean
 }) {
   const hold = countedHold(state)
-  const { comparison: room, loading } = useComparison(
-    { amountCents: 0, itemName: 'Room to spend' },
-    state.profile.version,
-  )
-  const income = getUpcomingFlows(state.profile, state.today, 30).find(
+  const paydays = getUpcomingFlows(state.profile, state.today, 30).filter(
     ({ flow }) => flow.kind === 'income',
   )
+  const income = paydays[0]
   if (!state.profile.confirmed)
     return (
       <section className="balance unconfirmed" aria-labelledby="bal-k">
@@ -159,23 +165,46 @@ function HeroTile({
       </section>
     )
   const kept = room.buyToday.outcome === 'fits'
+  const lowest = room.buyToday
   return (
     <section className="balance" aria-labelledby="bal-k">
       <div>
         <div className="k" id="bal-k">
-          Room to spend today
+          {month ? (
+            <>
+              <CalendarClock className="ico" aria-hidden="true" /> Your month from PayPal · room to
+              spend today, estimated
+            </>
+          ) : (
+            'Room to spend today'
+          )}
         </div>
         <div className="v num">{money(room.spendLess.maxPriceCents)}</div>
-        <p className="sub">
-          {kept
-            ? `Keeps your ${money(room.cushionCents)} cushion through ${dayLabel(room.window.end)}, if your plan holds.`
-            : `Your plan already dips below your ${money(room.cushionCents)} cushion on ${dayLabel(room.buyToday.lowestDate)}.`}{' '}
-          Based on {money(state.profile.balanceCents)} you confirmed{' '}
-          {state.profile.snapshotDate === state.today
-            ? 'today'
-            : `on ${dayLabel(state.profile.snapshotDate)}`}
-          .
-        </p>
+        {month ? (
+          <p className="sub">
+            With what you’ve confirmed,{' '}
+            {kept
+              ? `this keeps your ${money(room.cushionCents)} cushion through ${dayLabel(room.window.end)}.`
+              : `your month dips below your ${money(room.cushionCents)} cushion on ${dayLabel(lowest.lowestDate)}.`}{' '}
+            Your lowest point is about {money(lowest.lowestBalanceCents, false)} on{' '}
+            {dayLabel(lowest.lowestDate)}
+            {paydays.some(({ date }) => daysFrom(lowest.lowestDate, date) === 1)
+              ? ', the day before payday'
+              : ''}
+            .
+          </p>
+        ) : (
+          <p className="sub">
+            {kept
+              ? `Keeps your ${money(room.cushionCents)} cushion through ${dayLabel(room.window.end)}, if your plan holds.`
+              : `Your plan already dips below your ${money(room.cushionCents)} cushion on ${dayLabel(room.buyToday.lowestDate)}.`}{' '}
+            Based on {money(state.profile.balanceCents)} you confirmed{' '}
+            {state.profile.snapshotDate === state.today
+              ? 'today'
+              : `on ${dayLabel(state.profile.snapshotDate)}`}
+            .
+          </p>
+        )}
         {hold && <ReservationNote purchase={hold} onReview={onOpenCheckout} onBrand />}
         <a
           href="#ask"
@@ -408,6 +437,7 @@ export function Home({
   onOpenSaved,
   onEditPlan,
   onImport,
+  onImportFile,
   onOpenCheckout,
   onConfirmPlan,
   onReviewRefund,
@@ -422,6 +452,8 @@ export function Home({
   onEditPlan: () => void
   /** Opens the PayPal activity import, offered while the sample persona is showing. */
   onImport?: () => void
+  /** A PayPal export chosen on the sample's first-run card, real or the bundled sample (P3a). */
+  onImportFile?: (file: ChosenFile) => void
   onOpenCheckout: (purchase: Purchase) => void
   onConfirmPlan: (purchaseId: string) => void
   onReviewRefund: (purchaseId: string, refundId: string) => void
@@ -443,13 +475,28 @@ export function Home({
   }
   const income = state.profile.flows.find((flow) => flow.kind === 'income' && flow.active)
   const plans = allPlans(state)
+  // Imported PayPal activity, confirmed: the month-led Home. Maya's sample keeps its own layout.
+  const month = state.profile.source === 'import' && state.profile.confirmed
+  const { comparison: room, loading } = useComparison(
+    { amountCents: 0, itemName: 'Room to spend' },
+    state.profile.version,
+  )
+  const nextDays = <NextThirtyDays state={state} onShowAll={() => onNavigate('plan')} />
   return (
     <div className="page">
       <div className="wrap">
         <h1 className="sr">Home</h1>
         <div className="grid">
           <div className="stack">
-            {state.profile.source === 'demo' && (
+            {state.profile.source === 'demo' && onImportFile && (
+              <StartCard
+                state={state}
+                plans={plans.length}
+                onFile={onImportFile}
+                onEnterYourself={onEditPlan}
+              />
+            )}
+            {state.profile.source === 'demo' && !onImportFile && (
               <Alert tone="info" icon={Info}>
                 You’re viewing {SAMPLE_WHO} with {sampleHolds(plans.length)}.{' '}
                 {onImport && (
@@ -462,6 +509,9 @@ export function Home({
             )}
             <HeroTile
               state={state}
+              room={room}
+              loading={loading}
+              month={month}
               onAsk={() => onAsk()}
               onPlan={onEditPlan}
               onNavigate={onNavigate}
@@ -469,6 +519,7 @@ export function Home({
               onConfirmFunds={() => setFunds(true)}
               fundsElsewhere={Boolean(ready) && !fundsToday}
             />
+            {month && <PlanSummaryLine state={state} />}
             {ready && (
               <section
                 className="tile notice"
@@ -552,12 +603,18 @@ export function Home({
                 </div>
               </section>
             ))}
+            {month && nextDays}
             <section className="tile" aria-labelledby="ask-title">
               <div className="sec-head">
                 <h2 className="h-section" id="ask-title">
                   Thinking about buying something?
                 </h2>
               </div>
+              {month && (
+                <p className="meta" style={{ marginTop: 'calc(-1 * var(--s-1))' }}>
+                  Worth checks it against your month: pay now, later, or with PayPal Pay in 4.
+                </p>
+              )}
               <Composer onAsk={onAsk} placeholder="Can I afford a $1,199 camera?" id="home-q" />
               <p className="caption" style={{ marginTop: 'var(--s-2)' }}>
                 Shopping at another store? Paste the product link and confirm the price.
@@ -576,10 +633,19 @@ export function Home({
               </div>
             </section>
             {/* Under the starters, so the camera starter stays above the fold at 390 (round-2 #10). */}
-            <CollisionInsight state={state} onShowPlan={() => onNavigate('plan')} />
-            <ComingUp state={state} onShowAll={() => onNavigate('plan')} />
+            {!month && <CollisionInsight state={state} onShowPlan={() => onNavigate('plan')} />}
+            {!month && <ComingUp state={state} onShowAll={() => onNavigate('plan')} />}
           </div>
-          <aside className="rail" aria-label="Saved and your plan">
+          <aside
+            className="rail"
+            aria-label={
+              month
+                ? 'Your Pay in 4 plans, how your month was built and Saved'
+                : 'Saved and your plan'
+            }
+          >
+            {month && <PlanCards state={state} room={room} />}
+            {month && <MonthBuilt state={state} onImport={onImport} onEditPlan={onEditPlan} />}
             <section aria-labelledby="saved-title">
               <div className="sec-head">
                 <h2 className="h-section" id="saved-title">
@@ -595,57 +661,59 @@ export function Home({
                 <p className="meta">Nothing saved yet. Items you plan to buy later show up here.</p>
               )}
             </section>
-            <section aria-labelledby="plan-title">
-              <div className="sec-head">
-                <h2 className="h-section" id="plan-title">
-                  Your plan
-                </h2>
-              </div>
-              <dl className="kvlist">
-                <div>
-                  <dt>Money available</dt>
-                  <dd className="num">
-                    {money(state.profile.balanceCents)}
-                    <span className="caption">
-                      {!state.profile.confirmed
-                        ? 'Not confirmed'
-                        : state.profile.snapshotDate === state.today
-                          ? 'Confirmed today'
-                          : `Confirmed ${dayLabel(state.profile.snapshotDate)}`}
-                    </span>
-                  </dd>
+            {!month && (
+              <section aria-labelledby="plan-title">
+                <div className="sec-head">
+                  <h2 className="h-section" id="plan-title">
+                    Your plan
+                  </h2>
                 </div>
-                {income && (
+                <dl className="kvlist">
                   <div>
-                    <dt>Paycheck</dt>
+                    <dt>Money available</dt>
                     <dd className="num">
-                      {money(income.amountCents)}
-                      <span className="caption">{cadenceLabel(income)}</span>
+                      {money(state.profile.balanceCents)}
+                      <span className="caption">
+                        {!state.profile.confirmed
+                          ? 'Not confirmed'
+                          : state.profile.snapshotDate === state.today
+                            ? 'Confirmed today'
+                            : `Confirmed ${dayLabel(state.profile.snapshotDate)}`}
+                      </span>
                     </dd>
                   </div>
-                )}
-                <div>
-                  <dt>Cushion</dt>
-                  <dd className="num">{money(state.profile.cushionCents)}</dd>
-                </div>
-                <div>
-                  <dt>Everyday spending</dt>
-                  <dd className="num">{money(state.profile.dailySpendCents)} a day</dd>
-                </div>
-                <div>
-                  <dt>Pay in 4 plans</dt>
-                  <dd>{plans.length ? `${plans.length} running` : 'None'}</dd>
-                </div>
-              </dl>
-              <button
-                type="button"
-                className="link"
-                style={{ fontSize: 'var(--fs-section)', marginTop: 4 }}
-                onClick={onEditPlan}
-              >
-                Edit your plan
-              </button>
-            </section>
+                  {income && (
+                    <div>
+                      <dt>Paycheck</dt>
+                      <dd className="num">
+                        {money(income.amountCents)}
+                        <span className="caption">{cadenceLabel(income)}</span>
+                      </dd>
+                    </div>
+                  )}
+                  <div>
+                    <dt>Cushion</dt>
+                    <dd className="num">{money(state.profile.cushionCents)}</dd>
+                  </div>
+                  <div>
+                    <dt>Everyday spending</dt>
+                    <dd className="num">{money(state.profile.dailySpendCents)} a day</dd>
+                  </div>
+                  <div>
+                    <dt>Pay in 4 plans</dt>
+                    <dd>{plans.length ? `${plans.length} running` : 'None'}</dd>
+                  </div>
+                </dl>
+                <button
+                  type="button"
+                  className="link"
+                  style={{ fontSize: 'var(--fs-section)', marginTop: 4 }}
+                  onClick={onEditPlan}
+                >
+                  Edit your plan
+                </button>
+              </section>
+            )}
           </aside>
         </div>
       </div>
