@@ -1349,8 +1349,9 @@ export function createApp(options: AppOptions = {}) {
   })
   /**
    * "Back to <store>" (§4): the store's page with a signed verdict, computed here from the plan,
-   * never taken from the browser. A price the shopper corrected is what they decided on, so it is
-   * the one judged. Without a verdict (the plan needs details first) the link carries no token.
+   * never taken from the browser. The result names no price, so it is only ever about the store's
+   * own: after the shopper changes the price, or while the plan needs details first, the link
+   * goes back with no token and the store shows nothing.
    */
   app.post('/api/handoff/return', (req, res) => {
     handoffLimit(req)
@@ -1359,8 +1360,9 @@ export function createApp(options: AppOptions = {}) {
       .strict()
       .parse(req.body)
     const quote = sessionQuote(res, input.qid)
-    if (!handoff) return res.json({ url: quote.returnUrl })
-    const amountCents = input.amountCents ?? quote.amountCents
+    if (!handoff || (input.amountCents !== undefined && input.amountCents !== quote.amountCents))
+      return res.json({ url: quote.returnUrl })
+    const { amountCents } = quote
     const current = state(sessionId(res))
     const comparison = compareOptions(
       current.profile,

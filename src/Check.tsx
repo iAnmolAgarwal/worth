@@ -301,6 +301,8 @@ function Quote({
     ...(quote.canConsent ? { qid: quote.qid } : {}),
   }
   const p4 = payLaterLine(quote, amountCents)
+  /** Worth's answer names no price, so the store only ever gets it for its own price. */
+  const priceChanged = amountCents !== quote.amountCents
 
   async function back(event: MouseEvent<HTMLAnchorElement>) {
     // A new-tab click keeps the plain link; the verdict rides on a normal click.
@@ -313,7 +315,7 @@ function Quote({
     try {
       const result = await api<{ url: string }>('/handoff/return', {
         qid: quote.qid,
-        ...(claimed ? { amountCents } : {}),
+        ...(priceChanged ? { amountCents } : {}),
       })
       if (new URL(result.url).origin === new URL(quote.returnUrl).origin) url = result.url
     } catch {
@@ -367,7 +369,9 @@ function Quote({
       {claimed && (
         <p className="caption" style={{ margin: 0 }}>
           {quote.merchant}’s price was {money(quote.amountCents)}. Worth is checking the price you
-          entered.{' '}
+          entered.
+          {priceChanged &&
+            ` ${quote.merchant} won’t show Worth’s answer, because you changed the price.`}{' '}
           <button type="button" className="link inline" onClick={() => setClaimed(undefined)}>
             Use the store’s price
           </button>

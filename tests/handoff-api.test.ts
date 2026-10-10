@@ -412,11 +412,16 @@ describe('POST /api/handoff/return (contract §4)', () => {
     })
   })
 
-  it('judges the price the shopper corrected to', async () => {
+  it('never signs a verdict once the shopper changed the price (contract §7)', async () => {
     const { agent } = setup()
     await opened(agent)
-    const { verified } = await result(agent, { amountCents: 2000 })
-    expect(verified).toMatchObject({ ok: true, payload: { verdict: 'buy_today' } })
+    // $20 would fit today, but the store would show it next to its own $1,199.
+    const edited = await result(agent, { amountCents: 2000 })
+    expect(edited.token).toBeNull()
+    expect(edited.url.toString()).toBe(`${STORE}/p/camera`)
+    // The store's own price, sent explicitly, is not an edit.
+    const same = await result(agent, { amountCents: 119900 })
+    expect(same.verified).toMatchObject({ ok: true, payload: { verdict: 'wait' } })
   })
 
   it('omits payIn4Fits when the store said Pay in 4 isn’t offered', async () => {

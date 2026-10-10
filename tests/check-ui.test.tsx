@@ -257,6 +257,11 @@ describe('a verified quote on /check', () => {
       await screen.findByRole('group', { name: 'You entered · Everyday camera · $1,250.00' }),
     ).toBeTruthy()
     expect(screen.getByText(/Larkspur Supply’s price was \$1,199\.00/)).toBeTruthy()
+    expect(
+      screen.getByText(
+        /Larkspur Supply won’t show Worth’s answer, because you changed the price\./,
+      ),
+    ).toBeTruthy()
     // The store's Pay in 4 answer was for its own price, so it no longer applies.
     expect(screen.getByText('If this store offers PayPal Pay in 4, compare it below.')).toBeTruthy()
     await waitFor(() =>
