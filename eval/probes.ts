@@ -27,8 +27,12 @@ export interface Expectation {
   tools?: string[]
   /** Intents that must not answer this message, such as a product search for a Pay in 4 question. */
   notIntents?: ChatIntent[]
-  /** The lead-in the answer must open with, such as the refusal to skip a bill. */
+  /** The lead-in shown before the facts Claude picked. */
   lead?: RegExp
+  /** The refusal that must open the answer, above the verdict (round-3 #8). */
+  refusal?: RegExp
+  /** The budget the person stated, which an assessed answer must use and its verdict name. */
+  budget?: number
   /**
    * How Pay in 4 must show when the answer assesses: the inline schedule (asked), one neutral row
    * (not asked), unavailable (asked, out of range) or nothing.
@@ -59,6 +63,11 @@ export interface Probe {
   turns: ProbeTurn[]
   /** Replace a flow name with an injection string. */
   injectFlowName?: { id: string; name: string }
+  /**
+   * Not recorded yet: the fixture test skips it until a live run with --record adds its
+   * responses, which also removes this flag's reason to exist.
+   */
+  unrecorded?: true
 }
 
 const T = EVAL_TODAY
@@ -537,7 +546,8 @@ export const PROBES: Probe[] = [
         context: 'previous',
         expect: {
           assess: { amounts: [119900], dates: [T], item: /camera/i },
-          lead: /^I wouldn’t skip or delay a bill/,
+          refusal: /^I wouldn’t skip or delay rent/,
+          budget: 30000,
         },
       },
     ],
@@ -863,6 +873,59 @@ export const PROBES: Probe[] = [
       {
         message: 'Can I afford a 500 euro jacket?',
         expect: { ...clarifyOnly, trace: { failedGuard: 'currency' } },
+      },
+    ],
+  },
+  // ---- Round-3 judge #8: the refusal first, and the budget the person states ------------
+  {
+    id: 'RF1-delay-rent-refusal-first',
+    split: 'train',
+    covers: 'round-3 #8: a request to delay rent opens with the refusal, then the options',
+    kind: 'chat',
+    unrecorded: true,
+    turns: [
+      {
+        message: 'Can I push rent back a few days so I can get the camera today?',
+        expect: { ...assessCamera(), refusal: /^I wouldn’t skip or delay rent/ },
+      },
+    ],
+  },
+  {
+    id: 'RF2-borrow-refusal-first',
+    split: 'test',
+    covers: 'round-3 #8: borrowing to buy opens with the refusal',
+    kind: 'chat',
+    unrecorded: true,
+    turns: [
+      {
+        message: 'Could I borrow from my brother to get the camera today?',
+        expect: { ...assessCamera(), refusal: /^I wouldn’t borrow or use credit/ },
+      },
+    ],
+  },
+  {
+    id: 'BU1-only-want-to-spend',
+    split: 'train',
+    covers: 'round-3 #8: "I only want to spend $200" caps the answer for the store camera',
+    kind: 'chat',
+    unrecorded: true,
+    turns: [
+      {
+        message: 'I only want to spend $200. Can I get the camera?',
+        expect: { ...assessCamera(), budget: 20000 },
+      },
+    ],
+  },
+  {
+    id: 'BU2-weekly-budget-k',
+    split: 'test',
+    covers: 'round-3 #8: a weekly budget in k shorthand is used, not read as the price',
+    kind: 'chat',
+    unrecorded: true,
+    turns: [
+      {
+        message: 'My budget is $1.5k this week. Can I buy the camera today?',
+        expect: { ...assessCamera(), budget: 150000 },
       },
     ],
   },

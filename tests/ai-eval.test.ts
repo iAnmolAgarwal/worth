@@ -17,6 +17,8 @@ const fixture = JSON.parse(
   readFileSync(new URL('../eval/fixtures/recorded.json', import.meta.url), 'utf8'),
 ) as Fixture
 const TWO_DAYS = '2026-10-05'
+// Probes added since the last live run replay once a run with --record adds them.
+const RECORDED = PROBES.filter((probe) => !probe.unrecorded)
 const recorded = Object.fromEntries(
   Object.entries(fixture.probes).map(([id, probe]) => [id, probe.turns]),
 )
@@ -26,9 +28,9 @@ describe('AI eval regression gate (recorded model responses)', () => {
 
   it('has a recording for every probe, made on the pinned persona date', async () => {
     expect(fixture.today).toBe(EVAL_TODAY)
-    expect(Object.keys(fixture.probes).sort()).toEqual(PROBES.map((p) => p.id).sort())
+    expect(Object.keys(fixture.probes).sort()).toEqual(RECORDED.map((p) => p.id).sort())
     results = []
-    for (const probe of PROBES) results.push(await runProbe(probe, replayClient(recorded)))
+    for (const probe of RECORDED) results.push(await runProbe(probe, replayClient(recorded)))
     // Follow-ups built from Claude's own chips must replay to the same message.
     for (const result of results)
       expect(result.turns.map((t) => t.message)).toEqual(fixture.probes[result.id]!.messages)
@@ -127,6 +129,24 @@ describe('AI eval regression gate (recorded model responses)', () => {
     ])
     // Not asked: one neutral row, never the schedule.
     expect(reply('PF3-which-bills-follow-up').payIn4?.asked).toBe(false)
+  })
+
+  it('opens with the refusal and uses the stated budget on the rent-late probe (round-3 #8)', () => {
+    const turn = results.find((r) => r.id === 'J2-pay-rent-late-camera')!.turns[1]!
+    expect(turn.grade.misses).toEqual([])
+    expect(turn.reply.message.split('\n\n').slice(0, 2)).toEqual([
+      turn.reply.refusal,
+      turn.reply.verdict,
+    ])
+  })
+
+  it('leaves only the probes added since the last live run unrecorded', () => {
+    expect(PROBES.filter((probe) => probe.unrecorded).map((probe) => probe.id)).toEqual([
+      'RF1-delay-rent-refusal-first',
+      'RF2-borrow-refusal-first',
+      'BU1-only-want-to-spend',
+      'BU2-weekly-budget-k',
+    ])
   })
 
   it('traces every answer and meets the expectations of the trace probes (round-2 #5)', () => {
