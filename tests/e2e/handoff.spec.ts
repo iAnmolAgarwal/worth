@@ -3,11 +3,11 @@ import {
   analyse,
   analyseLink,
   backToStore,
-  CAMERA,
   claims,
   consent,
   consentBox,
   expect,
+  expectCamera,
   lowestBalance,
   origins,
   pay,
@@ -55,10 +55,12 @@ test('analyse at Larkspur, consent, go back and pay: Worth shows the payment onc
   await page.waitForURL(`${origins.worth}/check`)
   // The token was read from the fragment and removed from the address bar.
   expect(page.url()).toBe(`${origins.worth}/check`)
-  await expect(page.getByRole('group', { name: CAMERA })).toBeVisible()
+  await expectCamera(page)
   // The store's own PayPal SDK said yes to Pay in 4, signed into the quote (§3.2).
   await expect(
-    page.getByText('Larkspur Supply offers PayPal Pay in 4 for this amount.'),
+    page
+      .getByRole('button', { name: /Compare with PayPal Pay in 4/ })
+      .getByText('Larkspur Supply offers PayPal Pay in 4 for this amount.'),
   ).toBeVisible()
   // It reached Worth's server only in the body of /api/handoff/open, never in a URL or Referer.
   expect((await landing).headers()['referrer-policy']).toBe('no-referrer')
@@ -153,7 +155,7 @@ test.describe('when something is wrong', () => {
 
   test('an edited price goes back with no Worth line', async ({ page }) => {
     await analyse(page)
-    await expect(page.getByRole('group', { name: CAMERA })).toBeVisible()
+    await expectCamera(page)
     await page.getByRole('button', { name: 'Not right? Edit' }).click()
     await page.getByLabel('Total price, USD').fill('999')
     await page.locator('form.readas-edit').getByRole('button').first().click()
@@ -246,7 +248,7 @@ test.describe('report-back', () => {
     const friend = await newShopper()
     await friend.goto(href)
     await friend.waitForURL(`${origins.worth}/check`)
-    await expect(friend.getByRole('group', { name: CAMERA })).toBeVisible()
+    await expectCamera(friend)
     await consent(friend)
     await backToStore(friend)
     await expect(worthLine(friend)).toHaveText(/^Worth: /)
@@ -260,7 +262,7 @@ test.describe('report-back', () => {
       .getByRole('link', { name: /Analyse with Worth/ })
       .click()
     await minter.waitForURL(`${origins.worth}/check`)
-    await expect(minter.getByRole('group', { name: CAMERA })).toBeVisible()
+    await expectCamera(minter)
     await expect(consentBox(minter)).toHaveCount(0)
     await backToStore(minter)
     await expect(worthLine(minter)).toHaveCount(0)
