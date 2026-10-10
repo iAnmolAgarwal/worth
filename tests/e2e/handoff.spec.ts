@@ -38,9 +38,9 @@ test('analyse at Larkspur, consent, go back and pay: Worth shows the payment onc
   await expect(savedCamera).toHaveCount(1)
 
   // The store's product page renders <worth-check>; its link lands on /check, pre-filled.
-  await page.goto(`${origins.store}/p/camera`)
-  await expect(page.locator('worth-check a.worth-check')).toHaveText('Analyse with Worth')
-  const token = (await analyseLink(page)).token
+  const { link, token } = await analyseLink(page)
+  await expect(link).toHaveText('Analyse with Worth')
+  expect(await link.getAttribute('target')).toBeNull()
   const sent: { url: string; referer?: string; body: string | null }[] = []
   page.on('request', (request) => {
     if (request.url().startsWith(origins.worth))
@@ -51,7 +51,8 @@ test('analyse at Larkspur, consent, go back and pay: Worth shows the payment onc
       })
   })
   const landing = page.waitForResponse(`${origins.worth}/check`)
-  await analyse(page)
+  await link.click()
+  await page.waitForURL(`${origins.worth}/check`)
   // The token was read from the fragment and removed from the address bar.
   expect(page.url()).toBe(`${origins.worth}/check`)
   await expect(page.getByRole('group', { name: CAMERA })).toBeVisible()
