@@ -1,6 +1,13 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
-import { addDays, assessPurchase, money, payIn4InRange, withoutOwnHold } from '../shared/finance.ts'
+import {
+  addDays,
+  assessPurchase,
+  compareOptions,
+  money,
+  payIn4InRange,
+  withoutOwnHold,
+} from '../shared/finance.ts'
 import { PRODUCTS } from '../shared/seed.ts'
 import { plainText } from '../shared/text.ts'
 import type {
@@ -9,14 +16,13 @@ import type {
   Assessment,
   ChatIntent,
   ChatReply,
-  CheckoutHandoff,
   FactReason,
   Interpretation,
   PayIn4Eligibility,
+  StoreLink,
   TraceGuard,
   Transaction,
 } from '../shared/types.ts'
-import { CHECKOUT_OPTIONS, checkoutGuardTrail } from './agentCheckout.ts'
 import {
   categoryOf,
   notProductSearch,
@@ -26,7 +32,6 @@ import {
   wantsAlternatives,
 } from './alternatives.ts'
 import { PRICE_BUCKET_CENTS } from './channel3.ts'
-import type { PrepareCheckoutRequest, PrepareCheckoutResult } from './agentCheckout.ts'
 import { dateLabel, readTiming } from './dates.ts'
 import {
   clarificationText,
@@ -100,7 +105,11 @@ export interface CategoryReply {
  */
 export interface ChatActions {
   payIn4Eligibility?(amountCents: number): Promise<PayIn4Eligibility>
-  prepareCheckout?(request: PrepareCheckoutRequest): Promise<PrepareCheckoutResult>
+  /**
+   * The demo store's own page for a catalog item, or undefined while the store hand-off is off.
+   * Worth never prepares an order (decision 0.2): someone who wants to buy goes to the store.
+   */
+  storeProductUrl?(productId: string): string | undefined
   /** Similar products from other stores (Channel3), priced at or below the ceiling. */
   findAlternatives?(query: string, maxPriceCents: number): Promise<Alternatives>
 }
@@ -189,7 +198,7 @@ interface Answer {
   suggestions?: string[]
   toolCalls?: string[]
   note?: string
-  checkout?: CheckoutHandoff
+  storeLink?: StoreLink
   alternatives?: AlternativesOutcome
   /** A refusal the user's own words call for, such as paying a bill late (C-13). */
   refusal?: LeadIn
@@ -197,7 +206,7 @@ interface Answer {
   payIn4Asked?: boolean
   /** Each tool call and what the server did with it, for the trace. */
   tools?: AnswerTrace['tools']
-  /** Server checks beyond the reading itself: a checkout's guards, a search's limit. */
+  /** Server checks beyond the reading itself: a store link's checks, a search's limit. */
   guards?: TraceGuard[]
   /** Claude's sentence, or why it fell back (set only for answers from Claude). */
   sentence?: Sentence
@@ -495,7 +504,7 @@ function compose(answer: Answer, scoped: ChatData, asked = ''): ChatReply {
       categoryChips(answer.alternatives) ??
       (answer.suggestions?.length ? answer.suggestions : DEFAULT_SUGGESTIONS),
     toolCalls: answer.toolCalls ?? [],
-    ...(answer.checkout ? { checkout: answer.checkout } : {}),
+    ...(answer.storeLink ? { storeLink: answer.storeLink } : {}),
     ...(shown ? { alternatives: shown } : {}),
     ...(payIn4 ? { payIn4 } : {}),
     ...(explanation ? { explanation } : {}),
@@ -762,10 +771,9 @@ Scope
 - Anything else (creative writing, trivia, general knowledge, coding, other topics) is out of scope: call no tools and answer with intent "off_topic". The app shows a fixed redirect.
 - You cannot pay, capture a payment, cancel, move money, or change the plan.
 
-Preparing a checkout
-- When the person asks Worth to buy or check out one of the catalog items now, call prepare_checkout with the item and the option they chose. Never call it for a question such as whether they can afford something.
-- Worth's server decides whether an order can be prepared: it checks today's funds, a fresh assessment, the catalog price and that no other checkout is active. The person then approves the payment in PayPal and confirms it in Worth; you never take payment.
-- Set proceed_despite_shortfall only when the person explicitly says to go ahead even though the purchase dips below their cushion.
+Buying from the demo store
+- When the person asks to buy or check out one of the catalog items now, call open_store_checkout with the item. Never call it for a question such as whether they can afford something.
+- Worth sells nothing and prepares no order: the app links to the store's own page, where the person buys it with the store's PayPal checkout.
 
 Reading a purchase question
 - Call interpret_purchase for every question about buying or affording something, including follow-ups about the purchase being discussed. Report what the user said; the engine decides the answer.
@@ -967,31 +975,20 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
 ]
-const PREPARE_CHECKOUT_TOOL: Anthropic.Tool = {
-  name: 'prepare_checkout',
+const OPEN_STORE_CHECKOUT_TOOL: Anthropic.Tool = {
+  name: 'open_store_checkout',
   description:
-    "Prepare a PayPal sandbox order for a catalog item when the person asks Worth to buy it or check out now. The server sets the price from its catalog, checks today's funds, a fresh assessment and that no other checkout is active, and refuses otherwise. It never takes payment: the person approves in PayPal and confirms in Worth.",
+    "Link the person to the demo store's own page for a catalog item (Larkspur Supply) when they ask to buy it or check out now. Worth sells nothing, prepares no order and takes no payment: the store sells the item, and the person pays on the store's page with its own PayPal checkout. The server sets the price from the catalog and shows Worth's check of buying it today next to the link.",
   strict: true,
   input_schema: {
     type: 'object',
     additionalProperties: false,
-    required: ['item_id', 'option', 'proceed_despite_shortfall'],
+    required: ['item_id'],
     properties: {
       item_id: {
         type: 'string',
         enum: PRODUCTS.map((product) => product.id),
         description: `The catalog item: ${PRODUCTS.map((product) => `${product.id} (${product.name})`).join(', ')}.`,
-      },
-      option: {
-        type: 'string',
-        enum: [...CHECKOUT_OPTIONS],
-        description:
-          'buyToday: buy now. wait: buy on the wait date the plan suggested, once that day has come. spendLess: a cheaper catalog item within the amount that keeps the cushion.',
-      },
-      proceed_despite_shortfall: {
-        type: 'boolean',
-        description:
-          'True only when the person explicitly says to go ahead even though buying dips below their cushion.',
       },
     },
   },
@@ -1027,13 +1024,7 @@ const findSchema = z.object({
   item: z.string().max(200).nullable(),
   max_price_cents: z.number().int().min(0).max(100_000_000).nullable(),
 })
-const prepareSchema = z
-  .object({
-    item_id: z.string().max(100),
-    option: z.enum(CHECKOUT_OPTIONS),
-    proceed_despite_shortfall: z.boolean(),
-  })
-  .strict()
+const storeSchema = z.object({ item_id: z.string().max(100) }).strict()
 /** The person asked about Pay in 4 or paying later, so its availability may be shown. */
 const ASKS_PAY_IN_4 = /\bpay\s*(?:in\s*(?:4|four)|later)\b|\binstal+ments?\b|\bbnpl\b/i
 const FINAL_FORMAT = {
@@ -1159,12 +1150,11 @@ class Turn {
   read = new Set<string>()
   /** What Claude chose to show, kept per tool so the answer uses the choice made for it. */
   presentations = new Map<string, Presentation>()
-  /** The order prepared for approval, or the server's reason for not preparing one. */
-  checkout?: CheckoutHandoff
-  checkoutNote?: string
+  /** The store's own page for the catalog item the person wants to buy. */
+  storeLink?: StoreLink
   /** What fits today and what Channel3 found, when the person asked for something cheaper. */
   alternatives?: AlternativesOutcome
-  private checkoutRequested = false
+  private storeRequested = false
   /** Every tool call in order and what the server did with it, for the answer's trace. */
   tools: AnswerTrace['tools'] = []
   /** Server checks a tool ran beyond the reading itself. */
@@ -1197,7 +1187,7 @@ class Turn {
       return { content: 'Tool limit reached. Answer with what you have.', isError: true }
     }
     const input = (raw ?? {}) as Record<string, unknown>
-    if (name === 'prepare_checkout') return this.prepare(input)
+    if (name === 'open_store_checkout') return this.openStore(input)
     const shown = presentationSchema.safeParse(input)
     if (!shown.success)
       return { content: 'points, lead_in and follow_ups did not match the schema.', isError: true }
@@ -1246,74 +1236,76 @@ class Turn {
     return { content: JSON.stringify(result) }
   }
 
-  /** Asks the server to prepare an order. The server's guard, not Claude, decides. */
-  private async prepare(raw: Record<string, unknown>): Promise<ToolOutcome> {
-    if (!this.actions.prepareCheckout) {
-      this.mark('prepare_checkout', 'refused')
-      return {
-        content: 'Unknown tool prepare_checkout. Use only the listed read-only tools.',
-        isError: true,
-      }
+  /**
+   * Links to the store's own page for a catalog item (decision 0.2), with Worth's check of buying
+   * it today. Worth prepares no order: the URL, name and price all come from the server.
+   */
+  private openStore(raw: Record<string, unknown>): ToolOutcome {
+    const name = 'open_store_checkout'
+    const storeProductUrl = this.actions.storeProductUrl
+    if (!storeProductUrl) {
+      this.mark(name, 'refused')
+      return { content: `Unknown tool ${name}. Use only the listed tools.`, isError: true }
     }
-    const parsed = prepareSchema.safeParse(raw)
-    if (!parsed.success)
-      return {
-        content: 'item_id, option and proceed_despite_shortfall are required.',
-        isError: true,
-      }
-    if (this.checkoutRequested) {
-      this.mark('prepare_checkout', 'refused')
-      return {
-        content: JSON.stringify({ status: 'refused', reason: 'ALREADY_PREPARED' }),
-      }
+    const parsed = storeSchema.safeParse(raw)
+    const product = parsed.success && PRODUCTS.find((p) => p.id === parsed.data.item_id)
+    if (!product) return { content: 'item_id must be one of the catalog items.', isError: true }
+    if (this.storeRequested) {
+      this.mark(name, 'refused')
+      return { content: JSON.stringify({ status: 'refused', reason: 'ALREADY_LINKED' }) }
     }
-    this.checkoutRequested = true
-    const result = await this.actions.prepareCheckout({
-      itemId: parsed.data.item_id,
-      option: parsed.data.option,
-      proceedDespiteShortfall: parsed.data.proceed_despite_shortfall,
+    this.storeRequested = true
+    this.calls.push(name)
+    const purchases = withoutOwnHold(this.data.purchases, {
+      productId: product.id,
+      amountCents: product.priceCents,
     })
-    this.mark('prepare_checkout', result.ok ? 'ran' : 'refused')
-    this.guards.push(...checkoutGuardTrail(result))
-    const product = PRODUCTS.find((p) => p.id === parsed.data.item_id)
+    const item = { amountCents: product.priceCents, itemName: product.name, today: this.data.today }
     // The answer shows the engine's assessment of the item, at its catalog price, today.
-    if (product && !this.assessment && !this.clarify) {
-      const purchases = withoutOwnHold(this.data.purchases, {
-        productId: product.id,
-        amountCents: product.priceCents,
-      })
-      this.assessment = assessPurchase(this.data.profile, purchases, {
-        amountCents: product.priceCents,
-        itemName: product.name,
-        today: this.data.today,
-      })
+    if (!this.assessment && !this.clarify) {
+      this.assessment = assessPurchase(this.data.profile, purchases, item)
     }
-    if (!result.ok) {
-      this.checkoutNote = `Worth did not prepare an order. ${result.message}`
+    const url = storeProductUrl(product.id)
+    this.guards.push(
+      { id: 'catalog_item', label: `The item is in ${product.merchant}’s catalog`, passed: true },
+      {
+        id: 'catalog_price',
+        label: 'Name and price come from the store’s catalog, not from Claude',
+        passed: true,
+      },
+      {
+        id: 'no_order',
+        label: `Worth prepared no order and took no payment: you buy at ${product.merchant}`,
+        passed: true,
+      },
+    )
+    if (!url)
       return {
         content: JSON.stringify({
-          status: 'refused',
-          reason: result.code,
-          message_shown_by_app: result.message,
+          status: 'no_link',
+          shown_by_app: 'The app shows Worth’s check of buying it today. The store link is off.',
         }),
       }
+    // Next to the link, the card repeats the engine's wait date when waiting is its advice.
+    const comparison = compareOptions(this.data.profile, purchases, item)
+    const waitDate =
+      comparison.recommendation === 'wait' ? (comparison.wait.date ?? undefined) : undefined
+    this.storeLink = {
+      url,
+      merchant: product.merchant,
+      itemName: product.name,
+      amountCents: product.priceCents,
+      ...(waitDate ? { waitDate } : {}),
     }
-    const { checkout } = result
-    this.checkout = checkout
-    this.calls.push('prepare_checkout')
-    this.checkoutNote = [
-      `Worth prepared a PayPal sandbox order for the ${checkout.itemName} at ${money(checkout.amountCents)}.`,
-      checkout.requiresProceedConfirm
-        ? 'This purchase dips below your cushion, so confirm that you want to go ahead before you approve it in PayPal.'
-        : 'Approve it in PayPal, then confirm the payment in Worth.',
-      'Nothing is paid until you confirm.',
-    ].join(' ')
+    this.guards.push({
+      id: 'store_link',
+      label: `The link goes only to ${product.merchant}’s own page for this item`,
+      passed: true,
+    })
     return {
       content: JSON.stringify({
-        status: 'prepared',
-        requires_proceed_confirm: checkout.requiresProceedConfirm,
-        shown_by_app:
-          'The app shows the PayPal approval step. Payment happens only after the person approves in PayPal and confirms in Worth.',
+        status: 'linked',
+        shown_by_app: `The app shows Worth’s check of buying it today and a link to the item on ${product.merchant}’s site, where the person buys it with the store’s own PayPal checkout.`,
       }),
     }
   }
@@ -1542,8 +1534,7 @@ function answerFor(turn: Turn, final: Final | undefined): Answer {
         kind: turn.kind ?? commitmentKind(input.message),
       }
   }
-  if (turn.checkout) answer.checkout = turn.checkout
-  if (turn.checkoutNote) answer.note = turn.checkoutNote
+  if (turn.storeLink) answer.storeLink = turn.storeLink
   // Asked together with a priced item, the similar items follow its verdict.
   if (turn.alternatives) answer.alternatives = turn.alternatives
   // Claude's choice of facts and lead-in applies only with the tool that produced this
@@ -1706,7 +1697,7 @@ export function createChatProvider(
       const tools = [
         ...TOOLS,
         ...(actions.findAlternatives ? [FIND_ALTERNATIVES_TOOL] : []),
-        ...(actions.prepareCheckout ? [PREPARE_CHECKOUT_TOOL] : []),
+        ...(actions.storeProductUrl ? [OPEN_STORE_CHECKOUT_TOOL] : []),
       ]
       const messages: Anthropic.MessageParam[] = [
         ...history(input),
@@ -1806,7 +1797,7 @@ export function createChatProvider(
       if (
         !answer.alternatives &&
         !answer.assessment &&
-        !answer.checkout &&
+        !answer.storeLink &&
         (answer.intent === 'alternatives' ||
           (unanswered && localIntent(input, turn.data) === 'alternatives'))
       ) {

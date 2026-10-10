@@ -107,9 +107,9 @@ uses both values. That change only makes the check stricter, and it was not re-r
   team, the persona is synthetic, and the judge is itself a model (its stability is reported, not
   assumed). Misses (a question where an answer was possible) are counted separately from unsafe
   outcomes.
-- Checkout preparation is decided by server guards, not by the model, so `prepare_checkout` is
-  covered by unit tests (`tests/agent-checkout.test.ts`). The MCP tools make no model call and
-  are covered by `tests/mcp*.test.ts`. Neither is part of this eval.
+- Ask Worth's `open_store_checkout` only links to the store's page, with a URL, name and price
+  the server sets, so it is covered by unit tests (`tests/store-checkout-link.test.ts`). The MCP
+  tools make no model call and are covered by `tests/mcp*.test.ts`. Neither is part of this eval.
 
 Reports (JSON and markdown, one per run) are kept outside the repository with the team's review
 records; the tables above are copied from them.

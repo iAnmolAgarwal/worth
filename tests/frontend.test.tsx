@@ -504,35 +504,65 @@ describe('Ask answers', () => {
     expect(requests[1]!.context).toMatchObject({ purchaseDate: '2026-10-04' })
   })
 
-  it('confirms a shortfall before opening a checkout Claude prepared', async () => {
+  it('links to the store’s own page for an item to buy, in the same tab, with no order card', async () => {
     const user = userEvent.setup()
     const state = makeState()
-    const onOpenCheckout = vi.fn()
-    routeApi((path) => {
-      if (path === '/state') return state
-      return {
-        ...reply('I prepared the checkout.', 'anthropic'),
-        toolCalls: ['prepare_checkout'],
-        checkout: {
-          purchaseId: 'agent-order',
-          orderId: 'ORDER',
-          approveUrl: 'https://www.sandbox.paypal.com/checkoutnow?token=ORDER',
-          itemName: 'Everyday camera',
-          amountCents: 119900,
-          option: 'buyToday',
-          requiresProceedConfirm: true,
-        },
-      } satisfies ChatReply
-    })
-    render(<Ask {...askProps} state={state} onOpenCheckout={onOpenCheckout} />)
-    await sendMessage(user, 'Buy the camera anyway.')
-    const confirm = await screen.findByRole('region', { name: 'Confirm before checkout' })
-    expect(confirm.textContent).toContain('takes you below your cushion')
+    routeApi(() => ({
+      ...reply('Here is what buying it today does to your plan.', 'anthropic'),
+      toolCalls: ['open_store_checkout'],
+      storeLink: {
+        url: 'https://store.example/p/camera',
+        merchant: 'Larkspur Supply',
+        itemName: 'Everyday camera',
+        amountCents: 119900,
+      },
+    }))
+    render(<Ask {...askProps} state={state} />)
+    await sendMessage(user, 'Buy the camera.')
+    const card = await screen.findByRole('region', { name: 'Buy at Larkspur Supply' })
+    expect(card.textContent).toContain('Everyday camera, $1,199.00 at Larkspur Supply')
+    expect(card.textContent).toContain('Worth doesn’t sell this.')
+    const link = within(card).getByRole('link', { name: 'Open at Larkspur Supply' })
+    expect(link.getAttribute('href')).toBe('https://store.example/p/camera')
+    expect(link.getAttribute('rel')).toBe('noreferrer')
+    expect(link.getAttribute('target')).toBeNull()
+    expect(card.textContent).not.toContain('Worth suggests waiting')
+    expect(screen.queryByText(/Checkout ready/)).toBeNull()
     expect(screen.queryByRole('button', { name: 'Open checkout' })).toBeNull()
-    await user.click(within(confirm).getByRole('button', { name: 'Yes, continue' }))
-    await user.click(screen.getByRole('button', { name: 'Open checkout' }))
-    expect(onOpenCheckout).toHaveBeenCalledWith('agent-order', expect.stringContaining('ORDER'))
-    expect(screen.getByText('Claude read your question · every number is Worth’s')).toBeTruthy()
+  })
+
+  it('repeats the wait date above the store link when waiting is Worth’s advice', async () => {
+    const user = userEvent.setup()
+    routeApi(() => ({
+      ...reply('Here is what buying it today does to your plan.', 'anthropic'),
+      toolCalls: ['open_store_checkout'],
+      storeLink: {
+        url: 'https://store.example/p/camera',
+        merchant: 'Larkspur Supply',
+        itemName: 'Everyday camera',
+        amountCents: 119900,
+        waitDate: '2026-10-23',
+      },
+    }))
+    render(<Ask {...askProps} state={makeState()} />)
+    await sendMessage(user, 'Buy the camera.')
+    const card = await screen.findByRole('region', { name: 'Buy at Larkspur Supply' })
+    const line = within(card).getByText('Worth suggests waiting until Fri, Oct 23.')
+    expect(line.className).toBe('meta')
+    expect(within(card).getByRole('link', { name: 'Open at Larkspur Supply' })).toBeTruthy()
+  })
+
+  it('shows no store link when the answer has none', async () => {
+    const user = userEvent.setup()
+    routeApi(() => ({
+      ...reply('Here is what buying it today does to your plan.', 'anthropic'),
+      toolCalls: ['open_store_checkout'],
+    }))
+    render(<Ask {...askProps} state={makeState()} />)
+    await sendMessage(user, 'Buy the camera.')
+    await screen.findByText('Here is what buying it today does to your plan.')
+    expect(screen.queryByRole('link', { name: /Open at/ })).toBeNull()
+    expect(screen.queryByRole('region', { name: /Buy at/ })).toBeNull()
   })
 
   it('discards private history when the server rejects a chat across a session change', async () => {

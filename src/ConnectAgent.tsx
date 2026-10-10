@@ -70,8 +70,8 @@ function CopyButton({
 
 /**
  * Settings → Connect an agent. A token lets an outside agent such as Claude Desktop ask Worth
- * before it pays: check affordability, list saved plans and prepare an order the person approves
- * in PayPal. The token is shown once; Worth keeps only its hash.
+ * before it pays, at any store: check affordability, list saved plans and link to the demo store's
+ * own page for its items. The token is shown once; Worth keeps only its hash.
  */
 export function ConnectAgent({
   state,
@@ -144,7 +144,7 @@ export function ConnectAgent({
         </div>
         <div>
           <dt>It can also</dt>
-          <dd>Prepare a PayPal sandbox order that you approve yourself</dd>
+          <dd>Send you to the demo store’s own page to buy there</dd>
         </div>
         <div>
           <dt>Pay for you</dt>

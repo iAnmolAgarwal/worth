@@ -1,6 +1,6 @@
 /**
  * The Phase 3 / Phase 4 contract (specs/contract-phase3-4.md), now part of the shared types:
- * purchase lifecycle fields, the agent's checkout hand-off and Pay in 4 eligibility.
+ * purchase lifecycle fields and Pay in 4 eligibility.
  */
 import { checkProductLink } from '../shared/link'
 import { plainText } from '../shared/text'
@@ -18,7 +18,6 @@ export type {
   Alternatives,
   AppState,
   ChatReply,
-  CheckoutHandoff as AgentCheckout,
   Comparison,
   PayIn4Comparison as PayIn4,
   PayIn4Eligibility,

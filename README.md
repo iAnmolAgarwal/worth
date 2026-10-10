@@ -94,7 +94,7 @@ and 47% of BNPL users say they paid late in the past year
 - **Your own history.** Import a PayPal activity CSV (personal or business export, up to 1 MB and
   10,000 rows). Worth proposes recurring bills, categories and existing Pay in 4 plans for you to
   confirm; it never deducts history from today's funds a second time.
-- **Connect an agent.** Any MCP client can ask Worth before it pays. See [MCP](#mcp).
+- **Connect an agent.** Any MCP client can ask Worth before it pays. See [Worth guardrail MCP](#worth-guardrail-mcp).
 
 ![Saved on a return visit: the camera saved for Fri, Oct 23 now shows "Your plan suggests this may fit now — confirm today's funds"](docs/img/saved-return-visit.png)
 
@@ -109,10 +109,10 @@ On https://worth.onrender.com (no sign-in):
    ask: "If I put it on Pay in 4, which bills would the payments land next to?"
 2. Click **See the comparison**, then **Compare with PayPal Pay in 4**: four payments, the bill
    each one lands near, the plan already running, and PayPal's message.
-3. In Ask Worth, type "Go ahead and buy the studio headphones". Worth prepares a $349 PayPal
-   sandbox order behind its checkout guards and shows "Checkout ready". Choose **Open checkout**,
-   approve with the sandbox buyer above, then confirm in Worth. Activity shows the payment once,
-   and the room to spend drops by $349.
+3. In Ask Worth, type "Go ahead and buy the studio headphones". Worth shows its verdict for the
+   $349 headphones and an **Open at Larkspur Supply** link to the store's own product page, where
+   you pay with PayPal (the sandbox buyer above). Worth prepares no order: the store sells the
+   item and PayPal takes the payment.
 
 Pay in 4 itself is chosen inside PayPal's checkout. A sandbox buyer can pick it there; Worth
 cannot see which funding the buyer chose (PayPal's order and capture do not say), so after a
@@ -177,11 +177,10 @@ Claude is the interface and the narrator; the engine is the decision-maker.
   `checkSentence` rejects free numbers or dates, advice, a value in the wrong place, wording that
   rates Pay in 4, and anything that contradicts the engine's outcome; on any failure the
   engine's template sentence is shown instead. The verdict sentence itself is always a template.
-- **Act, behind guards.** `prepare_checkout` lets Claude ask for an order for a catalog item. The
-  server prepares it only if the user's own words (not quoted or pasted text) are an unqualified
-  instruction to buy, funds are confirmed for today, the assessment is fresh, no other checkout
-  is active, and the price comes from the catalog. Going below the cushion needs the user's own
-  "anyway" and a second confirmation at capture. Claude never captures.
+- **Send you to the store, never sell.** When you ask to buy a demo-store item,
+  `open_store_checkout` shows Worth's check of buying it today and an "Open at Larkspur Supply"
+  link to the store's own product page, built by the server from `MERCHANT_ORIGIN` and the
+  catalog. Worth prepares no order: you pay on the store's page with its own PayPal checkout.
 - **Consent and limits.** The untouched sample plan can use Claude without opt-in; an edited or
   imported plan needs the AI-sharing switch. Requests are capped per IP per hour and per server
   per day; past a cap, or without a key, answers are labelled local calculations.
@@ -200,10 +199,10 @@ The [evaluation](#evaluation) runs these paths live against the real model.
 | PayPal `find-eligible-methods` | Server-side Pay Later eligibility for the price before the Pay in 4 comparison is offered |
 | PayPal Webhooks | Raw-body signature verification; order events reconcile, refunds and reversals become review items |
 | PayPal sandbox accounts and negative testing | A US sandbox merchant and buyer; `PayPal-Mock-Response` for the decline and re-approve path |
-| Claude Sonnet 5.5 (Anthropic API) | Interprets questions, picks engine facts, writes one checked sentence, may request a guarded checkout, suggests import categories |
+| Claude Sonnet 5.5 (Anthropic API) | Interprets questions, picks engine facts, writes one checked sentence, may link to the demo store's product page, suggests import categories |
 | Claude Opus 5.5 (Anthropic API) | Offline only: the independent judge in the live AI eval (`eval/judge.ts`); never called by the app |
 | Channel3 API | `search`, `similar` and product reads for "similar items that fit today"; 6 h cache, daily and per-IP caps, recorded results as fallback |
-| Model Context Protocol SDK | The `/mcp` server and stdio relay that let outside agents check affordability and prepare orders |
+| Model Context Protocol SDK | Worth guardrail MCP: the `/mcp` server and stdio relay that let outside agents check affordability at any store before they buy |
 | Render | Hosts the app from `render.yaml`: one Node 24 web service with a 1 GB persistent disk |
 | SQLite (`node:sqlite`) | Session-scoped storage on that disk: plans, purchases, saved items, webhook events, agent tokens |
 | React 19, Vite, Express 5, Zod 4, TypeScript | The client, build, HTTP server and validation at every boundary |
@@ -223,7 +222,7 @@ The [evaluation](#evaluation) runs these paths live against the real model.
         │                    ▼                         └── Channel3 (similar items, cached)
         │        server/chat.ts (Anthropic SDK)
         │        tools ─► interpret · commitments · spending · plan · alternatives
-        │        prepare_checkout ─► checkoutGuards (server/agentCheckout.ts)
+        │        open_store_checkout ─► MERCHANT_ORIGIN/p/<id> (no order)
         │        sentence ─► checkSentence ─► template on any failure
         ▼                    │
   shared/finance.ts (pure TypeScript, integer cents) ◄──┘   the model's tools ARE the engine
@@ -231,7 +230,7 @@ The [evaluation](#evaluation) runs these paths live against the real model.
         │
   node:sqlite on the Render disk (one row set per anonymous session)
 
-  /mcp (bearer token, no Claude) ─► the same engine and checkoutGuards
+  /mcp (bearer token, no Claude) ─► the same engine; the store's link, never an order
 ```
 
 - **The engine** (`shared/finance.ts`, `shared/collision.ts`) is pure: data in, data out. It
@@ -250,32 +249,32 @@ The [evaluation](#evaluation) runs these paths live against the real model.
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) has the full design: the forecast, the AI
 boundary, the payment state machine, Channel3, saved plans, sessions and privacy.
 
-## MCP
+## Worth guardrail MCP
 
-Worth runs a Model Context Protocol server at `/mcp` (Streamable HTTP, stateless) with a stdio
-relay for local clients. Create a revocable agent token in **Settings → Connect an agent**, paste
+Worth runs its own Model Context Protocol server, Worth guardrail MCP, at `/mcp` (Streamable
+HTTP, stateless) with a stdio relay for local clients. Create a revocable agent token in **Settings → Connect an agent**, paste
 the generated config into Claude Desktop or any MCP client, and ask "Can I afford the $1,199
 camera?" in your own assistant.
 
-- `check_affordability` returns Worth's decision (affordable now, later, or not; the safe amount;
-  the earliest date; the low point and the bill behind it; Pay in 4 as a comparison) with a
-  ready-to-quote summary from Worth's templates. Coherence invariants are checked before every
-  answer.
-- `prepare_order` runs the same `checkoutGuards` as the Buy button and returns a PayPal approval
-  link for the person. There is no capture tool; the order waits in Activity, labelled
-  "Requested by an external agent", until the person approves and confirms.
+- `check_affordability` is the guardrail for any store. It returns Worth's decision (affordable
+  now, later, or not; the safe amount; the earliest date; the low point and the bill behind it;
+  Pay in 4 as a comparison) with a ready-to-quote summary from Worth's templates. Coherence
+  invariants are checked before every answer.
+- `store_checkout_link` is the demo store's checkout link: for a Larkspur Supply item it returns
+  the store's own product page with the same verdict. Worth creates no order; the person pays on
+  the store's page with its PayPal checkout.
 - `list_saved_plans` lists saved items and wait plans.
 
 The MCP path makes no Anthropic call. Tokens are stored as SHA-256 fingerprints, bound to one
 plan and rate-limited. Setup, the tool contract and the security model are in
 [docs/MCP.md](docs/MCP.md).
 
-<img src="docs/img/connect-agent.png" width="560" alt="Settings, Connect an agent: the agent can check a purchase against your plan and read saved items, can prepare a PayPal sandbox order you approve yourself, and can never pay for you">
+<img src="docs/img/connect-agent.png" width="560" alt="Settings, Connect an agent: the agent can check a purchase against your plan and read saved items, can send you to the demo store's own page to buy there, and can never pay for you">
 
 ## Limits and degradation
 
 - **Sandbox only.** No real money moves and no goods ship. The demo store (Larkspur Supply) has
-  six items; `prepare_checkout` and `prepare_order` work only for those.
+  six items; `open_store_checkout` and `store_checkout_link` link only to those.
 - **USD only, CSV only.** There is no consumer API for PayPal activity, so history comes from a
   CSV export or the sample plan. Foreign-currency rows without a USD conversion block positive
   answers until resolved.
@@ -338,7 +337,7 @@ the webhook ID in `PAYPAL_WEBHOOK_ID`. Localhost alone cannot receive them.
 | `CLAUDE_DAILY_LIMIT`, `CLAUDE_IP_HOURLY_LIMIT` | Claude requests per server per day (200) and per client IP per hour (20) |
 | `SESSION_IP_HOURLY_LIMIT` | New sessions per client IP per hour (30) |
 | `MAX_SESSIONS`, `MAX_TRANSACTIONS` | Live sessions (5,000) and stored transactions per session (20,000) |
-| `MCP_IP_PER_MINUTE`, `MCP_TOKEN_PER_MINUTE`, `MCP_PREPARE_HOURLY` | `/mcp` requests per IP per minute (120), per token per minute (30), and `prepare_order` calls per token per hour (5) |
+| `MCP_IP_PER_MINUTE`, `MCP_TOKEN_PER_MINUTE` | `/mcp` requests per IP per minute (120) and per token per minute (30) |
 | `PORT`, `HOST` | Port (5173) and bind address (`0.0.0.0` in production, `127.0.0.1` otherwise) |
 | `APP_ORIGIN` | Public browser origin. Falls back to `APP_URL`, then `RENDER_EXTERNAL_URL`, then `http://localhost:$PORT`. Production refuses localhost or plain HTTP |
 | `TRUST_PROXY` | Reverse-proxy hops trusted for the client IP. Required in production (2 on Render) |

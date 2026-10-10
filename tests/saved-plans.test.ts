@@ -292,8 +292,8 @@ describe('acceptance case 21: a saved wait plan, checked on return', () => {
           {
             type: 'tool_use',
             id: 'tool-1',
-            name: 'prepare_checkout',
-            input: { item_id: 'camera', option: 'wait', proceed_despite_shortfall: false },
+            name: 'open_store_checkout',
+            input: { item_id: 'camera' },
           },
         ],
       ],
@@ -325,14 +325,15 @@ describe('acceptance case 21: a saved wait plan, checked on return', () => {
     const early = await post(agent, `/api/saved/${plan.body.item.id}/prepare`)
     expect(early.status).toBe(409)
     expect(early.body.code).toBe('FUNDS_NOT_TODAY')
-    // Claude's prepare_checkout hits the same guard.
+    // Claude never prepares an order (decision 0.2): asked to buy, it only links to the store.
     const chat = await post(agent, '/api/chat', {
       message: 'Buy the camera now',
       history: [],
       context: { amountCents: 119900, itemName: 'Everyday camera' },
     })
+    expect(chat.status).toBe(200)
+    expect(chat.body.toolCalls).toContain('open_store_checkout')
     expect(chat.body.checkout).toBeUndefined()
-    expect(chat.body.message).toContain('Confirm today’s available funds')
     expect(paypal!.create).not.toHaveBeenCalled()
     expect((await state(agent)).purchases).toEqual([])
     // Confirm today's funds, then a fresh assessment, then the order.

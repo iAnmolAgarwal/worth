@@ -14,7 +14,13 @@ import {
   purchaseReviews,
   withoutOwnHold,
 } from '../shared/finance.ts'
-import { createDemoState, DEMO_TIMEZONE, PRODUCTS, rebaseDemoState } from '../shared/seed.ts'
+import {
+  createDemoState,
+  DEMO_MERCHANT,
+  DEMO_TIMEZONE,
+  PRODUCTS,
+  rebaseDemoState,
+} from '../shared/seed.ts'
 import {
   analyzeHistory,
   foreignPaymentTransaction,
@@ -46,12 +52,7 @@ import {
   validateOrder,
 } from './paypal.ts'
 import type { PayPalGateway, PayPalOrder } from './paypal.ts'
-import { checkoutGuards, decideAgentCheckout } from './agentCheckout.ts'
-import type {
-  PrepareCheckoutRequest,
-  PrepareCheckoutResult,
-  PrepareRefusal,
-} from './agentCheckout.ts'
+import { checkoutGuards } from './checkoutGuards.ts'
 import {
   AgentTokenError,
   createAgentToken,
@@ -61,7 +62,6 @@ import {
   mountMcp,
   revokeAgentToken,
 } from './mcp.ts'
-import type { ExternalOrderResult } from './mcp.ts'
 import { categoryCandidates, createChatProvider, fallbackCategories, localReply } from './chat.ts'
 import type { ChatActions, ChatProvider } from './chat.ts'
 import { allowedOrigins, handoffEnabled, loadConfig } from './config.ts'
@@ -405,6 +405,20 @@ export function createApp(options: AppOptions = {}) {
   const savedStore = handoff
     ? { origin: handoff.merchantOrigin, allowLocal: !config.production }
     : {}
+  /**
+   * The demo store's own page for a catalog item (decision 0.2): where Ask Worth and outside agents
+   * send someone who wants to buy it. Worth prepares no order; the store sells it. Undefined while
+   * the hand-off is off. The video replay carries over, so both origins show the same dates.
+   */
+  function storeProductUrl(sessionId: string, productId: string) {
+    const product = PRODUCTS.find((p) => p.id === productId && p.merchant === DEMO_MERCHANT)
+    if (!handoff || !product) return undefined
+    const url = new URL(`/p/${encodeURIComponent(product.id)}`, handoff.merchantOrigin)
+    const data = store.get(sessionId)
+    if (data?.profile.source === 'demo' && data.demoClock?.preset === 'video')
+      url.searchParams.set('replay', 'video')
+    return url.href
+  }
   const app = express()
   app.disable('x-powered-by')
   // Behind a proxy, req.ip must be the client address the proxy appended, not the proxy itself.
@@ -835,22 +849,15 @@ export function createApp(options: AppOptions = {}) {
     return value
   }
   /**
-   * Creates the purchase reservation and, in the sandbox, its PayPal order. Both the checkout
-   * button and Claude's prepare_checkout go through here.
+   * Creates the purchase reservation and, in the sandbox, its PayPal order. Only the person's own
+   * buttons come here: agents link to the store instead (decision 0.2).
    */
   async function startCheckout(
     id: string,
     product: Product,
     options: {
       acknowledgeShortfall: boolean
-      /**
-       * Claude's order below the cushion: it may be created, but it is stored unacknowledged and
-       * capture needs the user's own explicit acknowledgement.
-       */
-      confirmAtCapture?: boolean
-      /** 'agent': Ask Worth's prepare_checkout; 'external': an outside agent's prepare_order. */
-      preparedBy: 'agent' | 'external' | 'user'
-      /** The plan the agent's assessment used; any change since makes it stale. */
+      /** The plan the saved plan's guard check used; any change since makes it stale. */
       assessed?: { profileVersion: number; today: string }
     },
   ) {
@@ -858,7 +865,7 @@ export function createApp(options: AppOptions = {}) {
     let purchase = store.atomic(() => {
       const existing = active(id)
       if (existing) {
-        if (existing.productId !== product.id || options.preparedBy !== 'user')
+        if (existing.productId !== product.id)
           throw new HttpError(
             409,
             'You already have a checkout in progress. Finish or cancel it first.',
@@ -877,10 +884,7 @@ export function createApp(options: AppOptions = {}) {
           'Your plan or the date changed. Check this purchase again before checkout.',
           'ASSESSMENT_EXPIRED',
         )
-      assertAssessment(
-        assessment,
-        options.acknowledgeShortfall || options.confirmAtCapture === true,
-      )
+      assertAssessment(assessment, options.acknowledgeShortfall)
       const created: StoredPurchase = {
         id: randomUUID(),
         productId: product.id,
@@ -893,8 +897,7 @@ export function createApp(options: AppOptions = {}) {
         profileVersion: assessment.profileVersion,
         assessmentDate: assessment.today,
         acknowledgedShortfall: options.acknowledgeShortfall,
-        ...(options.confirmAtCapture ? { proceedConfirmRequired: true } : {}),
-        preparedBy: options.preparedBy,
+        preparedBy: 'user',
         ...(payLater ? { payLaterCapable: payLater !== 'unavailable' } : {}),
       }
       store.putPurchase(id, created)
@@ -903,131 +906,6 @@ export function createApp(options: AppOptions = {}) {
     if (purchase.mode === 'sandbox')
       purchase = await withPurchaseLock(purchase.id, () => ensureOrder(id, purchase))
     return purchase
-  }
-  /** Claude's gated prepare_checkout: the guard, then the same checkout path as the button. */
-  async function prepareCheckout(
-    id: string,
-    message: string,
-    contextItemName: string | undefined,
-    request: PrepareCheckoutRequest,
-  ): Promise<PrepareCheckoutResult> {
-    const data = store.get(id)
-    if (!data)
-      return { ok: false, code: 'ASSESSMENT_EXPIRED', message: 'This session has expired.' }
-    const product = PRODUCTS.find((p) => p.id === request.itemId)
-    const decision = decideAgentCheckout({
-      profile: data.profile,
-      purchases: livePurchases(id),
-      today: sessionToday(data),
-      product,
-      request,
-      message,
-      contextItemName,
-    })
-    if (!decision.ok) return decision
-    if (!paypal)
-      return {
-        ok: false,
-        code: 'PAYPAL_UNAVAILABLE',
-        message: 'PayPal sandbox checkout is not connected, so Worth cannot prepare an order.',
-      }
-    let purchase: StoredPurchase
-    try {
-      purchase = await startCheckout(id, decision.product, {
-        acknowledgeShortfall: false,
-        confirmAtCapture: !decision.fits,
-        preparedBy: 'agent',
-        assessed: { profileVersion: decision.profileVersion, today: decision.today },
-      })
-    } catch (error) {
-      if (error instanceof HttpError) return checkoutRefusal(error)
-      throw error
-    }
-    if (!purchase.orderId || !purchase.approvalUrl || purchase.status !== 'created')
-      return {
-        ok: false,
-        code: 'PAYPAL_UNAVAILABLE',
-        message: 'PayPal did not return an approval link. Open the checkout to continue.',
-      }
-    return {
-      ok: true,
-      checkout: {
-        purchaseId: purchase.id,
-        orderId: purchase.orderId,
-        approveUrl: purchase.approvalUrl,
-        itemName: purchase.name,
-        amountCents: purchase.amountCents,
-        option: request.option,
-        requiresProceedConfirm: !decision.fits,
-      },
-    }
-  }
-  /** A checkout error from startCheckout, as an agent's refusal code and message. */
-  function checkoutRefusal(error: HttpError): { ok: false; code: PrepareRefusal; message: string } {
-    const code =
-      error.code === 'CHECKOUT_ACTIVE' || error.code === 'ASSESSMENT_EXPIRED'
-        ? error.code
-        : error.code === 'PLAN_INCOMPLETE'
-          ? 'PLAN_INCOMPLETE'
-          : error.code === 'SHORTFALL_ACKNOWLEDGEMENT_REQUIRED'
-            ? 'SHORTFALL_NOT_CONFIRMED'
-            : 'PAYPAL_UNAVAILABLE'
-    return { ok: false, code, message: error.message }
-  }
-  /**
-   * An outside agent's prepare_order (MCP): the same checkoutGuards as a saved plan's Buy button,
-   * then the same checkout path. Below the cushion the agent must acknowledge it, the order is
-   * stored unacknowledged, and capture needs the person's own confirmation in Worth.
-   */
-  async function prepareExternalOrder(
-    id: string,
-    productId: string,
-    acknowledgeBelowCushion: boolean,
-  ): Promise<ExternalOrderResult> {
-    const data = store.get(id)
-    if (!data) return { ok: false, code: 'ASSESSMENT_EXPIRED', message: 'This plan has expired.' }
-    const product = PRODUCTS.find((p) => p.id === productId)
-    if (!product)
-      return {
-        ok: false,
-        code: 'UNKNOWN_ITEM',
-        message:
-          'Worth prepares orders only for items in the demo store’s catalog (Larkspur Supply).',
-      }
-    const decision = checkoutGuards({
-      profile: data.profile,
-      purchases: livePurchases(id),
-      today: sessionToday(data),
-      product,
-      request: { option: 'buyToday' },
-      proceedDespiteShortfall: acknowledgeBelowCushion,
-    })
-    if (!decision.ok) return decision
-    if (!paypal)
-      return {
-        ok: false,
-        code: 'PAYPAL_UNAVAILABLE',
-        message: 'PayPal sandbox checkout is not connected, so Worth cannot prepare an order.',
-      }
-    let purchase: StoredPurchase
-    try {
-      purchase = await startCheckout(id, product, {
-        acknowledgeShortfall: false,
-        confirmAtCapture: !decision.fits,
-        preparedBy: 'external',
-        assessed: { profileVersion: decision.profileVersion, today: decision.today },
-      })
-    } catch (error) {
-      if (error instanceof HttpError) return checkoutRefusal(error)
-      throw error
-    }
-    if (!purchase.orderId || !purchase.approvalUrl || purchase.status !== 'created')
-      return {
-        ok: false,
-        code: 'PAYPAL_UNAVAILABLE',
-        message: 'PayPal did not return an approval link. Open the checkout in Worth to continue.',
-      }
-    return { ok: true, purchase, fits: decision.fits }
   }
   let proxyHopsLogged = !config.production
   app.use((req, res, next) => {
@@ -1095,7 +973,7 @@ export function createApp(options: AppOptions = {}) {
       }
     },
     payIn4Eligibility,
-    prepareOrder: prepareExternalOrder,
+    storeProductUrl,
   })
   app.get('/api/health', (_req, res) =>
     res.json({
@@ -1811,9 +1689,9 @@ export function createApp(options: AppOptions = {}) {
     res.json(state(id))
   })
   /**
-   * The button path for a saved plan on return: the same guards as Claude's prepare_checkout
-   * (funds confirmed today, a fresh assessment for the plan's option, the catalog price, one
-   * active checkout), then the same checkout path as the Buy button. Custom items never check out.
+   * The button path for a saved plan on return: checkoutGuards (funds confirmed today, a fresh
+   * assessment for the plan's option, the catalog price, one active checkout), then the same
+   * checkout path as the Buy button. Custom items never check out.
    */
   app.post('/api/saved/:id/prepare', async (req, res) => {
     z.object({}).strict().parse(req.body)
@@ -1831,12 +1709,10 @@ export function createApp(options: AppOptions = {}) {
       today: sessionToday(data),
       product,
       request: { option: item.option === 'wait' ? 'wait' : 'buyToday' },
-      proceedDespiteShortfall: false,
     })
     if (!decision.ok) throw new HttpError(409, decision.message, decision.code)
     const purchase = await startCheckout(id, product, {
       acknowledgeShortfall: false,
-      preparedBy: 'user',
       assessed: { profileVersion: decision.profileVersion, today: decision.today },
     })
     res.json({
@@ -2182,12 +2058,11 @@ export function createApp(options: AppOptions = {}) {
     store.save(id, data)
     res.json(state(id))
   })
-  /** What Claude's tools may ask the server to do for this session, each behind its own guard. */
-  function chatActions(req: Request, id: string, input: z.infer<typeof chatSchema>): ChatActions {
+  /** What Claude's tools may ask the server for in this session, each behind its own guard. */
+  function chatActions(req: Request, id: string): ChatActions {
     return {
       payIn4Eligibility,
-      prepareCheckout: (request) =>
-        prepareCheckout(id, input.message, input.context?.itemName, request),
+      storeProductUrl: (productId) => storeProductUrl(id, productId),
       findAlternatives: (query, maxPriceCents) =>
         channel3.search(query, maxPriceCents, liveSearches(req)),
     }
@@ -2221,7 +2096,7 @@ export function createApp(options: AppOptions = {}) {
       today: current.today,
     }
     const id = session
-    const actions = chatActions(req, id, input)
+    const actions = chatActions(req, id)
     // Local answers still search other stores for something cheaper; nothing goes to Claude.
     /** Answers that list similar items record them as shown to this session. */
     const shown = (answer: ChatReply) => {
@@ -2271,10 +2146,7 @@ export function createApp(options: AppOptions = {}) {
       .parse(req.body)
     const product = PRODUCTS.find((p) => p.id === productId)
     if (!product) throw new HttpError(404, 'Product not found.', 'NOT_FOUND')
-    const purchase = await startCheckout(sessionId(res), product, {
-      acknowledgeShortfall,
-      preparedBy: 'user',
-    })
+    const purchase = await startCheckout(sessionId(res), product, { acknowledgeShortfall })
     res.json({
       purchase: publicPurchase(purchase),
       orderId: purchase.orderId,

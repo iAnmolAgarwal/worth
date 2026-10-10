@@ -48,8 +48,6 @@ export interface AppConfig {
   mcpTokenPerMinute: number
   /** Failed agent-token checks per client IP per 15 minutes, then /mcp refuses that IP. */
   mcpAuthFailures: number
-  /** prepare_order calls per agent token per hour. */
-  mcpPrepareHourly: number
   /** Agent tokens one plan may have active at once. */
   maxAgentTokens: number
   /**
@@ -175,7 +173,6 @@ export function loadConfig(env: Env = process.env, overrides: Partial<AppConfig>
     mcpIpPerMinute: wholeNumber(env, 'MCP_IP_PER_MINUTE', 120, 1),
     mcpTokenPerMinute: wholeNumber(env, 'MCP_TOKEN_PER_MINUTE', 30, 1),
     mcpAuthFailures: 20,
-    mcpPrepareHourly: wholeNumber(env, 'MCP_PREPARE_HOURLY', 5, 1),
     maxAgentTokens: 3,
     handoffSecret: setting(env, 'HANDOFF_SECRET'),
     merchantOrigin: setting(env, 'MERCHANT_ORIGIN'),

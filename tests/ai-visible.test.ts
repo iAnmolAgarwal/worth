@@ -1,6 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { describe, expect, it, vi } from 'vitest'
-import { checkoutGuardTrail, CHECKOUT_GUARDS } from '../server/agentCheckout.ts'
 import { createChatProvider, fallbackReply, localReply } from '../server/chat.ts'
 import type { ChatActions, ChatData, ChatInput } from '../server/chat.ts'
 import { readTiming } from '../server/dates.ts'
@@ -374,45 +373,19 @@ describe('how Ask Worth read this (judge #5)', () => {
     expect(reply.explanation).toBeUndefined()
   })
 
-  it('lists every prepare_checkout guard that passed', async () => {
-    const { provider } = model([
-      tool('prepare_checkout', {
-        item_id: 'headphones',
-        option: 'buyToday',
-        proceed_despite_shortfall: false,
-      }),
-      note(null),
-    ])
-    const prepareCheckout = vi.fn(async () => ({
-      ok: true as const,
-      checkout: {
-        purchaseId: 'p1',
-        orderId: 'o1',
-        approveUrl: 'https://www.sandbox.paypal.com/checkoutnow?token=o1',
-        itemName: 'Studio headphones',
-        amountCents: 34900,
-        option: 'buyToday' as const,
-        requiresProceedConfirm: false,
-      },
-    }))
+  it('lists the store link’s checks: catalog item and price, no order, the store’s own page', async () => {
+    const { provider } = model([tool('open_store_checkout', { item_id: 'headphones' }), note(null)])
+    const storeProductUrl = vi.fn((id: string) => `https://store.example/p/${id}`)
     const reply = await provider.reply(ask('Buy the studio headphones now'), demo(), {
-      prepareCheckout,
+      storeProductUrl,
     })
-    expect(reply.trace!.tools).toContainEqual({ name: 'prepare_checkout', outcome: 'ran' })
-    const guards = reply.trace!.guards.filter((g) => CHECKOUT_GUARDS.some((c) => c.id === g.id))
-    expect(guards.map((g) => g.id)).toEqual(CHECKOUT_GUARDS.map((g) => g.id))
+    expect(storeProductUrl).toHaveBeenCalledWith('headphones')
+    expect(reply.trace!.tools).toContainEqual({ name: 'open_store_checkout', outcome: 'ran' })
+    const ids = ['catalog_item', 'catalog_price', 'no_order', 'store_link']
+    const guards = reply.trace!.guards.filter((g) => ids.includes(g.id))
+    expect(guards.map((g) => g.id)).toEqual(ids)
     expect(guards.every((g) => g.passed)).toBe(true)
-  })
-
-  it('stops the guard list at the guard that refused', () => {
-    const trail = checkoutGuardTrail({ ok: false, code: 'FUNDS_NOT_TODAY' })
-    expect(trail.map((g) => [g.id, g.passed])).toEqual([
-      ['asked', true],
-      ['catalog_item', true],
-      ['item_named', true],
-      ['one_checkout', true],
-      ['funds_today', false],
-    ])
+    expect(reply.storeLink).toMatchObject({ url: 'https://store.example/p/headphones' })
   })
 
   it('keeps hidden control and direction characters in an item name away from Claude', async () => {
