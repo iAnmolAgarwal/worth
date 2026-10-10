@@ -142,9 +142,14 @@ describe('an item saved from a store’s hand-off (/check)', () => {
     // The store's own price is never read again through the lookup.
     await screen.findByText(/Checked just now/)
     expect(recheckCalls()).toHaveLength(0)
-    // Its comparison runs at the saved price and never claims the store's price as the shopper's.
+    // Its comparison runs at the saved price, names the saved item so the server judges Pay in 4
+    // by the range, and never claims the store's price as the shopper's.
     const compare = apiMock.mock.calls.find(([path]) => path === '/compare')
-    expect(compare?.[1]).toEqual({ amountCents: 12900, itemName: 'Trailhead Daypack 28L' })
+    expect(compare?.[1]).toEqual({
+      amountCents: 12900,
+      itemName: 'Trailhead Daypack 28L',
+      savedId: 'saved-pack',
+    })
   })
 })
 
@@ -182,6 +187,7 @@ describe('the ready day for an item from another store', () => {
       {
         amountCents: 10900,
         itemName: 'Trailhead Daypack 28L',
+        savedId: 'saved-pack',
         sourceUrl: LINK,
         priceSource: 'channel3',
       },

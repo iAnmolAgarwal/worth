@@ -49,6 +49,8 @@ export type DecisionRequest = {
   priceSource?: 'channel3' | 'user'
   /** A store's quote opened on /check, so the comparison uses the store's Pay in 4 answer. */
   qid?: string
+  /** A saved item with a store link: the server reads the link and judges Pay in 4 by range. */
+  savedId?: string
 }
 /**
  * A store's item from a signed hand-off (/check). The store sells it, so the way back to the

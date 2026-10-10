@@ -333,6 +333,22 @@ describe('a decision link from the address bar', () => {
     expect(decisionRequestFrom(own, confirmed)?.priceSource).toBe('channel3')
     expect(decisionRequestFrom(params(forged), confirmed)?.priceSource).toBe('user')
   })
+  it('carries a saved item’s ID, which the server checks, and drops a malformed one', () => {
+    const local = { amount: '119900', item: 'Everyday camera', saved: 'abc-123' }
+    expect(decisionRequestFrom(params(local))).toEqual({
+      amountCents: 119900,
+      itemName: 'Everyday camera',
+      savedId: 'abc-123',
+    })
+    // A local store link is dropped, but the saved ID still lets the server judge by range.
+    expect(
+      decisionRequestFrom(params({ ...local, link: 'http://localhost:8788/p/camera' })),
+    ).toEqual({ amountCents: 119900, itemName: 'Everyday camera', savedId: 'abc-123' })
+    expect(decisionRequestFrom(params({ ...local, saved: '../x y' }))).toEqual({
+      amountCents: 119900,
+      itemName: 'Everyday camera',
+    })
+  })
   it('drops a link that is not a public https page', () => {
     expect(
       decisionRequestFrom(params({ amount: '500', item: 'Router', link: 'https://10.0.0.1/a' })),

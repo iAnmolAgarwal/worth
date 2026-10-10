@@ -334,9 +334,11 @@ describe('Save for <date> on /check (contract §4)', () => {
     expect(calls('/handoff/save')).toEqual([
       ['/handoff/save', { qid: QUOTE.qid, waitDate: '2026-10-23' }],
     ])
-    expect(
-      await screen.findByText('Saved for Fri, Oct 23. Worth checks it again when you come back.'),
-    ).toBeTruthy()
+    expect(await screen.findByText('Saved for Fri, Oct 23. Find it in Saved.')).toBeTruthy()
+    // Saved once: the button says so and can't save again.
+    const done = await screen.findAllByRole('button', { name: 'Saved' })
+    expect(done.every((button) => (button as HTMLButtonElement).disabled)).toBe(true)
+    expect(screen.queryByRole('button', { name: 'Save for Fri, Oct 23' })).toBeNull()
   })
 
   it('sends a changed price as the shopper’s own', async () => {

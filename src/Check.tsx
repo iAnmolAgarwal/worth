@@ -308,6 +308,8 @@ function Quote({
   const [consent, setConsent] = useState(quote.consent)
   const [leaving, setLeaving] = useState(false)
   const [saving, setSaving] = useState(false)
+  /** The day this quote was saved for, once saved. */
+  const [savedFor, setSavedFor] = useState<string>()
   const itemName = claimed?.itemName ?? quote.item
   const amountCents = claimed?.amountCents ?? quote.amountCents
   // Only the session holding the quote can use it; another one compares like a typed-in item.
@@ -355,7 +357,8 @@ function Quote({
         ...(itemName !== quote.item ? { itemName } : {}),
       })
       onUpdate(result.state)
-      onToast(`Saved for ${dayLabel(waitDate)}. Worth checks it again when you come back.`)
+      setSavedFor(waitDate)
+      onToast(`Saved for ${dayLabel(waitDate)}. Find it in Saved.`)
     } catch (error) {
       onToast((error as Error).message)
     } finally {
@@ -466,9 +469,10 @@ function Quote({
                 variant="secondary"
                 icon={Bookmark}
                 loading={saving}
+                disabled={savedFor === c.wait.date}
                 onClick={() => void save(c.wait.date!)}
               >
-                Save for {dayLabel(c.wait.date)}
+                {savedFor === c.wait.date ? 'Saved' : `Save for ${dayLabel(c.wait.date)}`}
               </Button>
             )}
             {notes && (
