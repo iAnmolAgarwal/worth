@@ -63,17 +63,14 @@ describe('<worth-check> (contract §3.1, C2)', () => {
     expect(element.hidden).toBe(false)
   })
 
-  it('never opens a window or shows PayPal artwork, and is branded with five overrides', () => {
+  it('never opens a window or shows PayPal artwork, and keeps five overrides', () => {
     const open = vi.fn()
     vi.stubGlobal('open', open)
     const element = mount({ href: href(), amount: '1199.00' })
     link(element).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
     expect(open).not.toHaveBeenCalled()
-    // Only Worth's own inline W mark, hidden from screen readers; nothing is loaded.
-    expect(element.shadowRoot!.querySelector('img, iframe, use[href^="http"]')).toBeNull()
-    const marks = element.shadowRoot!.querySelectorAll('svg')
-    expect(marks).toHaveLength(1)
-    expect(marks[0]!.getAttribute('aria-hidden')).toBe('true')
+    // No artwork at all: no image, frame or icon; nothing is loaded.
+    expect(element.shadowRoot!.querySelector('img, iframe, svg, use')).toBeNull()
     expect(link(element).textContent).toBe('Analyse with Worth')
     const css = element.shadowRoot!.querySelector('style')!.textContent!
     // Exactly the five theming properties the contract lists, each with a default.
@@ -86,13 +83,33 @@ describe('<worth-check> (contract §3.1, C2)', () => {
       '--worth-check-radius',
     ])
     for (const name of names) expect(css).toMatch(new RegExp(`var\\(${name}, [^)]+\\)`))
-    // Worth's own colours, never PayPal's brand blues or gold, in the button or the mark.
+    // Never PayPal's brand blues or gold; #2c2e2f is Worth's own ink (src/index.css --c-text).
     const markup = element.shadowRoot!.innerHTML.toLowerCase()
     for (const hex of ['#003087', '#012169', '#009cde', '#0070e0', '#ffc439'])
       expect(markup, hex).not.toContain(hex)
-    expect(css).toContain('var(--worth-check-bg, #142c8e)')
     expect(css).not.toMatch(/paypal|gold|yellow/i)
     expect(css).toMatch(/a:focus-visible \{\s*outline: 3px solid/)
+  })
+
+  it('defaults to an outline pill with PayPal’s button type and height, and no mark', () => {
+    const element = mount({ href: href(), amount: '1199.00' })
+    const a = link(element)
+    expect(a.children).toHaveLength(0)
+    expect(a.textContent).toBe('Analyse with Worth')
+    const css = element.shadowRoot!.querySelector('style')!.textContent!
+    expect(css).not.toMatch(/\.mark|svg/)
+    const rule = css.match(/\na \{([^}]+)\}/)![1]!
+    expect(rule).toContain(`font: 400 16px/1 'Helvetica Neue', Helvetica, Arial, sans-serif;`)
+    expect(rule).toContain('letter-spacing: 0;')
+    expect(rule).toContain('text-transform: none;')
+    expect(rule).toContain('width: 100%;')
+    expect(rule).toContain('height: 45px;')
+    expect(rule).toContain('border: 1px solid var(--worth-check-border, #2c2e2f);')
+    expect(rule).toContain('border-radius: var(--worth-check-radius, 23px);')
+    expect(rule).toContain('background: var(--worth-check-bg, #ffffff);')
+    expect(rule).toContain('color: var(--worth-check-ink, #2c2e2f);')
+    expect(css).toMatch(/a:hover \{\s*background: var\(--worth-check-bg-hover, #f0f2f9\);/)
+    expect(css).toMatch(/a:focus-visible \{\s*outline: 3px solid #097ff5;\s*outline-offset: 2px;/)
   })
 
   it('hides itself without a usable link and never renders a javascript: link', () => {
