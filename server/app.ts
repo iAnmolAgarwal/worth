@@ -29,13 +29,14 @@ import type {
   Assessment,
   ChatReply,
   FinancialProfile,
+  HandoffQuote,
   PayIn4Eligibility,
   Product,
   Purchase,
   Transaction,
 } from '../shared/types.ts'
 import { ACTIVE, RETENTION_MS, SESSION_DAY_MS, Store, publicPurchase } from './store.ts'
-import type { SessionData, StoredPurchase } from './store.ts'
+import type { SessionData, StoredPurchase, StoredQuote } from './store.ts'
 import {
   approvalLink,
   createPayPalGateway,
@@ -63,12 +64,14 @@ import {
 import type { ExternalOrderResult } from './mcp.ts'
 import { categoryCandidates, createChatProvider, fallbackCategories, localReply } from './chat.ts'
 import type { ChatActions, ChatProvider } from './chat.ts'
-import { allowedOrigins, loadConfig } from './config.ts'
+import { allowedOrigins, handoffEnabled, loadConfig } from './config.ts'
 import type { AppConfig } from './config.ts'
 import { withoutWebsites } from './labels.ts'
 import { WindowLimiter } from './limits.ts'
 import { contentSecurityPolicy } from './csp.ts'
 import { itemSigner } from './remember.ts'
+import { createHandoff, withResult } from '../shared/handoff.ts'
+import type { QuotePayload, Verdict } from '../shared/handoff.ts'
 import { confirmPlan, confirmRefund, PlanError, recordRefund } from './plans.ts'
 import { queryFor, roomToday } from './alternatives.ts'
 import { createChannel3, loadFixtures } from './channel3.ts'
@@ -188,6 +191,7 @@ const productLink = z
   .string()
   .max(LINK_MAX_LENGTH)
   .refine((value) => checkProductLink(value).ok, 'Use a store’s https product link.')
+const qidSchema = z.string().regex(/^q_[A-Za-z0-9_-]{22}$/)
 const compareSchema = z
   .object({
     amountCents: cents.optional(),
@@ -196,6 +200,8 @@ const compareSchema = z
     /** For an item from a pasted link (C5): its page and who set the price. */
     sourceUrl: productLink.optional(),
     priceSource: z.enum(['channel3', 'user']).optional(),
+    /** A store's quote this session opened on /check: its Pay in 4 answer replaces Worth's. */
+    qid: qidSchema.optional(),
   })
   .strict()
   .refine(
@@ -318,6 +324,11 @@ const ELIGIBILITY_BANDS = [10_000, 50_000, 100_000]
 function eligibilityBand(amountCents: number) {
   return ELIGIBILITY_BANDS.filter((edge) => amountCents >= edge).length
 }
+/** Store hand-off calls (open, consent, return) per client IP per minute. */
+const HANDOFF_PER_MINUTE = 30
+/** The one message for any store link that fails verification; the link's contents are never echoed. */
+const HANDOFF_UNVERIFIED =
+  'We couldn’t verify this link from the store. You can still check the item yourself.'
 /** Webhook deliveries accepted per sender IP per minute; each one costs a PayPal verification call. */
 const WEBHOOK_PER_MINUTE = 60
 const SPENDING_REVIEW = 'Review your everyday spending:'
@@ -366,6 +377,15 @@ export function createApp(options: AppOptions = {}) {
     })
   // Signs the items each conversation assessed (see remember.ts).
   const signer = itemSigner()
+  // Store hand-offs (specs/handoff-contract.md): off until the key and the store origin are set.
+  const handoff = handoffEnabled(config)
+    ? createHandoff({
+        secret: config.handoffSecret,
+        mid: config.handoffMerchantId,
+        merchantOrigin: config.merchantOrigin,
+        now: () => now().getTime(),
+      })
+    : undefined
   const app = express()
   app.disable('x-powered-by')
   // Behind a proxy, req.ip must be the client address the proxy appended, not the proxy itself.
@@ -382,6 +402,7 @@ export function createApp(options: AppOptions = {}) {
   const busy = new Set<string>()
   const eligibilityCache = new Map<number, { value: PayIn4Eligibility; until: number }>()
   const webhookLimiter = new WindowLimiter(WEBHOOK_PER_MINUTE, 60_000)
+  const handoffLimiter = new WindowLimiter(HANDOFF_PER_MINUTE, 60_000)
   const chatBusy = new Set<string>()
   const requestLimiter = new WindowLimiter(config.requestsPerMinute, 60_000)
   const sessionLimiter = new WindowLimiter(config.sessionIpHourlyLimit, 60 * 60_000)
@@ -997,12 +1018,15 @@ export function createApp(options: AppOptions = {}) {
       )
     }
     res.setHeader('X-Content-Type-Options', 'nosniff')
-    res.setHeader('Referrer-Policy', 'same-origin')
+    // /check is where a store's hand-off lands; no referrer leaves it, even on the way back.
+    res.setHeader('Referrer-Policy', req.path === '/check' ? 'no-referrer' : 'same-origin')
     res.setHeader('X-Frame-Options', 'DENY')
     // The full policy needs the built app; Vite's development server injects inline scripts.
     res.setHeader(
       'Content-Security-Policy',
-      config.contentSecurityPolicy ? contentSecurityPolicy() : "frame-ancestors 'none'",
+      config.contentSecurityPolicy
+        ? contentSecurityPolicy(handoff ? [handoff.merchantOrigin] : [])
+        : "frame-ancestors 'none'",
     )
     if (config.production)
       res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
@@ -1013,6 +1037,8 @@ export function createApp(options: AppOptions = {}) {
   // Webhook signatures cover the exact bytes PayPal sent, so this route keeps the raw body.
   app.use('/api/paypal/webhook', express.raw({ type: () => true, limit: '64kb' }))
   app.use('/api/import', express.json({ limit: IMPORT_BODY_LIMIT }))
+  // A hand-off token is at most 4 KB.
+  app.use('/api/handoff', express.json({ limit: '8kb' }))
   // MCP messages are small tool calls; the parser leaves other content types unparsed.
   app.use('/mcp', express.json({ limit: MCP_BODY_LIMIT }))
   app.use(express.json({ limit: '1200kb' }))
@@ -1186,6 +1212,183 @@ export function createApp(options: AppOptions = {}) {
       }),
     )
   })
+  /** A quote this session opened; anything else, including another session's, is not found. */
+  function sessionQuote(res: Response, qid: string) {
+    const quote = store.quote(qid, now().getTime())
+    if (!quote || quote.sessionId !== sessionId(res))
+      throw new HttpError(404, 'This store link isn’t open in this session.', 'NOT_FOUND')
+    return quote
+  }
+  /**
+   * The store's Pay in 4 answer applies only to the price it was asked about (§3.2). A price the
+   * shopper corrected, or a quote without an answer, falls back to the amount range alone.
+   */
+  function quoteEligibility(quote: StoredQuote, amountCents: number): PayIn4Eligibility {
+    if (!payIn4InRange(amountCents)) return 'unavailable'
+    if (!quote.payLater || amountCents !== quote.amountCents) return 'range-only'
+    return quote.payLater.eligible ? 'paypal' : 'unavailable'
+  }
+  function quoteView(quote: StoredQuote, canConsent: boolean): HandoffQuote {
+    return {
+      qid: quote.qid,
+      merchant: quote.merchant,
+      item: quote.item,
+      amountCents: quote.amountCents,
+      returnUrl: quote.returnUrl,
+      ...(quote.imageUrl ? { imageUrl: quote.imageUrl } : {}),
+      payLater: !quote.payLater
+        ? 'unknown'
+        : quote.payLater.eligible && payIn4InRange(quote.amountCents)
+          ? 'offered'
+          : 'not-offered',
+      consent: canConsent && quote.consent,
+      canConsent,
+    }
+  }
+  function handoffLimit(req: Request) {
+    if (!handoffLimiter.take(req.ip ?? 'local', now().getTime()))
+      throw new HttpError(429, 'Please wait a moment before making more requests.', 'RATE_LIMITED')
+  }
+  /**
+   * The store's "Analyse with Worth" click lands here from /check (specs/handoff-contract.md
+   * §3.3). The token is verified in the contract's order; a verified quote is bound to this
+   * session for 24 hours. Only an expired or non-USD quote, whose signature and return origin
+   * checked out, offers the way back to the store.
+   */
+  app.post('/api/handoff/open', (req, res) => {
+    handoffLimit(req)
+    const input = z.object({ token: z.string() }).strict().safeParse(req.body)
+    if (!handoff || !input.success)
+      throw new HttpError(400, HANDOFF_UNVERIFIED, 'HANDOFF_UNVERIFIED')
+    const verified = handoff.verifyQuote(input.data.token)
+    if (!verified.ok) {
+      if (verified.reason === 'expired')
+        throw new HttpError(
+          400,
+          `This link from ${verified.payload.merchant} has expired. Go back and tap Analyse with Worth again.`,
+          'HANDOFF_EXPIRED',
+          undefined,
+          { merchant: verified.payload.merchant, returnUrl: verified.payload.returnUrl },
+        )
+      if (verified.reason === 'non_usd')
+        throw new HttpError(
+          400,
+          'Worth checks US dollar prices for now.',
+          'HANDOFF_CURRENCY',
+          undefined,
+          {
+            merchant: verified.payload.merchant,
+            item: verified.payload.item,
+            returnUrl: verified.payload.returnUrl,
+          },
+        )
+      throw new HttpError(400, HANDOFF_UNVERIFIED, 'HANDOFF_UNVERIFIED')
+    }
+    const id = sessionId(res)
+    const time = now().getTime()
+    const opened = store.openQuote(storedQuote(verified.payload, id, time), time)
+    const mine = opened.sessionId === id
+    // The video replay follows /?replay=video: the sample persona only, never imported data.
+    let replay = false
+    const data = dataFor(res)
+    if (
+      verified.payload.replay === 'video' &&
+      data.profile.source === 'demo' &&
+      data.demoClock?.preset !== 'video' &&
+      !active(id)
+    ) {
+      const next = applyDemoClock(data, { preset: 'video' }, today(data.profile.timezone))
+      store.atomic(() => {
+        for (const purchase of store.purchases(id))
+          if (!purchase.archived) store.putPurchase(id, { ...purchase, archived: true })
+        store.save(id, next.data)
+      })
+      replay = true
+    }
+    res.json({
+      quote: quoteView(mine ? opened : storedQuote(verified.payload, id, time), mine),
+      state: state(id),
+      ...(replay ? { replay } : {}),
+    })
+  })
+  function storedQuote(payload: QuotePayload, id: string, time: number): StoredQuote {
+    return {
+      qid: payload.qid,
+      sessionId: id,
+      mid: payload.mid,
+      item: payload.item,
+      productId: payload.productId,
+      amountCents: payload.amountCents,
+      merchant: payload.merchant,
+      returnUrl: payload.returnUrl,
+      ...(payload.imageUrl ? { imageUrl: payload.imageUrl } : {}),
+      ...(payload.payLater ? { payLater: payload.payLater } : {}),
+      openedAt: time,
+      consent: false,
+    }
+  }
+  /** The quote again after a reload of /check, for the session that opened it. */
+  app.get('/api/handoff/quotes/:qid', (req, res) => {
+    handoffLimit(req)
+    const quote = sessionQuote(res, qidSchema.parse(req.params.qid))
+    res.json({ quote: quoteView(quote, true) })
+  })
+  /** The report-back choice (§3.3 step 6), for the session that opened the quote only. */
+  app.post('/api/handoff/consent', (req, res) => {
+    handoffLimit(req)
+    const input = z.object({ qid: qidSchema, consent: z.boolean() }).strict().parse(req.body)
+    if (!store.setQuoteConsent(input.qid, sessionId(res), input.consent, now().getTime()))
+      throw new HttpError(404, 'This store link isn’t open in this session.', 'NOT_FOUND')
+    res.json({ qid: input.qid, consent: input.consent })
+  })
+  /**
+   * "Back to <store>" (§4): the store's page with a signed verdict, computed here from the plan,
+   * never taken from the browser. A price the shopper corrected is what they decided on, so it is
+   * the one judged. Without a verdict (the plan needs details first) the link carries no token.
+   */
+  app.post('/api/handoff/return', (req, res) => {
+    handoffLimit(req)
+    const input = z
+      .object({ qid: qidSchema, amountCents: cents.min(1).optional() })
+      .strict()
+      .parse(req.body)
+    const quote = sessionQuote(res, input.qid)
+    if (!handoff) return res.json({ url: quote.returnUrl })
+    const amountCents = input.amountCents ?? quote.amountCents
+    const current = state(sessionId(res))
+    const comparison = compareOptions(
+      current.profile,
+      withoutOwnHold(current.purchases, { itemName: quote.item, amountCents }),
+      {
+        amountCents,
+        itemName: quote.item,
+        today: current.today,
+        payIn4Eligible: quoteEligibility(quote, amountCents) !== 'unavailable',
+      },
+    )
+    const verdict: Verdict | undefined =
+      comparison.recommendation === 'buyToday'
+        ? 'buy_today'
+        : comparison.recommendation === 'wait'
+          ? 'wait'
+          : comparison.recommendation === 'spendLess'
+            ? 'spend_less'
+            : undefined
+    if (!verdict) return res.json({ url: quote.returnUrl })
+    const fitsOn =
+      verdict === 'buy_today'
+        ? current.today
+        : verdict === 'wait' && comparison.wait.date
+          ? comparison.wait.date
+          : undefined
+    const token = handoff.signResult({
+      qid: quote.qid,
+      verdict,
+      ...(fitsOn ? { fitsOn } : {}),
+      ...(comparison.payIn4.available ? { payIn4Fits: comparison.payIn4.outcome === 'fits' } : {}),
+    })
+    res.json({ url: withResult(quote.returnUrl, token) })
+  })
   app.post('/api/compare', async (req, res) => {
     const input = compareSchema.parse(req.body)
     const product = input.productId ? PRODUCTS.find((p) => p.id === input.productId) : undefined
@@ -1193,13 +1396,17 @@ export function createApp(options: AppOptions = {}) {
     if (product && input.amountCents !== undefined && input.amountCents !== product.priceCents)
       throw new HttpError(400, 'Use the catalog price for this product.', 'PRICE_MISMATCH')
     const amountCents = product?.priceCents ?? input.amountCents!
+    // A store's item uses the store's own Pay in 4 answer; Worth asks PayPal only for its own.
+    const quote = input.qid ? sessionQuote(res, input.qid) : undefined
     // PayPal's eligibility check runs first; the session is read afterwards so it is current. It
     // answers for Worth's own demo merchant, so another store's item is judged by the range only.
-    const eligibility = input.sourceUrl
-      ? payIn4InRange(amountCents)
-        ? 'range-only'
-        : 'unavailable'
-      : await payIn4Eligibility(amountCents)
+    const eligibility = quote
+      ? quoteEligibility(quote, amountCents)
+      : input.sourceUrl
+        ? payIn4InRange(amountCents)
+          ? 'range-only'
+          : 'unavailable'
+        : await payIn4Eligibility(amountCents)
     const current = state(sessionId(res))
     const comparison = compareOptions(
       current.profile,

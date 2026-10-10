@@ -58,12 +58,17 @@ export class Store {
         hash TEXT NOT NULL UNIQUE, hint TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL,
         last_used INTEGER, revoked INTEGER);
       CREATE INDEX IF NOT EXISTS agent_tokens_session ON agent_tokens(session_id);
+      CREATE TABLE IF NOT EXISTS handoff_quotes (qid TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        data TEXT NOT NULL, expires INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS handoff_quotes_session ON handoff_quotes(session_id);
+      CREATE INDEX IF NOT EXISTS handoff_quotes_expires ON handoff_quotes(expires);
     `)
   }
   close() {
     this.db.close()
   }
   cleanup(now = Date.now()) {
+    this.db.prepare('DELETE FROM handoff_quotes WHERE expires <= ?').run(now)
     const deleted = this.db.prepare('DELETE FROM sessions WHERE expires <= ?').run(now).changes
     if (deleted) this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)')
     return deleted
@@ -207,6 +212,40 @@ export class Store {
         .run(time, id, sessionId).changes > 0
     )
   }
+  /**
+   * Binds a store's quote to the session that opened it first, for 24 hours. Reopening in the same
+   * session refreshes the details and keeps the shopper's consent; another session can't take it.
+   */
+  openQuote(quote: StoredQuote, now = Date.now()): StoredQuote {
+    return this.atomic(() => {
+      const current = this.quote(quote.qid, now)
+      if (current && current.sessionId !== quote.sessionId) return current
+      const next = current ? { ...quote, consent: current.consent } : quote
+      this.db
+        .prepare(
+          `INSERT INTO handoff_quotes(qid,session_id,data,expires) VALUES(?,?,?,?)
+          ON CONFLICT(qid) DO UPDATE SET session_id=excluded.session_id,data=excluded.data,expires=excluded.expires`,
+        )
+        .run(quote.qid, quote.sessionId, JSON.stringify(next), now + DAY)
+      return next
+    })
+  }
+  /** A live quote by its id, whichever session holds it. */
+  quote(qid: string, now = Date.now()): StoredQuote | undefined {
+    const row = this.db
+      .prepare('SELECT data FROM handoff_quotes WHERE qid=? AND expires > ?')
+      .get(qid, now) as { data: string } | undefined
+    return row ? (JSON.parse(row.data) as StoredQuote) : undefined
+  }
+  /** Records the shopper's report-back choice; false unless this session holds the quote. */
+  setQuoteConsent(qid: string, sessionId: string, consent: boolean, now = Date.now()) {
+    const current = this.quote(qid, now)
+    if (!current || current.sessionId !== sessionId) return false
+    this.db
+      .prepare('UPDATE handoff_quotes SET data=? WHERE qid=? AND session_id=?')
+      .run(JSON.stringify({ ...current, consent }), qid, sessionId)
+    return true
+  }
   atomic<T>(fn: () => T): T {
     this.db.exec('BEGIN IMMEDIATE')
     try {
@@ -218,6 +257,27 @@ export class Store {
       throw error
     }
   }
+}
+
+/**
+ * A store's verified quote, bound to the session that opened it (specs/handoff-contract.md §3.3).
+ * C4's report-back finds it by qid and records a purchase only when `consent` is true.
+ */
+export interface StoredQuote {
+  qid: string
+  sessionId: string
+  mid: string
+  item: string
+  productId: string
+  amountCents: number
+  merchant: string
+  returnUrl: string
+  imageUrl?: string
+  payLater?: { eligible: boolean; source: 'merchant-sdk' }
+  /** When the quote was opened (ms). */
+  openedAt: number
+  /** Unticked by default: the shopper opts in on the decision screen. */
+  consent: boolean
 }
 
 /** An agent token as stored, without its hash. Times are in milliseconds. */

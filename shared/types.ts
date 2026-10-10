@@ -703,3 +703,34 @@ export interface ImportPreview {
   /** Possible existing Pay in 4 or Pay Later plans. Their rows are never ordinary spending. */
   instalmentPlans: InstalmentPlanProposal[]
 }
+
+/**
+ * A store's verified quote as /check shows it (specs/handoff-contract.md §3.3). Everything here
+ * came signed from the store's server; the shopper can still correct the price.
+ */
+export interface HandoffQuote {
+  qid: string
+  /** The store's name, plain text, at most 60 characters. */
+  merchant: string
+  /** The store's catalog name, plain text, at most 120 characters. */
+  item: string
+  amountCents: number
+  /** On the one allowed store origin; "Back to <store>" adds the result token. */
+  returnUrl: string
+  imageUrl?: string
+  /**
+   * The store's own PayPal Pay in 4 answer for this amount (§3.2): offered only when PayPal said
+   * eligible and the amount is in range; unknown when the store sent no answer.
+   */
+  payLater: 'offered' | 'not-offered' | 'unknown'
+  /** Report-back consent; unticked until the shopper ticks it. */
+  consent: boolean
+  /** False when another Worth session opened this link first, so report-back stays there. */
+  canConsent: boolean
+}
+export interface HandoffOpened {
+  quote: HandoffQuote
+  state: AppState
+  /** The quote asked for the video replay and the sample persona took it. */
+  replay?: boolean
+}

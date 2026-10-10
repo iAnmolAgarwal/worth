@@ -15,16 +15,17 @@ export const CHANNEL3_IMAGES = 'https://cdn.trychannel3.com'
 /**
  * The production Content-Security-Policy. Fonts are bundled with the app, so only 'self' and the
  * PayPal SDK domains are allowed. Inline styles are allowed because the SDK and the chart library
- * set them; inline scripts are not.
+ * set them; inline scripts are not. `images` adds image hosts, such as the one store origin a
+ * hand-off's product image may come from.
  */
-export function contentSecurityPolicy() {
+export function contentSecurityPolicy(images: string[] = []) {
   const paypal = PAYPAL_SOURCES.join(' ')
   return [
     "default-src 'self'",
     `script-src 'self' ${paypal}`,
     `connect-src 'self' ${paypal}`,
     `frame-src 'self' ${paypal}`,
-    `img-src 'self' data: ${paypal} ${CHANNEL3_IMAGES}`,
+    `img-src 'self' data: ${[paypal, CHANNEL3_IMAGES, ...images].join(' ')}`,
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self' data:",
     "object-src 'none'",
