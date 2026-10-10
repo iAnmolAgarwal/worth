@@ -30,3 +30,13 @@ export const MAY_FIT_NOW = 'Your plan suggests this may fit now — confirm toda
 /** The plan editor while the demo clock runs (the server refuses the edit too). */
 export const DEMO_CLOCK_EDIT =
   'The demo clock is replaying Maya’s sample plan as it is. Choose Back to today before editing a plan.'
+/** The sample persona in a sentence; the top-bar chip and the Home intro both say it (feedback F1). */
+export const SAMPLE_WHO = 'Maya’s sample month: a made-up PayPal shopper'
+/** Whether checkout reaches the PayPal sandbox; without sandbox keys it is simulated, never live. */
+export const paypalModeLine = (mode: 'sandbox' | 'demo') =>
+  mode === 'sandbox' ? 'PayPal checkout runs in the PayPal sandbox' : 'PayPal checkout is simulated'
+/** What the sample month holds; plan edits can change the count, so it is read from state. */
+export const sampleHolds = (plans: number) =>
+  plans === 0
+    ? 'a paycheck and bills'
+    : `a paycheck, bills and ${plans === 1 ? 'one PayPal Pay in 4 plan' : `${plans} PayPal Pay in 4 plans`}`

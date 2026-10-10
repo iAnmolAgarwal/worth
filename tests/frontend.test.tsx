@@ -1329,12 +1329,12 @@ describe('iteration 2 fixes', () => {
 })
 
 describe('iteration 4 fixes', () => {
-  it('closes the Sandbox demo details on Escape and returns focus to the chip', async () => {
+  it('closes the sample chip details on Escape and returns focus to the chip', async () => {
     const user = userEvent.setup()
     const state = makeState()
     routeApi((path, data) => (path === '/state' ? state : compare(state, data)))
     render(<App />)
-    const chip = await screen.findByRole('button', { name: 'Sandbox demo' })
+    const chip = await screen.findByRole('button', { name: 'Sample: Maya' })
     await user.click(chip)
     expect(chip.getAttribute('aria-expanded')).toBe('true')
     await user.keyboard('{Escape}')
@@ -1367,5 +1367,153 @@ describe('iteration 4 fixes', () => {
     await user.keyboard('{ArrowRight}')
     expect(document.activeElement).toBe(lines[1])
     expect(lines[1]!.tabIndex).toBe(0)
+  })
+})
+
+describe('first screen: the sample and PayPal (third-party feedback)', () => {
+  it('explains the sample in one chip and offers the PayPal import from it', async () => {
+    const user = userEvent.setup()
+    const state = makeState()
+    routeApi((path, data) => (path === '/state' ? state : compare(state, data)))
+    render(<App />)
+    const chip = await screen.findByRole('button', { name: 'Sample: Maya' })
+    expect(chip.closest('.show-m, .d')).toBeNull()
+    await user.click(chip)
+    const details = document.getElementById('env-details')!
+    expect(details.textContent).toContain(
+      'This is Maya’s sample month: a made-up PayPal shopper. No real money moves, and PayPal checkout is simulated.',
+    )
+    expect(within(details).queryByText('Sample data')).toBeNull()
+    expect(within(details).getByText('PayPal checkout: simulated')).toBeTruthy()
+    expect(within(details).getByRole('link', { name: 'About this demo' })).toBeTruthy()
+    await user.click(within(details).getByRole('button', { name: 'Use your own PayPal activity' }))
+    expect(await screen.findByRole('dialog', { name: 'Import PayPal activity' })).toBeTruthy()
+    expect(chip.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('closes the chip details when Tab moves focus out of them', async () => {
+    const user = userEvent.setup()
+    const state = makeState()
+    routeApi((path, data) => (path === '/state' ? state : compare(state, data)))
+    render(<App />)
+    const chip = await screen.findByRole('button', { name: 'Sample: Maya' })
+    await user.click(chip)
+    expect(document.getElementById('env-details')!.getAttribute('role')).toBeNull()
+    await user.tab()
+    expect(document.activeElement?.textContent).toBe('Use your own PayPal activity')
+    expect(document.getElementById('env-details')).not.toBeNull()
+    await user.tab()
+    expect(document.activeElement?.textContent).toBe('About this demo')
+    await user.tab()
+    expect(document.getElementById('env-details')).toBeNull()
+    expect(chip.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it.each([
+    [0, 'with a paycheck and bills.'],
+    [1, 'with a paycheck, bills and one PayPal Pay in 4 plan.'],
+    [2, 'with a paycheck, bills and 2 PayPal Pay in 4 plans.'],
+  ])('counts %i running Pay in 4 plans in the sample intro', (count, text) => {
+    const state = makeState()
+    const plan = state.profile.flows.filter((flow) => flow.kind === 'installment')
+    const others = state.profile.flows.filter((flow) => flow.kind !== 'installment')
+    const copies = Array.from({ length: count }, (_, index) =>
+      plan.map((flow) => ({
+        ...flow,
+        id: `${flow.id}-copy-${index}`,
+        planId: `${flow.planId}-${index}`,
+      })),
+    ).flat()
+    state.profile = { ...state.profile, flows: [...others, ...copies] }
+    apiMock.mockImplementation(((_path: string, input: unknown) =>
+      Promise.resolve(compare(state, input))) as typeof api)
+    render(
+      <Home
+        state={state}
+        onAsk={vi.fn()}
+        onNavigate={vi.fn()}
+        onOpenProduct={vi.fn()}
+        onEditPlan={vi.fn()}
+        onOpenCheckout={vi.fn()}
+        onConfirmPlan={vi.fn()}
+        onReviewRefund={vi.fn()}
+      />,
+    )
+    expect(screen.getByText(/You’re viewing Maya’s sample month/).textContent).toContain(text)
+  })
+
+  it('names the PayPal sandbox in the chip when checkout runs there', async () => {
+    const user = userEvent.setup()
+    const state = makeState()
+    state.config.paypal = 'sandbox'
+    routeApi((path, data) => (path === '/state' ? state : compare(state, data)))
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Sample: Maya' }))
+    expect(document.getElementById('env-details')!.textContent).toContain(
+      'No real money moves, and PayPal checkout runs in the PayPal sandbox.',
+    )
+  })
+
+  it('labels own data plainly and offers no sample import', async () => {
+    const user = userEvent.setup()
+    const state = makeState('import')
+    routeApi((path, data) => (path === '/state' ? state : compare(state, data)))
+    render(<App />)
+    const chip = await screen.findByRole('button', { name: 'Your data' })
+    await user.click(chip)
+    const details = document.getElementById('env-details')!
+    expect(details.textContent).toContain('This is the PayPal activity you imported.')
+    expect(details.textContent).not.toContain('Maya')
+    expect(within(details).queryByRole('button', { name: /own PayPal activity/ })).toBeNull()
+    await user.keyboard('{Escape}')
+    expect(document.getElementById('env-details')).toBeNull()
+    expect(document.activeElement).toBe(chip)
+  })
+
+  it('introduces Maya and PayPal at the top of Home and opens the import', async () => {
+    const user = userEvent.setup()
+    const state = makeState()
+    routeApi((path, data) => (path === '/state' ? state : compare(state, data)))
+    render(<App />)
+    const hero = await screen.findByRole('region', { name: 'Room to spend today' })
+    const intro = screen.getByText(/You’re viewing Maya’s sample month/).closest('.alert')!
+    expect(intro.textContent).toContain(
+      'You’re viewing Maya’s sample month: a made-up PayPal shopper with a paycheck, bills and one PayPal Pay in 4 plan.',
+    )
+    // It sits above the hero, so the figure stays the first number on the page.
+    expect(intro.compareDocumentPosition(hero) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    await user.click(
+      within(intro as HTMLElement).getByRole('button', { name: /Use your own PayPal activity/ }),
+    )
+    expect(await screen.findByRole('dialog', { name: 'Import PayPal activity' })).toBeTruthy()
+  })
+
+  it('shows no sample intro over imported data', async () => {
+    const state = makeState('import')
+    routeApi((path, data) => (path === '/state' ? state : compare(state, data)))
+    render(<App />)
+    await screen.findByRole('region', { name: 'Room to spend today' })
+    expect(screen.queryByText(/You’re viewing Maya’s sample month/)).toBeNull()
+    expect(screen.queryByRole('button', { name: /Use your own PayPal activity/ })).toBeNull()
+  })
+
+  it('keeps the intro without an import action when Home has no import handler', () => {
+    const state = makeState()
+    apiMock.mockImplementation(((_path: string, input: unknown) =>
+      Promise.resolve(compare(state, input))) as typeof api)
+    render(
+      <Home
+        state={state}
+        onAsk={vi.fn()}
+        onNavigate={vi.fn()}
+        onOpenProduct={vi.fn()}
+        onEditPlan={vi.fn()}
+        onOpenCheckout={vi.fn()}
+        onConfirmPlan={vi.fn()}
+        onReviewRefund={vi.fn()}
+      />,
+    )
+    expect(screen.getByText(/You’re viewing Maya’s sample month/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Use your own PayPal activity/ })).toBeNull()
   })
 })

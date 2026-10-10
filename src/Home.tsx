@@ -6,6 +6,7 @@ import {
   CalendarCheck,
   CalendarClock,
   CircleAlert,
+  Info,
   ReceiptText,
   RefreshCw,
 } from 'lucide-react'
@@ -14,7 +15,7 @@ import { getUpcomingFlows, planCollisions } from '../shared/finance'
 import type { Product, SavedItem } from '../shared/types'
 import type { AppState, Purchase } from './contract'
 import { isActive } from './contract'
-import { ASSESSMENT_ONLY, MAY_FIT_NOW } from './copy'
+import { ASSESSMENT_ONLY, MAY_FIT_NOW, SAMPLE_WHO, sampleHolds } from './copy'
 import { countedHold, ReservationNote } from './Reservation'
 import { FundsDialog } from './Saved'
 import {
@@ -28,7 +29,7 @@ import {
   useComparison,
 } from './engine'
 import { dayLabel, daysFrom, money, signed, displayName } from './format'
-import { Button, Disc, Pill, SkeletonRow } from './ui'
+import { Alert, Button, Disc, Pill, SkeletonRow } from './ui'
 
 /** The camera starter comes first, so it shows at every width (judge fix #10). */
 export const HOME_SUGGESTIONS = [
@@ -211,13 +212,18 @@ function CollisionInsight({ state, onShowPlan }: { state: AppState; onShowPlan: 
   const main = mainCollision(found)
   if (!main) return null
   const { payment, bill } = main
+  // Pay in 4 is PayPal's product, so a Pay in 4 plan gets its full name; any other plan stays generic.
+  const payIn4 = /\bpay\s+in\s+4\b/i.test(payment.name)
   return (
-    <section className="tile notice" aria-label="Pay in 4 payment next to a bill">
+    <section
+      className="tile notice"
+      aria-label={`${payIn4 ? 'PayPal Pay in 4' : 'Plan'} payment next to a bill`}
+    >
       <div className="row plain">
         <Disc icon={CalendarClock} kind="plan" />
         <div className="body">
           <div className="t">
-            Your {planLabel(payment.name)} Pay in 4 payment lands{' '}
+            Your {planLabel(payment.name)} {payIn4 ? 'PayPal Pay in 4' : 'plan'} payment lands{' '}
             {nearPhrase(bill.daysFromInstalment, displayName(bill.name), bill.kind)}
           </div>
           <div className="s">
@@ -401,6 +407,7 @@ export function Home({
   onOpenProduct,
   onOpenSaved,
   onEditPlan,
+  onImport,
   onOpenCheckout,
   onConfirmPlan,
   onReviewRefund,
@@ -413,6 +420,8 @@ export function Home({
   /** Opens a saved custom item's comparison. */
   onOpenSaved?: (item: SavedItem) => void
   onEditPlan: () => void
+  /** Opens the PayPal activity import, offered while the sample persona is showing. */
+  onImport?: () => void
   onOpenCheckout: (purchase: Purchase) => void
   onConfirmPlan: (purchaseId: string) => void
   onReviewRefund: (purchaseId: string, refundId: string) => void
@@ -440,6 +449,17 @@ export function Home({
         <h1 className="sr">Home</h1>
         <div className="grid">
           <div className="stack">
+            {state.profile.source === 'demo' && (
+              <Alert tone="info" icon={Info}>
+                You’re viewing {SAMPLE_WHO} with {sampleHolds(plans.length)}.{' '}
+                {onImport && (
+                  <button type="button" className="link inline" onClick={onImport}>
+                    Use your own PayPal activity
+                    <ArrowRight size={16} strokeWidth={2} aria-hidden="true" />
+                  </button>
+                )}
+              </Alert>
+            )}
             <HeroTile
               state={state}
               onAsk={() => onAsk()}
