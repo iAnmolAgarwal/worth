@@ -35,3 +35,41 @@ jobs:
           curl -fsS http://127.0.0.1:8788/p/camera | grep -q 'Analyse with Worth'
           curl -fsS http://127.0.0.1:8788/assets/store.js > /dev/null
           curl -fsSI http://127.0.0.1:8788/ | grep -qi "content-security-policy: default-src 'self'"
+  # The two-origin hand-off in a real browser (tests/e2e). It needs no secrets: a fresh test
+  # HANDOFF_SECRET per run, PayPal faked on both sides, Claude off and Channel3 on its fixtures.
+  e2e:
+    name: Two-origin E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Read the Playwright version
+        id: playwright
+        run: echo "version=$(npx playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        id: browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium
+      - name: Install Chromium
+        if: steps.browsers.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - name: Install Chromium's system libraries
+        if: steps.browsers.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+      - run: npm run test:e2e
+      - name: Keep the report of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
