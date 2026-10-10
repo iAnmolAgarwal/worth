@@ -349,6 +349,19 @@ describe('/check error states (contract §3.4)', () => {
     expect(storeLinks()).toHaveLength(0)
   })
 
+  it('never sends a token over 4 KB, and treats a body the server refused as unverified', async () => {
+    route()
+    visit(`#q=${'A'.repeat(5000)}.${'s'.repeat(43)}`)
+    expect(await screen.findByText(UNVERIFIED)).toBeTruthy()
+    expect(calls('/handoff/open')).toHaveLength(0)
+    cleanup()
+    resetHandoff()
+    route({ '/handoff/open': fails(413, 'TOO_LARGE', 'This file is too large.') })
+    visit()
+    expect(await screen.findByText(UNVERIFIED)).toBeTruthy()
+    expect(screen.queryByText('This file is too large.')).toBeNull()
+  })
+
   it('treats a quote the server no longer has as unverified', async () => {
     sessionStorage.setItem('worth.check.qid', QUOTE.qid)
     route({

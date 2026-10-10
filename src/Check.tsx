@@ -93,7 +93,11 @@ function failure(error: unknown): View {
       returnUrl: details.returnUrl,
       item: details.item ?? '',
     }
-  if (error instanceof ApiError && (error.code === 'HANDOFF_UNVERIFIED' || error.status === 404))
+  // A body the server couldn't even read (too large, not JSON) is an unverifiable link too.
+  if (
+    error instanceof ApiError &&
+    (error.code === 'HANDOFF_UNVERIFIED' || [400, 404, 413].includes(error.status))
+  )
     return { kind: 'unverified', message: UNVERIFIED }
   // The rate limit and network failures keep their own message and can be tried again.
   return { kind: 'failed', message }
@@ -160,7 +164,8 @@ export function Check({
     if (view.kind === 'ok') return
     let cancelled = false
     const qid = token ? undefined : rememberedQid()
-    if (!token && !qid) {
+    // Tokens over 4 KB are refused unread, so one is never sent.
+    if ((!token && !qid) || (token && token.length > 4096)) {
       // oxlint-disable-next-line react/set-state-in-effect
       setView({ kind: 'unverified', message: UNVERIFIED })
       return
