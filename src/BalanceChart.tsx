@@ -1073,8 +1073,8 @@ function ChartTable({
       >
         <table>
           <caption className="sr">
-            Projected balance each day at its low, counting bills before pay, against your{' '}
-            {money(cushionCents)} cushion.
+            Projected balance each day at its low, with that day’s bills taken out before pay
+            arrives, against your {money(cushionCents)} cushion.
             {spend ? ` Each day also includes about ${money(-spend)} of everyday spending.` : ''}
           </caption>
           <thead>

@@ -199,7 +199,7 @@ function OptionCard({
       </span>
       <span className="kv">
         <span className="k">
-          {k === 'spendLess' ? 'Most you can spend today' : 'Lowest balance'}
+          {k === 'spendLess' ? 'Most you can spend today' : 'Lowest point'}
         </span>
         <span className={cx('v num', k !== 'spendLess' && below && 'bad')}>
           {k === 'spendLess' ? money(c.spendLess.maxPriceCents) : signed(option.lowestBalanceCents)}
@@ -245,7 +245,7 @@ export function ChartTile({
       </h2>
       <div className="meta">
         Your balance each day, {shortDate(c.window.start)} to {shortDate(c.window.end)}. Each day
-        shows its low, counting bills before pay.
+        shows its low, with that day’s bills taken out before pay arrives.
       </div>
       <BalanceChart
         points={option.points}
@@ -264,7 +264,7 @@ export function ChartTile({
               point.events.some((event) => event.kind === 'income'),
           )?.date,
         }}
-        label={`Projected balance ${title.replace(/^If/, 'if')}, at each day’s low. Lowest point ${signed(option.lowestBalanceCents)} on ${fullDate(option.lowestDate)}, ${cushionGap(option.lowestBalanceCents, c.cushionCents)}.`}
+        label={`Projected balance ${title.replace(/^If/, 'if')}. Each day shows its low, with that day’s bills taken out before pay arrives. Lowest point ${signed(option.lowestBalanceCents)} on ${fullDate(option.lowestDate)}, ${cushionGap(option.lowestBalanceCents, c.cushionCents)}.`}
       />
       {/* With Pay in 4 open, the chart's own two-row comparison already states both lows. */}
       {!payIn4 && (

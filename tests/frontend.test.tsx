@@ -458,6 +458,9 @@ describe('Ask answers', () => {
     const options = await screen.findByRole('list', { name: 'Your options' })
     expect(within(options).getAllByRole('listitem')).toHaveLength(3)
     expect(within(options).getByText('Recommended')).toBeTruthy()
+    // Each option names its period minimum the way the chart does.
+    expect(options.textContent).toMatch(/Lowest point −\$458\.99 · \w{3}, \w{3} \d+/)
+    expect(options.textContent).toMatch(/Lowest point \$[\d,.]+ · \w{3}, \w{3} \d+/)
     expect(options.textContent).not.toMatch(/Pay in 4/)
     const picked = screen.getByRole('region', { name: 'Picked for your question' })
     expect(picked.textContent).toContain('Picked for your question')
@@ -1293,6 +1296,10 @@ describe('iteration 2 fixes', () => {
     expect(within(group).getByText('Above cushion')).toBeTruthy()
     expect(within(group).getByText('At your limit')).toBeTruthy()
     expect(within(group).queryByText('Fits')).toBeNull()
+    // Buy today and Wait name their period minimum as the chart does; Spend less shows its limit.
+    expect(within(group).getAllByText('Lowest point')).toHaveLength(2)
+    expect(within(group).getByText('Most you can spend today')).toBeTruthy()
+    expect(within(group).queryByText('Lowest balance')).toBeNull()
   })
 
   it('marks a bought item in Saved and drops it from Home’s Saved list', () => {

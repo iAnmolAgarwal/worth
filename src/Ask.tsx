@@ -183,7 +183,7 @@ function OptionRows({ c, at }: { c: Comparison; at?: Assessment }) {
   const recommendation = later ? (fits(buy) ? 'buyToday' : c.recommendation) : c.recommendation
   // Each row states its status once: as a pill when there is one, otherwise in words.
   const lowest = (option: OptionResult) =>
-    `Lowest ${minus(signed(option.lowestBalanceCents))} · ${dayLabel(option.lowestDate)}`
+    `Lowest point ${minus(signed(option.lowestBalanceCents))} · ${dayLabel(option.lowestDate)}`
   const rows: { key: string; title: string; sub: string; pill?: readonly [Tone, string] }[] = [
     {
       key: 'buyToday',
