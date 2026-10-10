@@ -52,17 +52,36 @@ export function checkProductLink(raw: string): LinkCheck {
 export const storeDomain = (host: string) => host.toLowerCase().replace(/^www\./, '')
 
 /**
- * The link in a composer message, when there is one. A message holding one http(s) link is a
- * pasted product (`one`); a message with several is `many`. Either way it is never sent to Claude.
+ * Links as people paste them: with a scheme, starting "www.", or a domain followed by a path
+ * ("shop.com/p/123"). A bare word with a dot ("e.g.", "$1.5k", "Node.js") is not a link.
+ */
+export const LINK_PATTERN =
+  /\bhttps?:\/\/[^\s<>"'`]+|\bwww\.[a-z0-9-]+(?:\.[a-z0-9-]+)+[^\s<>"'`]*|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,24}\/[^\s<>"'`]*/gi
+
+/** Sentence punctuation after a link is not part of it; a ")" is, when the link opened one. */
+function trimLink(text: string) {
+  let link = text
+  for (;;) {
+    if (/[.,;:!?\]'"]$/.test(link)) link = link.slice(0, -1)
+    else if (link.endsWith(')') && link.split('(').length < link.split(')').length)
+      link = link.slice(0, -1)
+    else return link
+  }
+}
+
+/**
+ * The link in a composer message, when there is one. A message holding one link is a pasted
+ * product (`one`, given a scheme when it had none); a message with several is `many`. Either way
+ * it is never sent to Claude.
  */
 export function linkIn(
   text: string,
 ): { kind: 'none' } | { kind: 'one'; url: string } | { kind: 'many' } {
-  const found = text.match(/\bhttps?:\/\/[^\s<>"'`]+/gi) ?? []
+  const found = text.match(new RegExp(LINK_PATTERN.source, 'gi')) ?? []
   if (!found.length) return { kind: 'none' }
   if (found.length > 1) return { kind: 'many' }
-  // Sentence punctuation after a link is not part of it.
-  return { kind: 'one', url: found[0]!.replace(/[.,;:!?)\]]+$/, '') }
+  const link = trimLink(found[0]!)
+  return { kind: 'one', url: /^https?:\/\//i.test(link) ? link : `https://${link}` }
 }
 
 /** A title read from a store page, made safe to show and edit: plain text, at most 80 characters. */

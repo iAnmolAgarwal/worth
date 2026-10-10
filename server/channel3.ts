@@ -287,8 +287,8 @@ export function parseProducts(
 }
 
 /**
- * Turns a lookup response into what the shopper confirms. Only an offer from the pasted link's own
- * store is used, preferring a USD price; another store's price is never shown as this one's. A
+ * Turns a lookup response into what the shopper confirms. Only an offer on the pasted link's own
+ * host is used, preferring a USD price; another store's price is never shown as this one's. A
  * product with no title is no product.
  */
 export function parseLookup(
@@ -304,11 +304,8 @@ export function parseLookup(
     const retailer = retailerName(offer?.domain)
     const price = offer?.price?.price
     const currency = offer?.price?.currency
-    if (
-      !retailer ||
-      !(domain === retailer || domain.endsWith(`.${retailer}`) || retailer.endsWith(`.${domain}`))
-    )
-      return []
+    // The same host, ignoring "www.": a suffix match would let "co.uk" match every UK store.
+    if (!retailer || retailer !== domain) return []
     if (typeof price !== 'number' || !Number.isFinite(price) || typeof currency !== 'string')
       return []
     const cents = Math.round(price * 100)

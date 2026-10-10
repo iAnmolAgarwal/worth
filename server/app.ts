@@ -65,6 +65,7 @@ import { categoryCandidates, createChatProvider, fallbackCategories, localReply 
 import type { ChatActions, ChatProvider } from './chat.ts'
 import { allowedOrigins, loadConfig } from './config.ts'
 import type { AppConfig } from './config.ts'
+import { withoutWebsites } from './labels.ts'
 import { WindowLimiter } from './limits.ts'
 import { contentSecurityPolicy } from './csp.ts'
 import { itemSigner } from './remember.ts'
@@ -1815,7 +1816,14 @@ export function createApp(options: AppOptions = {}) {
     // A remembered item counts only with this session's signature, so its price is one Worth read.
     const { items: sent, ...rest } = parsed
     const items = signer.verify(session, sent)
-    const input = { ...rest, ...(items.length ? { items } : {}) }
+    // Links never reach Claude (C5): the page sends them to /api/lookup, and any that arrive here
+    // anyway are replaced in the message and history.
+    const input = {
+      ...rest,
+      message: withoutWebsites(rest.message),
+      history: rest.history.map((turn) => ({ ...turn, content: withoutWebsites(turn.content) })),
+      ...(items.length ? { items } : {}),
+    }
     const reply = (answer: ChatReply) => res.json(signer.sign(session, answer))
     const current = state(session)
     if (input.sessionKey && input.sessionKey !== current.sessionKey)

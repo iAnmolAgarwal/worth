@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Ask } from '../src/Ask'
 import { Decision } from '../src/Decision'
+import { decisionRequestFrom } from '../src/contract'
 import { api, ApiError } from '../src/api'
 import { compareOptions } from '../shared/finance'
 import { createDemoState, PRODUCTS } from '../shared/seed'
@@ -150,7 +151,9 @@ describe('pasting a product link in Ask Worth', () => {
   it('asks for the price when Channel3 has none for this store', async () => {
     answer({ ...found, priceCents: undefined, currency: undefined })
     const { user, onOpenDecision } = await paste(LINK)
-    await screen.findByRole('heading', { name: 'We couldn’t read that page. What’s the price?' })
+    await screen.findByRole('heading', {
+      name: 'We found it, but not its price. What’s the price?',
+    })
     expect(screen.getByRole('textbox', { name: /Total price, USD/ })).toHaveProperty('value', '')
     await user.click(screen.getByRole('button', { name: 'Check it' }))
     expect(screen.getByText('Enter the total price in US dollars.')).toBeTruthy()
@@ -168,6 +171,8 @@ describe('pasting a product link in Ask Worth', () => {
     await screen.findByRole('heading', {
       name: 'That page shows a price in GBP. What’s the price in US dollars?',
     })
+    // The pound price is shown for reference only, never as the dollar amount.
+    expect(screen.getByText('Listed at £95.00')).toBeTruthy()
     expect(screen.getByRole('textbox', { name: /Total price, USD/ })).toHaveProperty('value', '')
   })
 
@@ -302,5 +307,35 @@ describe('the decision for a pasted link', () => {
     expect(
       screen.getByText(/\$10\.00 to \$2,000\.00; shop\.larkspur\.example and PayPal decide/),
     ).toBeTruthy()
+  })
+})
+
+describe('a decision link from the address bar', () => {
+  const params = (query: Record<string, string>) => new URLSearchParams(query)
+  const forged = { amount: '100', item: 'Trailhead Daypack 28L', link: LINK, price: 'channel3' }
+  it('never takes Channel3 as the price source from the URL', () => {
+    // A hand-made link cannot claim "price read by Channel3" for an amount nobody confirmed.
+    expect(decisionRequestFrom(params(forged))).toEqual({
+      amountCents: 100,
+      itemName: 'Trailhead Daypack 28L',
+      sourceUrl: LINK,
+      priceSource: 'user',
+    })
+  })
+  it('keeps Channel3 only for the item this tab just confirmed at that price', () => {
+    const confirmed = {
+      amountCents: 12900,
+      itemName: 'Trailhead Daypack 28L',
+      sourceUrl: LINK,
+      priceSource: 'channel3' as const,
+    }
+    const own = params({ amount: '12900', item: 'Trailhead Daypack 28L', link: LINK })
+    expect(decisionRequestFrom(own, confirmed)?.priceSource).toBe('channel3')
+    expect(decisionRequestFrom(params(forged), confirmed)?.priceSource).toBe('user')
+  })
+  it('drops a link that is not a public https page', () => {
+    expect(
+      decisionRequestFrom(params({ amount: '500', item: 'Router', link: 'https://10.0.0.1/a' })),
+    ).toEqual({ amountCents: 500, itemName: 'Router' })
   })
 })

@@ -14,14 +14,13 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react'
-import { checkProductLink } from '../shared/link'
 import type { InstalmentPlanProposal, Product, SavedItem } from '../shared/types'
 import { Activity } from './Activity'
 import { api } from './api'
 import { Ask } from './Ask'
 import { Checkout } from './Checkout'
 import type { AppState, Purchase, SavePlan, SaveTarget } from './contract'
-import { alternativeTarget, saveRequest } from './contract'
+import { alternativeTarget, decisionRequestFrom, saveRequest } from './contract'
 import { Decision, type DecisionRequest, type Explanation } from './Decision'
 import { envLabel } from './engine'
 import { dayLabel, fullDate } from './format'
@@ -111,6 +110,8 @@ export default function App() {
   const [prompt, setPrompt] = useState<{ text: string; id: number }>()
   const [epoch, setEpoch] = useState(0)
   const [explanations, setExplanations] = useState<Record<string, Explanation>>({})
+  /** The pasted-link item this tab last confirmed at Channel3's price (C5). */
+  const [confirmedLink, setConfirmedLink] = useState<DecisionRequest>()
   const [returned] = useState(() => {
     const params = new URLSearchParams(window.location.search)
     const id = params.get('checkout')
@@ -276,12 +277,11 @@ export default function App() {
       else {
         params.set('amount', String(request.amountCents))
         params.set('item', request.itemName ?? 'Your purchase')
-        if (request.sourceUrl && request.priceSource) {
-          params.set('link', request.sourceUrl)
-          params.set('price', request.priceSource)
-        }
+        if (request.sourceUrl) params.set('link', request.sourceUrl)
       }
       params.set('from', from)
+      // Channel3's price counts as read only in this tab's memory, never from the URL (C5).
+      setConfirmedLink(request.priceSource === 'channel3' ? request : undefined)
       if (explanation)
         setExplanations((all) => ({ ...all, [JSON.stringify(request)]: explanation }))
       navigate(`decision?${params}`)
@@ -339,21 +339,8 @@ export default function App() {
   const { screen, params } = route
   const decisionRequest = useMemo<DecisionRequest | undefined>(() => {
     if (screen !== 'decision') return undefined
-    const product = params.get('product')
-    if (product) return { productId: product }
-    const amount = Number(params.get('amount'))
-    if (!Number.isSafeInteger(amount) || amount <= 0) return undefined
-    const item = {
-      amountCents: amount,
-      itemName: (params.get('item') ?? 'Your purchase').slice(0, 150),
-    }
-    // A pasted link's page travels with it (C5), only when it is still a public https link.
-    const link = checkProductLink(params.get('link') ?? '')
-    const price = params.get('price')
-    return link.ok && (price === 'channel3' || price === 'user')
-      ? { ...item, sourceUrl: link.url, priceSource: price }
-      : item
-  }, [screen, params])
+    return decisionRequestFrom(params, confirmedLink)
+  }, [screen, params, confirmedLink])
 
   if (!state)
     return (
