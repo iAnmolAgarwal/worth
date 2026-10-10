@@ -214,6 +214,12 @@ describe('the comparison keeps the stated budget (judge B8 #7)', () => {
       itemName: 'Desk',
       budgetCents: 20000,
     })
+    expect(link('amount=119900&item=Camera&saved=s_1&budget=30000')).toEqual({
+      amountCents: 119900,
+      itemName: 'Camera',
+      savedId: 's_1',
+      budgetCents: 30000,
+    })
     expect(link('product=camera&budget=-5')).toEqual({ productId: 'camera' })
     expect(link('product=camera&budget=abc')).toEqual({ productId: 'camera' })
   })
