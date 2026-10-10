@@ -180,6 +180,12 @@ export class WorthCheck extends HTMLElement {
   }
 
   connectedCallback() {
+    // A page may set `paypal` before this module loads; that own property would hide the setter.
+    if (Object.prototype.hasOwnProperty.call(this, 'paypal')) {
+      const value = (this as { paypal?: WorthCheck['paypal'] }).paypal
+      delete (this as { paypal?: unknown }).paypal
+      this.paypal = value
+    }
     this.render()
     document.addEventListener('visibilitychange', this.onVisible)
   }

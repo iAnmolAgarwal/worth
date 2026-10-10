@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createHandoff } from '../../merchant/handoff-stub.ts'
+import { createHandoff } from '../../shared/handoff.ts'
 import { reportOutcome } from '../../merchant/reportBack.ts'
 
-const handoff = createHandoff({ secret: Buffer.alloc(32, 1), merchantId: 'larkspur' })
+const handoff = createHandoff({
+  secret: Buffer.alloc(32, 1),
+  mid: 'larkspur',
+  merchantOrigin: 'https://larkspur.example',
+})
 const body = {
   v: 1 as const,
   kid: '1',

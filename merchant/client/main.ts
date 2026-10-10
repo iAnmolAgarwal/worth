@@ -3,17 +3,13 @@ import { loadPayPalSdk, type PayPalSdkInstance } from '../../src/paypalSdk.ts'
 /**
  * Larkspur's checkout: PayPal's own SDK v6 button and popup, with the order created and captured
  * on the store's server. The page is server-rendered; this module only wires PayPal up, shows the
- * thank-you state, and keeps the "Analyse with Worth" link's quote fresh.
+ * thank-you state, and hands the SDK instance to <worth-check>, which asks it about Pay in 4 and
+ * keeps its own link fresh (shared/worthCheck.ts).
  */
 export interface CheckoutDeps {
   loadSdk: (clientId: string) => Promise<PayPalSdkInstance>
   fetch: typeof fetch
-  /** Seconds since the epoch. */
-  now: () => number
 }
-
-/** A quote this close to expiry is refreshed before the shopper leaves for Worth. */
-const REFRESH_MARGIN_S = 60
 
 async function post<T>(http: typeof fetch, path: string, body: unknown): Promise<T> {
   const response = await http(path, {
@@ -31,12 +27,10 @@ export function mountCheckout(root: HTMLElement, deps: CheckoutDeps) {
   const productId = root.dataset.productId ?? ''
   const amount = root.dataset.amount ?? ''
   const clientId = root.dataset.clientId ?? ''
-  const replay = root.dataset.replay === 'video'
   const status = root.querySelector<HTMLElement>('.lk-buy__status')
   const errorBox = root.querySelector<HTMLElement>('.lk-buy__error')
   const button = root.querySelector<HTMLElement>('paypal-button')
   const thanks = root.ownerDocument.getElementById('thanks')
-  let quoteExp = Number(root.dataset.quoteExp) || 0
 
   const showError = (message: string) => {
     if (!errorBox) return
@@ -55,23 +49,6 @@ export function mountCheckout(root: HTMLElement, deps: CheckoutDeps) {
     url.searchParams.delete('worth')
     root.ownerDocument.defaultView?.history.replaceState(null, '', url.pathname + url.search)
   }
-
-  // The Analyse link is a real same-tab link (contract §3.1). Near expiry it gets a fresh quote.
-  const link = root.querySelector<HTMLAnchorElement>('a.worth-check')
-  link?.addEventListener('click', (event) => {
-    if (quoteExp - deps.now() > REFRESH_MARGIN_S) return
-    event.preventDefault()
-    const query = new URLSearchParams({ productId, ...(replay ? { replay: 'video' } : {}) })
-    deps
-      .fetch(`/api/worth-quote?${query}`, { credentials: 'same-origin' })
-      .then((response) => (response.ok ? response.json() : Promise.reject(new Error())))
-      .then((quote: { href: string; exp: number }) => {
-        quoteExp = quote.exp
-        link.href = quote.href
-      })
-      .catch(() => undefined)
-      .finally(() => root.ownerDocument.defaultView?.location.assign(link.href))
-  })
 
   function complete(orderId: string) {
     root.hidden = true
@@ -103,6 +80,9 @@ export function mountCheckout(root: HTMLElement, deps: CheckoutDeps) {
   return deps
     .loadSdk(clientId)
     .then(async (instance) => {
+      // The store's own SDK answers <worth-check>'s Pay in 4 question (contract §3.2).
+      const worthCheck = root.querySelector<HTMLElement & { paypal?: unknown }>('worth-check')
+      if (worthCheck) worthCheck.paypal = instance
       try {
         instance.createPayPalMessages?.()
       } catch {
@@ -137,5 +117,4 @@ if (root)
   void mountCheckout(root, {
     loadSdk: loadPayPalSdk,
     fetch: (...args) => fetch(...args),
-    now: () => Math.floor(Date.now() / 1000),
   })

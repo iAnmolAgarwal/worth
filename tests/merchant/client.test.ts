@@ -65,7 +65,7 @@ describe('store checkout client', () => {
       'POST /api/orders': { orderId: 'ORDER1' },
       'POST /api/orders/ORDER1/capture': { status: 'COMPLETED', orderId: 'ORDER1' },
     })
-    await mountCheckout(root, { loadSdk: async () => paypal.instance, fetch, now: () => 1000 })
+    await mountCheckout(root, { loadSdk: async () => paypal.instance, fetch })
     const button = root.querySelector<HTMLElement>('paypal-button')!
     expect(button.hidden).toBe(false)
     expect(paypal.instance.findEligibleMethods).toHaveBeenCalledWith({
@@ -91,7 +91,7 @@ describe('store checkout client', () => {
     const fetch = vi.fn(async () =>
       Response.json({ error: 'PayPal couldn’t use that payment method.' }, { status: 422 }),
     ) as unknown as typeof globalThis.fetch
-    await mountCheckout(root, { loadSdk: async () => paypal.instance, fetch, now: () => 1000 })
+    await mountCheckout(root, { loadSdk: async () => paypal.instance, fetch })
     await paypal.approve('ORDER1')
     expect(root.hidden).toBe(false)
     expect(root.querySelector('.lk-buy__error')!.textContent).toContain('payment method')
@@ -102,52 +102,42 @@ describe('store checkout client', () => {
     await mountCheckout(root, {
       loadSdk: async () => sdk(false).instance,
       fetch: api({}),
-      now: () => 0,
     })
     expect(root.querySelector<HTMLElement>('paypal-button')!.hidden).toBe(true)
     const again = render()
     await mountCheckout(again, {
       loadSdk: async () => Promise.reject(new Error('blocked')),
       fetch: api({}),
-      now: () => 0,
     })
     expect(again.querySelector('.lk-buy__status')!.textContent).toContain('couldn’t load')
   })
 
-  it('leaves the Analyse link alone while the quote is fresh', async () => {
-    const root = render({ exp: 2000 })
-    const fetch = api({})
-    await mountCheckout(root, { loadSdk: async () => sdk().instance, fetch, now: () => 1000 })
-    const link = root.querySelector<HTMLAnchorElement>('a.worth-check')!
-    expect(link.getAttribute('href')).toBe('https://worth.example/check#q=TOKEN')
-    const event = new MouseEvent('click', { cancelable: true })
-    link.dispatchEvent(event)
-    expect(event.defaultPrevented).toBe(false)
-    expect(fetch).not.toHaveBeenCalled()
+  it('renders the real <worth-check> with its link, amount and refresh URL', () => {
+    const root = render()
+    const element = root.querySelector('worth-check')!
+    expect(element.getAttribute('href')).toBe('https://worth.example/check#q=TOKEN')
+    expect(element.getAttribute('merchant')).toBe('Larkspur Supply')
+    expect(element.getAttribute('amount')).toBe('1199.00')
+    expect(element.getAttribute('refresh-url')).toBe('/api/worth-quote?productId=camera')
+    // Without JavaScript, the plain link inside still goes to Worth in the same tab.
+    const fallback = element.querySelector('a')!
+    expect(fallback.getAttribute('href')).toBe('https://worth.example/check#q=TOKEN')
+    expect(fallback.getAttribute('target')).toBeNull()
   })
 
-  it('refreshes a quote near expiry before leaving for Worth', async () => {
-    const root = render({ exp: 1030 })
-    const fetch = api({
-      'GET /api/worth-quote?productId=camera': {
-        href: 'https://worth.example/check#q=FRESH',
-        exp: 2000,
-      },
-    })
-    await mountCheckout(root, { loadSdk: async () => sdk().instance, fetch, now: () => 1000 })
-    const link = root.querySelector<HTMLAnchorElement>('a.worth-check')!
-    const event = new MouseEvent('click', { cancelable: true })
-    link.dispatchEvent(event)
-    expect(event.defaultPrevented).toBe(true)
-    await vi.waitFor(() =>
-      expect(link.getAttribute('href')).toBe('https://worth.example/check#q=FRESH'),
+  it('hands the store’s own SDK instance to <worth-check>', async () => {
+    const root = render()
+    const { instance } = sdk()
+    await mountCheckout(root, { loadSdk: async () => instance, fetch: api({}) })
+    expect((root.querySelector('worth-check') as HTMLElement & { paypal?: unknown }).paypal).toBe(
+      instance,
     )
   })
 
   it('removes the Worth result token from the address bar', async () => {
     window.history.replaceState(null, '', '/p/camera?replay=video&worth=abc.def')
     const root = render({ clientId: '' })
-    await mountCheckout(root, { loadSdk: async () => sdk().instance, fetch: api({}), now: () => 0 })
+    await mountCheckout(root, { loadSdk: async () => sdk().instance, fetch: api({}) })
     expect(window.location.pathname + window.location.search).toBe('/p/camera?replay=video')
   })
 })

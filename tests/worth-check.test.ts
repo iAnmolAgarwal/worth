@@ -187,6 +187,20 @@ describe('Pay in 4 from the store’s own SDK (contract §3.2)', () => {
     expect(new URL(String(fetchMock.mock.calls[0]![0])).searchParams.has('payLater')).toBe(false)
   })
 
+  it('picks up an SDK the page set before the element was defined', async () => {
+    // The page assigned the property while the element was still undefined.
+    const paypal = payIn4()
+    const element = document.createElement('worth-check') as WorthCheck
+    Object.defineProperty(element, 'paypal', { value: paypal, writable: true, configurable: true })
+    element.setAttribute('href', href())
+    element.setAttribute('amount', '1199.00')
+    document.body.append(element)
+    await settle()
+    expect(paypal.findEligibleMethods).toHaveBeenCalled()
+    expect(element.paypal).toBe(paypal)
+    expect(Object.prototype.hasOwnProperty.call(element, 'paypal')).toBe(false)
+  })
+
   it('does nothing without an SDK, an amount or a refresh URL, or when the SDK fails', async () => {
     const element = mount({ href: href(), amount: '1199.00' })
     element.paypal = sdk(true)

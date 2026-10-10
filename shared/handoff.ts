@@ -187,7 +187,7 @@ export function timeFailure(
   claims: { iat: number; exp: number },
   nowSeconds: number,
 ): 'too_long' | 'expired' | 'future' | undefined {
-  if (claims.exp < claims.iat || claims.exp - claims.iat > MAX_LIFETIME_S) return 'too_long'
+  if (claims.exp <= claims.iat || claims.exp - claims.iat > MAX_LIFETIME_S) return 'too_long'
   if (nowSeconds > claims.exp + CLOCK_SKEW_S) return 'expired'
   if (claims.iat > nowSeconds + CLOCK_SKEW_S) return 'future'
   return undefined

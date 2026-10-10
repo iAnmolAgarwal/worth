@@ -19,6 +19,8 @@ export interface OrderRecord {
 interface Session {
   /** One quote ID per product, kept for the session's life and re-signed on every render. */
   quotes: Map<string, string>
+  /** Quote IDs this session came back from Worth with a verified result for (contract §5). */
+  results: Set<string>
   expires: number
 }
 
@@ -57,7 +59,7 @@ export class Sessions {
       this.sessions.delete(oldest)
     }
     const id = randomBytes(32).toString('base64url')
-    this.sessions.set(id, { quotes: new Map(), expires: time + DAY_MS })
+    this.sessions.set(id, { quotes: new Map(), results: new Set(), expires: time + DAY_MS })
     return { id, created: true }
   }
 
@@ -88,7 +90,17 @@ export class Sessions {
     return undefined
   }
 
-  /** The quote this session holds for a product: the one an order reports back against. */
+  /** Records a verified Worth result for a quote this session holds. */
+  markResult(sessionId: string, qid: string) {
+    if (this.quote(sessionId, qid)) this.sessions.get(sessionId)?.results.add(qid)
+  }
+
+  /** Whether this session came back from Worth with a verified result for the quote. */
+  hasResult(sessionId: string, qid: string) {
+    return this.sessions.get(sessionId)?.results.has(qid) ?? false
+  }
+
+  /** The quote this session holds for a product: the one an order may report back against. */
   quoteFor(sessionId: string, productId: string): QuoteRecord | undefined {
     const qid = this.sessions.get(sessionId)?.quotes.get(productId)
     return qid ? { qid, productId } : undefined

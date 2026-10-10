@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import request from 'supertest'
 import { createMerchantApp } from '../../merchant/app.ts'
-import { createHandoff } from '../../merchant/handoff-stub.ts'
+import { createHandoff, signToken } from '../../shared/handoff.ts'
 import { PayPalError, type PayPalGateway, type PayPalOrder } from '../../server/paypal.ts'
 import { PRODUCTS } from '../../shared/seed.ts'
 
@@ -81,7 +81,24 @@ function setup(
       log: () => {},
     },
   })
-  const worth = createHandoff({ secret: SECRET, merchantId: 'larkspur', now: () => clock })
+  // Worth's side of the shared module, on the store's clock, to read quotes and sign results.
+  const shared = createHandoff({
+    secret: SECRET,
+    mid: 'larkspur',
+    merchantOrigin: ORIGIN,
+    now: () => clock,
+  })
+  const worth = {
+    /** A quote's payload if Worth would accept it, as the store's first stub answered. */
+    open: (_direction: 'quote', token: string | undefined) => {
+      const verified = shared.verifyQuote(token)
+      return verified.ok
+        ? (verified.payload as Record<string, unknown> & { qid: string })
+        : undefined
+    },
+    /** Any payload signed for a direction, valid or not, to probe the store's checks. */
+    sign: (direction: 'quote' | 'result', payload: object) => signToken(SECRET, direction, payload),
+  }
   return {
     app,
     paypal,
@@ -100,6 +117,24 @@ function quoteToken(html: string) {
   return match?.[1]
 }
 const json = { 'Content-Type': 'application/json', Origin: ORIGIN }
+/**
+ * The shopper's round trip: the product page, Worth, then back with a verified result for the
+ * quote. Only then may the store report the quote's purchase (contract §5, anti-forwarding).
+ */
+async function cameBack(t: ReturnType<typeof setup>, agent: ReturnType<typeof request.agent>) {
+  const qid = t.worth.open('quote', quoteToken((await agent.get('/p/camera')).text))!.qid
+  const result = t.worth.sign('result', {
+    v: 1,
+    kid: '1',
+    mid: 'larkspur',
+    qid,
+    verdict: 'buy_today',
+    iat: T0,
+    exp: T0 + 900,
+  })
+  expect((await agent.get(`/p/camera?worth=${result}`)).text).toContain('Worth: fits today')
+  return qid
+}
 
 describe('store pages', () => {
   it('serves a health check, the security headers and the store’s own CSP', async () => {
@@ -155,9 +190,12 @@ describe('store pages', () => {
       '<paypal-message auto-bootstrap="true" amount="1199.00" currency-code="USD"',
     )
     expect(html).toContain('data-client-id="public-client-id"')
+    // The real <worth-check> element, with a plain same-tab link inside for no-JavaScript visits.
     expect(html).toMatch(
-      /<a class="worth-check" href="https:\/\/worth\.example\/check#q=[^"]+">Analyse with Worth<\/a>/,
+      /<worth-check href="https:\/\/worth\.example\/check#q=[^"]+" merchant="Larkspur Supply" amount="1199\.00" refresh-url="\/api\/worth-quote\?productId=camera"><a class="worth-check" href="https:\/\/worth\.example\/check#q=[^"]+">Analyse with Worth<\/a><\/worth-check>/,
     )
+    expect(html).toContain('<script type="module" src="/assets/worth-check.js"></script>')
+    expect((await request(app).get('/')).text).not.toContain('worth-check.js')
     expect(html).not.toContain('lk-buy__worth-result')
     // The spec sheet: stock number, breadcrumb, facts and four other products.
     expect(html).toContain('<span class="lk-product__no">No. 02</span>Cameras')
@@ -208,6 +246,10 @@ describe('quotes for Worth', () => {
       replay: 'video',
       returnUrl: `${ORIGIN}/p/camera?replay=video`,
     })
+    // A refreshed link keeps the replay too.
+    expect((await request(app).get('/p/camera?replay=video')).text).toContain(
+      'refresh-url="/api/worth-quote?productId=camera&amp;replay=video"',
+    )
   })
 
   it('mints a fresh quote on request, with the store SDK’s Pay Later answer', async () => {
@@ -355,11 +397,86 @@ describe('one quote ID per shopper and product', () => {
   })
 })
 
+describe('anti-forwarding (contract §5)', () => {
+  it('never reports a quote the session minted but never brought back from Worth', async () => {
+    const t = setup()
+    const agent = request.agent(t.app)
+    await agent.get('/p/camera')
+    await agent.post('/api/orders').set(json).send({ productId: 'camera' }).expect(201)
+    // No quote travels with the order: its reference is the store's own.
+    expect(t.created[0]!.qid).toBeUndefined()
+    expect(t.created[0]!.id).toMatch(/^lk_/)
+    await agent.post('/api/orders/ORDER1/capture').set(json).send({}).expect(200)
+    expect(t.app.locals.lastReport).toBeUndefined()
+    const webhook = await request(t.app)
+      .post('/api/paypal/webhook')
+      .set('Content-Type', 'application/json')
+      .send(
+        JSON.stringify({
+          id: 'WH-1',
+          event_type: 'PAYMENT.CAPTURE.COMPLETED',
+          resource: { id: 'CAP1', supplementary_data: { related_ids: { order_id: 'ORDER1' } } },
+        }),
+      )
+    expect(webhook.body).toEqual({ received: true, ignored: true })
+    expect(t.reports).toHaveLength(0)
+  })
+
+  it('reports a forwarded quote only for the shopper who came back with it, never its minter', async () => {
+    const t = setup()
+    // The minter's session holds the quote and forwards the Worth link.
+    const minter = request.agent(t.app)
+    const qid = t.worth.open('quote', quoteToken((await minter.get('/p/camera')).text))!.qid
+    // Someone else opens it in Worth and comes back with a verified result.
+    const shopper = request.agent(t.app)
+    const result = t.worth.sign('result', {
+      v: 1,
+      kid: '1',
+      mid: 'larkspur',
+      qid,
+      verdict: 'wait',
+      fitsOn: '2026-10-23',
+      iat: T0,
+      exp: T0 + 900,
+    })
+    await shopper.get(`/p/camera?worth=${result}`)
+    // The minter's purchase carries no quote and reports nothing.
+    await minter.post('/api/orders').set(json).send({ productId: 'camera' }).expect(201)
+    expect(t.created[0]!.qid).toBeUndefined()
+    await minter.post('/api/orders/ORDER1/capture').set(json).send({}).expect(200)
+    expect(t.reports).toHaveLength(0)
+    // The shopper who came back is the one whose purchase reports the quote.
+    await shopper.post('/api/orders').set(json).send({ productId: 'camera' }).expect(201)
+    expect(t.created[1]!.qid).toBe(qid)
+  })
+
+  it('needs the result for this product’s quote, verified, not any result', async () => {
+    const t = setup()
+    const agent = request.agent(t.app)
+    const qid = t.worth.open('quote', quoteToken((await agent.get('/p/camera')).text))!.qid
+    const forged = `${t.worth.sign('result', { v: 1, kid: '1', mid: 'larkspur', qid, verdict: 'buy_today', iat: T0, exp: T0 + 900 }).slice(0, -2)}AA`
+    await agent.get(`/p/camera?worth=${forged}`)
+    const valid = t.worth.sign('result', {
+      v: 1,
+      kid: '1',
+      mid: 'larkspur',
+      qid,
+      verdict: 'buy_today',
+      iat: T0,
+      exp: T0 + 900,
+    })
+    // A camera result shown on the chair page doesn't count for the camera.
+    await agent.get(`/p/chair?worth=${valid}`)
+    await agent.post('/api/orders').set(json).send({ productId: 'camera' }).expect(201)
+    expect(t.created[0]!.qid).toBeUndefined()
+  })
+})
+
 describe('PayPal orders on the store', () => {
   it('creates the order at the catalog price with the quote’s reference', async () => {
     const t = setup()
     const agent = request.agent(t.app)
-    const qid = t.worth.open('quote', quoteToken((await agent.get('/p/camera')).text))!.qid
+    const qid = await cameBack(t, agent)
     const res = await agent.post('/api/orders').set(json).send({ productId: 'camera' }).expect(201)
     expect(res.body).toEqual({ orderId: 'ORDER1' })
     expect(t.created[0]).toMatchObject({
@@ -404,7 +521,7 @@ describe('PayPal orders on the store', () => {
   it('captures, answers COMPLETED, and reports back to Worth without waiting', async () => {
     const t = setup()
     const agent = request.agent(t.app)
-    const qid = t.worth.open('quote', quoteToken((await agent.get('/p/camera')).text))!.qid
+    const qid = await cameBack(t, agent)
     await agent.post('/api/orders').set(json).send({ productId: 'camera' }).expect(201)
     const res = await agent.post('/api/orders/ORDER1/capture').set(json).send({}).expect(200)
     expect(res.body).toEqual({ status: 'COMPLETED', orderId: 'ORDER1' })
@@ -431,7 +548,7 @@ describe('PayPal orders on the store', () => {
       reportReplies: [503, 503, 503].map((status) => new Response('', { status })),
     })
     const agent = request.agent(t.app)
-    await agent.get('/p/camera')
+    await cameBack(t, agent)
     await agent.post('/api/orders').set(json).send({ productId: 'camera' })
     const res = await agent.post('/api/orders/ORDER1/capture').set(json).send({}).expect(200)
     expect(res.body.status).toBe('COMPLETED')
@@ -521,7 +638,7 @@ describe('store webhook', () => {
   it('reports a verified capture once, re-reading the order from PayPal', async () => {
     const t = setup()
     const agent = request.agent(t.app)
-    const qid = t.worth.open('quote', quoteToken((await agent.get('/p/camera')).text))!.qid
+    const qid = await cameBack(t, agent)
     await agent.post('/api/orders').set(json).send({ productId: 'camera' })
     const res = await request(t.app)
       .post('/api/paypal/webhook')
@@ -556,7 +673,7 @@ describe('store webhook', () => {
       ],
     })
     const agent = request.agent(t.app)
-    await agent.get('/p/camera')
+    await cameBack(t, agent)
     await agent.post('/api/orders').set(json).send({ productId: 'camera' })
     // The capture's report is in flight while the webhook arrives.
     const slow = t.app.locals as { lastReport?: Promise<unknown> }
@@ -583,7 +700,7 @@ describe('store webhook', () => {
   it('handles a redelivery when the order re-read failed the first time', async () => {
     const t = setup()
     const agent = request.agent(t.app)
-    await agent.get('/p/camera')
+    await cameBack(t, agent)
     await agent.post('/api/orders').set(json).send({ productId: 'camera' })
     const get = vi.mocked(t.paypal.get)
     const real = get.getMockImplementation()!

@@ -10,7 +10,10 @@ import type { MerchantConfig } from './config.ts'
 const production = process.env.NODE_ENV === 'production'
 let app: ReturnType<typeof createMerchantApp>
 try {
-  app = createMerchantApp({ scriptSrc: production ? '/assets/store.js' : '/main.ts' })
+  app = createMerchantApp({
+    scriptSrc: production ? '/assets/store.js' : '/main.ts',
+    worthCheckSrc: production ? '/assets/worth-check.js' : '/worth-check.ts',
+  })
 } catch (error) {
   console.error(error instanceof ConfigError ? error.message : error)
   process.exit(1)

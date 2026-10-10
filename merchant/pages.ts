@@ -1,6 +1,6 @@
 import type { Product } from '../shared/types.ts'
 import { CATALOG, formatPrice, STORE_NAME } from './catalog.ts'
-import type { ResultPayload } from './handoff-stub.ts'
+import type { ResultPayload } from '../shared/handoff.ts'
 
 /**
  * Server-rendered pages. Markup uses BEM-style `lk-` classes and every colour, size and font comes
@@ -20,6 +20,8 @@ export function esc(value: string | number) {
 export interface PageOptions {
   /** The client bundle's URL: built in production, served by Vite in development. */
   scriptSrc: string
+  /** The <worth-check> module's URL, the same way; loaded on product pages only. */
+  worthCheckSrc?: string
   /** Keeps `?replay=video` on in-store links so the demo stays in replay. */
   replay?: boolean
 }
@@ -36,7 +38,12 @@ function layout(title: string, main: string, options: PageOptions) {
 <title>${esc(title)}</title>
 <link rel="stylesheet" href="/static/store.css">
 <script type="module" src="${esc(options.scriptSrc)}"></script>
-</head>
+${
+  options.worthCheckSrc
+    ? `<script type="module" src="${esc(options.worthCheckSrc)}"></script>
+`
+    : ''
+}</head>
 <body class="lk">
 <header class="lk-header">
   <a class="lk-header__brand" href="${home}">${MARK}<span class="lk-header__name">${esc(STORE_NAME)}</span></a>
@@ -131,6 +138,7 @@ export function productPage(view: ProductView, options: PageOptions) {
   const { product, quote } = view
   const amount = (product.priceCents / 100).toFixed(2)
   const worthHref = `${view.worthOrigin}/check#q=${quote.token}`
+  const refresh = `/api/worth-quote?productId=${encodeURIComponent(product.id)}${options.replay ? '&replay=video' : ''}`
   const paypal = view.paypalClientId
     ? `<div class="lk-buy__paypal" data-slot="paypal">
         <paypal-button class="lk-buy__button" type="pay" hidden></paypal-button>
@@ -155,13 +163,11 @@ export function productPage(view: ProductView, options: PageOptions) {
     <section class="lk-buy" id="checkout" aria-label="Checkout"
       data-product-id="${esc(product.id)}"
       data-amount="${esc(amount)}"
-      data-client-id="${esc(view.paypalClientId ?? '')}"
-      data-quote-exp="${esc(quote.exp)}"
-      data-replay="${options.replay ? 'video' : ''}">
+      data-client-id="${esc(view.paypalClientId ?? '')}">
       ${paypal}
       ${view.worthLine ? `<p class="lk-buy__worth-result">${esc(view.worthLine)}</p>` : ''}
       <div class="lk-buy__worth" data-slot="worth-check">
-        <a class="worth-check" href="${esc(worthHref)}">Analyse with Worth</a>
+        <worth-check href="${esc(worthHref)}" merchant="${esc(STORE_NAME)}" amount="${esc(amount)}" refresh-url="${esc(refresh)}"><a class="worth-check" href="${esc(worthHref)}">Analyse with Worth</a></worth-check>
       </div>
       <p class="lk-buy__error" role="alert" hidden></p>
     </section>

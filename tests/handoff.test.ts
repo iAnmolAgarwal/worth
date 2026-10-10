@@ -310,6 +310,8 @@ describe('hand-off tokens (contract §2)', () => {
   it('exposes the time checks on their own', () => {
     expect(timeFailure({ iat: 0, exp: MAX_LIFETIME_S }, 10)).toBeUndefined()
     expect(timeFailure({ iat: 0, exp: MAX_LIFETIME_S + 1 }, 10)).toBe('too_long')
+    // A token that expires as it is issued is never valid (as the store's first version had it).
+    expect(timeFailure({ iat: 5, exp: 5 }, 5)).toBe('too_long')
     expect(timeFailure({ iat: 0, exp: 100 }, 161)).toBe('expired')
     expect(timeFailure({ iat: 100, exp: 200 }, 39)).toBe('future')
   })
