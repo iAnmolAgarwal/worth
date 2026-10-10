@@ -18,6 +18,7 @@ import type { InstalmentPlanProposal, Product, SavedItem } from '../shared/types
 import { Activity } from './Activity'
 import { api } from './api'
 import { Ask } from './Ask'
+import { Check, handoffToken, reloadForNewToken } from './Check'
 import { Checkout } from './Checkout'
 import type { AppState, Purchase, SavePlan, SaveTarget } from './contract'
 import { alternativeTarget, decisionRequestFrom, saveRequest } from './contract'
@@ -33,7 +34,8 @@ import { ASSESSMENT_ONLY, paypalModeLine, SAMPLE_WHO } from './copy'
 import { usePayPalSdk } from './paypal'
 import { Alert, Button, IconButton, Wordmark } from './ui'
 
-type Screen = 'home' | 'ask' | 'activity' | 'plan' | 'plan-edit' | 'saved' | 'settings' | 'decision'
+type Screen =
+  'home' | 'ask' | 'activity' | 'plan' | 'plan-edit' | 'saved' | 'settings' | 'decision' | 'check'
 const LEGACY: Record<string, Screen> = {
   overview: 'home',
   assistant: 'ask',
@@ -48,10 +50,13 @@ const NAV: { screen: Screen; label: string; tabLabel?: string; icon: LucideIcon;
     { screen: 'plan', label: 'Plan', icon: SlidersHorizontal, tab: true },
     { screen: 'saved', label: 'Saved', icon: Bookmark, tab: true },
   ]
-const DETAIL: Screen[] = ['decision', 'plan-edit', 'settings']
+const DETAIL: Screen[] = ['decision', 'plan-edit', 'settings', 'check']
 
 function parseRoute(): { screen: Screen; params: URLSearchParams } {
   const [path = '', query = ''] = window.location.hash.slice(1).split('?')
+  // A store's hand-off lands on /check (specs/handoff-contract.md); hash routes still work there.
+  if (window.location.pathname === '/check' && (path === '' || path.startsWith('q=')))
+    return { screen: 'check', params: new URLSearchParams() }
   const screen: Screen =
     path === 'plan/edit'
       ? 'plan-edit'
@@ -75,6 +80,8 @@ type ReviewState =
   { kind: 'plan'; purchaseId: string } | { kind: 'refund'; purchaseId: string; refundId: string }
 
 export default function App() {
+  // Read first, so the store's token leaves the address bar before anything else runs.
+  const [checkToken] = useState(handoffToken)
   const [state, setState] = useState<AppState>()
   const [error, setError] = useState('')
   const [route, setRoute] = useState(parseRoute)
@@ -173,6 +180,7 @@ export default function App() {
     // oxlint-disable-next-line react/set-state-in-effect
     void load()
     const onHash = () => {
+      if (reloadForNewToken()) return
       setRoute(parseRoute())
       setMenu(false)
       setEnvOpen(false)
@@ -400,7 +408,9 @@ export default function App() {
       ? (decisionProduct?.name ?? decisionRequest?.itemName ?? 'Your options')
       : screen === 'plan-edit'
         ? 'Edit your plan'
-        : 'Settings and privacy'
+        : screen === 'check'
+          ? 'Analyse with Worth'
+          : 'Settings and privacy'
   const checkoutProduct = checkout && state.products.find((p) => p.id === checkout.productId)
 
   return (
@@ -651,6 +661,17 @@ export default function App() {
               </div>
             </div>
           ))}
+        {screen === 'check' && (
+          <Check
+            state={state}
+            token={checkToken}
+            instance={sdk.instance}
+            onUpdate={replaceState}
+            onToast={setToast}
+            onOpenDecision={(request) => openDecision(request, undefined, 'home')}
+            onNavigate={navigate}
+          />
+        )}
         {screen === 'activity' && (
           <Activity
             state={state}

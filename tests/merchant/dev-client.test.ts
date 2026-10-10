@@ -25,6 +25,14 @@ describe('store development client', () => {
     await request(app).get(sdk!).expect(200)
   })
 
+  it('serves the <worth-check> module and the shared element it imports', async () => {
+    const entry = await request(app).get('/worth-check.ts').expect(200)
+    const element = entry.text.match(/(?:import |from )"(\/@fs\/[^"]+worthCheck\.ts)"/)?.[1]
+    expect(element).toBeDefined()
+    const code = await request(app).get(element!).expect(200)
+    expect(code.text).toContain('worth-check')
+  })
+
   it('never serves server code, config or secrets', async () => {
     const root = resolve(import.meta.dirname, '../..')
     for (const path of [

@@ -169,6 +169,7 @@ describe('GET /api/alternatives', () => {
     expect((await agent.get('/api/health')).body).toEqual({
       ok: true,
       service: 'worth',
+      handoff: 'off',
       channel3: 'ok',
     })
     const response = await agent.get('/api/alternatives?productId=camera')
@@ -298,6 +299,8 @@ describe('GET /api/alternatives', () => {
       production: true,
       trustProxy: 1,
       origin: 'https://worth.example.com',
+      handoffSecret: Buffer.alloc(32, 1).toString('base64url'),
+      merchantOrigin: 'https://store.example',
     })
     const policy = (await request(app).get('/api/health')).headers[
       'content-security-policy'

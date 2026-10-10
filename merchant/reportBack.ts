@@ -1,5 +1,5 @@
 import { retryDelay } from '../server/paypal.ts'
-import type { Handoff, OutcomeBody } from './handoff-stub.ts'
+import type { Handoff, OutcomePayload } from '../shared/handoff.ts'
 
 /** Contract §5: two retries after the first attempt, each attempt limited to five seconds. */
 export const REPORT_RETRIES = 2
@@ -24,7 +24,7 @@ export type ReportResult = 'sent' | 'rejected' | 'failed'
  * is idempotent on captureId, so the capture and webhook paths can both send.
  */
 export async function reportOutcome(
-  body: OutcomeBody,
+  body: OutcomePayload,
   options: ReportOptions,
 ): Promise<ReportResult> {
   const http = options.fetch ?? fetch

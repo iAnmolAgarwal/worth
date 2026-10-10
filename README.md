@@ -342,6 +342,9 @@ the webhook ID in `PAYPAL_WEBHOOK_ID`. Localhost alone cannot receive them.
 | `PORT`, `HOST` | Port (5173) and bind address (`0.0.0.0` in production, `127.0.0.1` otherwise) |
 | `APP_ORIGIN` | Public browser origin. Falls back to `APP_URL`, then `RENDER_EXTERNAL_URL`, then `http://localhost:$PORT`. Production refuses localhost or plain HTTP |
 | `TRUST_PROXY` | Reverse-proxy hops trusted for the client IP. Required in production (2 on Render) |
+| `HANDOFF_SECRET` | Key shared with the demo store for signed hand-offs to `/check`: 32+ random bytes, base64url. Set it with `MERCHANT_ORIGIN`, or neither: with neither the hand-off is off (`handoff: off` in `/api/health`), and production refuses only one without the other |
+| `MERCHANT_ORIGIN` | The demo store's origin, the only place a hand-off may return to. HTTPS only in production |
+| `HANDOFF_MERCHANT_ID` | The store's `mid` claim; default `larkspur` |
 | `DATABASE_PATH` | SQLite file; default `.data/worth.sqlite` |
 | `MAX_HEAP_MB` | Node heap for `npm start` (384); set in the host environment, not `.env` |
 | `NODE_ENV` | `production` turns on the CSP, HSTS, the `__Host-` secure cookie and the public HTTPS origin requirement |

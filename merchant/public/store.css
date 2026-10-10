@@ -371,13 +371,14 @@ body.lk {
 .lk-buy__error[hidden] {
   display: none;
 }
-/* The Worth control's slot: placement and width only; <worth-check> brings its own look. */
+/* The Worth control's slot: placement and width only; <worth-check> brings its own look. A clear
+   14px gap (gap 10px + 4px) keeps it apart from the PayPal button above. */
 .lk-buy__worth {
   order: 1;
   display: flex;
   justify-content: center;
   width: 100%;
-  padding: 2px 0;
+  padding: 4px 0 2px;
 }
 .lk-buy__worth-result {
   order: 2;

@@ -18,7 +18,12 @@ import type { Product } from '../shared/types.ts'
 import { findProduct, STORE_NAME } from './catalog.ts'
 import { loadMerchantConfig, type MerchantConfig } from './config.ts'
 import { merchantContentSecurityPolicy } from './csp.ts'
-import { createHandoff, KEY_ID, MAX_TTL_S, type OutcomeBody } from './handoff-stub.ts'
+import {
+  createHandoff,
+  HANDOFF_KID,
+  MAX_LIFETIME_S,
+  type OutcomePayload,
+} from '../shared/handoff.ts'
 import { catalogPage, notFoundPage, productPage, resultLine, type PageOptions } from './pages.ts'
 import { reportOutcome, type ReportOptions } from './reportBack.ts'
 import { Sessions, type OrderRecord } from './sessions.ts'
@@ -33,10 +38,12 @@ export interface MerchantAppOptions {
   report?: Pick<ReportOptions, 'fetch' | 'sleep' | 'log' | 'timeoutMs'>
   /** The client bundle's URL in the page. */
   scriptSrc?: string
+  /** The built <worth-check> module's URL in product pages. */
+  worthCheckSrc?: string
 }
 
 /** A quote is minted for the longest life the contract allows. */
-const QUOTE_TTL_S = MAX_TTL_S
+const QUOTE_TTL_S = MAX_LIFETIME_S
 const API_PER_MINUTE = 120
 const QUOTES_PER_MINUTE = 30
 const WEBHOOK_PER_MINUTE = 60
@@ -59,7 +66,8 @@ export function createMerchantApp(options: MerchantAppOptions = {}) {
   const now = options.now ?? Date.now
   const handoff = createHandoff({
     secret: config.handoffSecret,
-    merchantId: config.merchantId,
+    mid: config.merchantId,
+    merchantOrigin: config.origin,
     now,
   })
   const paypal =
@@ -157,7 +165,7 @@ export function createMerchantApp(options: MerchantAppOptions = {}) {
     const productUrl = `${config.origin}/p/${encodeURIComponent(product.id)}`
     const token = handoff.signQuote({
       v: 1,
-      kid: KEY_ID,
+      kid: HANDOFF_KID,
       mid: config.merchantId,
       qid,
       item: product.name.slice(0, 120),
@@ -189,14 +197,23 @@ export function createMerchantApp(options: MerchantAppOptions = {}) {
         .type('html')
         .send(notFoundPage(pageOptions(req)))
     const sessionId = session(req, res)
-    const page = pageOptions(req)
+    // Only product pages carry <worth-check>, so only they load it.
+    const page = {
+      ...pageOptions(req),
+      worthCheckSrc: options.worthCheckSrc ?? '/assets/worth-check.js',
+    }
     // A result from Worth adds one display line, and only for this shopper's quote for this
     // product. It never changes the price, the cart or the order. A verified qid the session does
     // not hold yet (a restarted store) is adopted, so the order reports back the quote Worth opened.
-    const result = handoff.verifyResult(req.query.worth)
+    const verified = handoff.verifyResult(req.query.worth)
+    const result = verified.ok ? verified.payload : undefined
     if (result) sessions.pinQuote(sessionId, product.id, result.qid)
     const quoted = result ? sessions.quote(sessionId, result.qid) : undefined
-    const worthLine = result && quoted?.productId === product.id ? resultLine(result) : undefined
+    const ours = result && quoted?.productId === product.id ? result : undefined
+    // Anti-forwarding (contract §5): only a session that came back from Worth with a verified
+    // result for its quote ever reports that quote's purchase.
+    if (ours) sessions.markResult(sessionId, ours.qid)
+    const worthLine = ours ? resultLine(ours) : undefined
     return res.type('html').send(
       productPage(
         {
@@ -248,7 +265,10 @@ export function createMerchantApp(options: MerchantAppOptions = {}) {
     const product = parsed.success ? findProduct(parsed.data.productId) : undefined
     if (!product) throw new HttpError(400, 'Unknown product.', 'UNKNOWN_PRODUCT')
     const sessionId = session(req, res)
-    const quote = sessions.quoteFor(sessionId, product.id)
+    // Only a quote this session brought back a verified Worth result for travels with the order,
+    // so a forwarded or merely minted quote never reports (contract §5, anti-forwarding).
+    const held = sessions.quoteFor(sessionId, product.id)
+    const quote = held && sessions.hasResult(sessionId, held.qid) ? held : undefined
     const suffix = randomBytes(6).toString('base64url')
     // The price is the catalog's, never the browser's.
     const record: Omit<OrderRecord, 'orderId'> = {
@@ -305,9 +325,9 @@ export function createMerchantApp(options: MerchantAppOptions = {}) {
       return
     }
     if (capture.amount.currency_code !== 'USD') return
-    const body: OutcomeBody = {
+    const body: OutcomePayload = {
       v: 1,
-      kid: KEY_ID,
+      kid: HANDOFF_KID,
       mid: config.merchantId,
       qid: order.qid,
       orderId,
