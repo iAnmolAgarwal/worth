@@ -147,21 +147,22 @@ describe('Pay in 4 from the store’s own SDK (contract §3.2)', () => {
     expect(element.getAttribute('href')).toBe(fresh)
   })
 
-  it('sends payLater=false only when PayPal offers no Pay Later at all', async () => {
-    answer(href({ payLater: { eligible: false } }))
+  it('never signs a no: without Pay Later, a link that says yes is refreshed without an answer', async () => {
+    answer(href())
     const element = mount({
       href: href({ payLater: { eligible: true } }),
-      amount: '5.00',
+      amount: '1199.00',
       'refresh-url': '/q',
     })
+    // PayPal's sandbox answers this before the shopper logs in, even where Messages offers Pay in 4.
     element.paypal = sdk(false)
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled())
-    expect(new URL(String(fetchMock.mock.calls[0]![0])).searchParams.get('payLater')).toBe('false')
+    expect(new URL(String(fetchMock.mock.calls[0]![0])).searchParams.has('payLater')).toBe(false)
   })
 
   it('leaves payLater unset for PAYLATER, another country or an unknown code', async () => {
     expect(await payIn4Offered(payIn4(), '50.00')).toBe(true)
-    expect(await payIn4Offered(sdk(false), '5.00')).toBe(false)
+    expect(await payIn4Offered(sdk(false), '5.00')).toBeUndefined()
     for (const answerOf of [
       () => sdk(true, 'PAYLATER', 'US'),
       () => sdk(true, 'PAY_LATER_SHORT_TERM', 'GB'),

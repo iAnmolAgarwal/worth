@@ -133,11 +133,15 @@ function safeHref(value: string | null) {
 }
 
 /**
- * Whether PayPal offers Pay in 4 for the amount, from the store's own SDK: true, false, or
- * undefined when PayPal's answer doesn't say which Pay Later product it means.
+ * Whether PayPal offers Pay in 4 for the amount, from the store's own SDK: true, or undefined when
+ * the answer can't say. A "no" is never signed: before the shopper logs in to PayPal, the sandbox
+ * answers `isEligible('paylater') === false` even for $1,199 while PayPal Messages on the same page
+ * offers Pay in 4, so a signed false would make Worth contradict PayPal's own message.
  */
 export async function payIn4Offered(source: EligibilitySource, amount: string) {
   return payIn4Offer(await source.findEligibleMethods({ currencyCode: 'USD', amount }))
+    ? true
+    : undefined
 }
 
 export class WorthCheck extends HTMLElement {
