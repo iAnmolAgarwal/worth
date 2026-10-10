@@ -49,6 +49,8 @@ export interface ChatData {
    * Pay in 4 or paying later. It adds one comparison fact; Pay in 4 is never recommended.
    */
   payIn4?: PayIn4Eligibility
+  /** A budget the person stated in this message ("my budget is $300"); answers stay within it. */
+  budgetCents?: number
 }
 
 export type ClarifyReason =

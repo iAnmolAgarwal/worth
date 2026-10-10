@@ -26,7 +26,7 @@ const when = (date: string, today: string) => {
 }
 
 /** The single verdict sentence for an assessment. Claude never writes it. */
-export function verdictFor(a: Assessment, interpretation?: Interpretation) {
+export function verdictFor(a: Assessment, interpretation?: Interpretation, budgetCents?: number) {
   const subject = `${capitalize(a.itemName)} at ${money(a.amountCents)}`
   const day = when(a.purchaseDate, a.today)
   if (a.outcome === 'incomplete')
@@ -42,7 +42,26 @@ export function verdictFor(a: Assessment, interpretation?: Interpretation) {
     interpretation?.option === 'max_price' || (a.outcome === 'tight' && a.maxAffordableCents > 0)
       ? ` The most you could spend ${day} and keep your cushion is ${money(a.maxAffordableCents)}.`
       : ''
-  return result + max
+  if (budgetCents === undefined) return result + max
+  // A budget below the price names the one ceiling that applies: the lower of the two.
+  return budgetCents < a.amountCents
+    ? `${result} ${budgetSentence(a, budgetCents)}`
+    : `${result}${max} ${budgetSentence(a, budgetCents)}`
+}
+/**
+ * The budget the person stated, against the price and what keeps the cushion (judge round 3 #8).
+ */
+export function budgetSentence(a: Assessment, budgetCents: number) {
+  const budget = money(budgetCents)
+  const day = when(a.purchaseDate, a.today)
+  if (budgetCents >= a.amountCents)
+    return a.outcome === 'fits'
+      ? `It’s within your ${budget} budget.`
+      : `Your ${budget} budget covers the price, but not your cushion.`
+  const most = Math.min(budgetCents, a.maxAffordableCents)
+  return most > 0
+    ? `Your ${budget} budget is below the ${money(a.amountCents)} price; within it, the most that fits ${day} is ${money(most)}.`
+    : `Your ${budget} budget is below the ${money(a.amountCents)} price, and nothing fits ${day} without going below your cushion.`
 }
 
 /** The supporting engine facts behind a verdict. */
@@ -226,10 +245,15 @@ export function purchaseFacts(a: Assessment, data: ChatData): FactCatalog {
       a.earliestDate && a.earliestDate > a.purchaseDate
         ? `Waiting until ${day(a.earliestDate, a.today)} would keep your cushion for the full ${money(a.amountCents)}.`
         : `No day in the next 30 days keeps your cushion at ${money(a.amountCents)}.`
+  const budget = data.budgetCents
   facts.spend_less =
-    a.maxAffordableCents > 0
-      ? `Up to ${money(a.maxAffordableCents)} would keep your cushion if you buy ${when(a.purchaseDate, a.today)}.`
-      : `Your plan has no room for a purchase ${when(a.purchaseDate, a.today)} without going below your cushion.`
+    a.maxAffordableCents <= 0
+      ? `Your plan has no room for a purchase ${when(a.purchaseDate, a.today)} without going below your cushion.`
+      : budget !== undefined && budget < a.maxAffordableCents
+        ? `Your ${money(budget)} budget would keep your cushion if you buy ${when(a.purchaseDate, a.today)}.`
+        : budget !== undefined && budget < a.amountCents
+          ? `Up to ${money(a.maxAffordableCents)} of your ${money(budget)} budget would keep your cushion if you buy ${when(a.purchaseDate, a.today)}.`
+          : `Up to ${money(a.maxAffordableCents)} would keep your cushion if you buy ${when(a.purchaseDate, a.today)}.`
   const before = a.drivers
     .filter((d) => d.kind !== 'income' && d.date >= a.today && d.date <= a.lowestDate)
     .slice(0, 3)
@@ -433,23 +457,61 @@ export function leadInText(lead: LeadIn, outcome: Assessment['outcome'] | undefi
 
 const REFUSAL_LEADS = new Set<LeadIn>(['no_skipping', 'no_credit', 'no_cushion', 'not_yes'])
 export const isRefusal = (lead: LeadIn | undefined) => Boolean(lead && REFUSAL_LEADS.has(lead))
-/** A refusal on its own, for an answer with no facts after it (a clarifying question). */
-export function refusalLine(lead: LeadIn) {
-  return LEAD_INS[lead].split(/(?<=\.) /)[0]!
+/** What follows a refusal lead-in once the refusal itself has been shown first. */
+export function afterRefusal(lead: LeadIn) {
+  return LEAD_INS[lead].split(/(?<=\.) /)[1]
 }
-const BILL =
-  /\b(?:rent|bills?|utilit(?:y|ies)|insurance|loan|phone\s+plan|mortgage|car\s+payment|student\s+loan)\b/i
-const SKIP =
-  /\b(?:skip\w*|delay\w*|defer\w*|postpon\w*|late|miss(?:ing)?|hold\s+off\s+on|put\s+off)\b/i
+/**
+ * The refusal and its reason in one calm sentence. It opens the answer, above the verdict and the
+ * options that offer what to do instead (judge round 3 #8).
+ */
+export function refusalSentence(lead: LeadIn, message = '') {
+  if (lead === 'no_skipping') {
+    const rent = [...message.matchAll(SKIP_BILL)].some((match) => /\brent\b/i.test(match[0]))
+    return `I wouldn’t skip or delay ${rent ? 'rent' : 'a bill'} to make a purchase fit, because late fees and a missed payment cost more than waiting.`
+  }
+  if (lead === 'no_credit')
+    return 'I wouldn’t borrow or use credit to make a purchase fit, because interest and a new payment would leave your plan tighter.'
+  if (lead === 'no_cushion')
+    return 'I wouldn’t dip into your cushion for this, because it’s there for surprises, not purchases.'
+  return 'I can’t simply say yes, because this purchase would take your balance below your cushion.'
+}
+// A bill, and a request to skip or delay that bill itself: "skip rent", "pay rent a week late",
+// "put off my phone bill". A skip word elsewhere in the sentence ("too late to buy before rent",
+// "skip the camera and save for rent") is not a request to skip the bill.
+const BILL = String.raw`(?:rent|(?:[a-z]+\s+)?bills?|utilit(?:y|ies)|(?:[a-z]+\s+)?insurance(?:\s+(?:payment|premium|bill))?|phone\s+plan|mortgage|(?:[a-z0-9]+\s+){0,4}?payment|(?:student\s+|car\s+)?loan(?:\s+payment)?)`
+const WHOSE = String.raw`(?:(?:my|the|our|this|next|that)\s+(?:month['’]?s\s+|week['’]?s\s+)?)?`
+const SKIP_BILL = new RegExp(
+  String.raw`\b(?:skip(?:ping)?|delay(?:ing)?|defer(?:ring)?|postpon(?:e|ing)|miss(?:ing)?|hold(?:ing)?\s+off\s+on|put(?:ting)?\s+off|push(?:ing)?\s+(?:back|off)|not\s+pay(?:ing)?|fall(?:ing)?\s+behind\s+on|be(?:ing)?\s+late\s+(?:on|with)|stiff(?:ing)?)\s+(?:paying\s+)?${WHOSE}${BILL}\b` +
+    // "Push rent back", never "push my rent payment too close".
+    String.raw`|\bpush(?:ing)?\s+${WHOSE}${BILL}\s+(?:back|off|later)\b` +
+    String.raw`|\bpay(?:ing)?\s+${WHOSE}${BILL}\s+(?:[a-z]+\s+){0,3}?(?:late|later)\b` +
+    String.raw`|\b${BILL}\s+(?:can|could)\s+(?:wait|be\s+late)\b`,
+  'gi',
+)
+// Borrowing to buy, in the present or future. Pay in 4 is not here: asked about, it is shown for
+// comparison, never advised. A card alone may be a debit card, so it takes "credit" or a card
+// network; a card's points or rewards are not borrowing.
+const BORROW =
+  /\b(?:borrow(?:ing)?|lend(?:ing)?\s+me|financ(?:e|ing)|(?:take|taking|get|getting)\s+(?:out\s+)?(?:a\s+)?(?:personal\s+|payday\s+)?loan|personal\s+loan|payday\s+loan|cash\s+advance|(?:put|putting|charge|charging)\s+(?:it|this|that)\s+on\s+(?:my\s+|a\s+)?credit\s+card|(?:use|using)\s+(?:my\s+|a\s+)?credit(?:\s+card)?(?!(?:\s+card)?\s+(?:points|rewards|miles|cash\s*back))|on\s+(?:my\s+|a\s+)?(?:visa|mastercard|amex|discover)(?!\s+debit)|max(?:ing)?\s+out\s+(?:my\s+|a\s+)?(?:credit\s+)?cards?|paypal\s+credit)\b/gi
+const CUSHION =
+  /\b(?:(?:dip|dipping|eat|eating|use|using|tap|tapping|raid|raiding|break|breaking)\s+(?:into\s+)?|(?:take|taking|pull|pulling|withdraw(?:ing)?)\s+(?:some\s+)?(?:money\s+|cash\s+)?(?:out\s+of|from)\s+)(?:my\s+|the\s+)?(?:[a-z]+\s+)?(?:cushion|emergency\s+(?:fund|savings|money)|safety\s+net)\b/gi
+// "I don't want to borrow", "without using my cushion": the person is ruling it out. "Why not" is
+// still a suggestion.
+const RULED_OUT =
+  /(?<!\bwhy\s)\b(?:don['’]?t|do\s+not|won['’]?t|will\s+not|without|never|not)\s+(?:\S+\s+){0,3}$/i
+const asks = (pattern: RegExp, message: string) =>
+  [...message.matchAll(pattern)].some((match) => !RULED_OUT.test(message.slice(0, match.index)))
 /**
  * The refusal a message calls for, read from the user's own words: skipping or paying a bill late
- * to make a purchase fit ("I could pay rent a week late"). It applies even when Claude chose none,
- * or when the purchase itself still needs a question.
+ * ("I could pay rent a week late"), borrowing to buy, or dipping into the cushion. It applies even
+ * when Claude chose none, or when the purchase itself still needs a question.
  */
 export function refusalFor(message: string): LeadIn | undefined {
-  return message.split(/[.!?;]+/).some((clause) => BILL.test(clause) && SKIP.test(clause))
-    ? 'no_skipping'
-    : undefined
+  if (asks(SKIP_BILL, message)) return 'no_skipping'
+  if (asks(BORROW, message)) return 'no_credit'
+  if (asks(CUSHION, message)) return 'no_cushion'
+  return undefined
 }
 
 // ---- Follow-up chips ---------------------------------------------------------------
@@ -489,6 +551,16 @@ export interface Placeholder {
 }
 export type Placeholders = Record<string, Placeholder>
 
+const BUDGET_BELOW_PRICE = 'the budget the person stated, which is below the price'
+/**
+ * With a budget below the price, a sentence about the budget may only say it is below the price,
+ * or name what fits within it ({max_spend}); anything else could say it covers the item.
+ */
+const BUDGET_BELOW =
+  /\{budget\}(?:\s+budget)?\s+(?:is|sits|falls|stays)\s+(?:well\s+|far\s+)?(?:below|under|less\s+than|short\s+of)\s+(?:the\s+)?(?:\{item\}(?:'s|’s)?\s+)?\{price\}/i
+/** Going past a budget, which Worth never suggests even next to {max_spend}. */
+const BUDGET_STRETCH = /\b(?:stretch\w*|past|over|exceed\w*|beyond|above|more\s+than)\b/i
+
 /** Placeholders for an assessed purchase. */
 export function purchasePlaceholders(a: Assessment, data: ChatData): Placeholders {
   if (a.outcome === 'incomplete') return {}
@@ -519,6 +591,17 @@ export function purchasePlaceholders(a: Assessment, data: ChatData): Placeholder
       value: money(a.stressLowestCents),
       about: 'the low point if everyday spending runs 20% higher',
     },
+    ...(data.budgetCents !== undefined
+      ? {
+          budget: {
+            value: money(data.budgetCents),
+            about:
+              data.budgetCents < a.amountCents
+                ? BUDGET_BELOW_PRICE
+                : 'the budget the person stated, which covers the price',
+          },
+        }
+      : {}),
   }
   // From the purchase date on: for a later day, earlier bills and income never explain it.
   const cause = a.drivers
@@ -575,11 +658,16 @@ export function purchasePlaceholders(a: Assessment, data: ChatData): Placeholder
       about: 'the earliest day that fits',
       date: a.earliestDate,
     }
-  if (a.maxAffordableCents > 0)
+  if (a.maxAffordableCents > 0) {
+    // Within a lower budget, the most that fits is the budget itself.
+    const withinBudget = data.budgetCents !== undefined && data.budgetCents < a.maxAffordableCents
     out.max_spend = {
-      value: money(a.maxAffordableCents),
-      about: 'the most that keeps the cushion on that day',
+      value: money(withinBudget ? data.budgetCents! : a.maxAffordableCents),
+      about: withinBudget
+        ? 'the most to spend on that day within the budget, which keeps the cushion'
+        : 'the most that keeps the cushion on that day',
     }
+  }
   if (data.payIn4 && data.payIn4 !== 'unavailable') {
     const scenario = payIn4For(a, data)
     if (scenario.available) {
@@ -806,6 +894,13 @@ export function checkSentence(
   const payIn4 = payIn4Problem(sentence, values)
   if (payIn4) return reject(payIn4)
   if (wrongValue(sentence, values)) return reject('wrong_value')
+  // A budget below the price never covers it, and Worth never suggests going past it.
+  if (
+    values.budget?.about === BUDGET_BELOW_PRICE &&
+    /\bbudget\b|\{budget\}/i.test(sentence) &&
+    (!(BUDGET_BELOW.test(sentence) || /\{max_spend\}/.test(sentence)) || BUDGET_STRETCH.test(prose))
+  )
+    return reject('contradicts_result')
   if (misordered(sentence, values)) return reject('contradicts_result')
   // A tight result may still say what would fit: waiting, or spending less.
   const conditional = /\{(?:wait_day|max_spend)\}|\bwait\w*|\bonly\s+(?:once|after|when)\b/i.test(

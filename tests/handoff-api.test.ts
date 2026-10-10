@@ -671,6 +671,17 @@ describe('POST /api/handoff/save (contract §4, Save for <date>)', () => {
     expect(compare.status).toBe(200)
     expect(compare.body.payIn4).toMatchObject({ available: true, eligibility: 'range-only' })
     expect(eligibility).not.toHaveBeenCalled()
+    // A budget stated in Ask travels with the saved item, and both apply (B8 #7).
+    const budgeted = await post(agent, '/api/compare', {
+      amountCents: 119900,
+      itemName: 'Everyday camera',
+      savedId: item.id,
+      budgetCents: 30000,
+    })
+    expect(budgeted.status).toBe(200)
+    expect(budgeted.body.payIn4).toMatchObject({ eligibility: 'range-only' })
+    expect(budgeted.body.spendLess.maxPriceCents).toBe(30000)
+    expect(eligibility).not.toHaveBeenCalled()
     // A saved item without a store link, or an ID this session doesn't hold, is Worth's own.
     await post(agent, '/api/compare', { amountCents: 119900, itemName: 'X', savedId: 'nope' })
     expect(eligibility).toHaveBeenCalledTimes(1)

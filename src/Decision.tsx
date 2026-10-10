@@ -51,6 +51,8 @@ export type DecisionRequest = {
   qid?: string
   /** A saved item with a store link: the server reads the link and judges Pay in 4 by range. */
   savedId?: string
+  /** The budget the person stated in Ask; Spend less stays within it. */
+  budgetCents?: number
 }
 /**
  * A store's item from a signed hand-off (/check). The store sells it, so the way back to the
@@ -217,7 +219,13 @@ function OptionCard({
         <Pill tone={status.tone}>{status.text}</Pill>
       </span>
       <span className="kv">
-        <span className="k">{k === 'spendLess' ? 'Most you can spend today' : 'Lowest point'}</span>
+        <span className="k">
+          {k === 'spendLess'
+            ? c.budgetCents !== undefined
+              ? 'Your budget today'
+              : 'Most you can spend today'
+            : 'Lowest point'}
+        </span>
         <span className={cx('v num', k !== 'spendLess' && below && 'bad')}>
           {k === 'spendLess' ? money(c.spendLess.maxPriceCents) : signed(option.lowestBalanceCents)}
         </span>

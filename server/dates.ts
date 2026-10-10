@@ -319,8 +319,18 @@ function clauseAround(text: string, start: number, end: number) {
 }
 
 /** Read the timing a message states. `incomeDate` is the next confirmed income date. */
+const PERIOD = String.raw`((?:this|per|a|each|every)\s+(?:week|month))\b`
+const AMOUNT = String.raw`\$\s?\d[\d,.]*k?\s+`
+const BUDGET_PERIODS = [
+  // Budget words before the amount: "budget is $400 this week", "I can spend $250 a week".
+  String.raw`(\b(?:budget(?:\s+(?:is|of|was))?|have|got|left|spare|limit|max(?:imum)?|up\s+to|under|no\s+more\s+than|at\s+most|i\s+(?:can|could)\s+(?:only\s+|just\s+)?spend|(?:only|just)\s+(?:want|wanna|plan|mean|hope|need)\s+to\s+spend)\s+(?:about\s+|around\s+|only\s+|just\s+)?${AMOUNT}(?:to\s+spend\s+|to\s+spare\s+|left\s+)?)${PERIOD}`,
+  // Budget words after it: "$400 budget this week", "$1.5k to spend this week".
+  String.raw`(${AMOUNT}(?:to\s+spend|to\s+spare|budget|left)\s+)${PERIOD}`,
+  // "my budget this week is $300".
+  String.raw`(\bbudget\s+(?:for\s+)?)${PERIOD}`,
+].map((source) => new RegExp(source, 'g'))
 export function readTiming(text: string, today: string, incomeDate?: string): TimingRead {
-  const source = ` ${text.toLowerCase().replace(/[’']/g, "'")} `
+  const written = ` ${text.toLowerCase().replace(/[’']/g, "'")} `
     // A weekday written before a calendar date ("Fri, Oct 16") adds nothing to the date.
     .replace(
       /\b(?:mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)[a-z]*,?\s+(?=(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d)/g,
@@ -328,6 +338,16 @@ export function readTiming(text: string, today: string, incomeDate?: string): Ti
     )
     // "Pay later" names a way to pay (PayPal Pay Later), not when the purchase happens.
     .replace(/\bpay(?:ing)?\s+(?:for\s+it\s+|it\s+)?later\b/g, (m) => ' '.repeat(m.length))
+  // A budget's period ("my budget is $400 this week", "I have $1.5k to spend this week") is not
+  // when the purchase happens. A price with a period ("the camera for $1,199 this week") is.
+  const source = BUDGET_PERIODS.reduce(
+    (read, pattern) =>
+      read.replace(
+        pattern,
+        (_, owner: string, period: string) => owner + ' '.repeat(period.length),
+      ),
+    written,
+  )
   // Every rule reads the original text; where spans overlap, the longest wins, so
   // "two days from now" is not read as "now" and "last Friday" is not read as "Friday".
   const found: Span[] = []

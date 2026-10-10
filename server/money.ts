@@ -120,8 +120,10 @@ const CURRENCY_MARKERS = new RegExp(
   'i',
 )
 
+// A ceiling the person sets: "my budget is $300", "I only want to spend $200", "I can't go over
+// $500". "Can I spend $349 on headphones?" and "Will it go over $300?" stay prices.
 const BUDGET_BEFORE =
-  /\b(?:budget|have|has|had|got|left|spare|saved|savings|balance|earn(?:ed)?|make|made|income|paid|salary|limit|max(?:imum)?|up\s+to|under|less\s+than|below|within|no\s+more\s+than|at\s+most)\s*(?:is|of|was|are|=)?\s*(?:about|around|roughly|like|just|only)?\s*$/i
+  /\b(?:budget(?:\s+(?:for\s+)?(?:this|the|per|a)\s+(?:week|month))?|have|has|had|got|left|spare|saved|savings|balance|earn(?:ed)?|make|made|income|paid|salary|limit|max(?:imum)?|up\s+to|under|less\s+than|below|within|no\s+more\s+than|at\s+most|(?:\w*n['’]t|not|never)\s+(?:(?:want|wanna|plan|mean)\s+to\s+)?(?:spend\s+more\s+than|go(?:ing)?\s+over|exceed(?:ing)?)|keep\s+it\s+(?:to|at|under)|(?:only|just)\s+(?:want|wanna|plan|mean|hope|need)\s+to\s+spend|i\s+(?:can|could)\s+(?:only\s+|just\s+)?(?:spend|afford))\s*(?:is|of|was|are|=)?\s*(?:about|around|roughly|like|just|only)?\s*$/i
 const BUDGET_AFTER =
   /^\s*(?:budget|left|to\s+spare|to\s+spend|in\s+(?:savings|my\s+account|the\s+bank)|saved|spare|limit|max(?:imum)?|or\s+less|tops)\b/i
 const OTHER_BEFORE =
@@ -129,6 +131,8 @@ const OTHER_BEFORE =
 const OTHER_AFTER = /^\s*(?:off|discount|cheaper|less|more|savings?|refund|deposit|ago)\b/i
 const PRICE_CUE =
   /\b(?:costs?|price[ds]?(?:\s+(?:is|of|at))?|priced\s+at|for|at|worth|pay(?:ing)?|spend(?:ing)?|is|it's|its)\s*(?:about|around|roughly|like|only|just)?\s*$/i
+const BARE_LIMIT =
+  /\b(?:under|budget(?:\s+(?:is|of))?|max(?:imum)?|up\s+to|no\s+more\s+than|at\s+most|less\s+than)\s*$/i
 const NOT_MONEY_AFTER =
   /^\s*(?:%|percent|x\b|times\b|days?\b|weeks?\b|months?\b|years?\b|hours?\b|minutes?\b|nights?\b|people\b|persons?\b|items?\b|pcs\b|pieces?\b|units?\b|of\s+them\b|st\b|nd\b|rd\b|th\b|am\b|pm\b|gb\b|tb\b|mp\b|mm\b|inch|"|'|in\b(?!\s+(?:savings|my|the)))/i
 
@@ -226,7 +230,9 @@ export function extractMoneyMentions(text: string): MoneyMention[] {
     // A preceding foreign word such as "EUR 500" or "Rs 500" was handled by the prefix.
     if (currency === 'NONE') {
       const before = text.slice(Math.max(0, index - 30), index)
-      if (NOT_MONEY_AFTER.test(rest) || !PRICE_CUE.test(before)) continue
+      // "Under 500" or "budget of 500" in a money question is a limit in dollars, from $10 up.
+      const bareLimit = BARE_LIMIT.test(before) && Number(whole.replaceAll(',', '')) >= 10
+      if (NOT_MONEY_AFTER.test(rest) || !(PRICE_CUE.test(before) || bareLimit)) continue
       // Unmarked numbers followed by a noun-like unit (e.g. "2 cameras") are quantities.
       if (
         !scale &&
