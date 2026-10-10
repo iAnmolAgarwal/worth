@@ -86,7 +86,12 @@ describe('<worth-check> (contract §3.1, C2)', () => {
       '--worth-check-radius',
     ])
     for (const name of names) expect(css).toMatch(new RegExp(`var\\(${name}, [^)]+\\)`))
-    expect(css).not.toMatch(/paypal|#ffc439|gold|yellow/i)
+    // Worth's own colours, never PayPal's brand blues or gold, in the button or the mark.
+    const markup = element.shadowRoot!.innerHTML.toLowerCase()
+    for (const hex of ['#003087', '#012169', '#009cde', '#0070e0', '#ffc439'])
+      expect(markup, hex).not.toContain(hex)
+    expect(css).toContain('var(--worth-check-bg, #142c8e)')
+    expect(css).not.toMatch(/paypal|gold|yellow/i)
     expect(css).toMatch(/a:focus-visible \{\s*outline: 3px solid/)
   })
 
