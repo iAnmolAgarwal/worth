@@ -671,41 +671,62 @@ export function chartModel(input: ChartInput) {
     bounds,
   }
   // The low point: always labelled, clear of the line, the story rules and every mark, and named
-  // "Lowest point" so it never reads as the selected day. When the two-line pill has no clean spot
-  // it tries a narrower stack (amount over "Lowest point"), then one line; the date is in the
-  // summary, the comparison rows and the readout.
+  // "Lowest point" so it never reads as the selected day. Of the variants that fit cleanly, the one
+  // closest to its ring wins (a short leader beats a wider label far away); the narrow stack only
+  // sits beside the ring. "Lowest $X" is the last resort on the narrowest phones, and when nothing
+  // fits the narrowest variant is forced. The date is in the summary, the comparison rows and the
+  // readout.
   const lowAmount = signed(values[lowIndex]!)
-  const lowSpec = ({ top, bottom }: { top: string; bottom: string }): LabelSpec => {
+  const lowDate = dayLabel(points[lowIndex]!.date)
+  type LowText = { top: string; bottom: string; nearOnly?: boolean; penalty: number }
+  const lowSpec = (text: LowText): LabelSpec => {
     const w =
-      Math.ceil(Math.max(textWidth(top, 12, 700), bottom ? textWidth(bottom, 11, 500) : 0)) + 20
-    const h = bottom ? 36 : 22
+      Math.ceil(
+        Math.max(textWidth(text.top, 12, 700), text.bottom ? textWidth(text.bottom, 11, 500) : 0),
+      ) + 20
+    const h = text.bottom ? 36 : 22
+    const candidates = lowCandidates(low, w, h, plot)
     return {
       id: 'low',
       w,
       h,
       required: true,
       anchor: { x: low.x, y: low.y },
-      candidates: lowCandidates(low, w, h, plot),
+      // Near and ring candidates cost under 30; the far sweep starts at 30.
+      candidates: text.nearOnly ? candidates.filter((c) => c.cost < 30) : candidates,
     }
   }
-  const wide = { top: `Lowest point ${lowAmount}`, bottom: dayLabel(points[lowIndex]!.date) }
-  const stacked = { top: lowAmount, bottom: 'Lowest point' }
-  const single = { top: `Lowest point ${lowAmount}`, bottom: '' }
-  const tries = [
-    { text: wide, ctx },
-    { text: stacked, ctx },
-    { text: single, ctx },
-    { text: wide, ctx: lenient },
-    { text: stacked, ctx: lenient },
-    { text: single, ctx: lenient },
+  const named: LowText[] = [
+    { top: `Lowest point ${lowAmount}`, bottom: lowDate, penalty: 0 },
+    { top: `Lowest point ${lowAmount}`, bottom: '', penalty: 4 },
+    { top: lowAmount, bottom: 'Lowest point', nearOnly: true, penalty: 8 },
   ]
-  const fits = (attempt: (typeof tries)[number]) =>
-    placeLabels([{ ...lowSpec(attempt.text), required: false }], attempt.ctx).length > 0
+  const short: LowText[] = [
+    { top: `Lowest ${lowAmount}`, bottom: lowDate, penalty: 0 },
+    { top: `Lowest ${lowAmount}`, bottom: '', penalty: 4 },
+  ]
+  const nearest = (texts: LowText[], context: typeof ctx) => {
+    let best: { text: LowText; ctx: typeof ctx; score: number } | null = null
+    for (const text of texts) {
+      const box = placeLabels([{ ...lowSpec(text), required: false }], context)[0]
+      if (!box) continue
+      const end = leaderEnd(box, low)
+      const score = Math.hypot(end.x - low.x, end.y - low.y) + text.penalty
+      if (!best || score < best.score) best = { text, ctx: context, score }
+    }
+    return best
+  }
+  const narrowest = [...named, ...short].reduce((a, b) => (lowSpec(b).w < lowSpec(a).w ? b : a))
   // With Pay in 4 open, the comparison rows under the plot state this low with its date, so when
   // no spot is clear of both lines the pill is left out rather than drawn across them.
   const fit =
-    tries.slice(0, 3).find(fits) ?? (p4Values ? null : (tries.slice(3).find(fits) ?? tries[0]!))
-  const lowTop = fit?.text.top ?? single.top
+    nearest(named, ctx) ??
+    nearest(short, ctx) ??
+    (p4Values
+      ? null
+      : (nearest(named, lenient) ??
+        nearest(short, lenient) ?? { text: narrowest, ctx: lenient, score: 0 }))
+  const lowTop = fit?.text.top ?? named[1]!.top
   const lowBottom = fit?.text.bottom ?? ''
   const lowPlaced = fit ? placeLabels([lowSpec(fit.text)], fit.ctx) : []
   // The purchase, in the lane above the plot.

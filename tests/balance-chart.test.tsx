@@ -19,6 +19,7 @@ import {
   ruleBox,
   stepPath,
   storyRules,
+  textWidth,
   type ChartInput,
 } from '../src/chartLayout'
 import { compareOptions } from '../shared/finance'
@@ -215,6 +216,56 @@ describe('chart layout', () => {
     }
   })
 
+  it('keeps the low-point label beside its ring between phone and desktop widths', () => {
+    // A 512px viewport gives a 438px frame. Main placed the camera wait pill on a 44.4px leader
+    // there; a narrower label must never be pushed further away.
+    const c = comparison('camera')
+    if (!c.wait.date) throw new Error('Expected a wait date')
+    for (const p4 of [false, true]) {
+      const model = chartModel(decisionInput(c, c.wait, 438, p4))!
+      const box = model.placed.find((b) => b.id === 'low')!
+      const end = leaderEnd(box, model.low)
+      expect(Math.hypot(end.x - model.low.x, end.y - model.low.y)).toBeLessThanOrEqual(45)
+    }
+    for (let width = 340; width <= 560; width += 4)
+      for (const state of decisionStates()) {
+        const model = chartModel(decisionInput(state.c, state.option, width, state.p4))!
+        const box = model.placed.find((b) => b.id === 'low')
+        if (!box) continue
+        const end = leaderEnd(box, model.low)
+        const reach = Math.hypot(end.x - model.low.x, end.y - model.low.y)
+        expect(reach, `${state.name} at ${width}`).toBeLessThanOrEqual(50)
+        // The narrow stack only ever sits right beside the ring.
+        if (model.lowBottom === 'Lowest point') expect(reach).toBeLessThan(LEADER_MIN)
+      }
+  })
+
+  it('falls back to "Lowest $X", then forces the narrowest label, on the smallest phones', () => {
+    const c = comparison('camera')
+    if (!c.wait.date) throw new Error('Expected a wait date')
+    // A 320–335px viewport: "Lowest point" has no clean spot, the short label does.
+    for (const width of [246, 262]) {
+      const model = chartModel(decisionInput(c, c.wait, width, false))!
+      expect(model.lowTop).toBe('Lowest $720.53')
+      const box = model.placed.find((b) => b.id === 'low')!
+      expect(hitsLine(box, model.values, model.g, 1)).toBe(false)
+      for (const line of model.buyLine) expect(overlaps(box, line)).toBe(false)
+    }
+    // Narrower still, nothing fits cleanly: the narrowest variant is forced, never the widest.
+    const model = chartModel(decisionInput(c, c.buyToday, 204, false))!
+    const amount = model.lowTop.replace(/^Lowest (point )?/, '')
+    const width = (top: string, bottom = '') =>
+      Math.ceil(Math.max(textWidth(top, 12, 700), bottom ? textWidth(bottom, 11, 500) : 0)) + 20
+    const narrowest = Math.min(
+      width(`Lowest point ${amount}`, dayLabel(c.buyToday.lowestDate)),
+      width(`Lowest point ${amount}`),
+      width(amount, 'Lowest point'),
+      width(`Lowest ${amount}`, dayLabel(c.buyToday.lowestDate)),
+      width(`Lowest ${amount}`),
+    )
+    expect(model.placed.find((b) => b.id === 'low')!.w).toBe(narrowest)
+  })
+
   it('finds the bill behind the low even when the low falls on a payday (Plan)', () => {
     const plain = c.spendLess.points
     const g = geometry(
@@ -276,7 +327,7 @@ describe('BalanceChart', () => {
     expect(within(table).getAllByRole('row')).toHaveLength(option.points.length + 1)
     expect(within(table).getByRole('rowheader', { name: 'Thu, Oct 22' })).toBeTruthy()
     expect(table.querySelector('caption')!.textContent).toContain(
-      'Projected balance each day at its low, counting bills before pay, against your $300.00 cushion.',
+      'Projected balance each day at its low, with that day’s bills taken out before pay arrives, against your $300.00 cushion.',
     )
     expect(within(table).getByRole('columnheader', { name: 'Balance (day’s low)' })).toBeTruthy()
     // One number per day: the cushion column says where the day sits, never a second amount.
@@ -470,12 +521,12 @@ describe('chart wording', () => {
     if (!wait.date) throw new Error('Expected a wait date')
     const { container } = render(<ChartTile c={camera} k="wait" />)
     expect(container.querySelector('.meta')!.textContent).toMatch(
-      /^Your balance each day, \w{3} \d+ to \w{3} \d+\. Each day shows its low, counting bills before pay\.$/,
+      /^Your balance each day, \w{3} \d+ to \w{3} \d+\. Each day shows its low, with that day’s bills taken out before pay arrives\.$/,
     )
     expect(container.querySelector('.bchart-key')!.textContent).toContain('Balance (day’s low)')
     const svg = screen.getByRole('img', { name: /^Projected balance/ })
     expect(svg.getAttribute('aria-label')).toMatch(
-      /^Projected balance if you wait until .+, at each day’s low\. Lowest point \$[\d,.]+ on .+, \$[\d,.]+ more than your \$300\.00 cushion\./,
+      /^Projected balance if you wait until [^.]+\. Each day shows its low, with that day’s bills taken out before pay arrives\. Lowest point \$[\d,.]+ on .+, \$[\d,.]+ more than your \$300\.00 cushion\./,
     )
     expect(container.querySelector('.bchart-lowpill')!.textContent).toMatch(/Lowest point/)
     // The overall minimum: "Lowest point:", its date and the gap to the named cushion.
