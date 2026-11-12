@@ -53,6 +53,8 @@ import {
 } from './paypal.ts'
 import type { PayPalGateway, PayPalOrder } from './paypal.ts'
 import { checkoutGuards } from './checkoutGuards.ts'
+import { createPayPalConnect, mountPayPalConnect } from './paypalConnect.ts'
+import type { PayPalConnect } from './paypalConnect.ts'
 import {
   AgentTokenError,
   createAgentToken,
@@ -108,6 +110,8 @@ export interface AppOptions {
   store?: Store
   config?: Partial<AppConfig>
   paypal?: PayPalGateway
+  /** Connect PayPal through PayPal's MCP server; injected in tests. */
+  paypalConnect?: PayPalConnect
   chat?: ChatProvider
   /** Channel3 search; defaults to the live client when CHANNEL3_API_KEY is set. */
   channel3?: Channel3Client
@@ -380,6 +384,14 @@ export function createApp(options: AppOptions = {}) {
           webhookId: config.paypalWebhookId,
         })
       : undefined)
+  const paypalConnect =
+    options.paypalConnect ??
+    createPayPalConnect({
+      origin: config.origin,
+      clientId: config.paypalMcpClientId,
+      enabled: config.paypalConnect,
+      now: () => now().getTime(),
+    })
   const chat =
     options.chat ??
     (config.anthropicKey
@@ -568,6 +580,7 @@ export function createApp(options: AppOptions = {}) {
         ...(chat ? { model: config.anthropicModel } : {}),
         alternatives: channel3.health(),
         handoff: handoff ? 'on' : 'off',
+        paypalConnect: paypalConnect.status(),
       },
     }
   }
@@ -985,6 +998,7 @@ export function createApp(options: AppOptions = {}) {
       service: 'worth',
       channel3: channel3.health(),
       handoff: handoff ? 'on' : 'off',
+      paypalConnect: paypalConnect.status(),
     }),
   )
   const webhookEvent = z.object({
@@ -1117,6 +1131,12 @@ export function createApp(options: AppOptions = {}) {
     next()
   })
   app.get('/api/state', (_req, res) => res.json(state(sessionId(res))))
+  mountPayPalConnect(app, {
+    connect: paypalConnect,
+    sessionId,
+    timezone: (res) => dataFor(res).profile.timezone,
+    now: () => now().getTime(),
+  })
   /**
    * PayPal's redirect back to Worth. It records whether the buyer approved or cancelled, then
    * opens the app at the checkout. Nothing is captured here.

@@ -550,3 +550,53 @@ html:has(.import-review) {
     display: none;
   }
 }
+
+/* Connect PayPal: the honest line before leaving for PayPal, the read in progress, and its source. */
+.connect-ask {
+  flex: 1 1 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  order: -1;
+}
+.connect-ask .caption {
+  max-width: 62ch;
+}
+.connect-ask-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-3) var(--s-5);
+}
+.start-actions:has(.connect-ask) {
+  flex-wrap: wrap;
+}
+.connect-progress {
+  display: flex;
+  gap: var(--s-3);
+  align-items: flex-start;
+}
+.connect-progress > .ico {
+  flex: none;
+  margin-top: 2px;
+}
+.connected-src {
+  margin-bottom: var(--s-2);
+}
+.connected-src .src {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+}
+.connected-src .src .ico {
+  flex: none;
+  margin-top: 2px;
+}
+@media (max-width: 767px) {
+  /* With Connect PayPal, it takes the card's first row and the two file actions share the second. */
+  .start-actions:has(.connect-btn) {
+    flex-wrap: wrap;
+  }
+  .start-actions > .connect-btn {
+    flex: 1 1 100%;
+  }
+}

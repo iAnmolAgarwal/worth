@@ -30,6 +30,8 @@ import type {
   ScheduledFlow,
 } from '../shared/types'
 import { api } from './api'
+import { connectAvailable, ConnectedSource, ConnectPayPalButton } from './ConnectPayPal'
+import type { ConnectedSummary } from './ConnectPayPal'
 import type { AppState } from './contract'
 import { isActive } from './contract'
 import { cadenceLabel, flowIcon } from './engine'
@@ -42,6 +44,8 @@ export interface ChosenFile {
   name: string
   /** The bundled, fictional sample export. */
   sample?: boolean
+  /** Read from PayPal through Connect PayPal rather than chosen as a file. */
+  connected?: ConnectedSummary
 }
 
 export const SAMPLE_FILE_NAME = 'Sample PayPal export (fictional)'
@@ -50,7 +54,10 @@ const SAMPLE_RENT_ID = 'you-sample-rent'
 /** The sample's money available and cushion: the review prefills them, both editable. */
 const SAMPLE_FUNDS = { balance: '1800.00', cushion: '300.00' }
 export const PRIVACY_LINE =
-  'You choose the file; there’s no PayPal login and no account link. Raw CSV files aren’t saved: Worth reads the file in this session.'
+  'With a CSV, you choose the file: there’s no PayPal login and no account link. Raw CSV files aren’t saved: Worth reads the file in this session.'
+/** The review's privacy line for activity read through Connect PayPal instead of a file. */
+export const CONNECTED_PRIVACY_LINE =
+  'Worth read this through PayPal’s MCP server with one read-only tool and kept no PayPal access afterwards.'
 const ESTIMATE_NOTE =
   'Pay in 4 dates are Worth’s estimate from your PayPal activity, about every 2 weeks. PayPal sets the actual schedule.'
 
@@ -135,14 +142,23 @@ export function useDrop(read: (file: File | undefined) => void, disabled?: boole
 export function ChooseFile({
   read,
   disabled,
+  secondary,
   children,
 }: {
   read: (file: File | undefined) => void
   disabled?: boolean
+  /** Beside Connect PayPal, choosing a file is the secondary action. */
+  secondary?: boolean
   children: ReactNode
 }) {
   return (
-    <label className={cx('btn btn-primary file-btn', disabled && 'is-disabled')}>
+    <label
+      className={cx(
+        'btn file-btn',
+        secondary ? 'btn-secondary' : 'btn-primary',
+        disabled && 'is-disabled',
+      )}
+    >
       <FileUp className="ico" aria-hidden="true" />
       {children}
       <input
@@ -215,6 +231,7 @@ export function StartCard({
   const busy = state.purchases.some(isActive)
   const { read, error, setError, reading } = useCsvFile(onFile)
   const { over, handlers } = useDrop((file) => void read(file), busy)
+  const connect = connectAvailable(state)
   async function sample() {
     setError('')
     setLoading(true)
@@ -246,7 +263,8 @@ export function StartCard({
         </Alert>
       )}
       <div className="start-actions">
-        <ChooseFile read={(file) => void read(file)} disabled={busy || reading}>
+        {connect && <ConnectPayPalButton disabled={busy} />}
+        <ChooseFile read={(file) => void read(file)} disabled={busy || reading} secondary={connect}>
           <span className="hide-m">Choose your PayPal CSV</span>
           <span className="show-m">Choose CSV</span>
         </ChooseFile>
@@ -928,12 +946,16 @@ export function ImportReview({
           <h1 className="title wizard-step-head" ref={heading} tabIndex={-1}>
             Check what Worth found
           </h1>
-          <p className="src">
-            <FileText className="ico" aria-hidden="true" />
-            <b>{file.name}</b>
-            {range && <span>· {range}</span>}
-            {preview && <span>· {preview.totalRows.toLocaleString('en-US')} rows</span>}
-          </p>
+          {file.connected ? (
+            <ConnectedSource summary={file.connected} />
+          ) : (
+            <p className="src">
+              <FileText className="ico" aria-hidden="true" />
+              <b>{file.name}</b>
+              {range && <span>· {range}</span>}
+              {preview && <span>· {preview.totalRows.toLocaleString('en-US')} rows</span>}
+            </p>
+          )}
           <p className="meta">
             Untick anything that has ended, and add what you pay outside PayPal.
           </p>
@@ -1181,7 +1203,8 @@ export function ImportReview({
                 </div>
               </section>
               <p className="caption" style={{ marginTop: 'var(--s-4)' }}>
-                {PRIVACY_LINE} Nothing is saved until you continue.
+                {file.connected ? CONNECTED_PRIVACY_LINE : PRIVACY_LINE} Nothing is saved until you
+                continue.
               </p>
             </>
           )}

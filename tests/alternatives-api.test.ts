@@ -171,6 +171,7 @@ describe('GET /api/alternatives', () => {
       service: 'worth',
       handoff: 'off',
       channel3: 'ok',
+      paypalConnect: 'off',
     })
     const response = await agent.get('/api/alternatives?productId=camera')
     // Product reads fail too, so the recorded rows appear without a price or link.

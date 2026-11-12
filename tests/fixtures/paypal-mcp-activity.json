@@ -1,0 +1,689 @@
+{
+ "transaction_details": [
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000001",
+    "transaction_event_code": "T1900",
+    "transaction_initiation_date": "2026-09-30T23:04:11Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "5000.00"
+    },
+    "transaction_status": "S",
+    "transaction_subject": "Initial balance",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "5000.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000002",
+    "paypal_reference_id": "TX000000000000003",
+    "transaction_event_code": "T0006",
+    "transaction_initiation_date": "2026-10-02T20:02:57Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "-349.00"
+    },
+    "transaction_status": "S",
+    "transaction_subject": "Worth sandbox: Studio headphones",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "4651.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000004",
+    "paypal_reference_id": "TX000000000000002",
+    "transaction_event_code": "T0300",
+    "transaction_initiation_date": "2026-10-02T20:02:57Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "349.00"
+    },
+    "transaction_status": "S",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "5000.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000005",
+    "paypal_reference_id": "TX000000000000006",
+    "transaction_event_code": "T0006",
+    "transaction_initiation_date": "2026-10-02T20:24:36Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "-249.00"
+    },
+    "transaction_status": "S",
+    "transaction_subject": "Worth sandbox: A weekend away",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "4751.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000007",
+    "paypal_reference_id": "TX000000000000005",
+    "transaction_event_code": "T0300",
+    "transaction_initiation_date": "2026-10-02T20:24:36Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "249.00"
+    },
+    "transaction_status": "S",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "5000.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000008",
+    "paypal_reference_id": "TX000000000000009",
+    "transaction_event_code": "T0006",
+    "transaction_initiation_date": "2026-10-03T13:55:09Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "-1199.00"
+    },
+    "transaction_status": "S",
+    "transaction_subject": "Spike S1 camera",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "3801.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000010",
+    "paypal_reference_id": "TX000000000000008",
+    "transaction_event_code": "T1600",
+    "transaction_initiation_date": "2026-10-03T13:55:09Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "1199.00"
+    },
+    "transaction_status": "S",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "5000.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000011",
+    "paypal_reference_id": "TX000000000000012",
+    "transaction_event_code": "T0006",
+    "transaction_initiation_date": "2026-10-03T17:32:41Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "-349.00"
+    },
+    "transaction_status": "S",
+    "transaction_subject": "Worth sandbox",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "4651.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000013",
+    "paypal_reference_id": "TX000000000000011",
+    "transaction_event_code": "T0300",
+    "transaction_initiation_date": "2026-10-03T17:32:41Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "349.00"
+    },
+    "transaction_status": "S",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "5000.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000014",
+    "paypal_reference_id": "TX000000000000015",
+    "transaction_event_code": "T0006",
+    "transaction_initiation_date": "2026-10-03T17:47:25Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "-349.00"
+    },
+    "transaction_status": "S",
+    "transaction_subject": "Worth sandbox: Studio headphones",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "4651.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000016",
+    "paypal_reference_id": "TX000000000000014",
+    "transaction_event_code": "T0300",
+    "transaction_initiation_date": "2026-10-03T17:47:25Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "349.00"
+    },
+    "transaction_status": "S",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "5000.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000017",
+    "paypal_reference_id": "TX000000000000018",
+    "transaction_event_code": "T0006",
+    "transaction_initiation_date": "2026-10-03T17:47:54Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "-129.00"
+    },
+    "transaction_status": "S",
+    "transaction_subject": "Worth sandbox: Travel backpack",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "4871.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000019",
+    "paypal_reference_id": "TX000000000000017",
+    "transaction_event_code": "T0300",
+    "transaction_initiation_date": "2026-10-03T17:47:54Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "129.00"
+    },
+    "transaction_status": "S",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "5000.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000020",
+    "paypal_reference_id": "TX000000000000021",
+    "transaction_event_code": "T0006",
+    "transaction_initiation_date": "2026-10-03T17:50:32Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "-129.00"
+    },
+    "transaction_status": "S",
+    "transaction_subject": "Worth sandbox: Travel backpack",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "4871.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000022",
+    "paypal_reference_id": "TX000000000000020",
+    "transaction_event_code": "T0300",
+    "transaction_initiation_date": "2026-10-03T17:50:32Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "129.00"
+    },
+    "transaction_status": "S",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "5000.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000023",
+    "paypal_reference_id": "TX000000000000024",
+    "transaction_event_code": "T0006",
+    "transaction_initiation_date": "2026-10-03T18:02:47Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "-349.00"
+    },
+    "transaction_status": "S",
+    "transaction_subject": "Worth sandbox: Studio headphones",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "4651.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000025",
+    "paypal_reference_id": "TX000000000000023",
+    "transaction_event_code": "T0300",
+    "transaction_initiation_date": "2026-10-03T18:02:47Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "349.00"
+    },
+    "transaction_status": "S",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "5000.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000026",
+    "paypal_reference_id": "TX000000000000027",
+    "transaction_event_code": "T0006",
+    "transaction_initiation_date": "2026-10-03T18:16:58Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "-349.00"
+    },
+    "transaction_status": "S",
+    "transaction_subject": "Worth sandbox: Studio headphones",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "4651.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000028",
+    "paypal_reference_id": "TX000000000000026",
+    "transaction_event_code": "T0300",
+    "transaction_initiation_date": "2026-10-03T18:16:58Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "349.00"
+    },
+    "transaction_status": "S",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "5000.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000029",
+    "paypal_reference_id": "TX000000000000030",
+    "transaction_event_code": "T0006",
+    "transaction_initiation_date": "2026-10-03T20:47:38Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "-349.00"
+    },
+    "transaction_status": "S",
+    "transaction_subject": "Worth sandbox: Studio headphones",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "4651.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000031",
+    "paypal_reference_id": "TX000000000000029",
+    "transaction_event_code": "T0300",
+    "transaction_initiation_date": "2026-10-03T20:47:38Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "349.00"
+    },
+    "transaction_status": "S",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "5000.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000032",
+    "paypal_reference_id": "TX000000000000033",
+    "transaction_event_code": "T0006",
+    "transaction_initiation_date": "2026-10-03T21:39:23Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "-349.00"
+    },
+    "transaction_status": "S",
+    "transaction_subject": "Worth sandbox: Studio headphones",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "4651.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000034",
+    "paypal_reference_id": "TX000000000000032",
+    "transaction_event_code": "T0300",
+    "transaction_initiation_date": "2026-10-03T21:39:23Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "349.00"
+    },
+    "transaction_status": "S",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "5000.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000035",
+    "paypal_reference_id": "TX000000000000036",
+    "transaction_event_code": "T0006",
+    "transaction_initiation_date": "2026-10-03T22:28:53Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "-349.00"
+    },
+    "transaction_status": "S",
+    "transaction_subject": "Worth sandbox: Studio headphones",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "4651.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000037",
+    "paypal_reference_id": "TX000000000000035",
+    "transaction_event_code": "T0300",
+    "transaction_initiation_date": "2026-10-03T22:28:53Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "349.00"
+    },
+    "transaction_status": "S",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "5000.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000038",
+    "paypal_reference_id": "TX000000000000039",
+    "transaction_event_code": "T0006",
+    "transaction_initiation_date": "2026-10-03T22:57:54Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "-349.00"
+    },
+    "transaction_status": "S",
+    "transaction_subject": "Worth sandbox: Studio headphones",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "4651.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000040",
+    "paypal_reference_id": "TX000000000000038",
+    "transaction_event_code": "T0300",
+    "transaction_initiation_date": "2026-10-03T22:57:54Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "349.00"
+    },
+    "transaction_status": "S",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "5000.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000041",
+    "paypal_reference_id": "TX000000000000038",
+    "transaction_event_code": "T1107",
+    "transaction_initiation_date": "2026-10-03T22:58:06Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "50.00"
+    },
+    "transaction_status": "S",
+    "transaction_subject": "Partial refund test",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "5050.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000042",
+    "paypal_reference_id": "TX000000000000038",
+    "transaction_event_code": "T0403",
+    "transaction_initiation_date": "2026-10-03T22:58:06Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "-50.00"
+    },
+    "transaction_status": "P",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "5000.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000043",
+    "paypal_reference_id": "TX000000000000044",
+    "transaction_event_code": "T0006",
+    "transaction_initiation_date": "2026-10-03T23:12:03Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "-349.00"
+    },
+    "transaction_status": "S",
+    "transaction_subject": "Worth sandbox: Studio headphones",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "4651.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000045",
+    "paypal_reference_id": "TX000000000000043",
+    "transaction_event_code": "T0300",
+    "transaction_initiation_date": "2026-10-03T23:12:03Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "349.00"
+    },
+    "transaction_status": "S",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "5000.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000046",
+    "paypal_reference_id": "TX000000000000047",
+    "transaction_event_code": "T0006",
+    "transaction_initiation_date": "2026-10-03T23:56:32Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "-349.00"
+    },
+    "transaction_status": "S",
+    "transaction_subject": "Worth sandbox: Studio headphones",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "4651.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000048",
+    "paypal_reference_id": "TX000000000000046",
+    "transaction_event_code": "T0300",
+    "transaction_initiation_date": "2026-10-03T23:56:32Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "349.00"
+    },
+    "transaction_status": "S",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "5000.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000049",
+    "paypal_reference_id": "TX000000000000050",
+    "transaction_event_code": "T0006",
+    "transaction_initiation_date": "2026-10-04T01:50:10Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "-1199.00"
+    },
+    "transaction_status": "S",
+    "transaction_subject": "Worth sandbox: Everyday camera",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "3801.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000051",
+    "paypal_reference_id": "TX000000000000049",
+    "transaction_event_code": "T0300",
+    "transaction_initiation_date": "2026-10-04T01:50:10Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "1199.00"
+    },
+    "transaction_status": "S",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "5000.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000052",
+    "paypal_reference_id": "TX000000000000049",
+    "transaction_event_code": "T1107",
+    "transaction_initiation_date": "2026-10-04T01:54:23Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "1199.00"
+    },
+    "transaction_status": "S",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "6199.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000053",
+    "paypal_reference_id": "TX000000000000049",
+    "transaction_event_code": "T0403",
+    "transaction_initiation_date": "2026-10-04T01:54:23Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "-1199.00"
+    },
+    "transaction_status": "P",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "5000.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000054",
+    "paypal_reference_id": "TX000000000000051",
+    "transaction_event_code": "T1104",
+    "transaction_initiation_date": "2026-10-04T01:54:46Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "-1199.00"
+    },
+    "transaction_status": "S",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "3801.00"
+    }
+   }
+  },
+  {
+   "transaction_info": {
+    "transaction_id": "TX000000000000053",
+    "paypal_reference_id": "TX000000000000049",
+    "transaction_event_code": "T1101",
+    "transaction_initiation_date": "2026-10-04T01:54:23Z",
+    "transaction_amount": {
+     "currency_code": "USD",
+     "value": "1199.00"
+    },
+    "transaction_status": "D",
+    "ending_balance": {
+     "currency_code": "USD",
+     "value": "5000.00"
+    }
+   }
+  }
+ ],
+ "start_date": "2026-09-11T05:17:32Z",
+ "end_date": "2026-10-12T05:16:32Z",
+ "page": 1,
+ "total_items": 39,
+ "total_pages": 1
+}

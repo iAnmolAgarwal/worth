@@ -30,6 +30,16 @@ sessions beyond what is needed to show the problem.
   they are read.
 - **The model** has no tool that pays, captures, cancels or edits the plan. Its one action,
   preparing a checkout, runs behind the same server guards as the Buy button.
+- **Connect PayPal** logs in with OAuth code + PKCE (S256) against PayPal's MCP server. The
+  `state` and verifier are single-use, expire in 10 minutes and are bound to the Worth session
+  that started the login; a callback from any other session is refused. The callback always
+  redirects to a fixed path, so no request chooses where the browser goes. PayPal's access token
+  is held only in server memory for that session, for one read or 10 minutes unused, whichever
+  is first; it is never written to disk, a cookie, a response, a URL or a log, and any refresh
+  token is discarded. PayPal's MCP server ignores narrower scopes, so the same token could create
+  and send invoices: the server calls only `list_transactions` (a hard allow-list, tested) and
+  refuses every other tool before any request is made. Logins and reads are rate-limited per
+  session and per IP.
 - **Agent tokens** for `/mcp` are stored as SHA-256 fingerprints, bound to one plan, revocable,
   rate-limited, and grant no capture. See [docs/MCP.md](docs/MCP.md).
 - **Production** sends a Content-Security-Policy that allows only the app and PayPal's SDK

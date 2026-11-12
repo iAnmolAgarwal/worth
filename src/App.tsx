@@ -30,6 +30,7 @@ import type { GuideExpression } from './Guide'
 import { Home, HomeSkeleton } from './Home'
 import { ImportDialog } from './Import'
 import { ImportReview, type ChosenFile } from './Onboarding'
+import { ConnectProgress } from './ConnectPayPal'
 import { PlanPage, PlanWizard } from './Plan'
 import { ConfirmPlanDialog, RefundDialog } from './Reviews'
 import { migratePlanned, Saved, Settings } from './Saved'
@@ -715,7 +716,14 @@ export default function App() {
             onUpdate={replaceState}
           />
         )}
-        {screen === 'import' && (
+        {screen === 'import' && route.params.get('connect') && !chosenFile && (
+          <ConnectProgress
+            result={route.params.get('connect')!}
+            onFile={setChosenFile}
+            onUseCsv={() => setRoute({ screen: 'import', params: new URLSearchParams() })}
+          />
+        )}
+        {screen === 'import' && !(route.params.get('connect') && !chosenFile) && (
           <ImportReview
             state={state}
             file={chosenFile}
