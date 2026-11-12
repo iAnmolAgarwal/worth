@@ -1601,38 +1601,6 @@ textarea.input {
 .kvlist dd .pill {
   margin-top: 4px;
 }
-/* "Lowest $620.01": the amount in a pill coloured by where it lands, all on one line. */
-.stress-low {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-}
-.amt-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 24px;
-  padding: 0 8px;
-  border-radius: var(--r-pill);
-  font-variant-numeric: tabular-nums;
-}
-.amt-pill .ico {
-  width: 14px;
-  height: 14px;
-}
-.amt-pill.ok {
-  background: var(--c-success-bg);
-  color: var(--c-success);
-}
-.amt-pill.warn {
-  background: var(--c-warning-bg);
-  color: var(--c-warning);
-}
-.amt-pill.bad {
-  background: var(--c-danger-bg);
-  color: var(--c-danger);
-}
 .rail-actions.solo {
   margin-top: 0;
 }
@@ -2603,41 +2571,28 @@ textarea.input {
   box-shadow: var(--e-3);
 }
 
-/* Rail folds: "Why this answer" and "What went into this" open on request. */
-.fold {
-  border-top: 1px solid var(--c-divider);
+/* "Why this answer", read straight after the verdict: plain body text, no card of its own. */
+.why-block {
+  max-width: 60ch;
+  padding: 0 var(--s-6);
+  color: var(--c-text-strong);
 }
-.fold .h-section {
+.why-block p {
   margin: 0;
 }
-.fold-head {
-  width: 100%;
-  min-height: 56px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--s-3);
-  background: none;
-  border: 0;
-  padding: 0;
-  cursor: pointer;
-  font: inherit;
-  color: inherit;
-  text-align: left;
+.why-block ul {
+  margin: var(--s-2) 0 0;
+  padding-left: 20px;
 }
-.fold-head .chev {
-  transition: transform var(--d-action) var(--ease-move);
+.why-block .trace {
+  margin-top: var(--s-2);
 }
-.fold[data-open='true'] .fold-head .chev {
-  transform: rotate(180deg);
+@media (max-width: 767px) {
+  /* Phones: the text runs the column's full width, so the first option still shows unscrolled. */
+  .why-block {
+    padding: 0;
+  }
 }
-.fold-body {
-  padding-bottom: var(--s-4);
-}
-.rail .fold + .fold {
-  margin-top: calc(-1 * var(--s-8));
-}
-
 /* File picker as a PayPal pill; the native control stays for keyboards and screen readers. */
 .file-pick {
   display: flex;

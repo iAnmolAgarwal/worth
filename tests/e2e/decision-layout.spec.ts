@@ -71,16 +71,6 @@ async function checkCards(page: Page) {
   await expect(group).not.toContainText('Tight')
   await expect(group).not.toContainText('Lowest that day')
 
-  // Item 3: "Lowest $620.01" on one line, the amount in its own pill.
-  await page.getByRole('button', { name: 'What went into this' }).click()
-  const stress = page.locator('.kvlist dd .stress-low')
-  await expect(stress).toContainText(/Lowest\s*\$620\.01/)
-  const [height, lineHeight] = await stress.evaluate((el) => [
-    el.closest('dd')!.getBoundingClientRect().height,
-    parseFloat(getComputedStyle(el.closest('dd')!).lineHeight),
-  ])
-  expect(height).toBeLessThan(lineHeight * 2)
-
   // Item 6: four cards, each block at the same place, each relation and low two lines.
   const head = page.getByRole('button', { name: /Compare with PayPal Pay in 4/ })
   await expect(head).not.toContainText('illustrative')
