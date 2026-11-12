@@ -14,16 +14,18 @@ prepares a PayPal sandbox order that you approve in PayPal and confirm in Worth.
 [![Live demo](https://img.shields.io/badge/live-worth.onrender.com-0070e0.svg)](https://worth.onrender.com)
 
 **Live:** https://worth.onrender.com, no sign-in needed. Each browser gets its own anonymous
-session with a sample plan (Maya), kept for 24 hours.
+session with a sample plan (Alex, on the demo day Fri, Nov 13, 2026), kept for 24 hours.
 
 **Demo video:** <!-- TODO(coordinator): YouTube link --> _link added at submission_.
 
 ## Judge quick facts
 
-- **Hosted app:** https://worth.onrender.com opens on Maya's sample plan; nothing to install.
-  Want the exact numbers from the video? Open https://worth.onrender.com/?replay=video (sample
-  data only; "Back to today" exits). Otherwise dates follow your own today, so they will not
-  match the video.
+- **Hosted app:** https://worth.onrender.com opens on Alex's sample plan on the demo day,
+  Fri, Nov 13, 2026: the same person and numbers as the video; nothing to install. He has
+  $2,540 available, but the $1,899 Halden X5 camera does not fit that day (room to spend today
+  is $872.26); Worth says wait until Tue, Dec 15, the day after a PayPal invoice pays him.
+  https://worth.onrender.com/?replay=demo-dec15 opens his return visit, with the camera saved
+  and ready.
 <!-- TODO(coordinator): fill in a dedicated judge sandbox buyer account, never the team's own. -->
 - **PayPal sandbox buyer** for the checkout step: email `TODO`, password `TODO`. If these still
   read `TODO`, ask the maintainer.
@@ -39,7 +41,7 @@ session with a sample plan (Maya), kept for 24 hours.
 - **What AI does:** Claude Sonnet 5.5 interprets the question, picks up to three engine facts
   and writes one placeholder-only sentence the server checks; it can ask for a PayPal order,
   which the server prepares only behind the same guards as the Buy button. It never pays.
-- **Three clicks:** Home → "Can I afford a $1,199 camera?" → "See the comparison" →
+- **Three clicks:** Home → "Can I afford the $1,899 Halden X5?" → "See the comparison" →
   "Compare with PayPal Pay in 4". Then the checkout path in [Try it](#try-it).
 
 ![Ask Worth answering "If I put the $1,199 camera on PayPal Pay in 4, which bills would the payments land next to?": the engine's verdict, Claude's checked note, the three options, and four illustrative Pay in 4 payments, one landing about a day after rent](docs/img/ask-pay-in-4.png)
@@ -66,7 +68,7 @@ and 47% of BNPL users say they paid late in the past year
 - **Home: room to spend today.** The most you could spend today and still keep your cushion
   through the forecast, the next payday, what is coming up, and a warning when a running Pay in 4
   payment lands next to a bill.
-- **Ask Worth.** Ask in your own words ("Can I afford a $1,199 camera?", "What's coming up?",
+- **Ask Worth.** Ask in your own words ("Can I afford the $1,899 Halden X5?", "What's coming up?",
   "If I put it on Pay in 4, which bills would the payments land next to?"). The answer shows how
   Worth read the question, the engine's verdict, Claude's checked note, the facts Claude picked
   and, under **How Ask Worth read this**, the tool that ran, why each fact was picked and every
@@ -108,7 +110,7 @@ and 47% of BNPL users say they paid late in the past year
 
 On https://worth.onrender.com (no sign-in):
 
-1. On Home, click **Can I afford a $1,199 camera?** Ask Worth answers with the engine's verdict.
+1. On Home, click **Can I afford the $1,899 Halden X5?** Ask Worth answers with the engine's verdict.
    Open **How Ask Worth read this** to see what Claude chose and what the server checked. Then
    ask: "If I put it on Pay in 4, which bills would the payments land next to?"
 2. Click **See the comparison**, then **Compare with PayPal Pay in 4**: four payments, the bill
@@ -305,9 +307,9 @@ plan and rate-limited. Setup, the tool contract and the security model are in
 - **Pay in 4 is illustrative.** Worth's schedule uses 14-day gaps; the sandbox's real schedule for
   the camera used 16. PayPal sets the terms at checkout, and the order does not say whether Pay
   in 4 was used, so the user confirms it afterwards.
-- **Dates follow your today.** The sample plan is dated relative to the viewer's day. The video
-  numbers are reproducible at https://worth.onrender.com/?replay=video (sample data only; "Back
-  to today" exits).
+- **The sample day is pinned.** Alex's sample plan is fixed to Fri, Nov 13, 2026 (and Tue,
+  Dec 15 for the return visit), the days its story is tuned for, so it reads the same whenever
+  it is opened. Imported data always uses your real today.
 - **Without Claude** (no key, a provider error, the hourly or daily cap, or AI sharing off),
   answers are labelled local calculations; every engine feature keeps working.
 - **Without PayPal credentials**, checkout runs in a labelled simulated mode. If the SDK cannot
@@ -371,6 +373,7 @@ the webhook ID in `PAYPAL_WEBHOOK_ID`. Localhost alone cannot receive them.
 | `MERCHANT_ORIGIN` | The demo store's origin, the only place a hand-off may return to. HTTPS only in production |
 | `HANDOFF_MERCHANT_ID` | The store's `mid` claim; default `larkspur` |
 | `DATABASE_PATH` | SQLite file; default `.data/worth.sqlite` |
+| `SAMPLE_PERSONA` | Who a new session starts as: `alex` (default) on the pinned demo day, or `maya`, the test fixture dated today. The test setups set `maya` |
 | `MAX_HEAP_MB` | Node heap for `npm start` (384); set in the host environment, not `.env` |
 | `NODE_ENV` | `production` turns on the CSP, HSTS, the `__Host-` secure cookie and the public HTTPS origin requirement |
 
@@ -429,10 +432,11 @@ after them are in [docs/EVALUATION.md](docs/EVALUATION.md).
 
 ## Data sources and attribution
 
-- **Sample plan and catalog** (`shared/seed.ts`) are synthetic: Maya, her bills and the
-  Larkspur Supply demo store are invented. Product names are used to name items, never as logos.
+- **Sample plan and catalog** (`shared/seed.ts`) are synthetic: Alex, his bills, the Halden
+  camera brand and the Larkspur Supply demo store are invented. Product names are used to name items, never as logos.
 - **Product photos** are from [Unsplash](https://unsplash.com/license), credited per photo in
-  [docs/DESIGN-SOURCES.md](docs/DESIGN-SOURCES.md).
+  [docs/DESIGN-SOURCES.md](docs/DESIGN-SOURCES.md); the Halden X5 photo is AI-generated for this
+  project and shows no brand mark.
 - **Similar items** are live Channel3 results, linking to the retailer; Worth keeps them only in
   a short cache and in the rows a user saves.
 - **PayPal marks** appear only inside PayPal's own SDK components. Worth is an independent

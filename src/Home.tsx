@@ -272,7 +272,7 @@ export function Home({
   }
   const income = state.profile.flows.find((flow) => flow.kind === 'income' && flow.active)
   const plans = allPlans(state)
-  // Imported PayPal activity, confirmed: the month-led Home. Maya's sample keeps its own layout.
+  // Imported PayPal activity, confirmed: the month-led Home. The sample keeps its own layout.
   const month = state.profile.source === 'import' && state.profile.confirmed
   const { comparison: room, loading } = useComparison(
     { amountCents: 0, itemName: 'Room to spend' },

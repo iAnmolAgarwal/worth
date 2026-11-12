@@ -1113,7 +1113,7 @@ export function Settings({
             )}
           </section>
           {/* The clock's controls show only while a sample day is pinned: always for Alex, and for
-              Maya only after a ?replay= link. */}
+              the test fixture persona only after a ?replay= link. */}
           {state.demoClock && (
             <section className="tile" aria-labelledby="set-clock">
               <div className="sec-head">
