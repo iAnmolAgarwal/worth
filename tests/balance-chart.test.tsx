@@ -191,7 +191,8 @@ describe('the default view', () => {
       'Payday: Salary $3,900.00 lands. You are $158.78 above your cushion. The day’s low comes before the pay arrives.',
     )
     expect(focus().querySelector('.also')).toBeNull()
-    expect(legend()).toEqual([WAIT, 'Money in', 'Money out', 'Cushion', 'Below cushion'])
+    // Waiting stays above the cushion, so the legend has no "Below cushion" entry to explain.
+    expect(legend()).toEqual([WAIT, 'Money in', 'Money out', 'Cushion'])
   })
 
   it('keeps a text alternative and a table of every day', async () => {
