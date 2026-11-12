@@ -5,6 +5,7 @@ import {
   CalendarClock,
   CircleAlert,
   FileText,
+  Download,
   FileUp,
   Plus,
   ReceiptText,
@@ -152,7 +153,7 @@ export function ChooseFile({
 }) {
   return (
     <label className={cx('btn btn-primary file-btn', disabled && 'is-disabled')}>
-      <FileUp className="ico" aria-hidden="true" />
+      <Download className="ico" aria-hidden="true" />
       {children}
       <input
         className="sr"
@@ -240,7 +241,7 @@ export function ImportPicker({
       )}
       <div className={cx('drop', over && 'over', chosen && 'chosen')} {...handlers}>
         <span className="co-ic" aria-hidden="true">
-          <FileUp className="ico" />
+          <Download className="ico" />
         </span>
         {chosen ? (
           <p className="t">{chosen}</p>
@@ -1151,7 +1152,7 @@ export function ImportReview({
               <section aria-labelledby="found-paydays">
                 <SectionHead
                   id="found-paydays"
-                  title="Paydays"
+                  title="Paychecks"
                   count={fromPayPal(paydays) ? `${fromPayPal(paydays)} from PayPal` : undefined}
                 />
                 {paydays.length ? (

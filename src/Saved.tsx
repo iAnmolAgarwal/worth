@@ -11,7 +11,7 @@ import {
   CreditCard,
   ExternalLink,
   Eye,
-  FileUp,
+  Download,
   Globe,
   Info,
   ShoppingBag,
@@ -644,7 +644,7 @@ export function Saved({
         </h1>
         <p className="meta" style={{ margin: '-12px 0 var(--s-5)' }}>
           {saved.length
-            ? `${saved.length} saved · plans are checked when you come back, never bought for you`
+            ? `${saved.length} saved · items are re-checked when you come back, never bought for you`
             : 'Nothing saved yet. Save an item from Ask Worth or a comparison to check it again later.'}
         </p>
         {ready.length > 0 && (
@@ -705,17 +705,10 @@ function RetentionSwitch({
   const [error, setError] = useState('')
   const keep = state.retention?.keep30 ?? false
   const until = state.retention ? new Date(state.retention.expiresAt) : undefined
-  const when = until
-    ? until.toLocaleString('en-US', {
-        weekday: 'short',
-        month: 'short',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-      })
+  // A calendar date in real time, never the sample's day: retention runs on the real clock.
+  const day = until
+    ? until.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
     : ''
-  // Retention runs on real time, even while the demo clock moves the sample's day.
-  const real = state.demoClock ? ' (real time)' : ''
   async function change(next: boolean) {
     setBusy(true)
     setError('')
@@ -734,8 +727,8 @@ function RetentionSwitch({
       sub={
         <span id="keep-note">
           {keep
-            ? `Kept until ${when}${real}. Only this browser can open it: no account, no recovery.`
-            : `Otherwise deleted ${when ? `on ${when}${real}` : 'after 24 hours'}.`}
+            ? `Kept for 30 days, until ${day}. Only this browser can open it: no account, no recovery.`
+            : 'Deleted after 24 hours unless you turn this on.'}
           {error && (
             <span className="co-error" role="alert">
               {' '}
@@ -896,6 +889,7 @@ export function Settings({
   onEditPlan,
   onImport,
   onToast,
+  open,
 }: {
   state: AppState
   onUpdate: (state: AppState) => void
@@ -903,6 +897,8 @@ export function Settings({
   onEditPlan: (step: number) => void
   onImport: () => void
   onToast?: (text: string) => void
+  /** A row to open on arrival: "agent" from Home's "Connect an agent". */
+  open?: string | null
 }) {
   const [confirm, setConfirm] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -992,7 +988,7 @@ export function Settings({
             />
             {/* Disconnect PayPal goes here, for a plan read through Connect PayPal. */}
             <SettingsAction
-              icon={FileUp}
+              icon={Download}
               label={demo ? 'Use your own PayPal activity' : 'Import PayPal activity'}
               sub="Connect PayPal or choose a CSV export"
               onClick={onImport}
@@ -1013,6 +1009,7 @@ export function Settings({
               icon={Bot}
               label="Connect an agent"
               sub="Let an agent like Claude Desktop ask Worth before it pays"
+              opened={open === 'agent'}
             >
               <ConnectAgent state={state} onToast={onToast} />
             </SettingsMore>

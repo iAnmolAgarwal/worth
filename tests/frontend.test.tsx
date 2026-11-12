@@ -1237,7 +1237,7 @@ describe('app shell', () => {
     const info = within(hero).getByLabelText('How Worth worked this out').closest('details')!
     expect(info.open).toBe(false)
     expect(info.textContent).toContain('Keeps your $300.00 cushion, if your plan holds.')
-    expect(info.textContent).toContain('you confirmed today')
+    expect(info.textContent).toContain('available on Sat, Oct 3')
   })
 })
 

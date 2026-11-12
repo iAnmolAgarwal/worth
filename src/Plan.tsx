@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { CircleAlert, FileUp, Info, Plus, ShieldCheck, Trash2 } from 'lucide-react'
+import { CircleAlert, Download, Info, Plus, ShieldCheck, Trash2 } from 'lucide-react'
 import { addDays, assessPurchase, getUpcomingFlows, todayInTimezone } from '../shared/finance'
 import type {
   Cadence,
@@ -14,6 +14,7 @@ import { BalanceChart } from './BalanceChart'
 import type { AppState } from './contract'
 import { isActive } from './contract'
 import { DEMO_CLOCK_EDIT, pinnedSample } from './copy'
+import { upcomingWithPlans } from './Hero'
 import './plan.css'
 import { allPlans, cadenceLabel, flowIcon, kindLabel, runningPlans } from './engine'
 import { cx, dayLabel, money, signed, displayName } from './format'
@@ -1009,7 +1010,7 @@ function InstalmentPlans({
   return (
     <section aria-labelledby="plans-title" className="stack tight">
       <h2 className="h-section" id="plans-title" style={{ marginTop: 16 }}>
-        Pay in 4 and other instalment plans
+        Pay in 4 and other payment plans
       </h2>
       {plans.length === 0 && offered.length === 0 && (
         <p className="meta">No plans running. Add any you’re still paying.</p>
@@ -1155,7 +1156,7 @@ function InstalmentPlans({
         </div>
       ) : (
         <Button variant="secondary" icon={Plus} onClick={() => onAdding(true)} disabled={locked}>
-          Add an instalment plan
+          Add a payment plan
         </Button>
       )}
     </section>
@@ -1269,25 +1270,44 @@ function Review({
 }
 
 /** The Plan tab after setup: commitments by kind, with Edit as the only action. */
+type PlanTab = 'bill' | 'subscription' | 'plans' | 'income' | 'soon'
+const PLAN_TABS: PlanTab[] = ['bill', 'subscription', 'plans', 'income', 'soon']
+
 export function PlanPage({
   state,
   onEdit,
   onImport,
+  initialTab,
+  focus,
 }: {
   state: AppState
   onEdit: (step: number) => void
   onImport: () => void
+  /** Opens on this tab, such as "soon" from Home's "And N more in the next 30 days". */
+  initialTab?: string | null
+  /** Brings this bill or Pay in 4 plan into view, from a Home row or notice. */
+  focus?: string | null
 }) {
-  const [tab, setTab] = useState<'bill' | 'subscription' | 'plans' | 'income'>('bill')
+  const [tab, setTab] = useState<PlanTab>(
+    PLAN_TABS.includes(initialTab as PlanTab) ? (initialTab as PlanTab) : 'bill',
+  )
+  useEffect(() => {
+    if (!focus) return
+    const row = document.getElementById(`plan-row-${focus}`)
+    row?.scrollIntoView?.({ block: 'center' })
+    row?.focus({ preventScroll: true })
+  }, [focus])
+  const soon = upcomingWithPlans(state)
   const plans = allPlans(state)
   const items = state.profile.flows
-    .filter((flow) => flow.active && (tab === 'plans' ? false : flow.kind === tab))
+    .filter((flow) => flow.active && flow.kind === tab)
     .sort((a, b) => a.nextDate.localeCompare(b.nextDate))
   const tabs = [
     ['bill', 'Bills'],
     ['subscription', 'Subscriptions'],
-    ['plans', 'Plans'],
+    ['plans', 'Pay in 4'],
     ['income', 'Income'],
+    ['soon', 'Next 30 days'],
   ] as const
   return (
     <div className="page plain plan-page">
@@ -1296,7 +1316,7 @@ export function PlanPage({
         <div className="plan-head">
           <h1 className="title">Your plan</h1>
           <div className="actions">
-            <Button variant="secondary" icon={FileUp} onClick={onImport} className="hide-m">
+            <Button variant="secondary" icon={Download} onClick={onImport} className="hide-m">
               Import PayPal activity
             </Button>
             <Button onClick={() => onEdit(0)}>Edit your plan</Button>
@@ -1319,87 +1339,127 @@ export function PlanPage({
               ))}
             </div>
             <div className="rows" id="commitments" role="tabpanel">
-              {tab === 'plans'
-                ? plans.map((plan) => (
-                    <div className="row" key={plan.planId}>
-                      <Disc icon={flowIcon({ kind: 'installment' })} kind="plan" />
-                      <div className="body">
-                        <div className="t">{plan.name}</div>
-                        <div className="s">
-                          Next {dayLabel(plan.next)}{' '}
-                          <span className="soft">
-                            ·{' '}
-                            {plan.total
-                              ? `${plan.total - plan.left} of ${plan.total} paid`
-                              : `${plan.left} payments left`}
-                          </span>
-                        </div>
-                        {plan.total && (
-                          <div
-                            className="prog"
-                            role="img"
-                            aria-label={`${plan.total - plan.left} of ${plan.total} paid`}
-                          >
-                            <i
-                              style={{ width: `${((plan.total - plan.left) / plan.total) * 100}%` }}
-                            />
-                          </div>
-                        )}
-                      </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <div className="amt num">{signed(-plan.amountCents)}</div>
-                        {!plan.planId.startsWith('purchase:') && (
-                          <button
-                            type="button"
-                            className="link edit-link"
-                            onClick={() => onEdit(2)}
-                            aria-label={`Edit ${plan.name}`}
-                          >
-                            Edit
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))
-                : items.map((flow) => (
-                    <div className="row" key={flow.id}>
+              {tab === 'soon'
+                ? soon.map(({ flow, date }) => (
+                    <div
+                      className="row"
+                      key={`${flow.id}-${date}`}
+                      id={`plan-row-${flow.planId ?? flow.id}`}
+                      tabIndex={-1}
+                    >
                       <Disc
                         icon={flowIcon(flow)}
-                        kind={flow.kind === 'income' ? 'income' : undefined}
+                        kind={
+                          flow.kind === 'income'
+                            ? 'income'
+                            : flow.kind === 'installment'
+                              ? 'plan'
+                              : undefined
+                        }
                       />
                       <div className="body">
                         <div className="t">{displayName(flow.name)}</div>
                         <div className="s">
-                          Next {dayLabel(flow.nextDate)}{' '}
-                          <span className="soft">· {cadenceLabel(flow)}</span>
+                          {dayLabel(date)} <span className="soft">· {kindLabel(flow.kind)}</span>
                         </div>
-                        {!flow.confirmed && (
-                          <div className="pills">
-                            <Pill tone="warn">Needs review</Pill>
-                          </div>
-                        )}
                       </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <div className={cx('amt num', flow.kind === 'income' && 'pos')}>
-                          {flow.kind === 'income'
-                            ? signed(flow.amountCents, true)
-                            : signed(-flow.amountCents)}
-                        </div>
-                        <button
-                          type="button"
-                          className="link edit-link"
-                          onClick={() => onEdit(flow.kind === 'income' ? 1 : 2)}
-                          aria-label={`Edit ${flow.name}`}
-                        >
-                          Edit
-                        </button>
+                      <div className={cx('amt num', flow.kind === 'income' && 'pos')}>
+                        {flow.kind === 'income'
+                          ? signed(flow.amountCents, true)
+                          : signed(-flow.amountCents)}
                       </div>
                     </div>
-                  ))}
-              {(tab === 'plans' ? plans.length : items.length) === 0 && (
+                  ))
+                : tab === 'plans'
+                  ? plans.map((plan) => (
+                      <div
+                        className="row"
+                        key={plan.planId}
+                        id={`plan-row-${plan.planId}`}
+                        tabIndex={-1}
+                      >
+                        <Disc icon={flowIcon({ kind: 'installment' })} kind="plan" />
+                        <div className="body">
+                          <div className="t">{plan.name}</div>
+                          <div className="s">
+                            Next {dayLabel(plan.next)}{' '}
+                            <span className="soft">
+                              ·{' '}
+                              {plan.total
+                                ? `${plan.total - plan.left} of ${plan.total} paid`
+                                : `${plan.left} payments left`}
+                            </span>
+                          </div>
+                          {plan.total && (
+                            <div
+                              className="prog"
+                              role="img"
+                              aria-label={`${plan.total - plan.left} of ${plan.total} paid`}
+                            >
+                              <i
+                                style={{
+                                  width: `${((plan.total - plan.left) / plan.total) * 100}%`,
+                                }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div className="amt num">{signed(-plan.amountCents)}</div>
+                          {!plan.planId.startsWith('purchase:') && (
+                            <button
+                              type="button"
+                              className="link edit-link"
+                              onClick={() => onEdit(2)}
+                              aria-label={`Edit ${plan.name}`}
+                            >
+                              Edit
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  : items.map((flow) => (
+                      <div className="row" key={flow.id} id={`plan-row-${flow.id}`} tabIndex={-1}>
+                        <Disc
+                          icon={flowIcon(flow)}
+                          kind={flow.kind === 'income' ? 'income' : undefined}
+                        />
+                        <div className="body">
+                          <div className="t">{displayName(flow.name)}</div>
+                          <div className="s">
+                            Next {dayLabel(flow.nextDate)}{' '}
+                            <span className="soft">· {cadenceLabel(flow)}</span>
+                          </div>
+                          {!flow.confirmed && (
+                            <div className="pills">
+                              <Pill tone="warn">Needs review</Pill>
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div className={cx('amt num', flow.kind === 'income' && 'pos')}>
+                            {flow.kind === 'income'
+                              ? signed(flow.amountCents, true)
+                              : signed(-flow.amountCents)}
+                          </div>
+                          <button
+                            type="button"
+                            className="link edit-link"
+                            onClick={() => onEdit(flow.kind === 'income' ? 1 : 2)}
+                            aria-label={`Edit ${flow.name}`}
+                          >
+                            Edit
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+              {(tab === 'plans' ? plans.length : tab === 'soon' ? soon.length : items.length) ===
+                0 && (
                 <p className="meta">
-                  No {tab === 'plans' ? 'instalment plans' : `${kindLabel(tab).toLowerCase()}s`} in
-                  your plan.
+                  {tab === 'soon'
+                    ? 'Nothing scheduled in the next 30 days.'
+                    : `No ${tab === 'plans' ? 'Pay in 4 plans' : `${kindLabel(tab).toLowerCase()}s`} in your plan.`}
                 </p>
               )}
             </div>

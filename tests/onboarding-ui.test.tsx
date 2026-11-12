@@ -206,7 +206,7 @@ describe('Check what Worth found', () => {
     reviewApi()
     renderReview()
     await screen.findByText('Northwind Payroll')
-    const paydays = screen.getByRole('region', { name: 'Paydays' })
+    const paydays = screen.getByRole('region', { name: 'Paychecks' })
     expect(within(paydays).getByText('1 from PayPal')).toBeTruthy()
     expect(within(paydays).getByText(/Every other Tuesday · next about Tue, Oct 20/)).toBeTruthy()
     const bills = screen.getByRole('region', { name: 'Bills and subscriptions' })

@@ -559,7 +559,7 @@ describe('settings, demo clock and mobile reach', () => {
     const keep = screen.getByRole('switch', { name: 'Keep my plan on this device for 30 days' })
     expect(keep.getAttribute('aria-checked')).toBe('false')
     // The deletion time is real time, even while the clock moves Maya's day (finding 11c).
-    expect(screen.getByText(/deleted on .*\(real time\)/)).toBeTruthy()
+    expect(screen.getByText('Deleted after 24 hours unless you turn this on.')).toBeTruthy()
     await user.click(keep)
     await user.click(screen.getByRole('button', { name: 'Video replay · Sat, Oct 3, 2026' }))
     expect(calls).toEqual([

@@ -453,11 +453,14 @@ export default function App() {
     )
 
   const detail = DETAIL.includes(screen)
+  // Only the page the visitor is on is highlighted: an answer opened from the chat belongs to no tab.
   const current: Screen =
     screen === 'decision'
       ? params.get('from') === 'saved'
         ? 'saved'
-        : 'home'
+        : params.get('from') === 'home'
+          ? 'home'
+          : 'decision'
       : screen === 'plan-edit'
         ? 'plan'
         : screen
@@ -549,7 +552,12 @@ export default function App() {
               <Compass className="ico" aria-hidden="true" />
               <span className="tour-btn-label">Take the tour</span>
             </button>
-            <a className="icon-btn hide-m" href="#settings" aria-label="Settings and privacy">
+            <a
+              className="icon-btn hide-m"
+              href="#settings"
+              aria-label="Settings and privacy"
+              aria-current={screen === 'settings' ? 'page' : undefined}
+            >
               <SettingsIcon className="ico" strokeWidth={1.75} aria-hidden="true" />
             </a>
             <button
@@ -781,9 +789,12 @@ export default function App() {
         )}
         {screen === 'plan' && (
           <PlanPage
+            key={params.toString()}
             state={state}
             onEdit={(step) => navigate(`plan/edit?step=${step}`)}
             onImport={() => setImporting(true)}
+            initialTab={params.get('tab')}
+            focus={params.get('focus')}
           />
         )}
         {screen === 'plan-edit' && (
@@ -823,6 +834,7 @@ export default function App() {
             onEditPlan={(step) => navigate(`plan/edit?step=${step}`)}
             onImport={() => setImporting(true)}
             onToast={setToast}
+            open={params.get('open')}
           />
         )}
       </main>

@@ -18,6 +18,7 @@ import type { Transaction } from '../shared/types'
 import { api } from './api'
 import type { AppState, Purchase } from './contract'
 import { isActive } from './contract'
+import { flowIcon } from './engine'
 import { ForeignPayments } from './ForeignPayments'
 import { monthLabel, money, shortDate, signed, displayName } from './format'
 import { Button, Dialog, Disc, EmptyState, Field, Pill } from './ui'
@@ -39,8 +40,10 @@ const KIND_TEXT: Record<Transaction['kind'], string> = {
   installment: 'Pay in 4 or Pay Later',
   unknown: 'Needs review',
 }
-const iconFor = (t: Transaction): LucideIcon =>
-  t.kind === 'income'
+/** A payment to a known bill (rent, a loan, a utility) takes the bill's own icon from Plan. */
+const iconFor = (t: Transaction, bills: Map<string, LucideIcon>): LucideIcon =>
+  bills.get(t.name.trim().toLowerCase()) ??
+  (t.kind === 'income'
     ? Banknote
     : t.kind === 'refund'
       ? RefreshCw
@@ -48,7 +51,7 @@ const iconFor = (t: Transaction): LucideIcon =>
         ? ArrowDownLeft
         : t.kind === 'installment'
           ? CalendarCheck
-          : Store
+          : Store)
 const PAGE = 25
 /** An order an outside agent asked for over MCP, from before agents linked to the store. */
 function ExternalAgent() {
@@ -144,7 +147,15 @@ export function Activity({
     setBusy(true)
     setError('')
     try {
-      setProposals(await api<CategoryResult>('/transactions/categories', {}))
+      const result = await api<CategoryResult>('/transactions/categories', {})
+      // Only the rows whose category would change are suggestions.
+      setProposals({
+        ...result,
+        suggestions: result.suggestions.filter(
+          (s) =>
+            state.transactions.find((item) => item.id === s.transactionId)?.category !== s.category,
+        ),
+      })
     } catch (failure) {
       setError((failure as Error).message)
     } finally {
@@ -175,6 +186,15 @@ export function Activity({
     }
   }
 
+  const bills = useMemo(
+    () =>
+      new Map(
+        state.profile.flows
+          .filter((flow) => flow.kind === 'bill' || flow.kind === 'subscription')
+          .map((flow) => [flow.name.trim().toLowerCase(), flowIcon(flow)] as const),
+      ),
+    [state.profile.flows],
+  )
   const row = (t: Transaction) => {
     const purchaseId = t.source === 'purchase' ? t.id.replace(/^purchase-/, '') : undefined
     const needsPlan = purchaseId && unconfirmed.has(purchaseId)
@@ -186,7 +206,7 @@ export function Activity({
         key={t.id}
         onClick={() => (needsPlan ? onConfirmPlan(purchaseId!) : setDetail(t))}
       >
-        <Disc icon={iconFor(t)} kind={t.kind === 'income' ? 'income' : undefined} />
+        <Disc icon={iconFor(t, bills)} kind={t.kind === 'income' ? 'income' : undefined} />
         <div className="body">
           <div className="t">{displayName(t.name)}</div>
           <div className="s">
@@ -197,7 +217,9 @@ export function Activity({
                   state.products.find((p) => p.id === bought?.productId)?.merchant ??
                   'the store'
                 } · PayPal`
-              : KIND_TEXT[t.kind]}
+              : t.kind === 'expense' && t.category
+                ? t.category
+                : KIND_TEXT[t.kind]}
             {t.status === 'excluded' ? ' · not counted' : ''}
           </div>
           {bought?.preparedBy === 'external' && <ExternalAgent />}
@@ -218,7 +240,7 @@ export function Activity({
   return (
     <div className="page plain activity">
       <div className="wrap">
-        <h1 className="sr">Activity</h1>
+        <h1 className="title activity-title">Activity</h1>
         <div className="search-row">
           <div className="composer">
             <Search className="ico search" aria-hidden="true" />
@@ -240,6 +262,7 @@ export function Activity({
             type="button"
             className="round-btn"
             aria-label="Filter activity"
+            title="Filters"
             aria-pressed={filtersOpen}
             aria-controls="activity-filters"
             onClick={() => setFiltersOpen(!filtersOpen)}
@@ -439,7 +462,11 @@ export function Activity({
       )}
       {proposals && (
         <Dialog title="Suggested categories" onClose={() => setProposals(undefined)} wide>
-          <p className="meta">{proposals.message}</p>
+          <p className="meta">
+            {proposals.suggestions.length
+              ? `Worth suggests a better category for ${proposals.suggestions.length} ${proposals.suggestions.length === 1 ? 'payment' : 'payments'}.`
+              : 'Your categories already look right.'}
+          </p>
           {proposals.suggestions.length ? (
             <div className="rows">
               {proposals.suggestions.slice(0, 10).map((s) => {

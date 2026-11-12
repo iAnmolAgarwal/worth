@@ -237,9 +237,9 @@ describe('the collision, surfaced', () => {
     )
     const insight = screen.getByRole('region', { name: 'PayPal Pay in 4 payment next to a bill' })
     expect(insight.textContent).toContain(
-      'Your laptop PayPal Pay in 4 payment lands about 1 day before your apartment rent',
+      'Heads-up, nothing to do: your laptop Pay in 4 payment ($160.00, Thu, Oct 15) and apartment rent ($1,450.00, Fri, Oct 16) land a day apart, and both are covered.',
     )
-    expect(insight.textContent).toContain('$160.00 on Thu, Oct 15')
+    expect(insight.textContent).toContain('($160.00, Thu, Oct 15)')
     expect(insight.textContent).not.toMatch(/recommend|should/i)
   })
 
@@ -263,7 +263,7 @@ describe('the collision, surfaced', () => {
       />,
     )
     const insight = screen.getByRole('region', { name: 'Plan payment next to a bill' })
-    expect(insight.textContent).toContain('Your sofa plan payment lands about 1 day before')
+    expect(insight.textContent).toContain('your sofa plan payment ($160.00, Thu, Oct 15)')
     expect(insight.textContent).not.toContain('PayPal')
   })
 
