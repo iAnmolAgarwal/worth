@@ -138,9 +138,17 @@ function ComingUp({ state, onShowAll }: { state: AppState; onShowAll: () => void
           </h2>
           {soon.length > 0 && <span className="sec-sub">Next 2 weeks</span>}
         </div>
-        <button type="button" className="link" onClick={onShowAll}>
-          Show all
-        </button>
+        {/* "And N more" below goes to the same place, so the heading link is only for short lists;
+            an invisible stand-in keeps the first card level with Saved's beside it. */}
+        {hidden === 0 ? (
+          <button type="button" className="link" onClick={onShowAll}>
+            Show all
+          </button>
+        ) : (
+          <span className="link" aria-hidden="true" style={{ visibility: 'hidden' }}>
+            Show all
+          </span>
+        )}
       </div>
       {!upcoming.length && (
         <p className="meta">Nothing scheduled in the next 30 days. Add your bills in your plan.</p>
