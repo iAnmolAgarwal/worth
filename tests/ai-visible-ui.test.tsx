@@ -201,10 +201,12 @@ describe('Ask Worth shows its work', () => {
     )
     const user = await ask(state, answer, { onOpenDecision })
     const row = await screen.findByText(/^PayPal Pay in 4:/)
+    // One link to the comparison per answer: the row has none of its own.
     expect(row.textContent).toBe(
-      'PayPal Pay in 4: payment 2 would land about 1 day after your apartment rent · Compare',
+      'PayPal Pay in 4: payment 2 would land about 1 day after your apartment rent',
     )
-    await user.click(within(row).getByRole('button', { name: 'Compare' }))
+    expect(screen.getAllByRole('button', { name: /comparison|Compare/ })).toHaveLength(1)
+    await user.click(screen.getByRole('button', { name: /See the comparison/ }))
     expect(onOpenDecision).toHaveBeenCalledWith({ productId: 'camera' }, expect.anything())
     expect(row.textContent).not.toMatch(/recommend/i)
     // Local mode: the trace says no tool ran and Claude was not used.

@@ -24,6 +24,7 @@ import {
 import { PAY_IN_4_DATES_NOTE, PAY_IN_4_SPACING } from '../shared/collision'
 import { confirmedSchedule, PAY_IN_4_MAX_CENTS, PAY_IN_4_MIN_CENTS } from '../shared/finance'
 import type { Alternative, OptionResult, Product } from '../shared/types'
+import { offerVerdict, type AskOffer } from './AgentLauncher'
 import { AlternativesLoading, SimilarItems, useSimilarItems } from './Alternatives'
 import { BalanceChart } from './BalanceChart'
 import type { AppState, Comparison, PayIn4, SavePlan, SaveTarget } from './contract'
@@ -561,6 +562,7 @@ export function Decision({
   onSaveAlternative,
   onViewActivity,
   handoff,
+  onOffer,
 }: {
   state: AppState
   request: DecisionRequest
@@ -576,6 +578,8 @@ export function Decision({
   onEditPlan?: () => void
   onViewActivity: () => void
   handoff?: DecisionHandoff
+  /** Offers this item, its price, store and verdict to the Ask Worth panel while on screen. */
+  onOffer?: (offer: AskOffer | undefined) => void
 }) {
   const [override, setOverride] = useState<DecisionRequest>()
   const active = override ?? request
@@ -604,6 +608,17 @@ export function Decision({
         : { itemName: c.itemName, amountCents: c.amountCents, maxPriceCents: cheaperLimit }
       : null,
   )
+  const store = handoff?.merchant ?? product?.merchant
+  useEffect(() => {
+    if (!onOffer || !c) return
+    onOffer({
+      itemName: product?.name ?? c.itemName,
+      amountCents: c.amountCents,
+      store,
+      verdict: offerVerdict(c),
+    })
+    return () => onOffer(undefined)
+  }, [onOffer, c, product?.name, store])
   if (error)
     return (
       <Frame>
