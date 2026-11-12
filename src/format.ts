@@ -18,6 +18,8 @@ export const shortDate = (date: string, options: Intl.DateTimeFormatOptions = {}
 /** "Mon, Oct 12": every date a person reads carries its weekday (brief §7). */
 export const dayLabel = (date: string) => shortDate(date, { weekday: 'short' })
 export const fullDate = (date: string) => shortDate(date, { weekday: 'long', year: 'numeric' })
+/** "Fri, Nov 13, 2026": a pinned sample day, short enough for one line. */
+export const sampleDate = (date: string) => shortDate(date, { weekday: 'short', year: 'numeric' })
 export const monthLabel = (date: string) =>
   at(date).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
 export const daysFrom = (from: string, to: string) =>

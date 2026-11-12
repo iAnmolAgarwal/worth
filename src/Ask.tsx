@@ -85,7 +85,7 @@ export function moodFor(entries: Entry[], busy: boolean): GuideExpression {
 }
 
 export const ASK_STARTERS = [
-  'Can I afford a $1,199 camera?',
+  'Can I afford the $1,899 Halden X5?',
   'How much can I spend today?',
   'What bills are coming up?',
 ]

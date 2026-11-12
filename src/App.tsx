@@ -25,7 +25,7 @@ import type { AppState, Purchase, SavePlan, SaveTarget } from './contract'
 import { alternativeTarget, decisionRequestFrom, saveRequest } from './contract'
 import { Decision, type DecisionRequest, type Explanation } from './Decision'
 import { envLabel } from './engine'
-import { cx, dayLabel, fullDate, money } from './format'
+import { cx, dayLabel, fullDate, money, sampleDate } from './format'
 import type { GuideExpression } from './Guide'
 import { Home, HomeSkeleton } from './Home'
 import { ImportDialog } from './Import'
@@ -34,7 +34,7 @@ import { ConnectProgress, returnToCheck } from './ConnectPayPal'
 import { PlanPage, PlanWizard } from './Plan'
 import { ConfirmPlanDialog, RefundDialog } from './Reviews'
 import { migratePlanned, Saved, Settings } from './Saved'
-import { ASSESSMENT_ONLY, paypalModeLine, SAMPLE_WHO } from './copy'
+import { ASSESSMENT_ONLY, paypalModeLine, pinnedSample, replayToast, SAMPLE_WHO } from './copy'
 import { usePayPalSdk } from './paypal'
 import { Alert, Button, IconButton, Wordmark } from './ui'
 
@@ -265,13 +265,14 @@ export default function App() {
     // Runs once, when the first state arrives.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [Boolean(state)])
-  // Once per load: move the browser's old wait dates to the server (G5-6), and start the video
-  // replay when the README link asks for it (?replay=video).
+  // Once per load: move the browser's old wait dates to the server (G5-6), and pin a sample day
+  // when a link asks for one (?replay=demo, demo-dec15 or video).
   useEffect(() => {
     if (!state) return
     void migratePlanned(replaceState)
     const params = new URLSearchParams(window.location.search)
-    if (params.get('replay') === 'video') {
+    const preset = params.get('replay')
+    if (preset === 'video' || preset === 'demo' || preset === 'demo-dec15') {
       params.delete('replay')
       const query = params.toString()
       history.replaceState(
@@ -279,7 +280,7 @@ export default function App() {
         '',
         window.location.pathname + (query ? `?${query}` : '') + window.location.hash,
       )
-      void startReplay()
+      void startReplay(preset)
     }
     // Runs once, when the first state arrives.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
@@ -389,14 +390,14 @@ export default function App() {
       return undefined
     }
   }
-  /** The README's ?replay=video link: pins the sample persona to the recording day (G5-3). */
-  async function startReplay() {
+  /** A ?replay= link: pins the sample persona to that preset's day (G5-3). */
+  async function startReplay(preset: 'video' | 'demo' | 'demo-dec15') {
     try {
-      const next = (await api<AppState>('/demo-clock', { preset: 'video' })) as AppState
+      const next = (await api<AppState>('/demo-clock', { preset })) as AppState
       clearConversation()
       replaceState(next)
       setEnvOpen(false)
-      setToast('Showing the video scenario: Maya on Sat, Oct 3, 2026.')
+      setToast(replayToast(next))
       navigate('home')
     } catch (failure) {
       setToast((failure as Error).message)
@@ -407,7 +408,11 @@ export default function App() {
       const next = (await api<AppState>('/demo-clock', { preset: 'today' })) as AppState
       clearConversation()
       replaceState(next)
-      setToast('Maya’s sample plan is back on today’s date.')
+      setToast(
+        next.demoClock
+          ? `${next.profile.name}’s sample is back on ${sampleDate(next.today)}.`
+          : `${next.profile.name}’s sample plan is back on today’s date.`,
+      )
     } catch (failure) {
       setToast((failure as Error).message)
     }
@@ -459,7 +464,7 @@ export default function App() {
         : screen
   const demo = state.profile.source === 'demo'
   // One label at every width: it names whose month this is (third-party feedback F1).
-  const sample = demo ? 'Sample: Maya' : 'Your data'
+  const sample = demo ? `Sample: ${state.profile.name}` : 'Your data'
   const env = envLabel(state)
   const decisionProduct = decisionRequest?.productId
     ? state.products.find((p) => p.id === decisionRequest.productId)
@@ -667,14 +672,22 @@ export default function App() {
         </div>
       </header>
       <main id="main" tabIndex={-1}>
-        {state.demoClock && (
+        {state.demoClock && pinnedSample(state) && (
           <div className="wrap" style={{ paddingBottom: 0 }}>
             <Alert tone="info" icon={CalendarClock}>
-              <b>Demo clock:</b> Maya’s sample plan is set to {fullDate(state.today)}
+              <b>Sample day:</b> {sampleDate(state.today)}
+            </Alert>
+          </div>
+        )}
+        {state.demoClock && !pinnedSample(state) && (
+          <div className="wrap" style={{ paddingBottom: 0 }}>
+            <Alert tone="info" icon={CalendarClock}>
+              <b>Demo clock:</b> {state.profile.name}’s sample plan is set to{' '}
+              {fullDate(state.today)}
               {state.demoClock.preset === 'video' ? ', the day the video was recorded' : ''}. Your
               own data never uses it.{' '}
               <button type="button" className="link inline" onClick={() => void endReplay()}>
-                Back to today
+                {state.config.sample === 'alex' ? 'Back to the sample day' : 'Back to today'}
               </button>
             </Alert>
           </div>

@@ -392,6 +392,17 @@ export function createDemoState(
 export const ALEX_DEMO_DAY = '2026-11-13'
 /** The return visit: the day the camera fits, after the Dec 14 invoice is paid. */
 export const ALEX_RETURN_DAY = '2026-12-15'
+/**
+ * The day the contest video was recorded. Pinning Maya to it reproduces that video exactly: rent
+ * on Fri Oct 16, wait until Fri Oct 23, buy-today low −$458.99 on Thu Oct 22.
+ */
+export const VIDEO_REPLAY_DAY = '2026-10-03'
+/** The day each pinned preset shows. */
+export const DEMO_PRESET_DAYS: Record<DemoPreset, string> = {
+  video: VIDEO_REPLAY_DAY,
+  demo: ALEX_DEMO_DAY,
+  'demo-dec15': ALEX_RETURN_DAY,
+}
 /** The pinned sample days a `?replay=` link can ask for, on Worth and on the store. */
 export const DEMO_PRESETS = ['video', 'demo', 'demo-dec15'] as const satisfies DemoPreset[]
 /** A `?replay=` value when it names a preset; anything else is ignored. */

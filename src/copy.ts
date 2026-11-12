@@ -1,3 +1,6 @@
+import type { AppState } from './contract'
+import { sampleDate } from './format'
+
 /** Everything that reaches Anthropic when Claude answers. Update it with any change to the chat tools. */
 export const CLAUDE_SHARED_DATA =
   'your messages, recent chat history (including figures), the item, price and date you ask about, the items and prices you asked about earlier in the same conversation, a forecast summary, 30-day spending totals by category, income and bill names with amounts and dates, minimized merchant labels, whether PayPal offers Pay in 4 for the price and, when you ask about Pay in 4, its illustrative payment dates and the bills they land near, whether Worth prepared a checkout for a catalog item and how it went, and, when you ask for something cheaper, the kind of item to look for and whether similar items were found (never their names, stores or prices)'
@@ -32,9 +35,9 @@ export const ASSESSMENT_ONLY = 'Assessment only — not sold in the demo store'
 export const MAY_FIT_NOW = 'Your plan suggests this may fit now — confirm today’s funds'
 /** The plan editor while the demo clock runs (the server refuses the edit too). */
 export const DEMO_CLOCK_EDIT =
-  'The demo clock is replaying Maya’s sample plan as it is. Choose Back to today before editing a plan.'
+  'The sample plan is pinned to its sample day, so it can’t be edited here. Bring your own PayPal activity to plan with your numbers.'
 /** The sample persona in a sentence; the top-bar chip and the Home intro both say it (feedback F1). */
-export const SAMPLE_WHO = 'Maya’s sample month: a made-up PayPal shopper'
+export const SAMPLE_WHO = 'a sample month for a made-up PayPal shopper'
 /** Whether checkout reaches the PayPal sandbox; without sandbox keys it is simulated, never live. */
 export const paypalModeLine = (mode: 'sandbox' | 'demo') =>
   mode === 'sandbox' ? 'PayPal checkout runs in the PayPal sandbox' : 'PayPal checkout is simulated'
@@ -43,3 +46,10 @@ export const sampleHolds = (plans: number) =>
   plans === 0
     ? 'a paycheck and bills'
     : `a paycheck, bills and ${plans === 1 ? 'one PayPal Pay in 4 plan' : `${plans} PayPal Pay in 4 plans`}`
+
+/** Alex's pinned days (`demo`, `demo-dec15`): the sample is tuned for them, so no "Back to today". */
+export const pinnedSample = (state: AppState) =>
+  state.demoClock?.preset === 'demo' || state.demoClock?.preset === 'demo-dec15'
+/** What the toast says when a pinned sample day starts, from the day the server pinned. */
+export const replayToast = (state: AppState) =>
+  `Showing ${state.demoClock?.preset === 'video' ? 'the video scenario' : 'the sample'}: ${state.profile.name} on ${sampleDate(state.today)}.`

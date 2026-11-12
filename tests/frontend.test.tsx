@@ -1456,7 +1456,7 @@ describe('first screen: the sample and PayPal (third-party feedback)', () => {
     await user.click(chip)
     const details = document.getElementById('env-details')!
     expect(details.textContent).toContain(
-      'This is Maya’s sample month: a made-up PayPal shopper. No real money moves, and PayPal checkout is simulated.',
+      'This is a sample month for a made-up PayPal shopper. No real money moves, and PayPal checkout is simulated.',
     )
     expect(within(details).queryByText('Sample data')).toBeNull()
     expect(within(details).getByText('PayPal checkout: simulated')).toBeTruthy()

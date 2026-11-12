@@ -246,7 +246,7 @@ export function StartCard({
           Start with your PayPal activity
         </h2>
         <p className="meta hide-m">
-          You’re viewing Maya’s sample month. Bring your PayPal activity to see your own.
+          You’re viewing a sample month. Bring your PayPal activity to see your own.
         </p>
       </div>
       {busy && (

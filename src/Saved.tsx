@@ -16,6 +16,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { addDays, WAIT_SEARCH_DAYS } from '../shared/finance'
+import { DEMO_PRESET_DAYS } from '../shared/seed'
 import type { Product, SavedItem, SavedPriceCheck } from '../shared/types'
 import { api, ApiError } from './api'
 import { usePriceDrop } from './Alternatives'
@@ -29,12 +30,14 @@ import {
   claudeUses,
   demoStoreRole,
   MAY_FIT_NOW,
+  pinnedSample,
+  replayToast,
 } from './copy'
 import type { DecisionRequest } from './Decision'
 import { claudeOn, fits, useComparison } from './engine'
 import type { AppState, Purchase } from './contract'
 import { isActive, savedSource, saveRequest } from './contract'
-import { dayLabel, fromMoney, fullDate, money, shortDate, signed } from './format'
+import { dayLabel, fromMoney, fullDate, money, sampleDate, shortDate, signed } from './format'
 import { Alert, Button, DateStepper, Dialog, Disc, Field, Pill, Toggle } from './ui'
 
 /** The browser's old per-device wait dates, from before plans moved to the server (G5-6). */
@@ -332,7 +335,7 @@ export function FundsDialog({
   const unreflected = state.purchases.filter(
     (p) => p.status === 'completed' && !p.archived && !profile.reflectedPurchaseIds.includes(p.id),
   )
-  // Only Maya's sample projection already counts these payments, so only it starts them ticked.
+  // Only the sample's own projection already counts these payments, so only it starts them ticked.
   // On any other plan each one stays unticked until the user says it has happened.
   const projected = Boolean(fundsProjection) && profile.userEdited === false
   const [paid, setPaid] = useState<string[]>(projected ? due.map((flow) => flow.id) : [])
@@ -392,7 +395,7 @@ export function FundsDialog({
           error={error}
           hint={
             fundsProjection
-              ? `Maya’s sample plan projects this for the start of ${dayLabel(state.today)}, from the funds confirmed ${dayLabel(fundsProjection.from)}. Sample data only.`
+              ? `${profile.name}’s sample plan projects this for the start of ${dayLabel(state.today)}, from the funds confirmed ${dayLabel(fundsProjection.from)}. Sample data only.`
               : `Last confirmed ${money(profile.balanceCents)} on ${dayLabel(profile.snapshotDate)}.${stale ? ' Enter what your accounts show now.' : ''}`
           }
         >
@@ -414,7 +417,7 @@ export function FundsDialog({
             </legend>
             <p className="caption" style={{ margin: '0 0 4px' }}>
               {projected
-                ? 'Ticked because Maya’s sample projection already counts them. Sample data only.'
+                ? `Ticked because ${profile.name}’s sample projection already counts them. Sample data only.`
                 : 'Tick each one your accounts already show.'}
             </p>
             {due.map((flow) => (
@@ -771,7 +774,7 @@ function RetentionSwitch({
         minute: '2-digit',
       })
     : ''
-  // Retention runs on real time, even while the demo clock moves Maya's day.
+  // Retention runs on real time, even while the demo clock moves the sample's day.
   const real = state.demoClock ? ' (real time)' : ''
   async function change(next: boolean) {
     setBusy(true)
@@ -827,6 +830,8 @@ function DemoClock({
   onToast: (text: string) => void
 }) {
   const sample = state.profile.source === 'demo'
+  const { name } = state.profile
+  const alex = state.config.sample === 'alex'
   const from = state.profile.snapshotDate
   const planned = (state.saved ?? [])
     .map((item) => item.waitDate)
@@ -836,12 +841,13 @@ function DemoClock({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const active = state.purchases.some(isActive)
-  async function set(body: object, done: string) {
+  async function set(body: object, done: string | ((next: AppState) => string)) {
     setBusy(true)
     setError('')
     try {
-      onUpdate((await api<AppState>('/demo-clock', body)) as AppState)
-      onToast(done)
+      const next = (await api<AppState>('/demo-clock', body)) as AppState
+      onUpdate(next)
+      onToast(typeof done === 'string' ? done : done(next))
     } catch (failure) {
       setError((failure as Error).message)
     } finally {
@@ -858,37 +864,59 @@ function DemoClock({
   return (
     <>
       <p className="meta">
-        Moves only Maya’s sample plan, so a demo can show a return visit on a plan’s date. Your own
-        data never uses it.{' '}
+        Moves only {name}’s sample plan, so a demo can show a return visit on a plan’s date. Your
+        own data never uses it.{' '}
         {state.demoClock
-          ? `Maya’s day is ${fullDate(state.today)}.`
-          : 'Maya’s day follows today’s date.'}
+          ? `${name}’s day is ${fullDate(state.today)}.`
+          : `${name}’s day follows today’s date.`}
       </p>
       <div className="actions" style={{ marginTop: 12 }}>
-        <Button
-          variant="secondary"
-          disabled={busy || active}
-          onClick={() =>
-            void set({ preset: 'video' }, 'Showing the video scenario: Maya on Sat, Oct 3, 2026.')
-          }
-        >
-          Video replay · Sat, Oct 3, 2026
-        </Button>
-        {state.demoClock && (
+        {alex ? (
+          <>
+            <Button
+              variant="secondary"
+              disabled={busy || active}
+              onClick={() => void set({ preset: 'demo' }, replayToast)}
+            >
+              Sample day · {sampleDate(DEMO_PRESET_DAYS.demo)}
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={busy || active}
+              onClick={() => void set({ preset: 'demo-dec15' }, replayToast)}
+            >
+              Return visit · {sampleDate(DEMO_PRESET_DAYS['demo-dec15'])}
+            </Button>
+          </>
+        ) : (
+          <Button
+            variant="secondary"
+            disabled={busy || active}
+            onClick={() => void set({ preset: 'video' }, replayToast)}
+          >
+            Video replay · {sampleDate(DEMO_PRESET_DAYS.video)}
+          </Button>
+        )}
+        {/* Alex's dates are fixed, so his pinned days have nowhere else to go back to. */}
+        {state.demoClock && !pinnedSample(state) && (
           <Button
             variant="text"
             disabled={busy || active}
             onClick={() =>
-              void set({ preset: 'today' }, 'Maya’s sample plan is back on today’s date.')
+              void set({ preset: 'today' }, (next) =>
+                next.demoClock
+                  ? `${next.profile.name}’s sample is back on ${sampleDate(next.today)}.`
+                  : `${next.profile.name}’s sample plan is back on today’s date.`,
+              )
             }
           >
-            Back to today
+            {alex ? 'Back to the sample day' : 'Back to today'}
           </Button>
         )}
       </div>
       <div style={{ marginTop: 12 }}>
         <DateStepper
-          label="Move Maya’s day to"
+          label={`Move ${name}’s day to`}
           value={date < from ? from : date}
           min={from}
           max={addDays(from, 60)}
@@ -900,9 +928,9 @@ function DemoClock({
             variant="secondary"
             icon={Clock}
             disabled={busy || active}
-            onClick={() => void set({ date }, `Maya’s day is now ${dayLabel(date)}.`)}
+            onClick={() => void set({ date }, `${name}’s day is now ${dayLabel(date)}.`)}
           >
-            Set Maya’s day
+            Set {name}’s day
           </Button>
         </div>
       </div>
@@ -1084,8 +1112,8 @@ export function Settings({
               </p>
             )}
           </section>
-          {/* The replay is reached only from the README's ?replay=video link, so its controls show
-              only while it runs. */}
+          {/* The clock's controls show only while a sample day is pinned: always for Alex, and for
+              Maya only after a ?replay= link. */}
           {state.demoClock && (
             <section className="tile" aria-labelledby="set-clock">
               <div className="sec-head">

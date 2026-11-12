@@ -108,7 +108,7 @@ export function PlanWizard({
   const mutating = useRef(false)
   const completedPurchases = state.purchases.filter((p) => p.status === 'completed')
   const activeCheckout = state.purchases.some(isActive)
-  // The demo clock replays Maya's sample plan as it is; the server refuses edits while it runs.
+  // The demo clock replays the sample plan as it is; the server refuses edits while it runs.
   const clockOn = Boolean(state.demoClock)
   const locked = busy || activeCheckout || clockOn
   const current = STEPS[step]!

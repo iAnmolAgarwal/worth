@@ -7,6 +7,7 @@ import { api, ApiError } from './api'
 import { connectAvailable, ConnectOnCheck } from './ConnectPayPal'
 import { Decision, EditPurchase, type DecisionRequest } from './Decision'
 import { dayLabel, money } from './format'
+import { replayToast } from './copy'
 import type { PayPalSdkInstance } from './paypalSdk'
 import { Alert, Button } from './ui'
 
@@ -207,7 +208,7 @@ export function Check({
         shown = result.quote
         rememberQid(result.quote.qid)
         if (result.state) onUpdate(result.state)
-        if (result.replay) onToast('Showing the video scenario: Maya on Sat, Oct 3, 2026.')
+        if (result.replay && result.state) onToast(replayToast(result.state))
         setView({ kind: 'ok', quote: result.quote })
       })
       .catch((error) => !cancelled && setView(failure(error)))

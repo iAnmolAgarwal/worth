@@ -8,26 +8,16 @@ import {
   createCameraScenario,
   createDemoState,
   DEMO_MERCHANT,
+  DEMO_PRESET_DAYS,
   DEMO_PRESETS,
   PRODUCTS,
 } from '../shared/seed.ts'
-import type { DemoPreset, Purchase, SamplePersona, SavedItem } from '../shared/types.ts'
+import type { Purchase, SamplePersona, SavedItem } from '../shared/types.ts'
 import type { SessionData } from './store.ts'
 
-/**
- * The day the contest video was recorded. Pinning the synthetic persona to it reproduces the
- * video exactly: rent on Fri Oct 16, wait until Fri Oct 23, buy-today low −$458.99 on Thu Oct 22.
- */
-export const VIDEO_REPLAY_DAY = '2026-10-03'
+export { VIDEO_REPLAY_DAY } from '../shared/seed.ts'
 /** How far the clock may move past the sample plan's funds date: the comparison window. */
 export const DEMO_CLOCK_MAX_DAYS = 60
-/** The day each pinned preset shows. */
-export const DEMO_PRESET_DAYS: Record<DemoPreset, string> = {
-  video: VIDEO_REPLAY_DAY,
-  demo: ALEX_DEMO_DAY,
-  'demo-dec15': ALEX_RETURN_DAY,
-}
-
 /** A new session's sample plan: Alex on the pinned demo day, or Maya on the viewer's today. */
 export function sampleSession(
   persona: SamplePersona,
