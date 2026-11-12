@@ -174,7 +174,7 @@ const REJECTED: Record<string, string> = {
 }
 
 function readSource(read: NonNullable<AnswerTrace['read']>) {
-  if (read.source === 'catalog') return `${read.store ?? 'Store'} price`
+  if (read.source === 'catalog') return 'listed price'
   if (read.source === 'earlier') return 'earlier in this chat'
   return 'your words'
 }

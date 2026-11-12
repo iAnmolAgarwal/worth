@@ -324,7 +324,7 @@ describe('the item a screen offers the panel', () => {
     expect(requests[0]!.context).toBeUndefined()
   })
 
-  it('is offered by Decision with the item, store and verdict while it is on screen', async () => {
+  it('is offered by Decision with the item and verdict, naming no store, while it is on screen', async () => {
     const state = makeState()
     apiMock.mockImplementation(((_path: string, data: unknown) =>
       Promise.resolve(compare(state, data))) as never)
@@ -346,7 +346,7 @@ describe('the item a screen offers the panel', () => {
       expect(onOffer).toHaveBeenLastCalledWith({
         itemName: 'Everyday camera',
         amountCents: 119900,
-        store: PRODUCTS.find((p) => p.id === 'camera')!.merchant,
+        store: undefined,
         verdict: offerVerdict(c),
       }),
     )

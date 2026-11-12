@@ -107,7 +107,8 @@ describe('the Decision page header (feedback 2)', () => {
     show({ productId: 'camera' })
     await screen.findByRole('heading', { level: 1 })
     expect(rail().getByText('Everyday camera')).toBeTruthy()
-    expect(rail().getByText(/^Sold by Larkspur Supply · demo.store$/)).toBeTruthy()
+    // Reached inside Worth, a listed item has no seller line: Worth never names the demo store.
+    expect(rail().queryByText(/Sold by|demo.store|Larkspur/)).toBeNull()
     expect(rail().getByText('$1,199.00')).toBeTruthy()
     expect(rail().getByText('· today')).toBeTruthy()
     expect(screen.getAllByRole('button', { name: 'Not right? Edit' })).toHaveLength(1)
@@ -118,7 +119,7 @@ describe('the Decision page header (feedback 2)', () => {
     show({ amountCents: 119900, itemName: 'camera' })
     await screen.findByRole('heading', { level: 1 })
     const card = rail().getByText('camera').closest('.tile') as HTMLElement
-    expect(within(card).getByText('Checkout is for demo store items')).toBeTruthy()
+    expect(within(card).queryByText(/demo store/)).toBeNull()
     expect(within(card).getByText('$1,199.00')).toBeTruthy()
     expect(within(card).getByText('· today')).toBeTruthy()
     expect(within(card).getByRole('button', { name: 'Not right? Edit' })).toBeTruthy()
@@ -157,7 +158,7 @@ describe('the Decision page header (feedback 2)', () => {
     const row = container.querySelector('.item-row') as HTMLElement
     expect(row.compareDocumentPosition(verdict) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(within(row).getByText('Everyday camera')).toBeTruthy()
-    expect(row.querySelector('.meta')!.textContent).toBe('$1,199.00 · Larkspur Supply · today')
+    expect(row.querySelector('.meta')!.textContent).toBe('$1,199.00 · today')
     expect(within(row).getByRole('button', { name: 'Not right? Edit' })).toBeTruthy()
     expect(container.querySelector('.decision-rail .product')).toBeNull()
     expect(screen.getAllByRole('button', { name: 'Not right? Edit' })).toHaveLength(1)

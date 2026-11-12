@@ -77,7 +77,7 @@ export function planDates(plan: Pick<DraftPlan, 'lastDate' | 'left'>, today: str
 }
 
 /**
- * "Larkspur Supply · Headphones · Pay in 4": the store, then the item when the export names it, or a
+ * "Brightline Audio · Headphones · Pay in 4": the store, then the item when the export names it, or a
  * neutral name when the purchase isn't in the file.
  */
 export const planName = (plan: Pick<DraftPlan, 'merchant' | 'title'>) =>

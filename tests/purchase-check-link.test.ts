@@ -13,7 +13,8 @@ import { createDemoState, PRODUCTS } from '../shared/seed.ts'
 import type { AppState, FinancialProfile, Purchase } from '../shared/types.ts'
 
 // Decision 0.2: Ask Worth never prepares an order. When the person wants to buy a catalog item,
-// Claude's open_store_checkout links to the store's own page, next to Worth's verdict.
+// Claude's open_purchase_check links to Worth's own comparison, next to Worth's verdict. The demo
+// store is never named or linked (final-day plan §0), even with the store hand-off on.
 
 const TODAY = '2026-10-03'
 const STORE = 'https://store.example'
@@ -62,7 +63,7 @@ function fakePayPal() {
   }
   return { gateway, orders }
 }
-/** Every PayPal call the gateway can make; Ask Worth's store link makes none of them. */
+/** Every PayPal call the gateway can make; Ask Worth's comparison link makes none of them. */
 const paypalCalls = (gateway: PayPalGateway) =>
   [gateway.create, gateway.get, gateway.capture, gateway.getRefund, gateway.eligibility].reduce(
     (count, fn) => count + vi.mocked(fn).mock.calls.length,
@@ -72,7 +73,7 @@ const paypalCalls = (gateway: PayPalGateway) =>
 type Block = Record<string, unknown>
 let toolId = 0
 function open(input: Record<string, unknown>): Block[] {
-  return [{ type: 'tool_use', id: `tool-${++toolId}`, name: 'open_store_checkout', input }]
+  return [{ type: 'tool_use', id: `tool-${++toolId}`, name: 'open_purchase_check', input }]
 }
 const final = (intent = 'affordability'): Block[] => [
   { type: 'text', text: JSON.stringify({ intent, follow_ups: [] }) },
@@ -120,16 +121,15 @@ const chat = (agent: Agent, message: string) => post(agent, '/api/chat', { messa
 const sentTools = (create: ReturnType<typeof setup>['create']) =>
   (create.mock.calls[0] as unknown as [{ tools: Anthropic.Tool[] }])[0].tools
 
-describe('open_store_checkout through the chat loop', () => {
-  it('links to the store’s own page for the item, with the verdict, and calls PayPal for nothing', async () => {
+describe('open_purchase_check through the chat loop', () => {
+  it('links to Worth’s own comparison for the item, with the verdict, and calls PayPal for nothing', async () => {
     const { agent, gateway } = setup([open({ item_id: 'headphones' })])
     await plan(agent)
-    const reply = await chat(agent, 'Buy the headphones for me')
+    const reply = await chat(agent, 'Go ahead and buy the studio headphones')
     expect(reply.status).toBe(200)
     // Fits today, so there is no wait date to repeat next to the link.
-    expect(reply.body.storeLink).toEqual({
-      url: `${STORE}/p/headphones`,
-      merchant: 'Larkspur Supply',
+    expect(reply.body.checkLink).toEqual({
+      href: '#decision?product=headphones',
       itemName: 'Studio headphones',
       amountCents: 34900,
     })
@@ -138,18 +138,20 @@ describe('open_store_checkout through the chat loop', () => {
       verdict: expect.any(String),
       assessment: { itemName: 'Studio headphones', amountCents: 34900, outcome: 'fits' },
     })
-    expect(reply.body.toolCalls).toContain('open_store_checkout')
+    expect(reply.body.toolCalls).toContain('open_purchase_check')
     expect(reply.body.checkout).toBeUndefined()
     expect(reply.body.message).not.toMatch(/prepared|order/i)
-    expect(reply.body.trace.tools).toContainEqual({ name: 'open_store_checkout', outcome: 'ran' })
+    expect(reply.body.trace.tools).toContainEqual({ name: 'open_purchase_check', outcome: 'ran' })
     expect(reply.body.trace.guards.map((g: { id: string }) => g.id)).toEqual([
       'verdict_template',
       'catalog_item',
       'catalog_price',
       'no_order',
-      'store_link',
+      'comparison_link',
     ])
     expect(reply.body.trace.guards.every((g: { passed: boolean }) => g.passed)).toBe(true)
+    // The store hand-off is on here, and still no store name or address reaches the answer.
+    expect(JSON.stringify(reply.body)).not.toMatch(/Larkspur|store\.example|\/p\/headphones/)
     expect(paypalCalls(gateway)).toBe(0)
     expect(((await agent.get('/api/state')).body as AppState).purchases).toEqual([])
   })
@@ -170,12 +172,15 @@ describe('open_store_checkout through the chat loop', () => {
     }
     await plan(agent, { balanceCents: 150000, flows: [paycheck] })
     const reply = await chat(agent, 'Buy the camera')
-    expect(reply.body.storeLink).toMatchObject({ url: `${STORE}/p/camera`, waitDate: '2026-10-09' })
+    expect(reply.body.checkLink).toMatchObject({
+      href: '#decision?product=camera',
+      waitDate: '2026-10-09',
+    })
     expect(reply.body.assessment).toMatchObject({ amountCents: 119900, outcome: 'tight' })
     expect(paypalCalls(gateway)).toBe(0)
   })
 
-  it('shows the verdict only, with no link, while the store hand-off is off', async () => {
+  it('links to the same comparison with the store hand-off off', async () => {
     const { agent, gateway } = setup([open({ item_id: 'headphones' })], {
       handoffSecret: undefined,
       merchantOrigin: undefined,
@@ -183,19 +188,9 @@ describe('open_store_checkout through the chat loop', () => {
     await plan(agent)
     const reply = await chat(agent, 'Buy the headphones')
     expect(reply.status).toBe(200)
-    expect(reply.body.storeLink).toBeUndefined()
+    expect(reply.body.checkLink.href).toBe('#decision?product=headphones')
     expect(reply.body.assessment).toMatchObject({ itemName: 'Studio headphones' })
-    expect(reply.body.trace.guards.map((g: { id: string }) => g.id)).not.toContain('store_link')
-    expect(JSON.stringify(reply.body)).not.toContain('/p/headphones')
     expect(paypalCalls(gateway)).toBe(0)
-  })
-
-  it('carries the video replay over to the store page on the sample persona', async () => {
-    const { agent } = setup([open({ item_id: 'camera' })])
-    expect((await post(agent, '/api/demo-clock', { preset: 'video' })).status).toBe(200)
-    expect((await post(agent, '/api/consent', { aiConsent: true })).status).toBe(200)
-    const reply = await chat(agent, 'Buy the camera')
-    expect(reply.body.storeLink.url).toBe(`${STORE}/p/camera?replay=video`)
   })
 
   it('takes no price, store or link from the model', async () => {
@@ -205,7 +200,7 @@ describe('open_store_checkout through the chat loop', () => {
     ])
     await plan(agent)
     const reply = await chat(agent, 'Buy the camera for $1')
-    expect(reply.body.storeLink).toBeUndefined()
+    expect(reply.body.checkLink).toBeUndefined()
     expect(JSON.stringify(reply.body)).not.toContain('evil.example')
     expect(create).toHaveBeenCalledTimes(2)
     expect(paypalCalls(gateway)).toBe(0)
@@ -215,9 +210,9 @@ describe('open_store_checkout through the chat loop', () => {
     const { agent } = setup([[...open({ item_id: 'headphones' }), ...open({ item_id: 'camera' })]])
     await plan(agent)
     const reply = await chat(agent, 'Buy the headphones')
-    expect(reply.body.storeLink.url).toBe(`${STORE}/p/headphones`)
+    expect(reply.body.checkLink.href).toBe('#decision?product=headphones')
     expect(reply.body.trace.tools).toContainEqual({
-      name: 'open_store_checkout',
+      name: 'open_purchase_check',
       outcome: 'refused',
     })
   })
@@ -227,25 +222,23 @@ describe('open_store_checkout through the chat loop', () => {
     await plan(agent, { aiConsent: false })
     const reply = await chat(agent, 'Buy the headphones')
     expect(reply.body.mode).toBe('demo')
-    expect(reply.body.storeLink).toBeUndefined()
+    expect(reply.body.checkLink).toBeUndefined()
     expect(create).not.toHaveBeenCalled()
     expect(paypalCalls(gateway)).toBe(0)
   })
 
-  it('offers open_store_checkout with only an item, and no tool that prepares an order', async () => {
+  it('offers open_purchase_check with only an item, naming no store, and no tool that prepares an order', async () => {
     const { agent, create } = setup([final('overview')])
     await plan(agent)
     await chat(agent, 'Hello')
     const tools = sentTools(create)
     expect(tools.map((t) => t.name)).not.toContain('prepare_checkout')
-    const tool = tools.find((t) => t.name === 'open_store_checkout')!
+    expect(tools.map((t) => t.name)).not.toContain('open_store_checkout')
+    const tool = tools.find((t) => t.name === 'open_purchase_check')!
     expect(Object.keys(tool.input_schema.properties as object)).toEqual(['item_id'])
-    expect(tool.description).toMatch(/Worth sells nothing, prepares no order and takes no payment/)
-    // Offered with the hand-off off too: the verdict still answers, only the link is missing.
-    const off = setup([final('overview')], { handoffSecret: undefined, merchantOrigin: undefined })
-    await plan(off.agent)
-    await chat(off.agent, 'Hello')
-    expect(sentTools(off.create).map((t) => t.name)).toContain('open_store_checkout')
+    expect(tool.description).toMatch(/Worth prepares no order and takes no payment/)
+    const request = create.mock.calls[0] as unknown as [{ system: { text: string }[] }]
+    expect(JSON.stringify([tools, request[0].system])).not.toMatch(/Larkspur|demo store/i)
   })
 })
 

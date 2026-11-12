@@ -308,7 +308,7 @@ describe('the collision, surfaced (judge #7)', () => {
 })
 
 describe('how Ask Worth read this (judge #5)', () => {
-  it('shows the store price as the source for a catalog item', async () => {
+  it('shows the listed price as the source for a catalog item, naming no store', async () => {
     const { provider } = model([
       interpret({
         items: [{ name: 'camera', amount_cents: null, currency: 'USD', quantity: 1 }],
@@ -321,8 +321,8 @@ describe('how Ask Worth read this (judge #5)', () => {
       item: 'Everyday camera',
       amountCents: 119900,
       source: 'catalog',
-      store: 'Larkspur',
     })
+    expect(JSON.stringify(reply)).not.toMatch(/Larkspur/)
     expect(reply.trace!.tools).toEqual([{ name: 'interpret_purchase', outcome: 'ran' }])
     expect(reply.trace!.reader).toBe('claude')
   })
@@ -373,19 +373,21 @@ describe('how Ask Worth read this (judge #5)', () => {
     expect(reply.explanation).toBeUndefined()
   })
 
-  it('lists the store link’s checks: catalog item and price, no order, the store’s own page', async () => {
-    const { provider } = model([tool('open_store_checkout', { item_id: 'headphones' }), note(null)])
-    const storeProductUrl = vi.fn((id: string) => `https://store.example/p/${id}`)
+  it('lists the comparison link’s checks: catalog item and price, no order, Worth’s own screen', async () => {
+    const { provider } = model([tool('open_purchase_check', { item_id: 'headphones' }), note(null)])
+    const purchaseCheckLink = vi.fn((id: string) => `#decision?product=${id}`)
     const reply = await provider.reply(ask('Buy the studio headphones now'), demo(), {
-      storeProductUrl,
+      purchaseCheckLink,
     })
-    expect(storeProductUrl).toHaveBeenCalledWith('headphones')
-    expect(reply.trace!.tools).toContainEqual({ name: 'open_store_checkout', outcome: 'ran' })
-    const ids = ['catalog_item', 'catalog_price', 'no_order', 'store_link']
+    expect(purchaseCheckLink).toHaveBeenCalledWith('headphones')
+    expect(reply.trace!.tools).toContainEqual({ name: 'open_purchase_check', outcome: 'ran' })
+    const ids = ['catalog_item', 'catalog_price', 'no_order', 'comparison_link']
     const guards = reply.trace!.guards.filter((g) => ids.includes(g.id))
     expect(guards.map((g) => g.id)).toEqual(ids)
     expect(guards.every((g) => g.passed)).toBe(true)
-    expect(reply.storeLink).toMatchObject({ url: 'https://store.example/p/headphones' })
+    expect(reply.checkLink).toMatchObject({ href: '#decision?product=headphones' })
+    // No store name or store address anywhere in the answer or its trace.
+    expect(JSON.stringify(reply)).not.toMatch(/Larkspur|store\.example|\/p\/headphones/)
   })
 
   it('keeps hidden control and direction characters in an item name away from Claude', async () => {

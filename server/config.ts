@@ -3,6 +3,9 @@ import type { SamplePersona } from '../shared/types.ts'
 
 type Env = Record<string, string | undefined>
 
+/** The default payee for Worth's own sandbox checkout (PAYPAL_BRAND_NAME). */
+export const SANDBOX_PAYEE = 'Sandbox demo merchant'
+
 export interface AppConfig {
   /** Public browser origin. PayPal returns here and state-changing requests must come from it. */
   origin: string
@@ -31,6 +34,11 @@ export interface AppConfig {
   paypalClientId?: string
   paypalSecret?: string
   paypalWebhookId?: string
+  /**
+   * The payee name PayPal's approval page and Activity show for Worth's own sandbox checkout
+   * (PAYPAL_BRAND_NAME). A neutral sandbox merchant, never a real or demo store's name.
+   */
+  paypalBrandName: string
   /**
    * Allows the sandbox decline demo (`PayPal-Mock-Response: INSTRUMENT_DECLINED` on capture). On by
    * default in development; production needs PAYPAL_NEGATIVE_TESTING=true.
@@ -194,6 +202,7 @@ export function loadConfig(env: Env = process.env, overrides: Partial<AppConfig>
       'paypalClientId' in overrides ? overrides.paypalClientId : setting(env, 'PAYPAL_CLIENT_ID'),
     ),
     paypalMcpClientId: setting(env, 'PAYPAL_MCP_CLIENT_ID'),
+    paypalBrandName: (setting(env, 'PAYPAL_BRAND_NAME') ?? SANDBOX_PAYEE).slice(0, 127),
     contentSecurityPolicy: production,
     anthropicKey: setting(env, 'ANTHROPIC_API_KEY'),
     anthropicModel: setting(env, 'ANTHROPIC_MODEL') ?? 'claude-sonnet-5-5',

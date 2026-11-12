@@ -80,7 +80,7 @@ describe('the bundled sample PayPal export', () => {
     ).toEqual([
       ['Northline Outfitters', 'Running shoes', 18000, 4500],
       ['PayPal Pay in 4', undefined, null, 6250],
-      ['Larkspur Supply', 'Headphones', 29988, 7497],
+      ['Brightline Audio', 'Headphones', 29988, 7497],
     ])
     // Everyday spending leaves out the repeats and the plans.
     expect(preview.suggestedDailySpendCents).toBeGreaterThan(2000)
@@ -117,9 +117,9 @@ describe('the bundled sample PayPal export', () => {
       const flows = plans
         .map((plan) => (plan.merchant ? plan : { ...plan, left: 0 }))
         .flatMap((plan) => planFlows(plan, today))
-      const larkspur = flows.filter((flow) => flow.name.startsWith('Larkspur Supply'))
-      // Rent from the bank, due the day before Larkspur's next payment.
-      const due = { ...rent, nextDate: addDays(larkspur[0]!.nextDate, -1) }
+      const brightline = flows.filter((flow) => flow.name.startsWith('Brightline Audio'))
+      // Rent from the bank, due the day before Brightline's next payment.
+      const due = { ...rent, nextDate: addDays(brightline[0]!.nextDate, -1) }
       const pay = preview.recurring.find((flow) => flow.kind === 'income')!
       expect(pay.nextDate < due.nextDate).toBe(true)
       const profile = {
@@ -133,7 +133,7 @@ describe('the bundled sample PayPal export', () => {
       expect(room.spendLess.maxPriceCents).toBeLessThanOrEqual(60000)
       const notes = planCollisions(profile, [], today).filter(({ bill }) => bill.kind === 'bill')
       expect(notes).toHaveLength(1)
-      expect(notes[0]!.payment).toMatchObject({ date: larkspur[0]!.nextDate, amountCents: 7497 })
+      expect(notes[0]!.payment).toMatchObject({ date: brightline[0]!.nextDate, amountCents: 7497 })
       expect(dayPhrase(notes[0]!.bill.daysFromInstalment, notes[0]!.bill.name)).toBe(
         'the day after Maple Court rent',
       )
@@ -150,10 +150,10 @@ describe('the review draft', () => {
     expect(plans.map(({ merchant, seen, left }) => [merchant, seen, left])).toEqual([
       ['Northline Outfitters', 3, 1],
       [null, 2, undefined],
-      ['Larkspur Supply', 2, 2],
+      ['Brightline Audio', 2, 2],
     ])
-    const larkspur = plans[2]!
-    expect(planDates(larkspur, TODAY)).toEqual(['2026-10-23', '2026-11-06'])
+    const brightline = plans[2]!
+    expect(planDates(brightline, TODAY)).toEqual(['2026-10-23', '2026-11-06'])
     // A plan whose payments are all in the file is done.
     const done = draftPlans([
       {
@@ -165,17 +165,17 @@ describe('the review draft', () => {
   })
 
   it('turns plans into payments from PayPal, none when left out or all paid', () => {
-    const [northline, undated, larkspur] = draftPlans(preview.instalmentPlans)
-    expect(planFlows(larkspur!, TODAY)).toMatchObject([
+    const [northline, undated, brightline] = draftPlans(preview.instalmentPlans)
+    expect(planFlows(brightline!, TODAY)).toMatchObject([
       {
-        name: 'Larkspur Supply · Headphones · Pay in 4',
+        name: 'Brightline Audio · Headphones · Pay in 4',
         amountCents: 7497,
         nextDate: '2026-10-23',
         origin: 'paypal',
         planTotalCents: 29988,
       },
       {
-        name: 'Larkspur Supply · Headphones · Pay in 4',
+        name: 'Brightline Audio · Headphones · Pay in 4',
         amountCents: 7497,
         nextDate: '2026-11-06',
         origin: 'paypal',
@@ -198,7 +198,7 @@ describe('the review draft', () => {
     expect(kept[0]).toBe(rent)
   })
 
-  it('runs planCollisions on the draft: Larkspur’s payment 3 lands the day after rent', () => {
+  it('runs planCollisions on the draft: Brightline’s payment 3 lands the day after rent', () => {
     const plans = draftPlans(preview.instalmentPlans).map((plan) =>
       plan.merchant ? plan : { ...plan, left: 0 },
     )

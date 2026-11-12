@@ -519,7 +519,7 @@ function PayIn4Panel({
           </Alert>
         )}
         {/* Mounted only when opened, so PayPal is asked for terms only on request. */}
-        {/* PayPal's message is Worth's demo store's own offer, so it shows only for its items. */}
+        {/* PayPal's message is for Worth's own sandbox checkout, so it shows only for its items. */}
         {open && !c.source && <PayPalMessage instance={instance} amountCents={c.amountCents} />}
         <p className="caption">
           {PAY_IN_4_DATES_NOTE} PayPal sets the exact terms at checkout. Pay in 4 is shown for
@@ -618,7 +618,8 @@ export function Decision({
         : { itemName: c.itemName, amountCents: c.amountCents, maxPriceCents: cheaperLimit }
       : null,
   )
-  const store = handoff?.merchant ?? product?.merchant
+  // A store is named only when the person came from it (a verified hand-off) or pasted its link.
+  const store = handoff?.merchant ?? c?.source?.merchantName
   useEffect(() => {
     if (!onOffer || !c) return
     onOffer({
@@ -761,7 +762,7 @@ export function Decision({
       )}
       {anyway && (
         <Button variant="text" onClick={() => setConfirmBuy(true)}>
-          {/* Next to other stores' items, the action names the demo store's own product. */}
+          {/* Next to other stores' items, the action names Worth's own listed product. */}
           {selected === 'spendLess'
             ? `Buy the ${lowerName(product!.name)} anyway`
             : 'Buy today anyway'}
@@ -846,9 +847,6 @@ export function Decision({
                 <img src={product!.image} alt={product!.name} />
                 <div>
                   <div className="pt">{product!.name}</div>
-                  <div className="meta">
-                    Sold by {product!.merchant} · demo{'\u00a0'}store
-                  </div>
                   <div className="num strong" style={{ fontWeight: 700, marginTop: 4 }}>
                     {money(bought.amountCents)}
                   </div>
@@ -917,12 +915,12 @@ export function Decision({
         name: product?.name ?? c.itemName,
         amountCents: c.amountCents,
         image: product?.image,
-        seller: product
-          ? `Sold by ${product.merchant} · demo\u00a0store`
-          : c.source
+        // Items reached inside Worth carry no seller line; only a pasted link names its store.
+        seller:
+          !product && c.source
             ? `At ${c.source.merchantName} · ${c.source.priceSource === 'channel3' ? 'price read by Channel3, confirmed by you' : 'price you entered'}`
-            : 'Checkout is for demo store items',
-        store: product?.merchant ?? c.source?.merchantName,
+            : undefined,
+        store: product ? undefined : c.source?.merchantName,
         when: 'today',
         edit,
         editor: editing ? (
@@ -1209,8 +1207,8 @@ interface ItemView {
   name: string
   amountCents: number
   image?: string
-  /** Under the name in the rail's card. */
-  seller: string
+  /** Under the name in the rail's card: the store, only after a hand-off or a pasted link. */
+  seller?: string
   /** After the price in the compact row. */
   store?: string
   /** When it would be bought, as Worth read it. */
@@ -1257,7 +1255,7 @@ function ItemCard({ item, compact }: { item: ItemView; compact?: boolean }) {
         {item.image && <img src={item.image} alt={item.name} />}
         <div>
           <div className="pt">{item.name}</div>
-          <div className="meta">{item.seller}</div>
+          {item.seller && <div className="meta">{item.seller}</div>}
           <div className="price-row">
             <span>
               <span className="num strong">{money(item.amountCents)}</span>

@@ -132,6 +132,11 @@ export interface GatewayConfig {
    * the demo store passes its product page.
    */
   returnUrl?: (purchase: OrderSource, result: 'approved' | 'cancelled') => string
+  /**
+   * The payee PayPal's approval page names (PAYPAL_BRAND_NAME). Worth's own checkout passes a
+   * neutral sandbox merchant; without it, the demo store's orders name the store itself.
+   */
+  brandName?: string
   /** Injected in tests; defaults to the global fetch. */
   fetch?: typeof fetch
   /** Receives PayPal debug IDs for failed calls. Never request bodies or credentials. */
@@ -382,9 +387,13 @@ export function createPayPalGateway(config: GatewayConfig): PayPalGateway {
   return {
     create(purchase) {
       const value = (purchase.amountCents / 100).toFixed(2)
-      // The payee is the store, not Worth: PayPal's approval page names the demo store the sandbox
-      // merchant stands in for, so Worth never looks like the seller.
+      // The payee is never Worth. Worth's own checkout names a neutral sandbox merchant; the demo
+      // store's orders name the store, so Worth never looks like the seller either way.
       const store = PRODUCTS.find((p) => p.id === purchase.productId)?.merchant ?? DEMO_MERCHANT
+      const payee = config.brandName ?? `${store} (demo store)`
+      const description = config.brandName
+        ? `${purchase.name} (PayPal sandbox)`
+        : `${purchase.name} from ${store} (sandbox demo store)`
       return request<PayPalOrder>('/v2/checkout/orders', {
         method: 'POST',
         requestId: `create-${purchase.id}`,
@@ -396,7 +405,7 @@ export function createPayPalGateway(config: GatewayConfig): PayPalGateway {
               custom_id: purchase.id,
               // PayPal refuses a second payment for the same invoice ID.
               invoice_id: purchase.id,
-              description: `${purchase.name} from ${store} (sandbox demo store)`.slice(0, 127),
+              description: description.slice(0, 127),
               amount: {
                 currency_code: 'USD',
                 value,
@@ -416,7 +425,7 @@ export function createPayPalGateway(config: GatewayConfig): PayPalGateway {
           payment_source: {
             paypal: {
               experience_context: {
-                brand_name: `${store} (demo store)`.slice(0, 127),
+                brand_name: payee.slice(0, 127),
                 user_action: 'CONTINUE',
                 shipping_preference: 'NO_SHIPPING',
                 return_url: returnTo(purchase, 'approved'),

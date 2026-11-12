@@ -166,7 +166,7 @@ describe('saved items on the server', () => {
     const prepared = await post(agent, `/api/saved/${custom.body.item.id}/prepare`)
     expect(prepared.status).toBe(409)
     expect(prepared.body).toMatchObject({ code: 'NOT_IN_STORE' })
-    expect(prepared.body.error).toContain('Assessment only — not sold in the demo store')
+    expect(prepared.body.error).toContain('Assessment only — no checkout in Worth')
     expect(paypal!.create).not.toHaveBeenCalled()
     expect((await state(agent)).purchases).toEqual([])
   })
@@ -292,7 +292,7 @@ describe('acceptance case 21: a saved wait plan, checked on return', () => {
           {
             type: 'tool_use',
             id: 'tool-1',
-            name: 'open_store_checkout',
+            name: 'open_purchase_check',
             input: { item_id: 'camera' },
           },
         ],
@@ -332,7 +332,7 @@ describe('acceptance case 21: a saved wait plan, checked on return', () => {
       context: { amountCents: 119900, itemName: 'Everyday camera' },
     })
     expect(chat.status).toBe(200)
-    expect(chat.body.toolCalls).toContain('open_store_checkout')
+    expect(chat.body.toolCalls).toContain('open_purchase_check')
     expect(chat.body.checkout).toBeUndefined()
     expect(paypal!.create).not.toHaveBeenCalled()
     expect((await state(agent)).purchases).toEqual([])
