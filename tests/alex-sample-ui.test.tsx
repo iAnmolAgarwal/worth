@@ -6,6 +6,7 @@ import App from '../src/App'
 import { Settings } from '../src/Saved'
 import { api } from '../src/api'
 import { lowerName } from '../src/engine'
+import { payIn4Lines } from '../src/payIn4Text'
 import { compareOptions } from '../shared/finance'
 import { ALEX_DEMO_DAY, createCameraScenario, PRODUCTS } from '../shared/seed'
 import type { AppState, DemoPreset } from '../shared/types'
@@ -136,5 +137,22 @@ describe('lowerName keeps a plan payment in sentence case', () => {
     expect(lowerName('Halden X5 · Pay in 4 payment 2 of 4')).toBe(
       'Halden X5 · Pay in 4 payment 2 of 4',
     )
+  })
+})
+
+describe('the Pay in 4 card on Alex’s camera', () => {
+  it('names the first dip, the lowest point and the payment that sets it', () => {
+    const { profile } = createCameraScenario(ALEX_DEMO_DAY)
+    const c = compareOptions(profile, [], {
+      amountCents: 189900,
+      itemName: 'Halden X5',
+      today: ALEX_DEMO_DAY,
+      payIn4Eligible: true,
+    })
+    if (!c.payIn4.available) throw new Error('Pay in 4 is in range for $1,899')
+    expect(payIn4Lines(c.payIn4, c.cushionCents)).toEqual({
+      lead: 'With Pay in 4, your balance would first go below your cushion on Sun, Nov 29',
+      low: 'Lowest point $222.76 on Mon, Nov 30, before payday. Payment 2 ($474.75) lands Fri, Nov 27.',
+    })
   })
 })
