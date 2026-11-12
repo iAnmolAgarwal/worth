@@ -204,11 +204,14 @@ export function ConnectPayPalButton({
       role="group"
       aria-label="Connect PayPal"
     >
+      <p>
+        Sign in on PayPal and choose Agree. PayPal calls the connection “Default Application”.
+      </p>
       <p className="caption">
-        PayPal’s screen will name <b>“Default Application”</b> (PayPal’s MCP connector) and ask to
-        access your transaction data. Worth keeps the connection to refresh your activity, only ever
-        reads it, and can’t pay, invoice or move money. Disconnect in Settings. Sandbox accounts
-        only.
+        Worth only reads your activity to keep your plan up to date. It can’t pay or move money.
+      </p>
+      <p className="caption">
+        Sandbox accounts only. Disconnect any time in Settings.
       </p>
       <div className="connect-ask-actions">
         <Button

@@ -46,9 +46,12 @@ describe('Connect PayPal button', () => {
     expect(screen.queryByText(/Default Application/)).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Connect PayPal' }))
     const group = screen.getByRole('group', { name: 'Connect PayPal' })
-    expect(group.textContent).toContain('“Default Application”')
-    expect(group.textContent).toContain('access your transaction data')
-    expect(group.textContent).toContain('can’t pay, invoice or move money')
+    // Three short lines, each readable on its own.
+    expect([...group.querySelectorAll('p')].map((line) => line.textContent)).toEqual([
+      'Sign in on PayPal and choose Agree. PayPal calls the connection “Default Application”.',
+      'Worth only reads your activity to keep your plan up to date. It can’t pay or move money.',
+      'Sandbox accounts only. Disconnect any time in Settings.',
+    ])
     expect(screen.getByRole('button', { name: 'Continue to PayPal' })).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Not now' }))
     expect(screen.getByRole('button', { name: 'Connect PayPal' })).toBeTruthy()
