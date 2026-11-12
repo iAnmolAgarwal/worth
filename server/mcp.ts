@@ -767,7 +767,7 @@ export function buildMcpServer(ctx: McpContext, caller: Caller) {
           .number()
           .positive()
           .max(1_000_000)
-          .describe('The total price in US dollars, e.g. 1199 or 1199.00.'),
+          .describe('The total price in US dollars, e.g. 1899 or 1899.00.'),
         date: isoDate
           .optional()
           .describe(

@@ -178,7 +178,7 @@ export function ConnectAgent({
               whole snippet if the file is empty), then save and restart Claude Desktop. It needs
               Node.js 20 or later for <code>npx</code>.
             </li>
-            <li>Ask: “Can I afford the $1,199 camera?”</li>
+            <li>Ask: “Can I afford the $1,899 Halden X5?”</li>
           </ol>
           <pre className="code-block" tabIndex={0} aria-label="Claude Desktop configuration">
             <code>{desktopConfig(created.endpoint, created.token)}</code>
