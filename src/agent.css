@@ -407,20 +407,11 @@
   }
 }
 
-/* The way out is plain: a filled close button with its Escape key named beside it. */
+/* The way out is plain: a filled close button (Escape closes too). */
 .agent-close {
   display: flex;
   align-items: center;
   gap: var(--s-1);
-}
-.agent-close kbd {
-  font: inherit;
-  font-size: var(--fs-caption);
-  line-height: 1;
-  color: var(--c-text-2);
-  border: 1px solid var(--c-border-strong);
-  border-radius: var(--r-xs);
-  padding: 3px 5px;
 }
 .agent-close .icon-btn {
   width: 40px;
@@ -430,9 +421,4 @@
 }
 .agent-close .icon-btn:hover {
   background: var(--c-info);
-}
-@media (max-width: 767px) {
-  .agent-close kbd {
-    display: none;
-  }
 }

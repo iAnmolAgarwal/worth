@@ -596,16 +596,6 @@ describe('settings, demo clock and mobile reach', () => {
     expect(screen.queryByRole('button', { name: /Video replay/ })).toBeNull()
   })
 
-  it('offers no replay in the sample chip details', async () => {
-    const user = userEvent.setup()
-    const state = { ...makeState(), demoClock: undefined }
-    routeApi((path) => (path === '/compare' ? compare(state, { amountCents: 0 }) : state))
-    render(<App />)
-    await user.click(await screen.findByRole('button', { name: 'Sample: Maya' }))
-    expect(screen.getByRole('link', { name: 'About this demo' })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /video scenario/i })).toBeNull()
-  })
-
   it('puts Saved in the tab bar and starts the replay from ?replay=video', async () => {
     const state = makeState()
     const calls: string[] = []

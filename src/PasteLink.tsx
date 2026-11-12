@@ -272,11 +272,7 @@ function ConfirmForm({
           onChange={(e) => setItem(e.target.value)}
         />
       </Field>
-      <Field
-        label="Total price, USD"
-        hint="Check it on the store page: size, tax and shipping can change it."
-        error={error.amount}
-      >
+      <Field label="Total price, USD" error={error.amount}>
         <span className="money-input">
           <span aria-hidden="true">$</span>
           <input

@@ -62,7 +62,6 @@ describe('Alex, the default sample', () => {
     const state = alexState()
     routeApi((path, data) => (path === '/state' ? state : compare(state, data)))
     render(<App />)
-    expect(await screen.findByRole('button', { name: 'Sample: Alex' })).toBeTruthy()
     expect((await screen.findByText('Alex’s sample month')).parentElement!.textContent).toBe(
       'Alex’s sample month, as of Fri, Nov 13, 2026 (not today’s date).',
     )

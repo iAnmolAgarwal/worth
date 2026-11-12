@@ -28,7 +28,7 @@ import { api, ApiError } from './api'
 import { alternativeTarget, decisionRequestFrom } from './contract'
 import type { AppState, ChatReply, Comparison, SavePlan, SaveTarget } from './contract'
 import { SimilarItems } from './Alternatives'
-import { PayIn4Row, PayIn4Strip, TraceDetails } from './AskTrace'
+import { PayIn4Row, PayIn4Strip } from './AskTrace'
 import { ASSESSMENT_ONLY, claudeUses } from './copy'
 import { optionStatus, type DecisionRequest, type Explanation } from './Decision'
 import { claudeOn, envLabel, fits, missingFix, useComparison } from './engine'
@@ -1422,7 +1422,10 @@ function Answer({
         </button>
       )}
       {reply.trace ? (
-        <TraceDetails trace={reply.trace} answeredBy={entry.trace ?? traceText(reply, state)} />
+        // The caption that sat under "How Ask Worth read this", without the expander.
+        <div className="trace-box">
+          <span className="caption trace-by">{entry.trace ?? traceText(reply, state)}</span>
+        </div>
       ) : (
         <div className="trace">
           <ListChecks className="ico" aria-hidden="true" />

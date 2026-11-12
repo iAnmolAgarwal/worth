@@ -110,6 +110,9 @@ describe('pasting a product link in Ask Worth', () => {
       'value',
       '129.00',
     )
+    // The price field is plain: no helper line under it (user review).
+    expect(within(card).getByRole('textbox', { name: 'Total price, USD' })).toBeTruthy()
+    expect(card.textContent).not.toContain('size, tax and shipping')
   })
 
   it('opens the decision only after the shopper confirms, with Channel3 as the price source', async () => {
