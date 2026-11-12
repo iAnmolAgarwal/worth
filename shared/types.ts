@@ -70,6 +70,13 @@ export interface FinancialProfile {
    * they changed it. Absent on the sample and older records.
    */
   dailySpendOrigin?: 'paypal' | 'you'
+  /**
+   * Set by the server on each import: 'paypal' when the file is the very activity Connect PayPal
+   * read in this session, 'file' otherwise. Absent on the sample and older records.
+   */
+  importedFrom?: 'paypal' | 'file'
+  /** When that import was committed (ISO time). */
+  importedAt?: string
 }
 export interface Transaction {
   id: string

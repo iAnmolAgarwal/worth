@@ -384,6 +384,31 @@ describe('Connect PayPal login', () => {
     for (const secret of [TOKEN, REFRESH, CODE, state]) expect(logged).not.toContain(secret)
   })
 
+  it('marks an import of exactly the connected activity as from PayPal, any other file not', async () => {
+    const { agent, fake } = setup()
+    const { state } = await startLogin(agent, fake)
+    await agent.get(`/api/paypal/connect/callback?code=${CODE}&state=${state}`)
+    const read = await post(agent, '/api/paypal/activity')
+    const header = { 'X-Worth-Client': 'web' }
+    const own = await agent.post('/api/import/commit').set(header).send({ csv: read.body.csv })
+    expect(own.status).toBe(200)
+    expect(own.body.profile).toMatchObject({ source: 'import', importedFrom: 'paypal' })
+    expect(Date.parse(own.body.profile.importedAt)).not.toBeNaN()
+    // The profile's own save keeps the server's word, whatever the client sends.
+    const saved = await agent
+      .patch('/api/profile')
+      .set(header)
+      .send({ profile: { ...own.body.profile, importedFrom: 'file' } })
+    expect(saved.body.profile.importedFrom).toBe('paypal')
+    // Any other file, even one edited by a single character, is a file.
+    const edited = read.body.csv.replace(/\n$/, '') + '\n'
+    const other = await agent
+      .post('/api/import/commit')
+      .set(header)
+      .send({ csv: edited === read.body.csv ? `${edited} ` : edited })
+    expect(other.body.profile.importedFrom).toBe('file')
+  })
+
   it('refuses a callback from another session, and the state is single-use', async () => {
     const { app, agent, fake } = setup()
     const { state } = await startLogin(agent, fake)

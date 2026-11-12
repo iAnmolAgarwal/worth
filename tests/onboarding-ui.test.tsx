@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
@@ -452,28 +452,14 @@ describe('Start with your PayPal activity', () => {
     await waitFor(() => expect(onFile).toHaveBeenCalledWith({ csv: SAMPLE, name: 'Download.CSV' }))
   })
 
-  it('is one slim row under the hero: the actions first, the steps and privacy behind More', async () => {
+  it('opens the import step from the hero’s source row', async () => {
     const user = userEvent.setup()
-    const onFile = vi.fn()
-    renderHome(demoState(), { onImportFile: onFile })
+    const onNavigate = vi.fn()
+    renderHome(demoState(), { onNavigate })
     const hero = await screen.findByRole('region', { name: 'Safe to spend today' })
-    const card = screen.getByRole('region', { name: 'Start with your PayPal activity' })
-    expect(hero.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(within(card).getByText(/^This is Maya’s sample plan\./)).toBeTruthy()
-    expect(within(card).getByRole('button', { name: /Try a sample export/ })).toBeTruthy()
-    expect(within(card).getByLabelText('Choose your PayPal activity CSV')).toBeTruthy()
-    const how = card.querySelector('details')!
-    expect(how.open).toBe(false)
-    expect(within(how).getByText('More').closest('summary')).toBeTruthy()
-    expect(within(how).getAllByRole('listitem', { hidden: true })).toHaveLength(3)
-    expect(how.textContent).toContain('How to get the file from PayPal')
-    expect(how.textContent).toContain('Raw CSV files aren’t saved')
-    await user.click(within(how).getByText('More'))
-    expect(how.open).toBe(true)
-    // A CSV dropped anywhere on the card is read like a chosen one.
-    const file = new File([CSV], 'Download.CSV', { type: 'text/csv' })
-    fireEvent.drop(card, { dataTransfer: { files: [file] } })
-    await waitFor(() => expect(onFile).toHaveBeenCalledWith({ csv: CSV, name: 'Download.CSV' }))
+    expect(screen.queryByRole('region', { name: 'Start with your PayPal activity' })).toBeNull()
+    await user.click(within(hero).getByRole('button', { name: 'Import a file' }))
+    expect(onNavigate).toHaveBeenCalledWith('import')
   })
 
   it('opens the review at #import from the sample button in the app', async () => {
@@ -484,7 +470,8 @@ describe('Start with your PayPal activity', () => {
         path === '/state' ? state : path === '/import/preview' ? preview : compare(state),
       )) as typeof api)
     render(<App />)
-    await user.click(await screen.findByRole('button', { name: /Try a sample export/ }))
+    await user.click(await screen.findByRole('button', { name: 'Import a file' }))
+    await user.click(await screen.findByRole('button', { name: /Try with a sample PayPal export/ }))
     await waitFor(() => expect(window.location.hash).toBe('#import'))
     expect(await screen.findByRole('heading', { name: 'Check what Worth found' })).toBeTruthy()
     expect(await screen.findByText('Sample PayPal export (fictional)')).toBeTruthy()
@@ -520,7 +507,7 @@ describe('the month-led Home for imported PayPal activity', () => {
   it('leads with the month from PayPal, the next 30 days by week and the plans in progress', async () => {
     renderHome(monthState())
     const hero = await screen.findByRole('region', { name: 'Safe to spend today' })
-    await waitFor(() => expect(hero.textContent).toContain('From your PayPal activity'))
+    expect(await within(hero).findByRole('button', { name: 'Import again' })).toBeTruthy()
     expect(hero.textContent).toMatch(/Your lowest point is about \$[\d,]+ on/)
     const next = screen.getByRole('region', { name: 'Next 30 days' })
     expect(
@@ -622,7 +609,7 @@ describe('the month-led Home for imported PayPal activity', () => {
   })
 
   it('keeps the sample Home’s own lists under the same hero', async () => {
-    renderHome(demoState(), { onImportFile: vi.fn() })
+    renderHome(demoState())
     expect(await screen.findByRole('region', { name: 'Safe to spend today' })).toBeTruthy()
     expect(screen.getByRole('region', { name: 'Coming up' })).toBeTruthy()
     expect(screen.getByRole('complementary', { name: 'Saved and your plan' })).toBeTruthy()

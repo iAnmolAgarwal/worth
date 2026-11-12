@@ -160,6 +160,9 @@ const profileSchema = z
     userEdited: z.boolean().optional(),
     aiChoiceMade: z.boolean().optional(),
     dailySpendOrigin: z.enum(['paypal', 'you']).optional(),
+    // Server-owned: accepted so a saved profile round-trips, then replaced by the stored values.
+    importedFrom: z.enum(['paypal', 'file']).optional(),
+    importedAt: z.string().max(40).optional(),
     flows: z
       .array(
         z
@@ -1127,11 +1130,15 @@ export function createApp(options: AppOptions = {}) {
     next()
   })
   app.get('/api/state', (_req, res) => res.json(state(sessionId(res))))
+  /** Per session, a hash of the activity Connect PayPal last read, so its import can say so. */
+  const connectedReads = new Map<string, string>()
+  const csvHash = (csv: string) => createHash('sha256').update(csv).digest('hex')
   mountPayPalConnect(app, {
     connect: paypalConnect,
     sessionId,
     timezone: (res) => dataFor(res).profile.timezone,
     now: () => now().getTime(),
+    onRead: (res, csv) => connectedReads.set(sessionId(res), csvHash(csv)),
   })
   /**
    * PayPal's redirect back to Worth. It records whether the buyer approved or cancelled, then
@@ -1630,6 +1637,8 @@ export function createApp(options: AppOptions = {}) {
       ...input,
       version: data.profile.version + 1,
       source: data.profile.source,
+      importedFrom: data.profile.importedFrom,
+      importedAt: data.profile.importedAt,
       coverageDays: data.profile.coverageDays,
       confirmedAt: input.confirmed ? now().toISOString() : '',
       userEdited: true,
@@ -1946,6 +1955,9 @@ export function createApp(options: AppOptions = {}) {
     data.profile.confirmedAt = ''
     data.profile.version += 1
     data.profile.userEdited = true
+    // Where this import came from: exactly the activity Connect PayPal read, or any other file.
+    data.profile.importedFrom = connectedReads.get(id) === csvHash(csv) ? 'paypal' : 'file'
+    data.profile.importedAt = now().toISOString()
     const known = switching ? [] : (data.foreignPayments ?? [])
     const inHistory = new Set(merged.map((t) => t.id))
     data.foreignPayments = [

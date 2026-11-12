@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowRight, CalendarClock, CircleAlert, Info, type LucideIcon } from 'lucide-react'
-import { getUpcomingFlows } from '../shared/finance'
+import type { CSSProperties } from 'react'
+import { ChevronRight, CircleAlert, CircleCheck, Info, RefreshCw } from 'lucide-react'
+import { dateInTimezone, getUpcomingFlows } from '../shared/finance'
 import type { Comparison, ScheduledFlow } from '../shared/types'
+import { connectAvailable, ConnectPayPalButton } from './ConnectPayPal'
 import type { AppState, Purchase } from './contract'
+import { isActive } from './contract'
 import { countedHold, ReservationNote } from './Reservation'
-import { flowIcon, missingFix, purchasePlans } from './engine'
-import { cx, dayLabel, daysFrom, displayName, money, shortDate, signed } from './format'
+import { missingFix, purchasePlans } from './engine'
+import { cx, dayLabel, daysFrom, money, shortDate, signed } from './format'
 import { Button, Pill } from './ui'
 import './hero.css'
 
@@ -116,145 +119,6 @@ export function heroSplit(balanceCents: number, room: Comparison): HeroSplit {
   return split
 }
 
-export interface HoldChip {
-  key: 'bill' | 'plan' | 'payday'
-  icon: LucideIcon
-  label: string
-  amountCents: number
-  date: string
-}
-
-/**
- * Up to three things that hold the money back: the largest bill up to the low point, the next
- * Pay in 4 (or other plan) payment, and the next payday.
- */
-export function holdChips(upcoming: Upcoming[], lowDate?: string): HoldChip[] {
-  const payday = upcoming.find(({ flow }) => flow.kind === 'income')
-  const until = lowDate ?? payday?.date
-  const bill = upcoming
-    .filter(
-      ({ flow, date }) =>
-        (flow.kind === 'bill' || flow.kind === 'subscription') && (!until || date <= until),
-    )
-    .reduce<Upcoming | undefined>(
-      (big, item) => (!big || item.flow.amountCents > big.flow.amountCents ? item : big),
-      undefined,
-    )
-  const plan = upcoming.find(({ flow }) => flow.kind === 'installment')
-  const chips: HoldChip[] = []
-  if (bill)
-    chips.push({
-      key: 'bill',
-      icon: flowIcon(bill.flow),
-      label: displayName(bill.flow.name),
-      amountCents: bill.flow.amountCents,
-      date: bill.date,
-    })
-  if (plan) {
-    // The plan's own name as written ("Laptop", "Northline Outfitters"), never lower-cased.
-    const name =
-      displayName(
-        plan.flow.name
-          .split('·')[0]!
-          .replace(/\bpay\s+in\s+4\b/i, '')
-          .trim(),
-      ) || 'Instalment'
-    const payIn4 = /\bpay\s+in\s+4\b/i.test(plan.flow.name)
-    chips.push({
-      key: 'plan',
-      icon: CalendarClock,
-      label: `${name} ${payIn4 ? 'Pay in 4' : 'plan'}`,
-      amountCents: plan.flow.amountCents,
-      date: plan.date,
-    })
-  }
-  if (payday)
-    chips.push({
-      key: 'payday',
-      icon: flowIcon(payday.flow),
-      label: 'Payday',
-      amountCents: payday.flow.amountCents,
-      date: payday.date,
-    })
-  return chips
-}
-
-/** The big figure: whole dollars large, the cents small, the exact amount for screen readers. */
-function Amount({ cents }: { cents: number }) {
-  const rest = cents % 100
-  return (
-    <p className="hero-v num">
-      <span aria-hidden="true">
-        {money(cents - rest, false)}
-        {rest > 0 && <small>.{String(rest).padStart(2, '0')}</small>}
-      </span>
-      <span className="sr">{money(cents)}</span>
-    </p>
-  )
-}
-
-function SplitBar({ split }: { split: HeroSplit }) {
-  const { balanceCents: total, freeCents, neededCents, cushionCents } = split
-  const segments = [
-    {
-      key: 'free',
-      // The short line below already names the date when nothing is free.
-      label: freeCents > 0 ? 'Free' : 'Nothing free',
-      cents: freeCents,
-    },
-    {
-      key: 'needed',
-      label: split.lowDate
-        ? `Needed through ${shortDate(split.lowDate)}`
-        : 'Needed for what’s coming',
-      cents: neededCents,
-    },
-    {
-      key: 'cushion',
-      label: split.belowCushion ? 'Cushion left' : 'Cushion',
-      cents: cushionCents,
-    },
-  ]
-  return (
-    <div className="hero-split">
-      <div className="hero-bar" aria-hidden="true">
-        {segments.map(
-          (segment) =>
-            segment.cents > 0 && (
-              <i key={segment.key} className={segment.key} style={{ flexGrow: segment.cents }} />
-            ),
-        )}
-      </div>
-      <div className="hero-legend">
-        <ul aria-label={`Your ${money(total)}`}>
-          {segments
-            // "Nothing free" always shows; a needed or cushion part of $0 does not.
-            .filter((segment) => segment.cents > 0 || segment.key === 'free')
-            .map((segment) => (
-              <li key={segment.key} className={segment.key}>
-                {segment.cents > 0 && <i aria-hidden="true" />}
-                <span>{segment.label}</span>
-                {segment.cents > 0 && <b className="num">{compactMoney(segment.cents)}</b>}
-              </li>
-            ))}
-          {split.shortCents > 0 && split.lowDate && (
-            <li className="short">
-              <CircleAlert size={16} aria-hidden="true" />
-              <span>
-                Short by <b className="num">{compactMoney(split.shortCents)}</b> on{' '}
-                {shortDate(split.lowDate)}
-              </span>
-            </li>
-          )}
-        </ul>
-        <p className="hero-of" title="The money available you confirmed">
-          of <b className="num">{compactMoney(total)}</b> in your account
-        </p>
-      </div>
-    </div>
-  )
-}
-
 /** The cushion, the confirmed balance and the arithmetic, one click away instead of on the face. */
 function HowWorkedOut({
   state,
@@ -361,14 +225,296 @@ function HowWorkedOut({
 }
 
 /**
- * Home's hero: how much is safe to spend today, and a picture of why it is less than the balance.
- * Before the plan is confirmed, or while a detail is missing, it says what to fix instead.
+ * The figure, the label and the bar as the card first draws them. Once per session, after the data
+ * has loaded, the card opens on the whole balance in one bar ("In your account"), then the bar
+ * divides while the figure counts down to what is safe. The label says "Safe to spend today" only
+ * when the figure is that amount. Reduced motion, a later visit or a test: the end state at once.
+ */
+const ENTRANCE_KEY = 'worth.heroEntrance'
+const HOLD_MS = 200
+const RUN_MS = 650
+type Phase = 'whole' | 'run' | 'done'
+
+function firstEntrance() {
+  try {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return false
+    if (sessionStorage.getItem(ENTRANCE_KEY)) return false
+    sessionStorage.setItem(ENTRANCE_KEY, '1')
+    return true
+  } catch {
+    return false
+  }
+}
+
+function useEntrance(fromCents: number, toCents: number) {
+  const [phase, setPhase] = useState<Phase>(() =>
+    typeof matchMedia === 'function' &&
+    typeof requestAnimationFrame === 'function' &&
+    firstEntrance()
+      ? 'whole'
+      : 'done',
+  )
+  const [shown, setShown] = useState(phase === 'done' ? toCents : fromCents)
+  useEffect(() => {
+    if (phase === 'done') {
+      setShown(toCents)
+      return
+    }
+    let frame = 0
+    const start = performance.now()
+    const tick = (now: number) => {
+      const t = Math.min(1, Math.max(0, (now - start - HOLD_MS) / RUN_MS))
+      if (t > 0) setPhase((current) => (current === 'whole' ? 'run' : current))
+      const eased = 1 - Math.pow(1 - t, 3)
+      setShown(Math.round(fromCents + (toCents - fromCents) * eased))
+      if (t < 1) frame = requestAnimationFrame(tick)
+      else setPhase('done')
+    }
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+    // Runs once, on the first render with data.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  return { phase, shown: phase === 'done' ? toCents : shown }
+}
+
+/**
+ * The big figure: whole dollars large, the cents small, the exact amount for screen readers. The
+ * size follows the number of characters, so $1,000,000 fits the card as $872 does.
+ */
+function Amount({ cents, exact }: { cents: number; exact: number }) {
+  const rest = cents % 100
+  const whole = money(cents - rest, false)
+  return (
+    <p className="hero-v num" data-tour="safe" style={{ '--chars': whole.length } as CSSProperties}>
+      <span aria-hidden="true">
+        {whole}
+        {rest > 0 && <small>.{String(rest).padStart(2, '0')}</small>}
+      </span>
+      <span className="sr">{money(exact)}</span>
+    </p>
+  )
+}
+
+/** The reference's status pill: bills covered through the low point, or how short the plan is. */
+function StatusPill({ split }: { split: HeroSplit }) {
+  if (!split.lowDate) return null
+  if (split.shortCents > 0)
+    return (
+      <p className="hero-pill short">
+        <CircleAlert size={16} strokeWidth={2.25} aria-hidden="true" />
+        <span>
+          Short by <b className="num">{compactMoney(split.shortCents)}</b> on{' '}
+          {shortDate(split.lowDate)}
+        </span>
+      </p>
+    )
+  return (
+    <p className="hero-pill ok">
+      <CircleCheck size={16} strokeWidth={2.25} aria-hidden="true" />
+      <span>Bills covered through {shortDate(split.lowDate)}</span>
+    </p>
+  )
+}
+
+function SplitBar({ split, phase }: { split: HeroSplit; phase: Phase }) {
+  const { balanceCents: total, freeCents, neededCents, cushionCents } = split
+  const segments = [
+    { key: 'free', label: freeCents > 0 ? 'Free' : 'Nothing free', cents: freeCents },
+    {
+      key: 'needed',
+      label: split.lowDate ? `Needed by ${shortDate(split.lowDate)}` : 'Needed for what’s coming',
+      cents: neededCents,
+    },
+    {
+      key: 'cushion',
+      label: split.belowCushion ? 'Cushion left' : 'Cushion',
+      cents: cushionCents,
+    },
+  ]
+  // The entrance's first beat: the whole balance as one bar.
+  const whole = phase === 'whole'
+  const drawn = segments.filter((segment) => segment.cents > 0)
+  return (
+    <div className="hero-split" data-tour="bar">
+      <div className="hero-bar" aria-hidden="true">
+        {drawn.map((segment, index) => (
+          // A $0 part is not drawn; the others grow by their amounts, each keeping a sliver. On
+          // the first beat the first part holds the whole bar, and the rest grow out of it.
+          <i
+            key={segment.key}
+            className={segment.key}
+            style={{ flexGrow: whole ? Number(index === 0) : segment.cents }}
+          />
+        ))}
+      </div>
+      <div className="hero-legend">
+        <ul aria-label={`Your ${money(total)}`}>
+          {segments
+            // "Nothing free" always shows; a needed or cushion part of $0 does not.
+            .filter((segment) => segment.cents > 0 || segment.key === 'free')
+            .map((segment) => (
+              <li key={segment.key} className={segment.key}>
+                {segment.cents > 0 && <i aria-hidden="true" />}
+                <span>{segment.label}</span>
+                {segment.cents > 0 && <b className="num">{compactMoney(segment.cents)}</b>}
+              </li>
+            ))}
+        </ul>
+        <p className="hero-of" title="The money available you confirmed">
+          of <b className="num">{compactMoney(total)}</b> in your account
+        </p>
+      </div>
+    </div>
+  )
+}
+
+/** Worth's W, as on the badge. */
+function Mark() {
+  return (
+    <span className="hero-mark" aria-hidden="true">
+      <svg viewBox="0 0 472 362">
+        <path d={W_PATH} transform="translate(24 32)" fill="#5cc6ff" opacity=".9" />
+        <path d={W_PATH} fill="#ffffff" />
+      </svg>
+    </span>
+  )
+}
+const W_PATH =
+  'M 2.136 9.729 Q 2 2 10 2 L 76 2 Q 84 2 83.777 9.812 L 77.733 221.071 Q 77.649 224 79.154 221.104 L 188.987 9.723 Q 193 2 201 2 L 247 2 Q 255 2 255.162 9.723 L 259.589 221.104 Q 259.649 224 261.026 221.071 L 360.328 9.812 Q 364 2 372 2 L 438 2 Q 446 2 442.01 9.729 L 282.208 319.304 Q 277.719 328 268.719 328 L 210.719 328 Q 201.719 328 201.234 319.393 L 191.001 137.869 Q 190.839 135 189.247 137.869 L 88.496 319.393 Q 83.719 328 74.719 328 L 16.719 328 Q 7.719 328 7.567 319.304 Z'
+
+/** Where the card's numbers come from: the sample, an imported file, or Connect PayPal. */
+export type HeroSource = 'sample' | 'file' | 'paypal'
+
+export function heroSource(state: AppState): HeroSource {
+  if (state.profile.source !== 'import') return 'sample'
+  return state.profile.importedFrom === 'paypal' ? 'paypal' : 'file'
+}
+
+/** "updated today", or the day of the import when it was earlier. */
+export function updatedLabel(state: AppState) {
+  const at = state.profile.importedAt
+  if (!at) return undefined
+  const day = dateInTimezone(at, state.profile.timezone)
+  return day === state.today ? 'updated today' : `updated ${shortDate(day)}`
+}
+
+/**
+ * The hero's actions: Check a purchase, and where the numbers come from with the ways to change it.
+ * Placement is CSS on the hero's grid, so the rows can sit beside the card or under it.
+ */
+export function HeroActions({
+  state,
+  onAsk,
+  onImport,
+}: {
+  state: AppState
+  onAsk: () => void
+  /** Opens the import step: choose a CSV, try the sample export, or enter bills yourself. */
+  onImport: () => void
+}) {
+  const source = heroSource(state)
+  const busy = state.purchases.some(isActive)
+  const connect = connectAvailable(state)
+  const updated = updatedLabel(state)
+  const importLink = (label: string) => (
+    <button type="button" className="hero-src-alt" onClick={onImport} disabled={busy}>
+      {label}
+    </button>
+  )
+  return (
+    <nav className="hero-actions" aria-label="Next steps">
+      <a
+        className="hero-act primary hero-cta"
+        href="#ask"
+        data-tour="check"
+        onClick={(event) => {
+          event.preventDefault()
+          onAsk()
+        }}
+      >
+        <span className="hero-act-main">
+          <span className="hero-act-t">Check a purchase</span>
+          <span className="hero-act-s">See the day it fits</span>
+        </span>
+        <ChevronRight className="chev" size={20} aria-hidden="true" />
+      </a>
+      <div className={cx('hero-act', 'hero-src', source)}>
+        {source === 'paypal' ? (
+          <>
+            <span className="hero-act-main">
+              <span className="hero-act-t hero-src-pill" data-tour="connect">
+                <i aria-hidden="true" />
+                PayPal connected
+              </span>
+              <span className="hero-act-s">
+                {updated ? `${updated[0]!.toUpperCase()}${updated.slice(1)}` : 'From PayPal'}
+              </span>
+            </span>
+            {connect && (
+              <ConnectPayPalButton
+                pop
+                disabled={busy}
+                trigger={(props) => (
+                  <button
+                    type="button"
+                    className="hero-src-refresh"
+                    aria-label="Read your PayPal activity again"
+                    title="Read your PayPal activity again"
+                    {...props}
+                  >
+                    <RefreshCw size={18} aria-hidden="true" />
+                  </button>
+                )}
+              />
+            )}
+          </>
+        ) : connect ? (
+          <>
+            <ConnectPayPalButton
+              pop
+              disabled={busy}
+              trigger={(props) => (
+                <button type="button" className="hero-act-main" data-tour="connect" {...props}>
+                  <span className="hero-act-t">Connect PayPal</span>
+                  <span className="hero-act-s">
+                    {source === 'sample' ? 'Sample data now' : 'From your imported file'}
+                  </span>
+                </button>
+              )}
+            />
+            {importLink(source === 'sample' ? 'Import a file' : 'Import again')}
+            <ChevronRight className="chev" size={20} aria-hidden="true" />
+          </>
+        ) : (
+          <>
+            <span className="hero-act-main">
+              <span className="hero-act-t">
+                {source === 'sample' ? 'Sample data' : 'Your PayPal activity'}
+              </span>
+              <span className="hero-act-s">
+                {source === 'sample'
+                  ? 'Bring your own PayPal activity'
+                  : (updated ?? 'From a file')}
+              </span>
+            </span>
+            {importLink(source === 'sample' ? 'Import a file' : 'Import again')}
+          </>
+        )}
+      </div>
+    </nav>
+  )
+}
+
+/**
+ * Home's hero: a flat sky-blue card with how much is safe to spend today and a picture of why it is
+ * less than the balance, and its actions beside it. Before the plan is confirmed, or while a detail
+ * is missing, it says what to fix instead.
  */
 export function Hero({
   state,
   room,
   loading,
-  month = false,
   onAsk,
   onPlan,
   onNavigate,
@@ -379,8 +525,6 @@ export function Hero({
   state: AppState
   room?: Comparison
   loading: boolean
-  /** Imported PayPal activity: the hero says where the plan came from. */
-  month?: boolean
   onAsk: () => void
   onPlan: () => void
   onNavigate: (hash: string) => void
@@ -434,58 +578,88 @@ export function Hero({
       </section>
     )
   }
-  if (loading || !room)
-    return (
-      <section className="hero" aria-busy="true" aria-label="Safe to spend today">
-        <h2 className="hero-k">Safe to spend today</h2>
-        <span className="sk hero-sk" />
-      </section>
-    )
-  const split = heroSplit(state.profile.balanceCents, room)
-  const upcoming = upcomingWithPlans(state)
-  const paydays = upcoming.filter(({ flow }) => flow.kind === 'income').map(({ date }) => date)
-  const chips = holdChips(upcoming, split.lowDate)
+  // One section in every state, so the region stays the same element when the numbers arrive.
   return (
-    <section className={cx('hero', split.freeCents === 0 && 'zero')} aria-labelledby="hero-k">
-      <div className="hero-top">
-        <h2 className="hero-k" id="hero-k">
-          Safe to spend today
-        </h2>
-        {month && <span className="hero-tag">From your PayPal activity</span>}
-        <HowWorkedOut state={state} room={room} split={split} paydays={paydays} />
-      </div>
-      <Amount cents={split.freeCents} />
-      <SplitBar split={split} />
-      {chips.length > 0 && (
-        <ul className="hero-chips" aria-label="What holds the rest back">
-          {chips.map(({ key, icon: Icon, label, amountCents, date }) => (
-            <li key={key} className={key}>
-              <span className="ic" aria-hidden="true">
-                <Icon size={16} strokeWidth={2} />
-              </span>
-              <span>
-                {label}{' '}
-                <b className="num">
-                  {key === 'payday' ? '+' : ''}
-                  {compactMoney(amountCents)}
-                </b>
-                <span className="when"> · {shortDate(date)}</span>
-              </span>
-            </li>
-          ))}
-        </ul>
+    <section
+      className="hero"
+      aria-busy={loading || !room || undefined}
+      aria-label="Safe to spend today"
+    >
+      {loading || !room ? (
+        <div className="hero-card">
+          <div className="hero-top">
+            <Mark />
+            <h2 className="hero-k">Safe to spend today</h2>
+          </div>
+          <span className="sk hero-sk" />
+        </div>
+      ) : (
+        <HeroCard
+          state={state}
+          room={room}
+          hold={hold}
+          onAsk={onAsk}
+          onImport={() => onNavigate('import')}
+          onOpenCheckout={onOpenCheckout}
+        />
       )}
-      {hold && <ReservationNote purchase={hold} onReview={onOpenCheckout} onBrand />}
-      <a
-        className="btn hero-cta"
-        href="#ask"
-        onClick={(event) => {
-          event.preventDefault()
-          onAsk()
-        }}
-      >
-        Check a purchase <ArrowRight size={18} aria-hidden="true" />
-      </a>
     </section>
+  )
+}
+
+function HeroCard({
+  state,
+  room,
+  hold,
+  onAsk,
+  onImport,
+  onOpenCheckout,
+}: {
+  state: AppState
+  room: Comparison
+  hold?: Purchase
+  onAsk: () => void
+  onImport: () => void
+  onOpenCheckout: (purchase: Purchase) => void
+}) {
+  const split = heroSplit(state.profile.balanceCents, room)
+  const paydays = upcomingWithPlans(state)
+    .filter(({ flow }) => flow.kind === 'income')
+    .map(({ date }) => date)
+  const { phase, shown } = useEntrance(split.balanceCents, split.freeCents)
+  const name = state.profile.source === 'demo' ? state.profile.name.trim() : ''
+  return (
+    <>
+      <div className={cx('hero-card', `is-${phase}`, split.freeCents === 0 && 'zero')}>
+        <div className="hero-top">
+          <Mark />
+          <div className="hero-id">
+            <h2 className="hero-k">
+              {phase === 'done' ? (
+                'Safe to spend today'
+              ) : (
+                <>
+                  {/* Never "Safe to spend" over a figure that is still counting. */}
+                  <span aria-hidden="true">
+                    {phase === 'whole' ? 'In your account' : 'Taking out what’s needed'}
+                  </span>
+                  <span className="sr">Safe to spend today</span>
+                </>
+              )}
+            </h2>
+            <p className="hero-sub">
+              {name ? `${name} · ` : ''}
+              {dayLabel(state.today)}
+            </p>
+          </div>
+          <HowWorkedOut state={state} room={room} split={split} paydays={paydays} />
+        </div>
+        <Amount cents={shown} exact={split.freeCents} />
+        <StatusPill split={split} />
+        <SplitBar split={split} phase={phase} />
+        {hold && <ReservationNote purchase={hold} onReview={onOpenCheckout} />}
+      </div>
+      <HeroActions state={state} onAsk={onAsk} onImport={onImport} />
+    </>
   )
 }
