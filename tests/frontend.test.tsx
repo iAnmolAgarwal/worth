@@ -287,12 +287,12 @@ describe('conversation isolation across sessions', () => {
     await screen.findByText(oldAnswer)
     await user.click(screen.getByRole('button', { name: /account menu/ }))
     await user.click(screen.getByRole('menuitem', { name: 'Import PayPal activity' }))
-    await user.click(await screen.findByText('Or paste the CSV contents'))
+    await user.click(await screen.findByRole('button', { name: 'Paste CSV text instead' }))
     await user.type(
       screen.getByRole('textbox', { name: 'PayPal CSV contents' }),
       'Date,Name,Currency,Amount\n2026-10-01,Coffee,USD,-6.50',
     )
-    await user.click(screen.getByRole('button', { name: /Preview my history/ }))
+    await user.click(screen.getByRole('button', { name: 'Use this text' }))
     await user.click(await screen.findByRole('checkbox', { name: /I reviewed this preview/ }))
     await user.click(screen.getByRole('button', { name: /Import and review my plan/ }))
     await screen.findByRole('heading', { name: 'How much money do you have right now?' })
@@ -1561,9 +1561,7 @@ describe('first screen: the sample and PayPal (third-party feedback)', () => {
     expect((await within(hero).findAllByText(/Sample data/)).length).toBeGreaterThan(0)
     await user.click(within(hero).getByRole('button', { name: 'Import a file' }))
     await waitFor(() => expect(window.location.hash).toBe('#import'))
-    expect(
-      await screen.findByRole('button', { name: /Try with a sample PayPal export/ }),
-    ).toBeTruthy()
+    expect(await screen.findByRole('button', { name: /Try a sample export/ })).toBeTruthy()
     expect(screen.getByLabelText('Choose your PayPal activity CSV')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Enter your bills yourself' }))
     await waitFor(() => expect(window.location.hash).toBe('#plan/edit'))

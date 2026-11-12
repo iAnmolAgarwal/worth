@@ -17,7 +17,7 @@ test('the hero comes first and stays above the fold, with its ways in beside it'
 test('the sample PayPal export builds a believable month with its calm note', async ({ page }) => {
   await page.goto(`${origins.worth}/`)
   await page.getByRole('button', { name: 'Import a file' }).click()
-  await page.getByRole('button', { name: /Try with a sample PayPal export/ }).click()
+  await page.getByRole('button', { name: /Try a sample export/ }).click()
   await expect(page.getByRole('heading', { name: 'Check what Worth found' })).toBeVisible()
   await expect(page.getByText('Northwind Payroll')).toBeVisible()
   await expect(page.getByText(/, the day after Maple Court rent\.$/)).toBeVisible()
@@ -82,7 +82,7 @@ test('on a wide screen the review’s Back and Continue never cover a card', asy
   test.skip(testInfo.project.name === 'phone-390', 'phones keep the sticky bar within thumb reach')
   await page.goto(`${origins.worth}/`)
   await page.getByRole('button', { name: 'Import a file' }).click()
-  await page.getByRole('button', { name: /Try with a sample PayPal export/ }).click()
+  await page.getByRole('button', { name: /Try a sample export/ }).click()
   await expect(page.getByRole('heading', { name: 'Check what Worth found' })).toBeVisible()
   for (const [width, height] of [
     [1440, 900],

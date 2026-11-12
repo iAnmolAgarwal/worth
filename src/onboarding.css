@@ -637,3 +637,90 @@ html:has(.import-review) {
     left: 0;
   }
 }
+
+/* ---------- One way in: Connect PayPal, a drop zone, then quiet links ---------- */
+.import-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.import-connect {
+  display: flex;
+  justify-content: center;
+}
+.import-connect .connect-btn {
+  min-width: 240px;
+}
+.import-or {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  margin: 0;
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  color: var(--c-text-2);
+}
+.import-or::before,
+.import-or::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--c-divider);
+}
+.import-picker .drop {
+  padding: var(--s-8) var(--s-4);
+}
+.import-picker .drop.chosen .co-ic {
+  background: var(--c-success-bg);
+  color: var(--c-success);
+}
+.import-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: baseline;
+  gap: var(--s-2) var(--s-5);
+  font-size: var(--fs-meta);
+}
+.import-links .link {
+  font-size: var(--fs-meta);
+}
+.import-how {
+  display: contents;
+}
+.import-how > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.import-how > summary::-webkit-details-marker {
+  display: none;
+}
+.import-how[open] > .howto {
+  flex-basis: 100%;
+  margin-top: var(--s-2);
+  text-align: left;
+}
+.import-paste {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s-2);
+}
+.import-paste .field {
+  width: 100%;
+}
+.import-privacy {
+  text-align: center;
+}
+/* Connect PayPal leads when it is offered; the file button steps back to secondary. */
+.import-connect ~ .drop .file-btn.btn-primary {
+  background: var(--c-surface);
+  color: var(--c-text-strong);
+  box-shadow: inset 0 0 0 2px var(--c-text-strong);
+}
+.import-connect ~ .drop .file-btn.btn-primary:hover {
+  background: var(--c-surface-2);
+}
+.import-note {
+  text-align: center;
+}

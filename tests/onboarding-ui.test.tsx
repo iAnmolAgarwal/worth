@@ -471,7 +471,7 @@ describe('Start with your PayPal activity', () => {
       )) as typeof api)
     render(<App />)
     await user.click(await screen.findByRole('button', { name: 'Import a file' }))
-    await user.click(await screen.findByRole('button', { name: /Try with a sample PayPal export/ }))
+    await user.click(await screen.findByRole('button', { name: /Try a sample export/ }))
     await waitFor(() => expect(window.location.hash).toBe('#import'))
     expect(await screen.findByRole('heading', { name: 'Check what Worth found' })).toBeTruthy()
     expect(await screen.findByText('Sample PayPal export (fictional)')).toBeTruthy()

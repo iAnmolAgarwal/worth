@@ -30,7 +30,7 @@ import type {
   ScheduledFlow,
 } from '../shared/types'
 import { api } from './api'
-import { ConnectedSource } from './ConnectPayPal'
+import { connectAvailable, ConnectedSource, ConnectPayPalButton } from './ConnectPayPal'
 import type { ConnectedSummary } from './ConnectPayPal'
 import type { AppState } from './contract'
 import { isActive } from './contract'
@@ -178,29 +178,142 @@ export function FileError({ children }: { children: string }) {
   )
 }
 
-/** The drop zone of the full import page: drop a file on wide screens, or choose it. */
-function DropZone({
-  onFile,
-  disabled,
-}: {
-  onFile: (file: ChosenFile) => void
-  disabled?: boolean
-}) {
-  const { read, error, reading } = useCsvFile(onFile)
-  const { over, handlers } = useDrop((file) => void read(file), disabled)
+/** The short privacy promise under every way in; the rest is in Settings › Privacy. */
+export function ImportPrivacy() {
   return (
-    <div className={cx('drop', over && 'over')} {...handlers}>
-      <span className="co-ic" aria-hidden="true">
-        <FileUp className="ico" />
-      </span>
-      <p className="t hide-m">Drop your PayPal activity CSV here</p>
-      <p className="t show-m">Choose the CSV you downloaded</p>
-      <p className="meta hide-m">or</p>
-      <ChooseFile read={(file) => void read(file)} disabled={disabled || reading}>
-        Choose your PayPal CSV
-      </ChooseFile>
-      <p className="caption">English-language export in USD · up to 1 MB</p>
-      {error && <FileError>{error}</FileError>}
+    <p className="caption import-privacy">
+      Worth doesn’t keep the raw file, and Claude sees your plan only with the assistant on.{' '}
+      <a href="#settings">Privacy</a>
+    </p>
+  )
+}
+
+/**
+ * The one way-in screen for PayPal activity, in the import dialog and on the import page: Connect
+ * PayPal when the server offers it, then a drop zone with a file button, then quiet links for the
+ * sample export, pasted text and PayPal's download steps. The format line is one grey line; a file
+ * that fails it says why.
+ */
+export function ImportPicker({
+  state,
+  onFile,
+  onEnterYourself,
+  disabled,
+  chosen,
+}: {
+  state: AppState
+  onFile: (file: ChosenFile) => void
+  /** "Enter your bills yourself", where the page offers it. */
+  onEnterYourself?: () => void
+  disabled?: boolean
+  /** The file already picked, named once in the drop zone. */
+  chosen?: string
+}) {
+  const { read, error, setError, reading } = useCsvFile(onFile)
+  const { over, handlers } = useDrop((file) => void read(file), disabled)
+  const [paste, setPaste] = useState(false)
+  const [text, setText] = useState('')
+  const [loading, setLoading] = useState(false)
+  async function sample() {
+    setError('')
+    setLoading(true)
+    try {
+      onFile(await loadSampleExport(realToday(state)))
+    } catch {
+      setError('The sample export could not load. Try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+  const busy = disabled || reading || loading
+  return (
+    <div className="import-picker">
+      {connectAvailable(state) && (
+        <>
+          <div className="import-connect">
+            <ConnectPayPalButton disabled={busy} />
+          </div>
+          <p className="import-or" aria-hidden="true">
+            <span>or use a file</span>
+          </p>
+        </>
+      )}
+      <div className={cx('drop', over && 'over', chosen && 'chosen')} {...handlers}>
+        <span className="co-ic" aria-hidden="true">
+          <FileUp className="ico" />
+        </span>
+        {chosen ? (
+          <p className="t">{chosen}</p>
+        ) : (
+          <>
+            <p className="t hide-m">Drop your PayPal CSV here</p>
+            <p className="t show-m">Choose the CSV you downloaded</p>
+          </>
+        )}
+        <ChooseFile read={(file) => void read(file)} disabled={busy}>
+          {chosen ? 'Choose another file' : 'Choose a file'}
+        </ChooseFile>
+        <p className="caption">PayPal activity CSV, in USD, up to 1 MB</p>
+        {error && <FileError>{error}</FileError>}
+      </div>
+      <div className="import-links">
+        <button
+          type="button"
+          className="link"
+          disabled={busy}
+          aria-busy={loading || undefined}
+          onClick={() => void sample()}
+        >
+          Try a sample export
+        </button>
+        <button
+          type="button"
+          className="link"
+          aria-expanded={paste}
+          aria-controls="import-paste"
+          onClick={() => setPaste(!paste)}
+        >
+          Paste CSV text instead
+        </button>
+        <details className="import-how">
+          <summary className="link">How to get this file from PayPal</summary>
+          <HowTo />
+        </details>
+        {onEnterYourself && (
+          <button type="button" className="link" onClick={onEnterYourself}>
+            Enter your bills yourself
+          </button>
+        )}
+      </div>
+      {paste && (
+        <form
+          id="import-paste"
+          className="import-paste"
+          onSubmit={(event) => {
+            event.preventDefault()
+            const csv = text
+            if (!csv.trim()) return setError('Paste your PayPal activity export first.')
+            if (utf8Bytes(csv) > CSV_IMPORT_LIMITS.maxBytes) return setError(CSV_SIZE_MESSAGE)
+            setError('')
+            onFile({ csv, name: 'Pasted CSV' })
+          }}
+        >
+          <Field label="PayPal CSV contents">
+            <textarea
+              className="input"
+              rows={6}
+              value={text}
+              maxLength={CSV_IMPORT_LIMITS.maxBytes}
+              onChange={(event) => setText(event.target.value)}
+              spellCheck={false}
+              disabled={busy}
+            />
+          </Field>
+          <Button type="submit" variant="secondary" disabled={busy || !text.trim()}>
+            Use this text
+          </Button>
+        </form>
+      )}
     </div>
   )
 }
@@ -822,27 +935,13 @@ export function ImportReview({
           <h1 className="title" ref={heading} tabIndex={-1}>
             Bring your PayPal activity
           </h1>
-          <div className="split">
-            <DropZone onFile={onFile} disabled={activeCheckout} />
-            <div className="stack tight">
-              <h2 className="h-section">Get the file from PayPal</h2>
-              <HowTo />
-            </div>
-          </div>
-          <p className="caption">{PRIVACY_LINE}</p>
-          <div className="alt-paths">
-            <Button
-              variant="secondary"
-              icon={FileText}
-              disabled={activeCheckout}
-              onClick={() => void loadSampleExport(today).then(onFile)}
-            >
-              Try with a sample PayPal export
-            </Button>
-            <button type="button" className="link" onClick={onEnterYourself}>
-              Enter your bills yourself
-            </button>
-          </div>
+          <ImportPicker
+            state={state}
+            onFile={onFile}
+            onEnterYourself={onEnterYourself}
+            disabled={activeCheckout}
+          />
+          <ImportPrivacy />
         </div>
       </div>
     )
