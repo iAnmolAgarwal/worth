@@ -591,11 +591,14 @@ export function ClaudeSwitch({
   onUpdate,
   label = 'Use the assistant (powered by Claude)',
   compact,
+  bare,
 }: {
   state: AppState
   onUpdate?: (state: AppState) => void
   label?: string
   compact?: boolean
+  /** Only the switch, for a settings row that shows its own label and line. */
+  bare?: boolean
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -627,6 +630,20 @@ export function ClaudeSwitch({
       onChange={(next) => void change(next)}
     />
   )
+  if (bare)
+    return (
+      <>
+        {toggle}
+        <span className="sr" id={noteId}>
+          {note}
+        </span>
+        {error && (
+          <span className="co-error" role="alert">
+            {error}
+          </span>
+        )}
+      </>
+    )
   if (compact)
     return (
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
