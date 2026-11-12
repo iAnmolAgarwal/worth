@@ -6,6 +6,17 @@
 import type { ForecastEvent, ForecastPoint } from '../shared/types'
 import { dayLabel, money, shortDate, signed } from './format'
 
+/**
+ * Room between a balance and the cushion, naming the cushion so the gap never reads as a second
+ * balance: "$650.52 more than your $300.00 cushion".
+ */
+export function cushionGap(value: number, cushion: number) {
+  if (value === cushion) return `exactly your ${money(cushion)} cushion`
+  return value > cushion
+    ? `${money(value - cushion)} more than your ${money(cushion)} cushion`
+    : `${money(cushion - value)} short of your ${money(cushion)} cushion`
+}
+
 export type DayState = 'above' | 'below' | 'negative'
 /** At the cushion counts as above it, as the engine's "fits" does. */
 export const dayState = (cents: number, cushionCents: number): DayState =>
@@ -27,7 +38,9 @@ export const isPayday = (point: ForecastPoint) =>
 export const namedEvents = (point: ForecastPoint) =>
   point.events
     .filter((event) => event.kind !== 'spending')
-    .sort((a, b) => (a.kind === 'income' ? -1 : b.kind === 'income' ? 1 : a.amountCents - b.amountCents))
+    .sort((a, b) =>
+      a.kind === 'income' ? -1 : b.kind === 'income' ? 1 : a.amountCents - b.amountCents,
+    )
 export const bigBills = (point: ForecastPoint) =>
   point.events.filter((event) => isBill(event) && -event.amountCents >= BIG_BILL_CENTS)
 
@@ -66,28 +79,23 @@ export function stretchDates(stretch: Stretch, points: ForecastPoint[]) {
   return stretch.to === stretch.from ? from : `${from} – ${shortDate(points[stretch.to]!.date)}`
 }
 
-/** One line of words for a whole series: does it stay above the cushion, and if not, when. */
+/**
+ * One line of words for a whole series: does it stay above the cushion and, if not, from when.
+ * A single stretch also says when it is back above; later stretches are left to their chips.
+ */
 export function seriesSummary(points: ForecastPoint[], values: number[], cushionCents: number) {
   const runs = stretches(values, cushionCents)
   const low = lowestIndex(values)
   const lowest = `Lowest ${signed(values[low]!)} on ${dayLabel(points[low]!.date)}.`
-  if (!runs.length) return `Stays above your ${money(cushionCents)} cushion. ${lowest}`
-  if (runs.length > 1) {
-    const days = runs.reduce((sum, run) => sum + run.to - run.from + 1, 0)
-    const negative = values.findIndex((value) => value < 0)
-    const zero = negative >= 0 ? `, and below zero from ${shortDate(points[negative]!.date)}` : ''
-    return `Below your ${money(cushionCents)} cushion on ${days} days, in ${runs.length} stretches${zero}. ${lowest}`
-  }
-  const run = runs[0]!
-  const zero =
-    run.negativeFrom !== undefined
-      ? `, below zero from ${shortDate(points[run.negativeFrom]!.date)}`
-      : ''
+  const first = runs[0]
+  if (!first) return `Stays above your ${money(cushionCents)} cushion. ${lowest}`
+  const negative = values.findIndex((value) => value < 0)
+  const zero = negative >= 0 ? ` and below zero from ${dayLabel(points[negative]!.date)}` : ''
   const back =
-    run.recovers !== undefined
-      ? ` Back above on ${dayLabel(points[run.recovers]!.date)}.`
-      : ` Not back above by ${shortDate(points.at(-1)!.date)}.`
-  return `Below your ${money(cushionCents)} cushion ${stretchDates(run, points)}${zero}. ${lowest}${back}`
+    runs.length === 1 && first.recovers !== undefined
+      ? ` Back above on ${dayLabel(points[first.recovers]!.date)}.`
+      : ''
+  return `Below your ${money(cushionCents)} cushion from ${dayLabel(points[first.from]!.date)}${zero}. ${lowest}${back}`
 }
 
 /** Where a balance sits, in words: "You are $158.78 above your cushion." */
@@ -100,8 +108,18 @@ export function positionText(cents: number, cushionCents: number) {
     : `You are ${money(cushionCents - cents)} below your cushion.`
 }
 
-function eventSentence(event: ForecastEvent) {
-  if (event.kind === 'income') return `${event.name} ${money(event.amountCents)} lands`
+/** A payday is the window's main income; smaller money coming in is "Income". */
+export function incomeKind(point: ForecastPoint, points: ForecastPoint[]) {
+  const income = (day: ForecastPoint) =>
+    day.events.reduce((sum, e) => sum + (e.kind === 'income' ? e.amountCents : 0), 0)
+  const own = income(point)
+  if (!own) return undefined
+  return own * 2 >= Math.max(...points.map(income)) ? 'Payday' : 'Income'
+}
+
+function eventSentence(event: ForecastEvent, income?: 'Payday' | 'Income') {
+  if (event.kind === 'income')
+    return `${income ?? 'Payday'}: ${event.name} ${money(event.amountCents)} lands`
   if (event.kind === 'purchase') return `You pay ${money(-event.amountCents)} for ${event.name}`
   return event.amountCents < 0
     ? `${event.name} ${money(-event.amountCents)} goes out`
@@ -109,11 +127,16 @@ function eventSentence(event: ForecastEvent) {
 }
 
 /** The sentence for one day: what moves, then where that leaves the balance. */
-export function daySentence(point: ForecastPoint, cents: number, cushionCents: number) {
+export function daySentence(
+  point: ForecastPoint,
+  cents: number,
+  cushionCents: number,
+  income?: 'Payday' | 'Income',
+) {
   const events = namedEvents(point)
-  const shown = events.slice(0, 2).map(eventSentence)
+  const shown = events.slice(0, 2).map((event) => eventSentence(event, income))
   if (events.length > 2) shown.push(`${events.length - 2} more`)
-  const moves = shown.length ? `${shown.join('; ')}. ` : ''
+  const moves = shown.length ? `${shown.join('. ')}. ` : ''
   // The day's low is taken before pay arrives, so a payday's number does not include the pay.
   const beforePay = isPayday(point) ? ' The day’s low comes before the pay arrives.' : ''
   return `${moves}${positionText(cents, cushionCents)}${beforePay}`
@@ -143,7 +166,7 @@ export function domain(values: number[], cushionCents: number) {
   const high = Math.max(cushionCents, ...values)
   const step =
     [50_000, 100_000, 200_000, 500_000, 1_000_000, 2_000_000, 5_000_000].find(
-      (size) => (Math.ceil(high / size) - Math.floor(low / size)) <= 5,
+      (size) => Math.ceil(high / size) - Math.floor(low / size) <= 5,
     ) ?? 10_000_000
   const lo = Math.floor(low / step) * step
   const hi = Math.max(lo + step, Math.ceil(high / step) * step)
@@ -215,6 +238,51 @@ export function smoothPath(points: { x: number; y: number }[]) {
   return path
 }
 
+/**
+ * Where a line's name fits on the plot: just above or below its own line, on the stretch with the
+ * most clear space from every other line and level. Undefined when nowhere is clear.
+ */
+export function lineLabelSpot(
+  own: (number | undefined)[],
+  others: (number | undefined)[][],
+  levels: number[],
+  f: Pick<Frame, 'plot' | 'step' | 'x'>,
+  width: number,
+) {
+  const span = Math.max(1, Math.ceil(width / f.step))
+  const top = f.plot.y + 2
+  const bottom = f.plot.y + f.plot.h - 2
+  let best: { x: number; y: number; clear: number } | undefined
+  for (let start = 0; start + span < own.length; start++) {
+    const ys = own.slice(start, start + span + 1)
+    if (ys.some((y) => y === undefined)) continue
+    // The name belongs where its line runs on its own, not where it sits on another.
+    const shared = others.some((line) =>
+      ys.some((y, index) => {
+        const other = line[start + index]
+        return other !== undefined && Math.abs(other - y!) < 6
+      }),
+    )
+    if (shared) continue
+    const high = Math.min(...(ys as number[]))
+    const low = Math.max(...(ys as number[]))
+    for (const base of [high - 7, low + 16]) {
+      const box = { top: base - 10, bottom: base + 2 }
+      if (box.top < top || box.bottom > bottom) continue
+      const apart = (y: number) => (y < box.top ? box.top - y : y > box.bottom ? y - box.bottom : 0)
+      const near = [
+        ...levels,
+        ...others.flatMap((line) =>
+          line.slice(start, start + span + 1).flatMap((y) => (y === undefined ? [] : [y])),
+        ),
+      ]
+      const clear = Math.min(...near.map(apart))
+      if (!best || clear > best.clear) best = { x: f.x(start), y: base, clear }
+    }
+  }
+  return best && best.clear >= 3 ? { x: best.x, y: best.y } : undefined
+}
+
 /** Sparse date ticks: the first day, then every one, two or four weeks. */
 export function dateTicks(days: number, plotWidth: number) {
   const room = Math.max(2, Math.floor(plotWidth / 84))
@@ -230,4 +298,24 @@ export function tickLabel(cents: number) {
   const dollars = Math.abs(cents) / 100
   const text = dollars >= 1000 ? `${Number((dollars / 1000).toFixed(1))}k` : `${dollars}`
   return `${cents < 0 ? '−' : ''}$${text}`
+}
+
+let canvas: CanvasRenderingContext2D | null | undefined
+/** Text width in px; a per-character estimate where canvas is unavailable (tests). */
+export function textWidth(text: string, size = 12, weight = 700) {
+  if (canvas === undefined) {
+    try {
+      canvas =
+        typeof document !== 'undefined' && !/jsdom/i.test(navigator.userAgent)
+          ? (document.createElement('canvas').getContext('2d') ?? null)
+          : null
+    } catch {
+      canvas = null
+    }
+  }
+  if (canvas) {
+    canvas.font = `${weight} ${size}px "Figtree Variable", Figtree, "Helvetica Neue", Arial, sans-serif`
+    return canvas.measureText(text).width
+  }
+  return text.length * size * (weight >= 600 ? 0.6 : 0.55)
 }

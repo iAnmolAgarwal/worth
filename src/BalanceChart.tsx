@@ -1,5 +1,13 @@
-import type { ForecastPoint } from '../shared/types'
-import { useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import type { ForecastPoint, InstalmentDetail } from '../shared/types'
+import {
+  Fragment,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from 'react'
 import { Pin } from 'lucide-react'
 import {
   bigBills,
@@ -7,7 +15,9 @@ import {
   daySentence,
   dayState,
   frame,
+  incomeKind,
   isPayday,
+  lineLabelSpot,
   lowestIndex,
   namedEvents,
   rangeOptions,
@@ -16,10 +26,10 @@ import {
   STATE_WORDS,
   stretchDates,
   stretches,
+  textWidth,
   tickLabel,
   type RangeKey,
 } from './chartModel'
-import { textWidth } from './chartLayout'
 import { cx, dayLabel, money, shortDate, signed } from './format'
 import './chart.css'
 
@@ -29,9 +39,16 @@ export interface CompareSeries {
   /** The chip and legend name: "Buy today". */
   name: string
   points: ForecastPoint[]
+  /** Its own colour for its line, chip and labels; red and green keep their meanings. */
+  tone?: Tone
   /** Starts switched on (the page opened this comparison itself). */
   on?: boolean
+  /** Pay in 4's payments, named on their days in the table. */
+  instalments?: InstalmentDetail[]
 }
+
+export type Tone = 'amber' | 'violet' | 'teal'
+const TONES: Tone[] = ['amber', 'violet', 'teal']
 
 /** Tracks the rendered width; tests (no ResizeObserver) get a desktop-sized default. */
 function useWidth() {
@@ -57,6 +74,17 @@ const TRACK_H = 8
 const TRACK_GAP = 5
 const eventText = (event: { name: string; amountCents: number }) =>
   `${event.name} ${signed(event.amountCents, event.amountCents > 0)}`
+/** Amounts never break between the minus sign and the figure. */
+const amounts = (text: string) =>
+  text.split(/(−?\$[\d,.]*\d)/).map((part, index) =>
+    index % 2 ? (
+      <span className="num nowrap" key={index}>
+        {part}
+      </span>
+    ) : (
+      <Fragment key={index}>{part}</Fragment>
+    ),
+  )
 
 /**
  * The balance chart: one bold line for the option in question against the cushion, and as little
@@ -112,21 +140,25 @@ export function BalanceChart({
   const visible = points.slice(0, days)
   const values = visible.map((point) => point.minimumCents)
   const others = compare
-    .map((series, index) => ({ ...series, style: `alt${index + 1}` }))
+    .map((series, index) => ({ ...series, style: `tone-${series.tone ?? TONES[index % 3]}` }))
     .filter((series) => shown.has(series.key))
     .map((series) => {
       const byDate = new Map(series.points.map((point) => [point.date, point]))
-      return { ...series, days: visible.map((point) => byDate.get(point.date)) }
+      const days = visible.map((point) => byDate.get(point.date))
+      // Its own lowest day in view (the first, as the engine counts a tie).
+      const low = days.reduce(
+        (best, point, index) =>
+          point && (best < 0 || point.minimumCents < days[best]!.minimumCents) ? index : best,
+        -1,
+      )
+      return { ...series, days, low }
     })
   const rows = 1 + others.length
   const underPlot = 10 + rows * (TRACK_H + TRACK_GAP) + (bills ? 30 : 0) + 24
   const g = frame(
     width,
     Math.max(1, visible.length),
-    [
-      ...values,
-      ...others.flatMap((s) => s.days.flatMap((p) => (p ? [p.minimumCents] : []))),
-    ],
+    [...values, ...others.flatMap((s) => s.days.flatMap((p) => (p ? [p.minimumCents] : [])))],
     cushionCents,
     underPlot,
   )
@@ -145,15 +177,10 @@ export function BalanceChart({
   const focusState = dayState(focusValue, cushionCents)
   const buyIndex = purchase ? visible.findIndex((point) => point.date === purchase.date) : -1
 
-  const incomeOn = (point: ForecastPoint) =>
-    point.events.reduce((sum, e) => sum + (e.kind === 'income' ? e.amountCents : 0), 0)
-  const topIncome = Math.max(0, ...points.map(incomeOn))
+  const sentence = (index: number) =>
+    daySentence(visible[index]!, values[index]!, cushionCents, incomeKind(visible[index]!, points))
   const describe = (index: number) =>
-    `${dayLabel(visible[index]!.date)}. Day’s low ${signed(values[index]!)}. ${daySentence(
-      visible[index]!,
-      values[index]!,
-      cushionCents,
-    )}`
+    `${dayLabel(visible[index]!.date)}. Day’s low ${signed(values[index]!)}. ${sentence(index)}`
   const move = (index: number) => {
     const next = Math.max(0, Math.min(visible.length - 1, index))
     setHover(null)
@@ -210,7 +237,13 @@ export function BalanceChart({
     ...(buyIndex !== 0 ? [{ index: 0, kind: 'today', text: 'Today' }] : []),
     ...visible.flatMap((point, index) =>
       isPayday(point) && index !== buyIndex
-        ? [{ index, kind: 'payday', text: incomeOn(point) * 2 >= topIncome ? 'Payday' : 'Income' }]
+        ? [
+            {
+              index,
+              kind: (incomeKind(point, points) ?? 'Payday').toLowerCase(),
+              text: incomeKind(point, points) ?? 'Payday',
+            },
+          ]
         : [],
     ),
   ]
@@ -249,7 +282,7 @@ export function BalanceChart({
   const billsTop = trackTop + rows * (TRACK_H + TRACK_GAP)
   const axisY = g.height - 6
   const series = [
-    { key: 'main', name, style: 'main', cents: values as (number | undefined)[] },
+    { key: 'main', name, style: 'tone-main', cents: values as (number | undefined)[] },
     ...others.map((s) => ({
       key: s.key,
       name: s.name,
@@ -258,11 +291,27 @@ export function BalanceChart({
     })),
   ]
 
+  // Each compare line is named on the plot where it sits furthest from the main line, so the
+  // lines read without their colours.
+  const drawn = series.map((s) =>
+    s.cents.map((cents) => (cents === undefined ? undefined : g.y(cents))),
+  )
+  const lineLabels = series.slice(1).flatMap((s, index) => {
+    const spot = lineLabelSpot(
+      drawn[index + 1]!,
+      drawn.filter((_, other) => other !== index + 1),
+      [cushionY, ...(anyNegative ? [g.y(0)] : [])],
+      g,
+      textWidth(s.name, 11, 600) + 4,
+    )
+    return spot ? [{ key: s.key, style: s.style, name: s.name, ...spot }] : []
+  })
+
   const summaries = [
     {
       key: 'main',
       name,
-      style: 'main',
+      style: 'tone-main',
       text: seriesSummary(visible, values, cushionCents),
       runs,
       of: visible,
@@ -290,7 +339,7 @@ export function BalanceChart({
             <span className={cx('wchart-swatch', summary.style)} aria-hidden />
             <span className="words">
               {(others.length > 0 || index > 0) && <b>{summary.name}: </b>}
-              {summary.text}
+              {amounts(summary.text)}
             </span>
             <span className="jumps">
               {summary.runs.map((run) => (
@@ -304,7 +353,11 @@ export function BalanceChart({
                 </button>
               ))}
               {index === 0 && (
-                <button type="button" className="wchart-jump" onClick={() => jump(visible[low]!.date)}>
+                <button
+                  type="button"
+                  className="wchart-jump"
+                  onClick={() => jump(visible[low]!.date)}
+                >
                   Lowest point {shortDate(visible[low]!.date)}
                 </button>
               )}
@@ -319,7 +372,7 @@ export function BalanceChart({
             <button
               type="button"
               key={s.key}
-              className="wchart-chip"
+              className={cx('wchart-chip', `tone-${s.tone ?? TONES[index % 3]}`)}
               aria-pressed={shown.has(s.key)}
               onClick={() => {
                 const next = new Set(shown)
@@ -327,17 +380,15 @@ export function BalanceChart({
                 setShown(next)
               }}
             >
-              <span className={cx('wchart-swatch', `alt${index + 1}`)} aria-hidden />
               {s.name}
             </button>
           ))}
           <button
             type="button"
-            className="wchart-chip"
+            className="wchart-chip tone-bill"
             aria-pressed={bills}
             onClick={() => setBills(!bills)}
           >
-            <span className="wchart-swatch bill" aria-hidden />
             Bills
           </button>
         </div>
@@ -377,13 +428,24 @@ export function BalanceChart({
               </linearGradient>
               {/* Below the cushion a line is redrawn in red, so a dip reads without a label. */}
               <clipPath id={`${id}-under`}>
-                <rect x={0} y={cushionY} width={g.width} height={Math.max(0, floor - cushionY + 4)} />
+                <rect
+                  x={0}
+                  y={cushionY}
+                  width={g.width}
+                  height={Math.max(0, floor - cushionY + 4)}
+                />
               </clipPath>
             </defs>
 
             {g.ticks.map((cents) => (
               <g key={cents}>
-                <line className="wchart-grid" x1={plot.x} x2={plot.x + plot.w} y1={g.y(cents)} y2={g.y(cents)} />
+                <line
+                  className="wchart-grid"
+                  x1={plot.x}
+                  x2={plot.x + plot.w}
+                  y1={g.y(cents)}
+                  y2={g.y(cents)}
+                />
                 <text className="wchart-tick" x={plot.x - 8} y={g.y(cents) + 4} textAnchor="end">
                   {tickLabel(cents)}
                 </text>
@@ -400,7 +462,12 @@ export function BalanceChart({
                 <g key={run.from}>
                   <rect className="wchart-band" x={x} y={plot.y} width={w} height={plot.h} />
                   {fit && (
-                    <text className="wchart-bandlabel" x={x + w / 2} y={plot.y + 14} textAnchor="middle">
+                    <text
+                      className="wchart-bandlabel"
+                      x={x + w / 2}
+                      y={plot.y + 14}
+                      textAnchor="middle"
+                    >
                       {fit}
                     </text>
                   )}
@@ -449,7 +516,20 @@ export function BalanceChart({
             <path className="wchart-line" d={mainPath} />
             <path className="wchart-line under" d={mainPath} clipPath={`url(#${id}-under)`} />
             {g.step >= 7 &&
-              main.map((point, index) => <circle key={index} className="wchart-dot" cx={point.x} cy={point.y} r={1.6} />)}
+              main.map((point, index) => (
+                <circle key={index} className="wchart-dot" cx={point.x} cy={point.y} r={1.6} />
+              ))}
+
+            {lineLabels.map((label) => (
+              <text
+                key={label.key}
+                className={cx('wchart-linelabel', label.style)}
+                x={label.x}
+                y={label.y}
+              >
+                {label.name}
+              </text>
+            ))}
 
             <circle className="wchart-low" cx={g.x(low)} cy={g.y(values[low]!)} r={5} />
             {buyIndex >= 0 && (
@@ -470,7 +550,14 @@ export function BalanceChart({
                   const y = trackTop + row * (TRACK_H + TRACK_GAP)
                   return (
                     <g key={index}>
-                      <rect className={state} x={g.x(index) - w / 2} y={y} width={w} height={TRACK_H} rx={Math.min(3, w / 2)} />
+                      <rect
+                        className={state}
+                        x={g.x(index) - w / 2}
+                        y={y}
+                        width={w}
+                        height={TRACK_H}
+                        rx={Math.min(3, w / 2)}
+                      />
                       {row === 0 && isPayday(visible[index]!) && (
                         <path className="pay" d={`M${g.x(index) - 3},${y - 1}h6l-3,-4z`} />
                       )}
@@ -481,7 +568,11 @@ export function BalanceChart({
                   )
                 })}
                 {rows > 1 && (
-                  <text x={plot.x + plot.w + 8} y={trackTop + row * (TRACK_H + TRACK_GAP) + TRACK_H}>
+                  <text
+                    className={s.style}
+                    x={plot.x + plot.w + 8}
+                    y={trackTop + row * (TRACK_H + TRACK_GAP) + TRACK_H}
+                  >
                     {s.name.replace(/^Wait until \w+, /, 'Wait to ')}
                   </text>
                 )}
@@ -490,8 +581,17 @@ export function BalanceChart({
 
             {billDays.map((bill) => (
               <g key={bill.index} className="wchart-bill">
-                <line x1={g.x(bill.index)} x2={g.x(bill.index)} y1={billsTop + 1} y2={billsTop + 8} />
-                <circle cx={g.x(bill.index)} cy={billsTop + 10} r={-bill.total >= 100_000 ? 3.5 : 2.5} />
+                <line
+                  x1={g.x(bill.index)}
+                  x2={g.x(bill.index)}
+                  y1={billsTop + 1}
+                  y2={billsTop + 8}
+                />
+                <circle
+                  cx={g.x(bill.index)}
+                  cy={billsTop + 10}
+                  r={-bill.total >= 100_000 ? 3.5 : 2.5}
+                />
                 {namedBills.has(bill.index) && (
                   <text x={g.x(bill.index)} y={billsTop + 25} textAnchor="middle">
                     {bill.name}
@@ -501,18 +601,38 @@ export function BalanceChart({
             ))}
 
             {dateTicks(visible.length, plot.w).map((index) => (
-              <text key={index} className="wchart-tick" x={g.x(index)} y={axisY} textAnchor={index === 0 ? 'start' : 'middle'} dx={index === 0 ? -g.step / 2 : 0}>
+              <text
+                key={index}
+                className="wchart-tick"
+                x={g.x(index)}
+                y={axisY}
+                textAnchor={index === 0 ? 'start' : 'middle'}
+                dx={index === 0 ? -g.step / 2 : 0}
+              >
                 {shortDate(visible[index]!.date)}
               </text>
             ))}
 
             <g className={cx('wchart-focus', pinned !== null && hover === null && 'pinned')}>
-              <line x1={g.x(focus)} x2={g.x(focus)} y1={plot.y} y2={trackTop + rows * (TRACK_H + TRACK_GAP) - TRACK_GAP} />
-              {series.map((s, index) =>
-                s.cents[focus] === undefined ? null : (
-                  <circle key={s.key} className={index === 0 ? 'main' : 'alt'} cx={g.x(focus)} cy={g.y(s.cents[focus]!)} r={index === 0 ? 5 : 3.5} />
-                ),
-              )}
+              <line
+                x1={g.x(focus)}
+                x2={g.x(focus)}
+                y1={plot.y}
+                y2={trackTop + rows * (TRACK_H + TRACK_GAP) - TRACK_GAP}
+              />
+              {[...series.entries()]
+                .reverse()
+                .map(([index, s]) =>
+                  s.cents[focus] === undefined ? null : (
+                    <circle
+                      key={s.key}
+                      className={s.style}
+                      cx={g.x(focus)}
+                      cy={g.y(s.cents[focus]!)}
+                      r={index === 0 ? 5 : 3.5}
+                    />
+                  ),
+                )}
             </g>
           </svg>
           <div
@@ -524,9 +644,16 @@ export function BalanceChart({
             aria-valuemax={visible.length - 1}
             aria-valuenow={focus}
             aria-valuetext={dayLabel(focusPoint.date)}
-            style={{ left: plot.x, width: plot.w, top: plot.y, height: trackTop + rows * (TRACK_H + TRACK_GAP) - plot.y }}
+            style={{
+              left: plot.x,
+              width: plot.w,
+              top: plot.y,
+              height: trackTop + rows * (TRACK_H + TRACK_GAP) - plot.y,
+            }}
             onKeyDown={onKey}
-            onPointerMove={(event) => event.pointerType === 'mouse' && setHover(dayAt(event.clientX))}
+            onPointerMove={(event) =>
+              event.pointerType === 'mouse' && setHover(dayAt(event.clientX))
+            }
             onPointerLeave={() => setHover(null)}
             onClick={(event) => {
               const index = dayAt(event.clientX)
@@ -542,7 +669,12 @@ export function BalanceChart({
               {hover === null && pinned === null ? 'Lowest point' : 'Day in focus'}
             </span>
             {pinned !== null && hover === null && (
-              <button type="button" className="wchart-pin" onClick={() => setPinned(null)} aria-label="Pinned. Unpin this day">
+              <button
+                type="button"
+                className="wchart-pin"
+                onClick={() => setPinned(null)}
+                aria-label="Pinned. Unpin this day"
+              >
                 <Pin aria-hidden="true" /> Pinned
               </button>
             )}
@@ -550,9 +682,10 @@ export function BalanceChart({
           <div className="date">{dayLabel(focusPoint.date)}</div>
           <div className="amount num">{signed(focusValue)}</div>
           <div className="state">{STATE_WORDS[focusState]}</div>
-          <p className="words">{daySentence(focusPoint, focusValue, cushionCents)}</p>
+          <p className="words">{amounts(sentence(focus))}</p>
           {others.length > 0 && (
-            <dl className="also">
+            <dl className="also" aria-label="The other options on this day">
+              <div className="also-head">Same day, other options</div>
               {others.map((s) =>
                 s.days[focus] ? (
                   <div key={s.key}>
@@ -562,6 +695,10 @@ export function BalanceChart({
                     </dt>
                     <dd className={cx('num', dayState(s.days[focus]!.minimumCents, cushionCents))}>
                       {signed(s.days[focus]!.minimumCents)}
+                      <span>
+                        {' '}
+                        · {STATE_WORDS[dayState(s.days[focus]!.minimumCents, cushionCents)]}
+                      </span>
                     </dd>
                   </div>
                 ) : null,
@@ -572,53 +709,85 @@ export function BalanceChart({
       </div>
 
       <div className="wchart-legend" aria-hidden="true">
-        <span><i className="wchart-swatch main" />{name} (each day’s low)</span>
-        <span><i className="wchart-pill above" />Above cushion</span>
-        <span><i className="wchart-pill below" />Below cushion</span>
-        <span><i className="wchart-pill negative" />Below zero</span>
+        {series.map((s) => (
+          <span key={s.key} className={s.style}>
+            <i className="wchart-swatch" />
+            {s.name}
+          </span>
+        ))}
+        <span>
+          <i className="wchart-swatch cushion" />
+          Cushion
+        </span>
+        <span>
+          <i className="wchart-pill above" />
+          Above cushion
+        </span>
+        <span>
+          <i className="wchart-pill below" />
+          Below cushion
+        </span>
+        <span>
+          <i className="wchart-pill negative" />
+          Below zero
+        </span>
       </div>
       <div className="wchart-live" aria-live="polite">
         {spoken}
       </div>
 
-      <details className="bchart-table">
-        <summary>
-          View as table
-        </summary>
-        <div className="bchart-scroll">
+      <details className="wchart-table">
+        <summary>View as table</summary>
+        <div
+          className="wchart-scroll"
+          tabIndex={0}
+          role="region"
+          aria-label="Balance by day, as a table"
+        >
           <table>
             <caption>
               Projected balance each day at its low, with that day’s bills taken out before pay
-              arrives, against your {money(cushionCents)} cushion.
+              arrives, against your {money(cushionCents)} cushion.{' '}
+              {summaries.map((summary) => `${summary.name}: ${summary.text}`).join(' ')}
             </caption>
             <thead>
               <tr>
                 <th scope="col">Day</th>
                 <th scope="col">{others.length ? `${name} (day’s low)` : 'Balance (day’s low)'}</th>
                 <th scope="col">Against cushion</th>
+                <th scope="col">What happens</th>
                 {others.map((s) => (
                   <th scope="col" key={s.key}>
-                    {s.name}
+                    {s.name} (day’s low)
                   </th>
                 ))}
-                <th scope="col">What happens</th>
               </tr>
             </thead>
             <tbody>
               {visible.map((point, index) => (
+                // Each balance is red only when it is itself below the cushion, and says so in
+                // words: every column is judged on its own value, as the engine judges it.
                 <tr key={point.date}>
                   <th scope="row">{dayLabel(point.date)}</th>
-                  <td className="num">
+                  <td className={cx('num', values[index]! < cushionCents && 'below')}>
                     {signed(values[index]!)}
                     {index === low ? ' · lowest point' : ''}
                   </td>
                   <td>{STATE_WORDS[dayState(values[index]!, cushionCents)]}</td>
-                  {others.map((s) => (
-                    <td className="num" key={s.key}>
-                      {s.days[index] ? signed(s.days[index]!.minimumCents) : ''}
-                    </td>
-                  ))}
-                  <td>{namedEvents(point).map(eventText).join(', ')}</td>
+                  <td>{namedEvents(point).map(eventText).join(', ') || '—'}</td>
+                  {others.map((s) => {
+                    const cents = s.days[index]?.minimumCents
+                    if (cents === undefined) return <td key={s.key}>—</td>
+                    const instalment = s.instalments?.find((i) => i.date === point.date)
+                    return (
+                      <td className={cx('num', cents < cushionCents && 'below')} key={s.key}>
+                        {signed(cents)}
+                        {instalment ? ` · payment ${instalment.number} of 4` : ''}
+                        {index === s.low ? ' · lowest point' : ''}
+                        {cents < cushionCents ? ' · below cushion' : ''}
+                      </td>
+                    )
+                  })}
                 </tr>
               ))}
             </tbody>

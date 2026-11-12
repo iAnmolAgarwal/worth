@@ -1243,9 +1243,8 @@ function Review({
             Your balance, next {preview.points.length - 1} days
           </h2>
           <p className="meta">
-            {shortDate(preview.points[0]!.date)} to {shortDate(preview.points.at(-1)!.date)}, before
-            any purchase. Each day shows its low, with that day’s bills taken out before pay
-            arrives.
+            Each day’s lowest balance before any purchase, {shortDate(preview.points[0]!.date)} to{' '}
+            {shortDate(preview.points.at(-1)!.date)}.
           </p>
           <BalanceChart
             points={preview.points.map((point) => ({

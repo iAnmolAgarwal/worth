@@ -48,7 +48,7 @@ import {
   purchasePlans,
   useComparison,
 } from './engine'
-import { cushionGap } from './chartLayout'
+import { cushionGap } from './chartModel'
 import { boughtOn, cx, dayLabel, fromMoney, fullDate, money, shortDate, signed } from './format'
 import { PayPalMessage } from './paypal'
 import type { PayPalSdkInstance } from './paypalSdk'
@@ -294,7 +294,7 @@ export function ChartTile({
   c: Comparison
   k: OptionKey
   payIn4?: P4
-  /** The Pay in 4 scenario, open or not, so opening the comparison never rescales the chart. */
+  /** The Pay in 4 scenario, open or not, so the chart can offer it as a line. */
   scaleWith?: P4
 }) {
   const option = optionOf(c, k) ?? c.buyToday
@@ -306,8 +306,24 @@ export function ChartTile({
   const compare: CompareSeries[] = [
     ...(['buyToday', 'wait'] as const)
       .filter((key) => key !== k && optionOf(c, key))
-      .map((key) => ({ key, name: optionTitle(key, c), points: optionOf(c, key)!.points })),
-    ...(p4 ? [{ key: 'payIn4', name: 'Pay in 4', points: p4.points, on: Boolean(payIn4) }] : []),
+      .map((key) => ({
+        key,
+        name: optionTitle(key, c),
+        points: optionOf(c, key)!.points,
+        tone: key === 'buyToday' ? ('amber' as const) : ('teal' as const),
+      })),
+    ...(p4
+      ? [
+          {
+            key: 'payIn4',
+            name: 'Pay in 4',
+            points: p4.points,
+            tone: 'violet' as const,
+            on: Boolean(payIn4),
+            instalments: p4.instalments,
+          },
+        ]
+      : []),
   ]
   return (
     <section className="tile" aria-labelledby="chart-title">
@@ -315,8 +331,7 @@ export function ChartTile({
         {title}
       </h2>
       <div className="meta">
-        Your balance each day, {shortDate(c.window.start)} to {shortDate(c.window.end)}. Each day
-        shows its low, with that day’s bills taken out before pay arrives.
+        Each day’s lowest balance, {shortDate(c.window.start)} to {shortDate(c.window.end)}.
       </div>
       {thesis && <p className="chart-thesis">{thesis}</p>}
       <BalanceChart
