@@ -1,6 +1,6 @@
 # Worth guardrail MCP: the affordability check an agent must pass before paying
 
-Worth guardrail MCP is Worth's own [Model Context Protocol](https://modelcontextprotocol.io) server (not PayPal's). Any MCP client can ask it whether the person can afford a purchase at any store, read their saved plans, and, for the demo store's items, get the store's own product page. **Worth sells nothing and never creates an order** (decision 0.2 of the checkout pivot): the store sells the item, and the person pays on the store's page with the store's own PayPal checkout. No agent can pay through Worth: no tool creates, approves or captures a payment.
+Worth guardrail MCP is Worth's own [Model Context Protocol](https://modelcontextprotocol.io) server (not PayPal's). Any MCP client can ask it whether the person can afford a purchase at any store, read their saved plans, and, for Worth's listed items, get a link to Worth's own comparison. **Worth never creates an order** (decision 0.2 of the checkout pivot): the person decides in Worth and presses the buttons themselves. No agent can pay through Worth: no tool creates, approves or captures a payment.
 
 - **Transport:** Streamable HTTP at `/mcp` on the Worth server (stateless mode), plus a stdio relay (`server/mcpStdio.ts`) for clients that launch a local process.
 - **SDK:** `@modelcontextprotocol/sdk` 1.32.0 (`McpServer`, `registerTool` with zod schemas, `StreamableHTTPServerTransport` with `sessionIdGenerator: undefined`, `StdioServerTransport`).
@@ -10,7 +10,7 @@ Worth guardrail MCP is Worth's own [Model Context Protocol](https://modelcontext
 
 **1. Bring your own AI.** Someone with a Claude Desktop subscription (or any MCP client) connects it to their Worth plan and asks "Can I afford the $1,199 camera?" in their own assistant. Their model writes the reply; Worth supplies every number. Each result carries a ready-to-quote `summary` rendered by Worth's own templates (the same wording the app uses), with `source: "Worth engine"` and the `as_of` date. The tool descriptions tell the model to quote it and never recompute or round.
 
-**2. A guardrail for shopping agents, at any store.** An agent that shops and checks out for someone calls `check_affordability` before it buys, wherever the item is sold. Worth answers from the person's own plan: buy today, wait until a dated day, or spend less, with PayPal Pay in 4 as a comparison only. The person then buys on the store's own site. For an item in the demo store's catalog (Larkspur Supply), `store_checkout_link` returns that item's page on the store's site with the same verdict, so the agent can hand the person a link instead of a checkout.
+**2. A guardrail for shopping agents, at any store.** An agent that shops and checks out for someone calls `check_affordability` before it buys, wherever the item is sold. Worth answers from the person's own plan: buy today, wait until a dated day, or spend less, with PayPal Pay in 4 as a comparison only. The person then buys on the store's own site. For one of Worth's listed items, `purchase_check_link` returns a link to Worth's own comparison with the same verdict, so the agent can hand the person a link instead of a checkout.
 
 ## Setup
 
@@ -128,7 +128,7 @@ Read-only. It assesses the purchase against the person's plan over Worth's 60-da
 | `explanation`                    | Worth's decision sentences (template verdict, low point, cause).                                                                                                                                    |                                                                                                                                               |
 | `pay_in_4_comparison`            | PayPal Pay in 4 as an illustrative comparison: payments, the bills each lands near (`collisions`), and the cushion label. **Never recommended.**                                                    | `recommended: false`; `eligibility`: `paypal`, `range-only` or `unavailable`.                                                                 |
 | `facts`                          | Worth's fact sentences (the same ones Ask Worth uses).                                                                                                                                              |                                                                                                                                               |
-| `catalog_item_id`                | Set when the item is in the demo store's catalog (Larkspur Supply), so `store_checkout_link` can return its page on the store's site. |                                                                                                                                               |
+| `catalog_item_id`                | Set when the item is one of Worth's listed items, so `purchase_check_link` can link to Worth's comparison for it. |                                                                                                                                               |
 | `guards`                         | The checks behind the answer, in the app's trace vocabulary.                                                                                                                                        |                                                                                                                                               |
 | `next_step`                      | What an agent may do next, without recommending.                                                                                                                                                    |                                                                                                                                               |
 
@@ -154,16 +154,15 @@ How Worth's outcome maps to the contract:
 
 **Fail closed:** invalid input, an incomplete plan, and the one ambiguous case (an earlier day than the one asked about fits) each return a refusal with a reason. None of them returns a guessed verdict.
 
-### `store_checkout_link({ catalog_item_id })`
+### `purchase_check_link({ catalog_item_id })`
 
-The demo store's checkout link. Read-only: it returns the item's page on the store's own site (`MERCHANT_ORIGIN/p/<catalog_item_id>`) together with Worth's verdict for buying it today at the catalog price, which is the same decision `check_affordability` gives for that item. Worth creates no order and calls no PayPal order API; the person buys on the store's page with the store's own PayPal checkout, now or on the day Worth suggests. Price, name and store come from the catalog, never from the agent.
+A link to Worth's own comparison for one of its listed items. Read-only: it returns `<APP_ORIGIN>/#decision?product=<catalog_item_id>` together with Worth's verdict for buying it today at the catalog price, which is the same decision `check_affordability` gives for that item. Worth creates no order and calls no PayPal order API; the person opens the link in their own browser and chooses there: buy today with Worth's PayPal sandbox checkout (behind the app's guards), wait for the day it fits, or save it. Price and name come from the catalog, never from the agent. No store is named or linked.
 
-- **Returns** `catalog_item_id`, `item`, `merchant`, `amount_usd`, `currency`, `store_url`, `affordability_status`, `recommended_action`, `amount_safe_to_pay`, `earliest_date_for_full_payment`, `explanation`, `order_created: false`, `human_steps` and `guards`. The `summary` is Worth's verdict, then "Larkspur Supply sells the …, not Worth. Buy it on the store's own page with its PayPal checkout: <store_url>", then "Worth prepared no order and nothing has been paid."
-- **Below the cushion** it still returns the link; the verdict says so (for example `affordable_later` with the date that fits). There is no acknowledgement flag, because there is nothing to approve in Worth.
-- **Store hand-off off** (`MERCHANT_ORIGIN` or `HANDOFF_SECRET` unset): `store_url` is `null`, and the summary gives the verdict and says this Worth server has no store link set up.
+- **Returns** `catalog_item_id`, `item`, `amount_usd`, `currency`, `check_url`, `affordability_status`, `recommended_action`, `amount_safe_to_pay`, `earliest_date_for_full_payment`, `explanation`, `order_created: false`, `human_steps` and `guards`. The `summary` is Worth's verdict, then "The person can compare buying the … today, waiting or saving it in Worth, and decide there: <check_url>", then "Worth prepared no order and nothing has been paid."
+- **Below the cushion** it still returns the link; the verdict says so (for example `affordable_later` with the date that fits). There is no acknowledgement flag, because there is nothing to approve through the agent.
 - Catalog: `headphones`, `camera`, `chair`, `backpack`, `macbook-pro-14`, `airpods-4`. Any other item is refused with `UNKNOWN_ITEM`; `check_affordability` works for it instead.
 
-Before decision 0.2 this tool was `prepare_order` and created a PayPal sandbox order for the person to approve. It was renamed rather than kept, because no client config names a tool: the Claude Desktop snippets above list only the server.
+Before decision 0.2 this tool was `prepare_order` and created a PayPal sandbox order for the person to approve; later it was `store_checkout_link` and linked to the example store's product page. It was renamed each time rather than kept, because no client config names a tool: the Claude Desktop snippets above list only the server.
 
 ### `list_saved_plans()`
 
@@ -183,7 +182,7 @@ Worth's refusals are tool results with `isError: true` and one JSON text block:
 | `PLAN_INCOMPLETE`                                                                                                                              | The plan needs details confirmed in Worth (`missing` lists them).                          |
 | `EARLIER_DAY_FITS`                                                                                                                             | The requested date dips below the cushion but an earlier day does not; ask about that day. |
 | `INCOHERENT_RESULT`                                                                                                                            | The coherence gate refused to send an answer.                                              |
-| `UNKNOWN_ITEM`                                                                                                                                 | `store_checkout_link` for an item outside the demo store's catalog.                        |
+| `UNKNOWN_ITEM`                                                                                                                                 | `purchase_check_link` for an item outside Worth's listed items.                            |
 | `PLAN_EXPIRED`                                                                                                                                 | The plan was deleted while the request ran.                                                |
 | `INTERNAL_ERROR`                                                                                                                               | Anything unexpected. The message is fixed; no exception text, stack or data is included.   |
 
@@ -202,7 +201,7 @@ HTTP-level refusals are JSON-RPC errors: `401` (with `WWW-Authenticate: Bearer`)
   - 20 failed token checks per IP per 15 minutes, after which that IP is refused even with a valid token;
   - 30 requests per token per minute (`MCP_TOKEN_PER_MINUTE`);
   - 10 token creations per plan per hour.
-- **No order or payment path.** No tool creates, approves or captures an order. `store_checkout_link` returns a link to the store's own page, built by the server from `MERCHANT_ORIGIN` and the catalog ID; the store creates its own PayPal order when the person checks out there.
+- **No order or payment path.** No tool creates, approves or captures an order. `purchase_check_link` returns a link to Worth's own comparison, built by the server from `APP_ORIGIN` and the catalog ID; any checkout happens in the person's own browser, behind the app's guards.
 - **Untrusted input.** Item text and saved names are labels, and no figure is read from them. They never start or speak in Worth's quotable `summary`: a catalog item is named by the catalog; anything else is "This purchase", with its sanitised label only in quotes after Worth's sentences, or "this item" when the text reads like a verdict, an instruction or a price. The tool descriptions and server instructions tell agents to treat them as data.
 - **Token lookup** is by its SHA-256 hash through a unique index, not a constant-time compare. With 256-bit random tokens, timing can at most reveal a prefix of a stored hash, which does not help find a token.
 - **Nothing leaks.** Errors carry fixed codes and sentences written for people. Logs record the error class only. Results never include credentials, PayPal payer data or identifiers other than the catalog and saved-item IDs the agent needs.
@@ -210,7 +209,7 @@ HTTP-level refusals are JSON-RPC errors: `401` (with `WWW-Authenticate: Bearer`)
 
 ## Example transcript (abridged)
 
-Abridged from the sample persona on the video day (`/?replay=video`), with the store hand-off on.
+Abridged from the sample persona on the video day (`/?replay=video`).
 
 > **Person:** Buy me the $1,199 camera.
 >
@@ -224,14 +223,14 @@ Abridged from the sample persona on the video day (`/?replay=video`), with the s
 >
 > **Person:** Send me the link anyway; I'll decide.
 >
-> **Agent** → `store_checkout_link({"catalog_item_id":"camera"})`
+> **Agent** → `purchase_check_link({"catalog_item_id":"camera"})`
 >
-> **Worth:** `affordable_later` · `store_url: https://<store>/p/camera?replay=video` · `order_created: false`. Summary: the same verdict, then "Larkspur Supply sells the everyday camera, not Worth. Buy it on the store's own page with its PayPal checkout: … Worth prepared no order and nothing has been paid."
+> **Worth:** `affordable_later` · `check_url: https://<worth>/#decision?product=camera` · `order_created: false`. Summary: the same verdict, then "The person can compare buying the everyday camera today, waiting or saving it in Worth, and decide there: … Worth prepared no order and nothing has been paid."
 >
-> **Person** opens the store's page, where Larkspur's own PayPal button and "Analyse with Worth" sit side by side, and pays there now or on Fri, Oct 23.
+> **Person** opens Worth's comparison and taps "Save for Fri, Oct 23", or "Buy today anyway" to open Worth's PayPal sandbox checkout.
 
 ## Limits
 
-- PayPal **sandbox** only, and the six-item demo catalog. `check_affordability` works for any item at any store; `store_checkout_link` works only for the demo store's catalog items.
+- PayPal **sandbox** only, and the six listed sample items. `check_affordability` works for any item at any store; `purchase_check_link` works only for those six.
 - No OAuth. Remote clients that require OAuth for custom connectors (rather than a header) need the `mcp-remote` bridge above.
 - When a token is revoked mid-session, mcp-remote reacts to the `401` by trying OAuth discovery, and shows "Dynamic Client Registration rejected (HTTP 404)". The stdio relay shows Worth's own `UNAUTHORIZED` message instead.

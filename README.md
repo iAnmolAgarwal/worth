@@ -2,7 +2,8 @@
 
 Buy now, wait, or split it into 4? See which bill each payment lands on before you decide.
 
-Worth is a cash-flow check for the moment before a purchase. A deterministic engine, written in
+Worth is a personal finance agent for shoppers, connected to PayPal: a cash-flow check for the
+moment before a purchase. A deterministic engine, written in
 integer cents, projects your balance day by day against your bills, paydays and the cushion you
 want to keep, and compares buying today, waiting, spending less and PayPal Pay in 4. Claude reads
 your question, chooses which of the engine's facts answer it and adds one sentence that the server
@@ -29,18 +30,17 @@ session with a sample plan (Alex, on the demo day Fri, Nov 13, 2026), kept for 2
 <!-- TODO(coordinator): fill in a dedicated judge sandbox buyer account, never the team's own. -->
 - **PayPal sandbox buyer** for the checkout step: email `TODO`, password `TODO`. If these still
   read `TODO`, ask the maintainer.
-- **Who's who:** Worth is the shopper's side. It reads your plan and helps you decide when and
-  how to pay, and it sells nothing. **Larkspur Supply is a demo store** that stands in for any
-  shop that takes PayPal: the sandbox merchant account plays that store, so PayPal's approval
-  page names "Larkspur Supply (demo store)" as the payee, never Worth. In a real deployment Worth
-  would sit with the shopper (in the PayPal app, or as a check before the PayPal button) and the
-  payment would go to the actual shop.
+- **Who's who:** Worth is the shopper's agent. It reads your PayPal activity and your plan, tells
+  you the day a purchase fits, and when that day comes you pay with PayPal. It sells nothing.
+  Worth's own checkout pays a neutral sandbox merchant ("Sandbox demo merchant",
+  `PAYPAL_BRAND_NAME`), which PayPal's approval page names as the payee, never Worth. In a real
+  deployment the payment would go to the actual shop.
 - **What PayPal does:** Orders v2 create and capture, the official JS SDK v6 PayPal button and
   popup, PayPal Messages for Pay in 4, a server-side Pay Later eligibility check, and verified
   webhooks that turn a refund into a review item. Sandbox only.
 - **What AI does:** Claude Sonnet 5.5 interprets the question, picks up to three engine facts
-  and writes one placeholder-only sentence the server checks; it can ask for a PayPal order,
-  which the server prepares only behind the same guards as the Buy button. It never pays.
+  and writes one placeholder-only sentence the server checks; when you ask to buy, it links to
+  Worth's own comparison, where you press the buttons. It never pays or prepares an order.
 - **Three clicks:** Home → "Can I afford the $1,899 Halden X5?" → "See the comparison" →
   "Compare with PayPal Pay in 4". Then the checkout path in [Try it](#try-it).
 
@@ -85,9 +85,11 @@ and 47% of BNPL users say they paid late in the past year
 - **A balance chart you can read.** The forecast is drawn as the daily low with the cushion, and
   every payday and bill of $100 or more is a line you can click (or reach with the arrow keys)
   for its amount and the balance after it. A table view carries the same numbers.
-- **Checkout prepared, never taken.** "Buy" (or "Go ahead and buy the studio headphones" in Ask
-  Worth) prepares a PayPal sandbox order behind server guards. You approve in PayPal; Worth
-  captures only when you confirm in Worth, and the payment shows up in Activity once.
+- **Checkout prepared, never taken.** "Buy today anyway" or "Buy with PayPal" on the comparison
+  prepares a PayPal sandbox order behind server guards. "Go ahead and buy the studio headphones"
+  in Ask Worth shows the verdict and a link to that comparison; it never buys. You approve in
+  PayPal; Worth captures only when you confirm in Worth, and the payment shows up in Activity
+  once.
 - **Save it for the day it fits.** "Save for Tue, Dec 15" keeps the item with its date. When the
   day comes, Saved says the plan suggests it may fit, you confirm today's funds, Worth checks
   again, and only then does Buy with PayPal open.
@@ -109,17 +111,18 @@ and 47% of BNPL users say they paid late in the past year
 
 ## Try it
 
-On https://worth.onrender.com (no sign-in):
+On https://worth.onrender.com (no sign-in), all inside Worth:
 
-1. On Home, click **Can I afford the $1,899 Halden X5?** Ask Worth answers with the engine's verdict.
-   Open **How Ask Worth read this** to see what Claude chose and what the server checked. Then
-   ask: "If I put it on Pay in 4, which bills would the payments land next to?"
-2. Click **See the comparison**, then **Compare with PayPal Pay in 4**: four payments, the bill
-   each one lands near, the plan already running, and PayPal's message.
-3. In Ask Worth, type "Go ahead and buy the studio headphones". Worth shows its verdict for the
-   $349 headphones and an **Open at Larkspur Supply** link to the store's own product page, where
-   you pay with PayPal (the sandbox buyer above). Worth prepares no order: the store sells the
-   item and PayPal takes the payment.
+1. **Home.** See how much you could spend today and still keep your cushion, and what is coming
+   up.
+2. **Check the Halden X5.** Ask Worth "Can I afford the Halden X5?" (or "Go ahead and buy it").
+   Worth answers with the engine's verdict and the day it fits; open **How Ask Worth read this**
+   to see what Claude chose and what the server checked. Open the comparison: buy today, wait, or
+   spend less, and **Compare with PayPal Pay in 4**. **Save for** the day it fits, or **Buy today
+   anyway** to open Worth's PayPal sandbox checkout (the sandbox buyer above; the payee is
+   "Sandbox demo merchant").
+3. **Connect PayPal.** Bring your own sandbox activity through PayPal's MCP server, or **Try with
+   a sample PayPal export**; Home becomes your month from PayPal.
 
 Pay in 4 itself is chosen inside PayPal's checkout. A sandbox buyer can pick it there; Worth
 cannot see which funding the buyer chose (PayPal's order and capture do not say), so after a
@@ -133,8 +136,9 @@ credentials and the browser receives only the public client ID.
 
 - **Orders v2.** `POST /v2/checkout/orders` with `intent: CAPTURE`, one item at the catalog
   price, and the purchase ID as `reference_id`, `custom_id` and `invoice_id`;
-  `experience_context` sets the brand name to the demo store (the payee, not Worth),
-  `NO_SHIPPING` and Worth's return and cancel URLs.
+  `experience_context` sets the brand name to a neutral sandbox merchant (`PAYPAL_BRAND_NAME`,
+  default "Sandbox demo merchant"; the payee, not Worth), `NO_SHIPPING` and Worth's return and
+  cancel URLs.
   `GET` reconciles state and `POST …/capture` captures after the buyer approves and the user
   confirms. `PayPal-Request-Id` is derived from the purchase ID, so retries are idempotent, and
   every returned order is checked for the purchase reference, merchant, currency, amount and
@@ -200,10 +204,11 @@ Claude is the interface and the narrator; the engine is the decision-maker.
   `checkSentence` rejects free numbers or dates, advice, a value in the wrong place, wording that
   rates Pay in 4, and anything that contradicts the engine's outcome; on any failure the
   engine's template sentence is shown instead. The verdict sentence itself is always a template.
-- **Send you to the store, never sell.** When you ask to buy a demo-store item,
-  `open_store_checkout` shows Worth's check of buying it today and an "Open at Larkspur Supply"
-  link to the store's own product page, built by the server from `MERCHANT_ORIGIN` and the
-  catalog. Worth prepares no order: you pay on the store's page with its own PayPal checkout.
+- **Link to the comparison, never buy.** When you ask to buy a listed item,
+  `open_purchase_check` shows Worth's check of buying it today and a link to Worth's own
+  comparison for it, built by the server from the catalog. Worth prepares no order: on the
+  comparison you choose Buy today anyway, Save for the day it fits, or nothing, and Worth's
+  PayPal sandbox checkout opens only behind its guards.
 - **Consent and limits.** The untouched sample plan can use Claude without opt-in; an edited or
   imported plan needs the AI-sharing switch. Requests are capped per IP per hour and per server
   per day; past a cap, or without a key, answers are labelled local calculations.
@@ -223,14 +228,14 @@ The [evaluation](#evaluation) runs these paths live against the real model.
 | PayPal Webhooks | Raw-body signature verification; order events reconcile, refunds and reversals become review items |
 | PayPal MCP server (`mcp.sandbox.paypal.com`) | Connect PayPal: OAuth with PKCE, then only its `list_transactions` tool reads the logged-in user's own activity for the import review |
 | PayPal sandbox accounts and negative testing | A US sandbox merchant and buyer; `PayPal-Mock-Response` for the decline and re-approve path |
-| Claude Sonnet 5.5 (Anthropic API) | Interprets questions, picks engine facts, writes one checked sentence, may link to the demo store's product page, suggests import categories |
+| Claude Sonnet 5.5 (Anthropic API) | Interprets questions, picks engine facts, writes one checked sentence, may link to Worth's comparison for an item, suggests import categories |
 | Claude Opus 5.5 (Anthropic API) | Offline only: the independent judge in the live AI eval (`eval/judge.ts`); never called by the app |
 | Channel3 API | `search`, `similar` and product reads for "similar items that fit today"; 6 h cache, daily and per-IP caps, recorded results as fallback |
 | Model Context Protocol SDK | Worth guardrail MCP: the `/mcp` server and stdio relay that let outside agents check affordability at any store before they buy |
 | Render | Hosts the app from `render.yaml`: one Node 24 web service with a 1 GB persistent disk |
 | SQLite (`node:sqlite`) | Session-scoped storage on that disk: plans, purchases, saved items, webhook events, agent tokens |
 | React 19, Vite, Express 5, Zod 4, TypeScript | The client, build, HTTP server and validation at every boundary |
-| Unsplash | The six product photos in the demo store, each checked for brand marks ([credits](docs/DESIGN-SOURCES.md)) |
+| Unsplash | The six product photos, each checked for brand marks ([credits](docs/DESIGN-SOURCES.md)) |
 | Figtree, Lucide | The typeface (OFL 1.1) and icons (ISC) |
 | Vitest, oxlint, Prettier, GitHub Actions | Tests, lint, formatting and CI (`npm run check` on every push and pull request) |
 
@@ -246,7 +251,7 @@ The [evaluation](#evaluation) runs these paths live against the real model.
         │                    ▼                         └── Channel3 (similar items, cached)
         │        server/chat.ts (Anthropic SDK)
         │        tools ─► interpret · commitments · spending · plan · alternatives
-        │        open_store_checkout ─► MERCHANT_ORIGIN/p/<id> (no order)
+        │        open_purchase_check ─► #decision?product=<id> (no order)
         │        sentence ─► checkSentence ─► template on any failure
         ▼                    │
   shared/finance.ts (pure TypeScript, integer cents) ◄──┘   the model's tools ARE the engine
@@ -254,7 +259,7 @@ The [evaluation](#evaluation) runs these paths live against the real model.
         │
   node:sqlite on the Render disk (one row set per anonymous session)
 
-  /mcp (bearer token, no Claude) ─► the same engine; the store's link, never an order
+  /mcp (bearer token, no Claude) ─► the same engine; a link to Worth, never an order
 ```
 
 - **The engine** (`shared/finance.ts`, `shared/collision.ts`) is pure: data in, data out. It
@@ -284,21 +289,21 @@ Halden X5?" in your own assistant.
   now, later, or not; the safe amount; the earliest date; the low point and the bill behind it;
   Pay in 4 as a comparison) with a ready-to-quote summary from Worth's templates. Coherence
   invariants are checked before every answer.
-- `store_checkout_link` is the demo store's checkout link: for a Larkspur Supply item it returns
-  the store's own product page with the same verdict. Worth creates no order; the person pays on
-  the store's page with its PayPal checkout.
+- `purchase_check_link` returns, for one of Worth's listed items, a link to Worth's own
+  comparison with the same verdict. Worth creates no order; the person decides there and presses
+  the buttons themselves.
 - `list_saved_plans` lists saved items and wait plans.
 
 The MCP path makes no Anthropic call. Tokens are stored as SHA-256 fingerprints, bound to one
 plan and rate-limited. Setup, the tool contract and the security model are in
 [docs/MCP.md](docs/MCP.md).
 
-<img src="docs/img/connect-agent.png" width="560" alt="Settings, Connect an agent: the agent can check a purchase against your plan and read saved items, can send you to the demo store's own page to buy there, and can never pay for you">
+<img src="docs/img/connect-agent.png" width="560" alt="Settings, Connect an agent: the agent can check a purchase against your plan and read saved items, can send you a link to Worth's comparison for an item, and can never pay for you">
 
 ## Limits and degradation
 
-- **Sandbox only.** No real money moves and no goods ship. The demo store (Larkspur Supply) has
-  six items; `open_store_checkout` and `store_checkout_link` link only to those.
+- **Sandbox only.** No real money moves and no goods ship. Worth's checkout covers six listed
+  sample items; `open_purchase_check` and `purchase_check_link` link only to those.
 - **USD only.** No public API gives third-party apps a consumer's PayPal activity; Worth reads it
   through PayPal's MCP server after you log in (sandbox), or from a CSV export. A sandbox account
   holds only what was done in the sandbox (rows can't be backdated), so its history is short.
@@ -359,6 +364,7 @@ the webhook ID in `PAYPAL_WEBHOOK_ID`. Localhost alone cannot receive them.
 | `PAYPAL_WEBHOOK_ID` | ID of the registered sandbox webhook; required to accept webhook deliveries |
 | `PAYPAL_CONNECT` | `on` or `off`. Connect PayPal through PayPal's MCP server; on by default when `PAYPAL_CLIENT_ID` is set |
 | `PAYPAL_MCP_CLIENT_ID` | Optional: a client already registered on PayPal's MCP server for `<APP_ORIGIN>/api/paypal/connect/callback`. Without it Worth registers one at first use |
+| `PAYPAL_BRAND_NAME` | The payee PayPal's approval page and Activity show for Worth's own sandbox checkout; default `Sandbox demo merchant` |
 | `PAYPAL_NEGATIVE_TESTING` | Allows the sandbox decline demo. On in development unless `false`; off in production unless `true` |
 | `CHANNEL3_API_KEY` | Channel3 key for similar items. Without it the panel is hidden |
 | `CHANNEL3_MODE` | `live` (default with a key), `fixture` (recorded results, no credits) or `off` |
@@ -370,8 +376,8 @@ the webhook ID in `PAYPAL_WEBHOOK_ID`. Localhost alone cannot receive them.
 | `PORT`, `HOST` | Port (5173) and bind address (`0.0.0.0` in production, `127.0.0.1` otherwise) |
 | `APP_ORIGIN` | Public browser origin. Falls back to `APP_URL`, then `RENDER_EXTERNAL_URL`, then `http://localhost:$PORT`. Production refuses localhost or plain HTTP |
 | `TRUST_PROXY` | Reverse-proxy hops trusted for the client IP. Required in production (2 on Render) |
-| `HANDOFF_SECRET` | Key shared with the demo store for signed hand-offs to `/check`: 32+ random bytes, base64url. Set it with `MERCHANT_ORIGIN`, or neither: with neither the hand-off is off (`handoff: off` in `/api/health`), and production refuses only one without the other |
-| `MERCHANT_ORIGIN` | The demo store's origin, the only place a hand-off may return to. HTTPS only in production |
+| `HANDOFF_SECRET` | Key shared with the example store for signed hand-offs to `/check`: 32+ random bytes, base64url. Set it with `MERCHANT_ORIGIN`, or neither: with neither the hand-off is off (`handoff: off` in `/api/health`), and production refuses only one without the other |
+| `MERCHANT_ORIGIN` | The example store's origin, the only place a hand-off may return to. HTTPS only in production |
 | `HANDOFF_MERCHANT_ID` | The store's `mid` claim; default `larkspur` |
 | `DATABASE_PATH` | SQLite file; default `.data/worth.sqlite` |
 | `SAMPLE_PERSONA` | Who a new session starts as: `alex` (default) on the pinned demo day, or `maya`, the test fixture dated today. The test setups set `maya` |
@@ -434,7 +440,7 @@ after them are in [docs/EVALUATION.md](docs/EVALUATION.md).
 ## Data sources and attribution
 
 - **Sample plan and catalog** (`shared/seed.ts`) are synthetic: Alex, his bills, the Halden
-  camera brand and the Larkspur Supply demo store are invented. Product names are used to name items, never as logos.
+  camera brand, the products and the example store are invented. Product names are used to name items, never as logos.
 - **Product photos** are from [Unsplash](https://unsplash.com/license), credited per photo in
   [docs/DESIGN-SOURCES.md](docs/DESIGN-SOURCES.md); the Halden X5 photo is AI-generated for this
   project and shows no brand mark.
@@ -444,6 +450,20 @@ after them are in [docs/EVALUATION.md](docs/EVALUATION.md).
   hackathon project and not a PayPal product.
 - **Statistics** in [The problem](#the-problem) are from the Federal Reserve, the CFPB and
   LendingTree, linked where they are cited.
+
+## Example: a shop adding the Worth swipe to its PayPal button
+
+`merchant/` is a separate demo app, not part of Worth: an invented shop, Larkspur Supply, that
+adds a Worth swipe (`<worth-check>`) to its PayPal button. It shows how a store could hand a
+shopper to Worth before they pay. The swipe opens Worth's `/check` page with a quote the
+store's server signed (the contract is described in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md));
+Worth verifies it, names that store on `/check` only, and refuses a tampered or expired link. If the shopper agrees, the store
+reports the payment back so it shows once in Activity. The store runs its own PayPal checkout
+(Orders v2, JS SDK v6 and webhooks, sandbox), as Worth's own checkout does.
+
+The hosted Worth app does not link to it. To run both locally, start Worth with `npm run dev`
+and the store with `npm run dev:merchant`, with `HANDOFF_SECRET` set to the same value on both
+and `MERCHANT_ORIGIN` / `WORTH_ORIGIN` pointing at each other (see `.env.example`).
 
 ## Security
 
