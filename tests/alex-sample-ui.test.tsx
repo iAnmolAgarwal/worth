@@ -152,7 +152,7 @@ describe('the Pay in 4 card on Alex’s camera', () => {
     if (!c.payIn4.available) throw new Error('Pay in 4 is in range for $1,899')
     expect(payIn4Lines(c.payIn4, c.cushionCents)).toEqual({
       lead: 'With Pay in 4, your balance would first go below your cushion on Sun, Nov 29',
-      low: 'Lowest point $222.76 on Mon, Nov 30, before payday. Payment 2 ($474.75) lands Fri, Nov 27.',
+      low: 'Lowest point $222.76 on Mon, Nov 30, before payday. Payment 2 ($474.75) lands about Fri, Nov 27.',
     })
   })
 })

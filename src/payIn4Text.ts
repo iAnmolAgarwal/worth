@@ -53,7 +53,8 @@ export function payIn4Lines(p4: P4, cushion: number) {
   const payment = p4.lowPointCause?.name.match(/Pay in 4 payment (\d) of 4$/)?.[1]
   const cause =
     payment && p4.lowPointCause!.date !== p4.lowestDate
-      ? ` Payment ${payment} (${money(p4.lowPointCause!.amountCents)}) lands ${dayLabel(p4.lowPointCause!.date)}.`
+      ? // After the first, every date is PayPal's to set, so it is "about", as on the schedule.
+        ` Payment ${payment} (${money(p4.lowPointCause!.amountCents)}) lands ${payment === '1' ? '' : 'about '}${dayLabel(p4.lowPointCause!.date)}.`
       : ''
   return { lead, low: `Lowest point ${signed(p4.lowestBalanceCents)} ${day}${payday}.${cause}` }
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Bookmark,
   BookmarkCheck,
@@ -617,6 +617,16 @@ export function Saved({
   const productOf = (item: SavedItem) =>
     item.kind === 'catalog' ? state.products.find((p) => p.id === item.productId) : undefined
   const ready = saved.filter((item) => item.status === 'ready')
+  // One engine run per saved amount, again only when the plan or Saved changes.
+  const fits = useMemo(
+    () =>
+      new Map(
+        (state.saved ?? [])
+          .filter((item) => item.status !== 'bought')
+          .map((item) => [item.id, fitStatus(state, item.amountCents)] as const),
+      ),
+    [state],
+  )
   const more = state.products.filter(
     (p) => !saved.some((item) => item.kind === 'catalog' && item.productId === p.id),
   )
@@ -669,7 +679,7 @@ export function Saved({
                 key={item.id}
                 item={item}
                 product={productOf(item)}
-                fit={item.status === 'bought' ? undefined : fitStatus(state, item.amountCents)}
+                fit={fits.get(item.id)}
                 onOpen={() => onOpenDecision(decisionFor(item))}
                 onRemove={() => void remove(item)}
               />
