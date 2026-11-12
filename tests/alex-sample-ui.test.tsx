@@ -61,11 +61,24 @@ describe('Alex, the default sample', () => {
     routeApi((path, data) => (path === '/state' ? state : compare(state, data)))
     render(<App />)
     expect(await screen.findByRole('button', { name: 'Sample: Alex' })).toBeTruthy()
-    expect((await screen.findByText('Sample day:')).parentElement!.textContent).toBe(
-      'Sample day: Fri, Nov 13, 2026',
+    expect((await screen.findByText('Alex’s sample month')).parentElement!.textContent).toBe(
+      'Alex’s sample month, as of Fri, Nov 13, 2026 (not today’s date).',
     )
     expect(screen.queryByRole('button', { name: /Back to (today|the sample day)/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Start the sample again' })).toBeNull()
     expect(document.body.textContent).not.toMatch(/Maya/)
+  })
+
+  it('offers "Start the sample again" once Alex’s plan was edited', async () => {
+    const user = userEvent.setup()
+    const state = alexState()
+    state.profile = { ...state.profile, userEdited: true, balanceCents: 300000 }
+    routeApi((path, data) =>
+      path === '/state' ? state : path === '/demo-clock' ? alexState() : compare(state, data),
+    )
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Start the sample again' }))
+    expect(apiMock).toHaveBeenCalledWith('/demo-clock', { preset: 'demo' })
   })
 
   it('opens ?replay=demo-dec15 from a link and says so', async () => {
@@ -111,5 +124,17 @@ describe('item names inside a sentence', () => {
     expect(lowerName('Everyday camera')).toBe('everyday camera')
     expect(lowerName('Halden X5')).toBe('Halden X5')
     expect(lowerName('MacBook Pro 14-inch')).toBe('MacBook Pro 14-inch')
+  })
+})
+
+describe('lowerName keeps a plan payment in sentence case', () => {
+  it('tests only the part before " · "', () => {
+    expect(lowerName('Laptop · Pay in 4')).toBe('laptop · Pay in 4')
+    expect(lowerName('Desk chair · Pay in 4 payment 2 of 4')).toBe(
+      'desk chair · Pay in 4 payment 2 of 4',
+    )
+    expect(lowerName('Halden X5 · Pay in 4 payment 2 of 4')).toBe(
+      'Halden X5 · Pay in 4 payment 2 of 4',
+    )
   })
 })

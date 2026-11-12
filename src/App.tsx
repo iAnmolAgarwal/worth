@@ -675,7 +675,20 @@ export default function App() {
         {state.demoClock && pinnedSample(state) && (
           <div className="wrap" style={{ paddingBottom: 0 }}>
             <Alert tone="info" icon={CalendarClock}>
-              <b>Sample day:</b> {sampleDate(state.today)}
+              <b>{state.profile.name}’s sample month</b>, as of {sampleDate(state.today)} (not
+              today’s date).
+              {state.profile.userEdited && (
+                <>
+                  {' '}
+                  <button
+                    type="button"
+                    className="link inline"
+                    onClick={() => void startReplay(state.demoClock!.preset!)}
+                  >
+                    Start the sample again
+                  </button>
+                </>
+              )}
             </Alert>
           </div>
         )}

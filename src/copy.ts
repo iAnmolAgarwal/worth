@@ -35,7 +35,7 @@ export const ASSESSMENT_ONLY = 'Assessment only — not sold in the demo store'
 export const MAY_FIT_NOW = 'Your plan suggests this may fit now — confirm today’s funds'
 /** The plan editor while the demo clock runs (the server refuses the edit too). */
 export const DEMO_CLOCK_EDIT =
-  'The sample plan is pinned to its sample day, so it can’t be edited here. Bring your own PayPal activity to plan with your numbers.'
+  'The demo clock is replaying the sample plan as it is. Choose Back to today before editing a plan.'
 /** The sample persona in a sentence; the top-bar chip and the Home intro both say it (feedback F1). */
 export const SAMPLE_WHO = 'a sample month for a made-up PayPal shopper'
 /** Whether checkout reaches the PayPal sandbox; without sandbox keys it is simulated, never live. */

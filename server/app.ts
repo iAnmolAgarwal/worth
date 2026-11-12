@@ -98,6 +98,7 @@ import {
   demoClockSchema,
   demoToday,
   fundsProjection,
+  ownSaved,
   sampleSession,
 } from './demoClock.ts'
 
@@ -581,17 +582,18 @@ export function createApp(options: AppOptions = {}) {
       },
     }
   }
-  /** The persona switch, the clock and the store's camera page for a demo-clock request. */
+  /** Alex's pinned day (`demo`, `demo-dec15`), on which his plan can be edited. */
+  function pinnedDay(data: SessionData) {
+    const preset = data.demoClock?.preset
+    return data.profile.source === 'demo' && (preset === 'demo' || preset === 'demo-dec15')
+      ? data.demoClock!.today
+      : undefined
+  }
+  /** The persona switch and the clock for a demo-clock request. */
   function demoClockOptions() {
     return {
       persona: config.samplePersona,
       now: now(),
-      storeLink: (productId: string) => {
-        const product = PRODUCTS.find((p) => p.id === productId && p.merchant === DEMO_MERCHANT)
-        return handoff && product
-          ? new URL(`/p/${encodeURIComponent(product.id)}`, handoff.merchantOrigin).href
-          : undefined
-      },
     }
   }
   function startSession(req: Request, res: Response, replacing = false) {
@@ -611,7 +613,7 @@ export function createApp(options: AppOptions = {}) {
       )
     const timezone = viewerTimezone(req) ?? DEMO_TIMEZONE
     const data: SessionData = {
-      ...sampleSession(config.samplePersona, today(timezone), timezone),
+      ...sampleSession(config.samplePersona, today(timezone), timezone, now()),
       createdAt: time,
     }
     savedOf(data, now())
@@ -1605,11 +1607,12 @@ export function createApp(options: AppOptions = {}) {
     noActive(id)
     const data = dataFor(res)
     // The demo clock replays the sample persona as it is: a hand-edited plan is the user's own
-    // numbers, which never run on the clock (pre-merge judge finding 4).
-    if (demoToday(data))
+    // numbers, which never run on a moving clock (pre-merge judge finding 4). Alex's pinned days
+    // are fixed, so his plan can be edited there and stays on that day.
+    if (demoToday(data) && !pinnedDay(data))
       throw new HttpError(
         409,
-        `The demo clock is replaying ${data.profile.name}’s sample plan as it is. ${config.samplePersona === 'alex' ? 'Bring your own PayPal activity to edit a plan.' : 'Choose Back to today before editing a plan.'}`,
+        `The demo clock is replaying ${data.profile.name}’s sample plan as it is. Choose Back to today before editing a plan.`,
         'DEMO_CLOCK_RUNNING',
       )
     if (input.version !== data.profile.version)
@@ -1627,7 +1630,8 @@ export function createApp(options: AppOptions = {}) {
         'Only completed purchases can be included in your balance snapshot.',
         'INVALID_SNAPSHOT',
       )
-    if (input.snapshotDate > today(input.timezone))
+    // On a pinned sample day, the future starts after that day, not after the real date.
+    if (input.snapshotDate > (pinnedDay(data) ?? today(input.timezone)))
       throw new HttpError(400, 'The balance snapshot cannot be in the future.', 'INVALID_SNAPSHOT')
     if (input.flows.some((flow) => flow.paidOn && flow.paidOn > input.snapshotDate))
       throw new HttpError(
@@ -1922,8 +1926,9 @@ export function createApp(options: AppOptions = {}) {
     if (merged.length > config.maxTransactions)
       throw new HttpError(400, transactionLimitMessage(merged.length), 'TOO_MANY_TRANSACTIONS')
     const switching = data.profile.source === 'demo'
-    // Imported data is real: it never follows the demo clock.
+    // Imported data is real: it never follows the demo clock, nor keeps the sample's own saved items.
     delete data.demoClock
+    if (data.saved) data.saved = ownSaved(data.saved)
     if (switching) {
       data.profile = {
         ...data.profile,
