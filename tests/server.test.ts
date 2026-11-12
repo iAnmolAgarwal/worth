@@ -1221,7 +1221,7 @@ describe('local chat fallback', () => {
     const data = await simpleProfile(agent, { balanceCents: 50000, cushionCents: 50000 })
     const result = fallbackReply({ message: 'How much can I afford?', history: [] }, data)
     expect(result.message).toContain('reaches your $500 cushion')
-    expect(result.message).toContain('no room for an additional purchase')
+    expect(result.message).toContain('no room for another purchase')
     expect(result.message).not.toContain('already falls below')
   })
   it('asks for missing information before making a baseline shortfall claim', async () => {

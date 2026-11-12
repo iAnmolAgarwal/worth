@@ -35,7 +35,10 @@ export function verdictFor(a: Assessment, interpretation?: Interpretation, budge
   const later = a.earliestDate && a.earliestDate > a.purchaseDate
   const result =
     a.outcome === 'fits'
-      ? `${subject} fits your plan if you buy it ${day}.`
+      ? // A later day that fits when today fits too never reads as if today did not.
+        a.purchaseDate > a.today && a.earliestDate === a.today
+        ? `${subject} fits your plan today and ${day}.`
+        : `${subject} fits your plan if you buy it ${day}.`
       : later
         ? `${subject} would dip below your cushion if you buy it ${day}. The earliest date that fits is ${dateLabel(a.earliestDate!, a.today)}.`
         : `${subject} would dip below your cushion if you buy it ${day}, and no date in the next ${WAIT_SEARCH_DAYS} days fits this plan.`
@@ -139,6 +142,73 @@ export function commitmentsFacts(data: ChatData, kind: CommitmentKind) {
     .join('; ')
   return `${title} due in the next 30 days: ${list}. Total: ${money(value.totalCents)}. These are recorded commitments, not a live account sync.`
 }
+// "on coffee", "for groceries", "at Coffee bar": what a spending question names.
+const NAMED =
+  /\b(?:on|for|at)\s+(?:my\s+|the\s+)?([a-z][a-z'&-]*(?:\s+[a-z][a-z'&-]*)?)\s*[?.!]*\s*$/i
+const NOT_A_NAME = new Set([
+  'it',
+  'this',
+  'that',
+  'them',
+  'stuff',
+  'things',
+  'everything',
+  'average',
+  'purchases',
+  'today',
+  'month',
+  'week',
+  'year',
+  'now',
+  'all',
+  'me',
+])
+const ASKS_SPENDING = /\bspen[dt]|\bspending\b|\bcost(?:s|ing)?\b/i
+/**
+ * A spending question that names a merchant or category ("Am I spending too much on coffee?"):
+ * its total and count over the same 30 days as the spending summary, and its share of all that
+ * spending, from the server's own sums. It states the numbers and never judges "too much".
+ */
+export function namedSpending(message: string, data: ChatData) {
+  if (!ASKS_SPENDING.test(message)) return undefined
+  const named = NAMED.exec(message.trim())?.[1]?.toLowerCase()
+  if (!named || NOT_A_NAME.has(named)) return undefined
+  // "coffees" finds "Coffee bar"; a plural category still matches its singular.
+  const term = named.replace(/(?<=[a-z]{3})s$/, '')
+  const value = spending(data)
+  const rows = data.transactions.filter(
+    (t) =>
+      t.date >= value.from &&
+      t.date <= value.through &&
+      t.kind === 'expense' &&
+      t.status === 'completed' &&
+      t.currency === 'USD' &&
+      `${t.name} ${t.category}`.toLowerCase().includes(term),
+  )
+  const period = `from ${shortLabel(value.from)} to ${shortLabel(value.through)}`
+  if (!rows.length) return `I found no ${named} payments in your activity ${period}.`
+  const total = rows.reduce((sum, row) => sum + Math.abs(row.amountCents), 0)
+  const share = value.totalCents ? Math.round((total / value.totalCents) * 100) : 0
+  const count = `${rows.length} payment${rows.length === 1 ? '' : 's'}`
+  return `${capitalize(named)}: ${money(total)} over ${count} ${period}, ${share < 1 ? 'under 1%' : `${share}%`} of your recorded spending in that time.`
+}
+
+const ASKS_PAYDAY =
+  /\b(?:when|next|what\s+day)\b.*\b(?:get(?:ting)?\s+paid|pay\s*days?|pay\s*checks?|salary|income)\b/i
+/** "When do I get paid next?": the next payment in, first, from the plan. */
+export function nextPayday(message: string, data: ChatData) {
+  if (!ASKS_PAYDAY.test(message)) return undefined
+  const next = getUpcomingFlows(data.profile, data.today, 60).find(
+    ({ flow }) => flow.kind === 'income',
+  )
+  if (!next) return 'Your plan has no income in the next 60 days. Add it under Plan, Income.'
+  return `Your next payday is ${dateLabel(next.date, data.today)}: ${chatLabel(next.flow.name)}, ${money(next.flow.amountCents)}.`
+}
+/** The direct answer to a question that is not about a purchase, when Worth can give one. */
+export function directAnswer(message: string, data: ChatData) {
+  return namedSpending(message, data) ?? nextPayday(message, data)
+}
+
 export function spendingFacts(data: ChatData) {
   const value = spending(data)
   const top = value.categories
@@ -152,10 +222,10 @@ export function overviewFacts(data: ChatData) {
   if (base.outcome === 'incomplete')
     return `Your plan needs a quick review: ${base.missingFields.join('; ')}. Open Your plan to confirm the missing information, then ask about a purchase.`
   if (base.baselineLowestCents < base.cushionCents)
-    return `Your confirmed plan already falls below your cushion before a new purchase. The projected low point is ${money(base.baselineLowestCents)} on ${shortLabel(base.lowestDate)}, ${money(base.cushionCents - base.baselineLowestCents)} below your ${money(base.cushionCents)} cushion. There is no room for an additional purchase while preserving that cushion in this base scenario. Review your upcoming commitments and expected income before deciding on a purchase.`
+    return `Your confirmed plan already falls below your cushion before a new purchase. The projected low point is ${money(base.baselineLowestCents)} on ${shortLabel(base.lowestDate)}, ${money(base.cushionCents - base.baselineLowestCents)} below your ${money(base.cushionCents)} cushion. There is no room for another purchase while keeping that cushion. Review your upcoming commitments and expected income before deciding on a purchase.`
   if (base.maxAffordableCents === 0)
-    return `Your confirmed plan reaches your ${money(base.cushionCents)} cushion on ${shortLabel(base.lowestDate)}, leaving no room for an additional purchase while preserving it in this base scenario. Review your upcoming commitments and expected income before deciding on a purchase.`
-  return `Based on your confirmed plan, a purchase of up to ${money(base.maxAffordableCents)} today would preserve your ${money(data.profile.cushionCents)} cushion in the base scenario. Your lowest projected balance before a new purchase is ${money(base.baselineLowestCents)}. Tell me what you have your eye on and I will check its timing.`
+    return `Your confirmed plan reaches your ${money(base.cushionCents)} cushion on ${shortLabel(base.lowestDate)}, leaving no room for another purchase while keeping it. Review your upcoming commitments and expected income before deciding on a purchase.`
+  return `Based on your confirmed plan, a purchase of up to ${money(base.maxAffordableCents)} today would keep your ${money(data.profile.cushionCents)} cushion. Your lowest projected balance before a new purchase is ${money(base.baselineLowestCents)}. Tell me what you have your eye on and I will check its timing.`
 }
 export const OFF_TOPIC_REPLY =
   'I can only help with your purchases, upcoming bills and subscriptions, spending, and how much room your plan has. Ask me about something you are thinking of buying.'

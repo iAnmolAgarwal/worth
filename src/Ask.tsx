@@ -214,7 +214,8 @@ export const claudeAllowed = claudeOn
 
 function traceText(reply: ChatReply, state: AppState) {
   // One caption for every answer, so the source reads the same each time.
-  if (reply.mode === 'anthropic') return 'Claude read your question · every number is Worth’s'
+  // The assistant is Worth here; Settings names Claude and what it sees (first-glance #5).
+  if (reply.mode === 'anthropic') return 'Numbers calculated by Worth, not guessed by AI'
   return claudeAllowed(state)
     ? 'Worth’s own calculation · assistant unavailable for this answer'
     : 'Worth’s own calculation · assistant off'
@@ -242,9 +243,9 @@ function Explanation({ reply }: { reply: ChatReply }) {
   return (
     <p className="explain">
       {claude && (
-        <span className="claude-note">
+        <span className="claude-note" title="Written with Claude, checked by Worth">
           <Sparkles className="ico" aria-hidden="true" />
-          Claude’s note · Worth’s numbers
+          Worth’s note
         </span>
       )}
       {amountsOnOneLine(reply.explanation)}
@@ -1001,7 +1002,6 @@ export function Ask({
                   onEdit={() => setEditing(entry.id)}
                   onCancelEdit={() => setEditing(undefined)}
                   onSend={(text, next) => void send(text, next)}
-                  onAnswer={() => input.current?.focus()}
                   onOpenDecision={onOpenDecision}
                   onOpenCheckout={onOpenCheckout}
                   onNavigate={onNavigate}
@@ -1177,7 +1177,6 @@ function Answer({
   onEdit,
   onCancelEdit,
   onSend,
-  onAnswer,
   onOpenDecision,
   onOpenCheckout,
   onNavigate,
@@ -1192,7 +1191,6 @@ function Answer({
   onEdit: () => void
   onCancelEdit: () => void
   onSend: (text: string, context?: PurchaseContext) => void
-  onAnswer: () => void
   onOpenDecision: (request: DecisionRequest, explanation?: Explanation) => void
   onOpenCheckout: (purchaseId: string) => void
   onNavigate: (hash: string) => void
@@ -1266,15 +1264,8 @@ function Answer({
           }
         />
       )}
-      {!read && reply.intent === 'clarify' && (
-        <ReadAsChip
-          ask
-          label="Needs an answer"
-          value={reply.pending?.itemName ?? 'Your purchase'}
-          action="Answer"
-          onAction={onAnswer}
-        />
-      )}
+      {/* A question back offers its answers as buttons (the suggestions under it), not a
+          "Needs an answer" tag that only moved focus. */}
       {assessment ? (
         <VerdictTile
           reply={reply}
@@ -1395,7 +1386,13 @@ function Answer({
       {reply.trace ? (
         // The caption that sat under "How Ask Worth read this", without the expander.
         <div className="trace-box">
-          <span className="caption trace-by">{entry.trace ?? traceText(reply, state)}</span>
+          <span
+            className="caption trace-by"
+            // Who read the question stays findable: Settings → What Claude sees has the rest.
+            title={reply.mode === 'anthropic' ? 'Read with Claude, checked by Worth' : undefined}
+          >
+            {entry.trace ?? traceText(reply, state)}
+          </span>
         </div>
       ) : (
         <div className="trace">

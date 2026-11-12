@@ -1208,3 +1208,24 @@ describe('catalog grounding and the cheaper-search routing together', () => {
     expect(findAlternatives).not.toHaveBeenCalled()
   })
 })
+
+describe('a question back offers its answers as buttons (first-glance #6)', () => {
+  it('turns "which day do you mean" into one chip per day, and nothing unrelated', async () => {
+    const { provider } = model([
+      interpret([item('TV', 60000)], { date_phrase: 'this weekend', date: null }),
+      final(),
+    ])
+    const reply = await provider.reply(ask('Can I afford a $600 TV this weekend?'), demo())
+    expect(reply.intent).toBe('clarify')
+    expect(reply.message).toMatch(/^Which day do you mean: .+ or .+\?/)
+    const days = reply.message.match(/Which day do you mean: (.+) or (.+)\?/)!.slice(1)
+    expect(reply.suggestions.map((s) => s.toLowerCase())).toEqual(days.map((d) => d.toLowerCase()))
+  })
+
+  it('opens a payday question with the next payday', async () => {
+    const { provider } = model([readTool('get_plan_summary'), final('overview')])
+    const reply = await provider.reply(ask('When do I get paid next?'), demo())
+    expect(reply.message).toMatch(/^Your next payday is /)
+    expect(reply.message).not.toMatch(/base scenario/)
+  })
+})
