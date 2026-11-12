@@ -7,7 +7,6 @@ import {
   ALEX_RETURN_DAY,
   createCameraScenario,
   createDemoState,
-  DEMO_MERCHANT,
   DEMO_PRESET_DAYS,
   DEMO_PRESETS,
   PRODUCTS,
@@ -23,13 +22,53 @@ export function sampleSession(
   persona: SamplePersona,
   realToday: string,
   timezone: string,
-): Pick<SessionData, 'profile' | 'transactions' | 'wishlist' | 'demoClock'> {
+  now = new Date(),
+): Pick<SessionData, 'profile' | 'transactions' | 'wishlist' | 'demoClock' | 'saved'> {
   if (persona === 'maya') {
     const { profile, transactions, wishlist } = createDemoState(realToday, timezone)
     return { profile, transactions, wishlist }
   }
   const { profile, transactions, wishlist } = createCameraScenario(ALEX_DEMO_DAY, timezone)
-  return { profile, transactions, wishlist, demoClock: { today: ALEX_DEMO_DAY, preset: 'demo' } }
+  return {
+    profile,
+    transactions,
+    wishlist,
+    saved: alexSaved('demo', now),
+    demoClock: { today: ALEX_DEMO_DAY, preset: 'demo' },
+  }
+}
+
+/** A catalog item Alex saved before the story starts: marked `seeded`, never a store's. */
+function seededItem(productId: string, now: Date, waitDate?: string): SavedItem {
+  const product = PRODUCTS.find((p) => p.id === productId)!
+  return {
+    id: randomUUID(),
+    kind: 'catalog',
+    productId,
+    name: product.name,
+    amountCents: product.priceCents,
+    ...(waitDate ? { option: 'wait' as const, waitDate } : {}),
+    createdAt: now.toISOString(),
+    status: 'active',
+    seeded: true,
+  }
+}
+
+/**
+ * Alex's Saved on a pinned day: the Halden X5 and the studio headphones. On the demo day the
+ * camera has no date yet (its check offers "Save for Tue, Dec 15"); on the return visit it is
+ * saved for Dec 15, so it is ready. Neither carries a store name or link.
+ */
+function alexSaved(preset: 'demo' | 'demo-dec15', now: Date): SavedItem[] {
+  return [
+    seededItem('headphones', now),
+    seededItem(ALEX_CAMERA_ID, now, preset === 'demo-dec15' ? ALEX_RETURN_DAY : undefined),
+  ]
+}
+
+/** The items the person saved themselves; seeded ones belong only to the sample they came with. */
+export function ownSaved(saved: SavedItem[] | undefined): SavedItem[] {
+  return (saved ?? []).filter((item) => !item.seeded)
 }
 
 export const demoClockSchema = z.union([
@@ -91,34 +130,6 @@ export function freshPersona(
 }
 
 /**
- * The return visit's Saved: the Halden X5, saved on the demo day as a wait plan for Dec 15, with
- * the store page it was checked from when the store hand-off is on. Other saved items stay.
- */
-function savedForReturn(
-  saved: SavedItem[] | undefined,
-  now: Date,
-  storeLink?: (productId: string) => string | undefined,
-): SavedItem[] {
-  const camera = PRODUCTS.find((p) => p.id === ALEX_CAMERA_ID)!
-  const link = storeLink?.(camera.id)
-  return [
-    ...(saved ?? []).filter((item) => item.productId !== camera.id),
-    {
-      id: randomUUID(),
-      kind: 'catalog',
-      productId: camera.id,
-      name: camera.name,
-      amountCents: camera.priceCents,
-      option: 'wait',
-      waitDate: ALEX_RETURN_DAY,
-      createdAt: now.toISOString(),
-      status: 'active',
-      ...(link ? { sourceUrl: link, merchantName: DEMO_MERCHANT, priceSource: 'component' } : {}),
-    },
-  ]
-}
-
-/**
  * Applies a demo-clock request. A preset pins a fresh persona to its day: `video` is Maya on the
  * recording day, `demo` and `demo-dec15` are Alex on Nov 13 and on Dec 15 with the camera saved
  * and ready. A date moves the clock forward from the persona's funds date without changing the
@@ -132,8 +143,6 @@ export function applyDemoClock(
   options: {
     persona?: SamplePersona
     now?: Date
-    /** The store's page for a catalog item, when the store hand-off is on. */
-    storeLink?: (productId: string) => string | undefined
   } = {},
 ): { data: SessionData; reset: boolean } {
   const persona = options.persona ?? 'alex'
@@ -153,8 +162,15 @@ export function applyDemoClock(
     const preset = input.preset === 'today' ? 'demo' : input.preset
     const day = DEMO_PRESET_DAYS[preset]
     const next = freshPersona(data, day, timezone, preset === 'video' ? 'maya' : 'alex')
-    if (preset === 'demo-dec15')
-      next.saved = savedForReturn(data.saved, options.now ?? new Date(), options.storeLink)
+    // A restart brings back the preset's own saved items; what the person saved stays.
+    const own = ownSaved(data.saved)
+    next.saved =
+      preset === 'video'
+        ? own
+        : [
+            ...own.filter((item) => item.productId !== ALEX_CAMERA_ID),
+            ...alexSaved(preset, options.now ?? new Date()),
+          ]
     return { data: { ...next, demoClock: { today: day, preset } }, reset: true }
   }
   // A hand-edited plan holds the user's own numbers, which never run on the clock (re-judge N1).

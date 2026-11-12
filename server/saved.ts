@@ -364,6 +364,8 @@ export function addSaved(
     })
     if (!plan.option) delete same.option
     if (!plan.waitDate) delete same.waitDate
+    // Saved again by the person, so it is theirs now, not the sample's.
+    delete same.seeded
     return same
   }
   if (items.filter((existing) => existing.status !== 'removed').length >= MAX_SAVED)

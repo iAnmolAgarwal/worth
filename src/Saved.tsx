@@ -28,7 +28,6 @@ import {
   CHANNEL3_SHARED_DATA,
   CLAUDE_SHARED_DATA,
   claudeUses,
-  demoStoreRole,
   MAY_FIT_NOW,
   pinnedSample,
   replayToast,
@@ -93,6 +92,9 @@ const priceNote = (item: SavedItem) =>
       : 'price you confirmed'
 
 const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
+
+/** A catalog item's second line: what it is, never the demo store's name (owner decision). */
+const productLine = (product: Product) => product.subtitle ?? product.category
 
 /** The store's name for "Back to <store>": its own name, or the link's domain. */
 const storeName = (item: SavedItem) =>
@@ -189,7 +191,7 @@ function SavedCard({
             {item.name}
           </div>
           <div className="s soft">
-            {product?.merchant ??
+            {(product && productLine(product)) ??
               (item.sourceUrl
                 ? item.priceSource === 'component'
                   ? sentence(priceNote(item))
@@ -206,7 +208,7 @@ function SavedCard({
       <div className="hide-m">
         <div className="t">{item.name}</div>
         <div className="meta">
-          {product?.merchant ??
+          {(product && productLine(product)) ??
             (item.sourceUrl ? storeName(item) : (item.retailer ?? 'Your assessment'))}
         </div>
         <div className="num strong" style={{ fontWeight: 700, marginTop: 4 }}>
@@ -266,7 +268,7 @@ function StoreCard({
           <div className="t" style={{ fontSize: 'var(--fs-body)' }}>
             {product.name}
           </div>
-          <div className="s soft">{product.merchant}</div>
+          <div className="s soft">{productLine(product)}</div>
         </div>
         <div className="amt num" style={{ fontSize: 'var(--fs-body)' }}>
           {money(product.priceCents)}
@@ -274,7 +276,7 @@ function StoreCard({
       </div>
       <div className="hide-m">
         <div className="t">{product.name}</div>
-        <div className="meta">{product.merchant}</div>
+        <div className="meta">{productLine(product)}</div>
         <div className="num strong" style={{ fontWeight: 700, marginTop: 4 }}>
           {money(product.priceCents)}
         </div>
@@ -716,13 +718,9 @@ export function Saved({
           <section aria-labelledby="store-title" style={{ marginTop: 'var(--s-6)' }}>
             <div className="sec-head">
               <h2 className="h-section" id="store-title">
-                Demo store · {state.products[0]?.merchant ?? 'Larkspur Supply'}
+                More to check
               </h2>
             </div>
-            <p className="caption" style={{ marginBottom: 'var(--s-4)' }}>
-              {demoStoreRole(state.products[0]?.merchant ?? 'Larkspur Supply')} Nothing is sold or
-              shipped in this sandbox.
-            </p>
             <div className="saved-grid">
               {more.map((product) => (
                 <StoreCard
@@ -735,9 +733,6 @@ export function Saved({
             </div>
           </section>
         )}
-        <p className="caption" style={{ marginTop: 'var(--s-6)' }}>
-          Items saved from Ask Worth that the demo store doesn’t sell are assessments only.
-        </p>
       </div>
       {confirming && (
         <FundsDialog

@@ -129,6 +129,8 @@ export interface SavedItem {
   waitDate?: string
   createdAt: string
   status: 'active' | 'ready' | 'bought' | 'removed'
+  /** Came with the sample plan; dropped when the session leaves the sample (an import). */
+  seeded?: boolean
   /** Where a custom item was found, such as a retailer listing; shown, never checked out. */
   retailer?: string
   url?: string
