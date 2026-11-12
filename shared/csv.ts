@@ -607,6 +607,7 @@ function proposeInstalmentPlans(records: PayLaterRecord[]): InstalmentPlanPropos
       paymentCents: quarterSplit(-row.amount)[0]!,
       payments: [],
       transactionIds: [transaction.id, ...(credit ? [credit.transaction.id] : [])],
+      ...(fundedBy ? { funded: true as const } : {}),
     })
   }
   const unlinked = new Map<number, InstalmentPlanProposal>()

@@ -746,7 +746,11 @@ export default function App() {
         {screen === 'import' && route.params.get('connect') && !chosenFile && (
           <ConnectProgress
             result={route.params.get('connect')!}
-            onFile={setChosenFile}
+            onFile={(file) => {
+              setChosenFile(file)
+              // The login's result is used up: nothing may show the reading screen for it again.
+              setRoute({ screen: 'import', params: new URLSearchParams() })
+            }}
             onUseCsv={() => setRoute({ screen: 'import', params: new URLSearchParams() })}
           />
         )}
@@ -758,6 +762,7 @@ export default function App() {
             onEnterYourself={() => navigate('plan/edit')}
             onCancel={() => {
               setChosenFile(undefined)
+              setRoute({ screen: 'home', params: new URLSearchParams() })
               navigate('home')
             }}
             onImported={(next) => {

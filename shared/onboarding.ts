@@ -33,7 +33,7 @@ export interface DraftPlan {
   title?: string
   purchaseCents: number | null
   paymentCents: number
-  /** Payments the file shows, pending or completed. */
+  /** Payments the file shows, pending or completed, or the one taken at checkout (see draftPlans). */
   seen: number
   /** The last payment seen, or the purchase day when none was. */
   lastDate: string
@@ -49,7 +49,11 @@ export interface DraftPlan {
 export function draftPlans(proposals: InstalmentPlanProposal[]): DraftPlan[] {
   return proposals.flatMap((plan) => {
     const dated = plan.purchaseCents !== null
-    const seen = plan.payments.length
+    // PayPal takes the first Pay in 4 payment at checkout. A purchase its Pay Later funding paid
+    // for, with no payment rows (Connect PayPal's activity shows none), counts that one as paid on
+    // the purchase day; the rest follow every 2 weeks. Worth's estimate, which the user confirms.
+    const atCheckout = dated && plan.funded && !plan.payments.length ? 1 : 0
+    const seen = plan.payments.length + atCheckout
     if (dated && seen >= PAY_IN_4_PAYMENTS) return []
     return [
       {

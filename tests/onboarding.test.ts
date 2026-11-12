@@ -164,6 +164,46 @@ describe('the review draft', () => {
     expect(done).toEqual([])
   })
 
+  it('counts the checkout payment of a purchase PayPal’s Pay Later funding paid for', () => {
+    // The judge buyer's Laptop through Connect PayPal: the purchase and PayPal's funding credit at the
+    // same moment, and no payment rows. PayPal takes the first payment at checkout.
+    const funded = parsePayPalCsv(
+      [
+        'Date,Time,Name,Type,Status,Currency,Net,Transaction ID',
+        '2026-11-12,12:28:40,PayPal Pay Later,Pay Later Funding,Completed,USD,1299.00,F1',
+        '2026-11-12,12:28:40,Laptop,Express Checkout Payment,Completed,USD,-1299.00,P1',
+      ].join('\n'),
+      [],
+      { today: '2026-11-12' },
+    ).instalmentPlans
+    expect(funded).toMatchObject([{ name: 'Laptop', purchaseCents: 129900, funded: true }])
+    const [laptop] = draftPlans(funded)
+    expect(laptop).toMatchObject({ seen: 1, left: 3, lastDate: '2026-11-12', paymentCents: 32475 })
+    // The three left: 14, 28 and 42 days after the purchase.
+    expect(planDates(laptop!, '2026-11-12')).toEqual(['2026-11-26', '2026-12-10', '2026-12-24'])
+    expect(planFlows(laptop!, '2026-11-12').reduce((sum, flow) => sum + flow.amountCents, 0)).toBe(
+      97425,
+    )
+    // Its payment rows, once PayPal shows them, are what counts; the estimate never adds to them.
+    expect(
+      draftPlans([
+        {
+          ...funded[0]!,
+          payments: [
+            funded[0]!.payments[0] ?? {
+              date: '2026-11-12',
+              amountCents: 32475,
+              status: 'completed' as const,
+            },
+          ],
+        },
+      ])[0],
+    ).toMatchObject({ seen: 1, left: 3 })
+    // A purchase without PayPal's funding row keeps its estimate unchanged.
+    const unfunded = draftPlans([{ ...funded[0]!, funded: undefined }])
+    expect(unfunded[0]).toMatchObject({ seen: 0, left: 4 })
+  })
+
   it('turns plans into payments from PayPal, none when left out or all paid', () => {
     const [northline, undated, brightline] = draftPlans(preview.instalmentPlans)
     expect(planFlows(brightline!, TODAY)).toMatchObject([
