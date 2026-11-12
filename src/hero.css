@@ -532,3 +532,48 @@ button.hero-act-main::after,
 .home-band + .grid > .rail {
   padding-top: 0;
 }
+
+/* ---------- The row under the hero: Coming up | Saved as one grid ---------- */
+/* Both columns go heading, then their first card, with the same gap. "Next 2 weeks" sits on the
+   heading line instead of between the heading and the first card. */
+.sec-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  min-width: 0;
+}
+.sec-sub {
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  color: var(--c-text-2);
+  white-space: nowrap;
+}
+/* The rail on Home is cards on the page background, like Coming up: no full-bleed white panel. */
+.page.home-page:not(.plain) .grid > .rail::before {
+  content: none;
+}
+/* Saved's cards match Coming up's: the same 44 px picture and one line under the name. */
+.home-page .rail .rows .thumb {
+  width: 44px;
+  height: 44px;
+}
+.home-page .rail .rows .row .s {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rail-card {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  padding: var(--s-4);
+}
+.agent-entry > .ico {
+  flex: none;
+  align-self: center;
+  color: var(--c-text-3);
+}
+/* Saved's prices keep clear of the guide's launcher where the rail ends near the window edge. */
+.home-page .rail .row .amt {
+  padding-right: 2px;
+}
