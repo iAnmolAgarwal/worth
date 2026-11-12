@@ -4,7 +4,7 @@ import {
   Bookmark,
   CalendarClock,
   CircleAlert,
-  FileUp,
+  Compass,
   House,
   ReceiptText,
   Settings as SettingsIcon,
@@ -41,7 +41,7 @@ import {
 import { PlanPage, PlanWizard } from './Plan'
 import { ConfirmPlanDialog, RefundDialog } from './Reviews'
 import { migratePlanned, Saved, Settings } from './Saved'
-import { Tour, tourOnLoad } from './Tour'
+import { startTour, Tour, tourOnLoad } from './Tour'
 import { ASSESSMENT_ONLY, pinnedSample, replayToast } from './copy'
 import { usePayPalSdk } from './paypal'
 import { Alert, Button, IconButton, Wordmark } from './ui'
@@ -597,12 +597,14 @@ export default function App() {
                   type="button"
                   role="menuitem"
                   onClick={() => {
+                    // As the panel's link and Settings' row do: Home, then step 1.
                     setMenu(false)
-                    setImporting(true)
+                    startTour()
+                    navigate('home')
                   }}
                 >
-                  <FileUp className="ico" aria-hidden="true" />
-                  Import PayPal activity
+                  <Compass className="ico" aria-hidden="true" />
+                  Take the tour
                 </button>
                 <a role="menuitem" href="#settings">
                   <SettingsIcon className="ico" aria-hidden="true" />

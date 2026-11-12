@@ -285,8 +285,11 @@ describe('conversation isolation across sessions', () => {
     await openAsk(user)
     await sendMessage(user, 'Check the sample before I import my history.')
     await screen.findByText(oldAnswer)
-    await user.click(screen.getByRole('button', { name: /account menu/ }))
-    await user.click(screen.getByRole('menuitem', { name: 'Import PayPal activity' }))
+    // The account menu offers the tour now; Plan still has the import (user review).
+    act(() => {
+      window.location.hash = 'plan'
+    })
+    await user.click(await screen.findByRole('button', { name: 'Import PayPal activity' }))
     await user.click(await screen.findByRole('button', { name: 'Paste CSV text instead' }))
     await user.type(
       screen.getByRole('textbox', { name: 'PayPal CSV contents' }),
@@ -1433,6 +1436,29 @@ describe('iteration 2 fixes', () => {
     expect(screen.queryByRole('switch')).toBeNull()
     expect(screen.getByRole('textbox', { name: 'Message Worth' })).toBeTruthy()
   })
+})
+
+describe('the account menu', () => {
+  it.each(['demo', 'import'] as const)(
+    'offers the tour in place of the import (%s data), starting it from Home',
+    async (source) => {
+      const user = userEvent.setup()
+      const state = makeState(source)
+      routeApi((path, data) => (path === '/state' ? state : compare(state, data)))
+      window.location.hash = 'saved'
+      const started = vi.fn()
+      window.addEventListener('worth:tour', started)
+      render(<App />)
+      await user.click(await screen.findByRole('button', { name: /account menu/ }))
+      const menu = screen.getByRole('menu', { name: 'Account' })
+      expect(within(menu).queryByRole('menuitem', { name: /Import/ })).toBeNull()
+      await user.click(within(menu).getByRole('menuitem', { name: 'Take the tour' }))
+      expect(started).toHaveBeenCalledOnce()
+      expect(screen.queryByRole('menu', { name: 'Account' })).toBeNull()
+      await waitFor(() => expect(window.location.hash).toBe('#home'))
+      window.removeEventListener('worth:tour', started)
+    },
+  )
 })
 
 describe('iteration 4 fixes', () => {
