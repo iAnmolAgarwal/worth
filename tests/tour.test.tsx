@@ -10,6 +10,7 @@ import {
   presentSteps,
   rememberTour,
   shownBox,
+  startTour,
   Tour,
   TOUR_KEY,
   TOUR_STEPS,
@@ -365,6 +366,47 @@ describe('the tour on Home', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false)
     expect(onHome).toHaveBeenCalled()
     expect((await dialog()).textContent).toContain('1 of 2')
+  })
+})
+
+describe('the top bar’s "Take the tour"', () => {
+  const dialog = () =>
+    screen.findByRole('dialog', { name: 'Safe to spend today' }, { timeout: 3000 })
+
+  it('restarts at step 1 after a click on a highlighted feature ended the tour', async () => {
+    setSearch('?tour=1')
+    anchors(['safe', 'bar'])
+    const onHome = vi.fn()
+    const { rerender } = render(<Tour home blocked={false} onHome={onHome} />)
+    await dialog()
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' })
+    expect(screen.getByRole('dialog').textContent).toContain('2 of 2')
+    // Using the feature leaves Home, which ends the tour.
+    rerender(<Tour home={false} blocked={false} onHome={onHome} />)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    act(() => startTour())
+    expect(onHome).toHaveBeenCalled()
+    rerender(<Tour home blocked={false} onHome={onHome} />)
+    expect((await dialog()).textContent).toContain('1 of 2')
+  })
+
+  it('under the dim, a click on it starts over instead of only ending the tour', async () => {
+    setSearch('?tour=1')
+    anchors(['safe', 'bar'])
+    const button = document.createElement('button')
+    button.className = 'tour-btn'
+    button.getBoundingClientRect = () => box(1100, 20, 140, 32)
+    document.body.append(button)
+    render(<Tour home blocked={false} onHome={() => {}} />)
+    await dialog()
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' })
+    expect(screen.getByRole('dialog').textContent).toContain('2 of 2')
+    fireEvent.click(document.querySelector('.tour-pane')!, { clientX: 1150, clientY: 36 })
+    expect((await dialog()).textContent).toContain('1 of 2')
+    // Anywhere else on the dim still just ends it.
+    fireEvent.click(document.querySelector('.tour-pane')!, { clientX: 400, clientY: 600 })
+    await new Promise((resolve) => setTimeout(resolve, 800))
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 })
 

@@ -534,6 +534,21 @@ export default function App() {
             )}
           </nav>
           <div className="right">
+            {/* Always in the top bar, so a tour cut short is one click from starting over. */}
+            <button
+              type="button"
+              className="env env-btn tour-btn"
+              aria-label="Take the tour"
+              title="Take the tour"
+              onClick={() => {
+                setMenu(false)
+                startTour()
+                navigate('home')
+              }}
+            >
+              <Compass className="ico" aria-hidden="true" />
+              <span className="tour-btn-label">Take the tour</span>
+            </button>
             <a className="icon-btn hide-m" href="#settings" aria-label="Settings and privacy">
               <SettingsIcon className="ico" strokeWidth={1.75} aria-hidden="true" />
             </a>
@@ -593,19 +608,6 @@ export default function App() {
                   <SlidersHorizontal className="ico" aria-hidden="true" />
                   Edit your plan
                 </a>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    // As the panel's link and Settings' row do: Home, then step 1.
-                    setMenu(false)
-                    startTour()
-                    navigate('home')
-                  }}
-                >
-                  <Compass className="ico" aria-hidden="true" />
-                  Take the tour
-                </button>
                 <a role="menuitem" href="#settings">
                   <SettingsIcon className="ico" aria-hidden="true" />
                   Settings and privacy
