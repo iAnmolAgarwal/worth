@@ -494,7 +494,7 @@ describe('saving a similar item for later', () => {
     await waitFor(() => expect(posts).toEqual([saved]))
     expect(
       await screen.findByText(
-        'Interchangeable Lens Camera Body is in Saved. Assessment only — no checkout in Worth.',
+        'Interchangeable Lens Camera Body is in Saved. Check only: Worth can’t pay for this item.',
       ),
     ).toBeTruthy()
   })

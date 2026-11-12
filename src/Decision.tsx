@@ -745,7 +745,7 @@ export function Decision({
         </Button>
         {notes && (
           <p className="caption" style={{ textAlign: 'center' }}>
-            {ASSESSMENT_ONLY}. Nothing is bought.
+            {ASSESSMENT_ONLY}.
           </p>
         )}
       </>
@@ -1106,20 +1106,39 @@ export function Decision({
           title="Buy today anyway?"
           onClose={() => setConfirmBuy(false)}
           footer={
-            <>
-              <Button
-                block
-                onClick={() => {
-                  setConfirmBuy(false)
-                  onBuy(product, true)
-                }}
-              >
-                Continue to checkout
-              </Button>
-              <Button variant="text" onClick={() => setConfirmBuy(false)}>
-                Keep my plan
-              </Button>
-            </>
+            // Below the cushion, keeping the plan is the safe choice, so it is the filled button.
+            c.buyToday.outcome !== 'fits' ? (
+              <>
+                <Button block onClick={() => setConfirmBuy(false)}>
+                  Keep my plan
+                </Button>
+                <Button
+                  block
+                  variant="secondary"
+                  onClick={() => {
+                    setConfirmBuy(false)
+                    onBuy(product, true)
+                  }}
+                >
+                  Continue to checkout
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button
+                  block
+                  onClick={() => {
+                    setConfirmBuy(false)
+                    onBuy(product, true)
+                  }}
+                >
+                  Continue to checkout
+                </Button>
+                <Button variant="text" onClick={() => setConfirmBuy(false)}>
+                  Keep my plan
+                </Button>
+              </>
+            )
           }
         >
           <Alert tone="bad" icon={TriangleAlert}>

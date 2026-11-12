@@ -755,6 +755,13 @@ describe('decision view', () => {
     render(<Decision {...props} onBuy={onBuy} state={state} request={{ productId: 'camera' }} />)
     await user.click((await screen.findAllByRole('button', { name: 'Buy today anyway' }))[0]!)
     const dialog = screen.getByRole('dialog', { name: 'Buy today anyway?' })
+    // Below the cushion, keeping the plan is the filled button; continuing is the secondary one.
+    expect(within(dialog).getByRole('button', { name: 'Keep my plan' }).className).toContain(
+      'btn-primary',
+    )
+    expect(
+      within(dialog).getByRole('button', { name: 'Continue to checkout' }).className,
+    ).toContain('btn-secondary')
     expect(dialog.textContent).toContain('below your $300.00 cushion')
     await user.click(within(dialog).getByRole('button', { name: 'Continue to checkout' }))
     expect(onBuy).toHaveBeenCalledWith(expect.objectContaining({ id: 'camera' }), true)
