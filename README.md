@@ -177,8 +177,10 @@ Open https://worth.onrender.com. No sign-in; each browser gets its own anonymous
    up to date without another login: when you open it and the last read is over 15 minutes old,
    it re-reads PayPal in the background and adds what is new (transactions, a new Pay in 4 plan,
    a Pay in 4 payment made). It never changes what you entered. **Settings → Disconnect PayPal**
-   ends the connection and keeps the plan. PayPal's own transaction index can lag by up to about
-   three hours.
+   ends the connection and keeps the plan: it deletes Worth's only copy of the token and asks
+   PayPal to revoke it (Worth can't guarantee PayPal honours that; to be sure, remove the
+   connection in the PayPal account's settings). PayPal's own transaction index can lag by up to
+   about three hours.
 6. To return to Alex: **Settings → Delete my data now → Delete and start over**.
 
 A sandbox account holds only what was done in that sandbox, so it has no payday or bills, and
@@ -242,9 +244,13 @@ credentials and the browser receives only the public client ID.
   server-side, sealed with AES-256-GCM under `PAYPAL_TOKEN_KEY` and stored with the session (or in
   memory only when the key is unset), and access tokens in memory for under an hour. It refreshes
   one at a time, keeps only the newest refresh token PayPal issues, and re-reads in the background
-  when the last read is over 15 minutes old, applying additive changes only. No token reaches the
-  browser, a log or Claude. **Settings → Disconnect PayPal** or **Delete my data now** removes it,
-  and a refresh token PayPal refuses quietly returns Home to Connect PayPal. The same token could
+  when the last read is over 15 minutes old, only adding rows and plans and dropping Pay in 4
+  payments PayPal shows as made once they are due. No token reaches the
+  browser, a log or Claude. **Settings → Disconnect PayPal** or **Delete my data now** deletes
+  Worth's only copy and asks PayPal to revoke it; Worth can't guarantee PayPal honours that, and
+  earlier tokens PayPal issued may stay valid there until they expire (to be sure, remove the
+  connection in the PayPal account's settings). A refresh token PayPal refuses quietly returns
+  Home to Connect PayPal. The same token could
   create and send invoices, so the server allow-lists `list_transactions` and refuses every other
   tool.
   Opening a session takes PayPal about 12 s and each window about 11 s (the six run side by side);

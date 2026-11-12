@@ -450,7 +450,13 @@ export function createApp(options: AppOptions = {}) {
   // Behind a proxy, req.ip must be the client address the proxy appended, not the proxy itself.
   if (config.trustProxy) app.set('trust proxy', config.trustProxy)
   app.locals.store = store
-  app.locals.cleanup = () => store.cleanup(now().getTime())
+  app.locals.cleanup = () => {
+    const time = now().getTime()
+    const deleted = store.cleanup(time)
+    // PayPal links held in memory go with the sessions that expired.
+    paypalConnect.cleanup((id) => store.isLive(id, time))
+    return deleted
+  }
   /** For payment webhooks: records a refund for the user to review, once per refund ID. */
   app.locals.recordRefund = (
     sessionId: string,
@@ -1187,10 +1193,18 @@ export function createApp(options: AppOptions = {}) {
               maxTransactions: config.maxTransactions,
             },
           )
-      // The read itself succeeded, so the plan is up to date as of now.
-      data.profile.importedAt = now().toISOString()
-      store.save(id, data)
-      return { state: state(id), changes: changes ?? { transactions: 0, plans: 0, paid: 0 } }
+      // Up to date as of now only when the read was applied (or rightly found nothing new). A
+      // skipped read (rows the import can't use, over the limit, a checkout open) keeps the old
+      // time, so the row never says "updated" untruthfully and a later visit tries again.
+      if (changes) {
+        data.profile.importedAt = now().toISOString()
+        store.save(id, data)
+      }
+      return {
+        state: state(id),
+        changes: changes ?? { transactions: 0, plans: 0, paid: 0 },
+        ...(changes ? {} : { skipped: true }),
+      }
     },
     canSync: (res) => {
       const { profile } = dataFor(res)

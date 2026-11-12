@@ -138,20 +138,27 @@ review step (`server/paypalSync.ts`), only in ways that cannot overwrite what th
 - new transactions are added to Activity;
 - a Pay in 4 plan is added only when its purchase is new in this read, so a plan left out at review
   never comes back;
-- a known plan loses its earliest remaining payments when PayPal now shows them as made.
+- a known plan drops a remaining payment PayPal now shows as made, once that payment is due (an
+  early payment leaves the schedule alone, so room to spend never rises before the balance shows
+  the money gone).
 
 Bills, paydays, the cushion, money available and everyday spending are never changed, and a read
 with rows the import can't use applies nothing. Not applied automatically (they wait for an
 explicit import): new recurring bills or paydays, payments of a plan whose purchase isn't in the
 history, and foreign-currency payments that need a USD cost. `importedAt` moves to the time of the
-read, which Home shows as "PayPal connected · updated <day>". PayPal's own transaction index can
+read only when the read was applied (or rightly found nothing new), which Home shows as "PayPal
+connected · updated <day>"; a skipped read keeps the old time and a later visit tries again.
+Background syncs have their own hourly budget per session and per IP, apart from the reads the
+user's own Connect PayPal needs. PayPal's own transaction index can
 lag by up to about three hours, so a purchase can take that long to appear.
 
 **What is stored, and why it is safe enough.** Per session, only the newest refresh token and the
 MCP client it was issued to (`server/paypalVault.ts`). With `PAYPAL_TOKEN_KEY` set it is sealed
 with AES-256-GCM (a fresh 96-bit IV, the session ID as associated data, so a row copied to another
 session fails to open) in `paypal_links`, which references the session and is deleted with it
-(`secure_delete` is on). Without the key it lives in process memory only. Access tokens are
+(`secure_delete` is on). Without the key it lives in process memory only, and the periodic session
+cleanup drops it when its session expires, so in both modes a link never outlives its session.
+Access tokens are
 memory-only and used for at most 55 minutes. No token is logged, put in a response, sent to the
 browser, included in the plan summary sent to Claude, or kept in the clear on disk.
 
@@ -163,7 +170,13 @@ token, so nothing in the page can call PayPal directly. Refresh tokens rotate, a
 revoke the previous one, so Worth replaces the stored token with each new one and never keeps two.
 Disconnect PayPal (Settings), Delete my data, an expired session, or PayPal answering
 `invalid_grant`/`invalid_client` deletes the link; the plan is left as it is and the next Connect
-PayPal logs in again. A network failure keeps the link for a later visit. Logins in progress stay
+PayPal logs in again. Each Disconnect or Delete bumps a per-session generation that every refresh
+and read captures before its first request, so one already in flight stores no token and applies
+nothing. Disconnecting deletes Worth's only copy and asks PayPal to revoke it; Worth can't guarantee PayPal
+honours that, and earlier tokens PayPal issued may stay valid there until they expire. To be sure,
+remove the connection in the PayPal account's settings. (Revocation is RFC 7009
+at the endpoint PayPal's metadata names, `/token`; on the sandbox it answered 200 and the
+revoked token was then refused with `invalid_grant`.) A network failure keeps the link for a later visit. Logins in progress stay
 in memory, so the service runs as one instance.
 
 ## AI boundary

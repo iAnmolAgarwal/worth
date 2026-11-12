@@ -93,11 +93,11 @@ describe('a background PayPal read applied to a confirmed plan', () => {
     const data = confirmed()
     const cameraFlows = data.profile.flows.filter((f) => f.planId)
     expect(cameraFlows).toHaveLength(3)
-    const changes = applyConnectedRead(
-      data,
-      preview([...ROWS, ...LATER], data.transactions),
-      OPTIONS,
-    )
+    // Read on Nov 15, once the camera's Nov 14 payment is due.
+    const changes = applyConnectedRead(data, preview([...ROWS, ...LATER], data.transactions), {
+      ...OPTIONS,
+      today: '2026-11-15',
+    })
     expect(changes).toEqual({ transactions: 5, plans: 1, paid: 1 })
     // The camera: PayPal shows a second payment made, so its earliest remaining one is gone.
     const camera = data.profile.flows.filter((f) => f.planId === cameraFlows[0]!.planId)
@@ -110,6 +110,23 @@ describe('a background PayPal read applied to a confirmed plan', () => {
       ['2026-12-22', 10000],
     ])
     expect(data.profile.version).toBe(5)
+  })
+
+  it('leaves the schedule alone for a payment made early, before it is due', () => {
+    const data = confirmed()
+    const before = data.profile.flows.filter((f) => f.planId).map((f) => f.nextDate)
+    expect(before[0]! > TODAY).toBe(true)
+    const changes = applyConnectedRead(
+      data,
+      preview([...ROWS, ...LATER], data.transactions),
+      OPTIONS,
+    )
+    expect(changes?.paid).toBe(0)
+    expect(
+      data.profile.flows
+        .filter((f) => f.planId && !f.name.startsWith('Desk lamp'))
+        .map((f) => f.nextDate),
+    ).toEqual(before)
   })
 
   it('never changes what the user entered or confirmed', () => {

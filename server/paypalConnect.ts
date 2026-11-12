@@ -3,7 +3,7 @@ import type { Express, Request, Response } from 'express'
 import { CSV_IMPORT_LIMITS, utf8Bytes } from '../shared/limits.ts'
 import { WindowLimiter } from './limits.ts'
 import { memoryVault } from './paypalVault.ts'
-import type { LinkVault } from './paypalVault.ts'
+import type { LinkVault, PayPalLink } from './paypalVault.ts'
 
 /**
  * "Connect PayPal" (final-day plan §2): the user logs in at PayPal and Worth reads their activity
@@ -22,6 +22,8 @@ import type { LinkVault } from './paypalVault.ts'
  */
 export const MCP_ORIGIN = 'https://mcp.sandbox.paypal.com'
 export const CALLBACK_PATH = '/api/paypal/connect/callback'
+/** PayPal's metadata names its token endpoint as the revocation endpoint (RFC 7009). */
+const REVOCATION_PATH = '/token'
 /**
  * The only MCP tools Worth may call. The same token can create and send invoices; Worth must never
  * be able to, so every tool call goes through callTool, which refuses anything else before any
@@ -381,8 +383,13 @@ export interface PayPalConnect {
   finish(sessionId: string, query: Record<string, unknown>): Promise<ConnectResult>
   /** Whether Worth can read this session's PayPal activity without another login. */
   linked(sessionId: string): boolean
-  /** Forgets this session's PayPal tokens and any login in progress. The plan is not touched. */
+  /**
+   * Forgets this session's PayPal tokens and any login in progress, and asks PayPal to revoke the
+   * refresh token. A read or refresh already in flight keeps nothing. The plan is not touched.
+   */
   disconnect(sessionId: string): void
+  /** Drops tokens and links of sessions that no longer exist (expired or deleted). */
+  cleanup(isLive: (sessionId: string) => boolean): void
   /**
    * Reads the session's activity through list_transactions, refreshing the access token from the
    * kept refresh token when needed. One read per session at a time.
@@ -409,6 +416,12 @@ export function createPayPalConnect(options: PayPalConnectOptions): PayPalConnec
   const tokens = new Map<string, Held>()
   const vault = options.vault ?? memoryVault()
   const reading = new Set<string>()
+  /**
+   * Bumped by every Disconnect (and Delete my data): a refresh or read already in flight for the
+   * session sees the change and keeps nothing and returns nothing, so a connection never comes back.
+   */
+  const generations = new Map<string, number>()
+  const generation = (sessionId: string) => generations.get(sessionId) ?? 0
   let client: Promise<string> | undefined = options.clientId
     ? Promise.resolve(options.clientId)
     : undefined
@@ -419,6 +432,30 @@ export function createPayPalConnect(options: PayPalConnectOptions): PayPalConnec
   function prune(time: number) {
     for (const [key, item] of pending) if (item.until <= time) pending.delete(key)
     for (const [key, item] of tokens) if (item.until <= time) tokens.delete(key)
+  }
+
+  /**
+   * Asks PayPal to revoke a refresh token (RFC 7009 at the revocation endpoint PayPal's metadata
+   * names, which is /token). Best effort: never awaited by the user's action, never fails it.
+   */
+  function revoke(link: PayPalLink) {
+    void send(
+      REVOCATION_PATH,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          token: link.refreshToken,
+          token_type_hint: 'refresh_token',
+          client_id: link.clientId,
+        }).toString(),
+      },
+      OAUTH_TIMEOUT_MS,
+      'MCP_FAILED',
+    ).then(
+      ({ response }) => log({ event: 'paypal_connect_revoked', status: response.status }),
+      () => log({ event: 'paypal_connect_revoke_failed' }),
+    )
   }
 
   /** A fetch to the MCP server with a hard timeout; transport failures become `failure`. */
@@ -606,6 +643,8 @@ export function createPayPalConnect(options: PayPalConnectOptions): PayPalConnec
       if (login) pending.delete(state)
       if (!login || login.until <= time || !sameText(login.sessionId, sessionId)) return 'expired'
       if (query.error !== undefined) return query.error === 'access_denied' ? 'denied' : 'failed'
+      // A Disconnect while PayPal answers wins: nothing from this login is kept.
+      const expected = generation(sessionId)
       const code = typeof query.code === 'string' ? query.code : ''
       if (!/^[\x21-\x7e]{1,2048}$/.test(code)) return 'failed'
       try {
@@ -625,7 +664,9 @@ export function createPayPalConnect(options: PayPalConnectOptions): PayPalConnec
           OAUTH_TIMEOUT_MS,
           'MCP_FAILED',
         )
-        const granted = response.ok ? keep(sessionId, await clientId(), text, time) : false
+        const granted = response.ok
+          ? keep(sessionId, await clientId(), text, time, expected)
+          : false
         if (!granted) {
           log({ event: 'paypal_connect_token_failed', status: response.status })
           return 'failed'
@@ -641,22 +682,42 @@ export function createPayPalConnect(options: PayPalConnectOptions): PayPalConnec
       return Boolean((held && held.until > now()) || vault.get(sessionId))
     },
     disconnect(sessionId) {
+      generations.set(sessionId, generation(sessionId) + 1)
+      const link = vault.get(sessionId)
       tokens.delete(sessionId)
       vault.delete(sessionId)
       for (const [key, item] of pending) if (item.sessionId === sessionId) pending.delete(key)
+      if (link) revoke(link)
+    },
+    cleanup(isLive) {
+      prune(now())
+      for (const sessionId of vault.sessions?.() ?? [])
+        if (!isLive(sessionId)) vault.delete(sessionId)
+      for (const sessionId of tokens.keys()) if (!isLive(sessionId)) tokens.delete(sessionId)
+      for (const sessionId of generations.keys())
+        if (!isLive(sessionId)) generations.delete(sessionId)
     },
     async read(sessionId, timezone) {
       if (reading.has(sessionId)) throw new ConnectError('BUSY')
       reading.add(sessionId)
+      // Taken before the first await: a Disconnect from here on wins over this read.
+      const started = generation(sessionId)
+      const current = () => {
+        if (generation(sessionId) !== started) throw new ConnectError('NOT_CONNECTED')
+      }
       try {
+        let activity: Activity
         try {
-          return await readWith(sessionId, timezone, await access(sessionId))
+          activity = await readWith(sessionId, timezone, await access(sessionId, started))
         } catch (error) {
           // A held access token PayPal no longer accepts: refresh once and read again.
           if (!(error instanceof ConnectError && error.code === 'STALE_ACCESS')) throw error
+          current()
           tokens.delete(sessionId)
-          return await readWith(sessionId, timezone, await access(sessionId))
+          activity = await readWith(sessionId, timezone, await access(sessionId, started))
         }
+        current()
+        return activity
       } catch (error) {
         if (error instanceof ConnectError && error.code === 'STALE_ACCESS')
           throw new ConnectError('MCP_FAILED')
@@ -672,7 +733,13 @@ export function createPayPalConnect(options: PayPalConnectOptions): PayPalConnec
    * Keeps a token reply: the access token in memory, the refresh token (if any) in the vault under
    * the client it was issued to. False when the reply holds no usable access token.
    */
-  function keep(sessionId: string, client: string, text: string, time: number) {
+  function keep(
+    sessionId: string,
+    client: string,
+    text: string,
+    time: number,
+    expected = generation(sessionId),
+  ) {
     let body: { access_token?: unknown; refresh_token?: unknown; expires_in?: unknown }
     try {
       body = JSON.parse(text)
@@ -681,6 +748,16 @@ export function createPayPalConnect(options: PayPalConnectOptions): PayPalConnec
     }
     const token = body.access_token
     if (typeof token !== 'string' || !TOKEN_SHAPE.test(token)) return false
+    const refreshToken =
+      typeof body.refresh_token === 'string' && TOKEN_SHAPE.test(body.refresh_token)
+        ? body.refresh_token
+        : undefined
+    // Disconnected (or deleted) while PayPal was answering: keep nothing, and ask PayPal to drop
+    // the refresh token it just issued.
+    if (generation(sessionId) !== expected) {
+      if (refreshToken) revoke({ clientId: client, refreshToken })
+      throw new ConnectError('NOT_CONNECTED')
+    }
     const seconds =
       typeof body.expires_in === 'number' && body.expires_in > 0 ? body.expires_in : 3600
     tokens.set(sessionId, {
@@ -690,13 +767,12 @@ export function createPayPalConnect(options: PayPalConnectOptions): PayPalConnec
     })
     // PayPal rotates refresh tokens: only the newest is kept (an older one may still work at
     // PayPal, which is why it must never be stored or logged).
-    if (typeof body.refresh_token === 'string' && TOKEN_SHAPE.test(body.refresh_token))
-      vault.set(sessionId, { clientId: client, refreshToken: body.refresh_token })
+    if (refreshToken) vault.set(sessionId, { clientId: client, refreshToken })
     return true
   }
 
   /** An access token for the session: the held one, or a new one from the kept refresh token. */
-  async function access(sessionId: string) {
+  async function access(sessionId: string, expected: number) {
     const time = now()
     const held = tokens.get(sessionId)
     if (held && held.until > time) return held
@@ -720,11 +796,12 @@ export function createPayPalConnect(options: PayPalConnectOptions): PayPalConnec
     // PayPal refused the refresh token (expired, revoked, rotated away, or its client is gone):
     // the link is over. The plan stays as it is; the next Connect PayPal logs in again.
     if (response.status === 400 || response.status === 401) {
-      vault.delete(sessionId)
+      // Only this connection's link: a newer login after a Disconnect is left alone.
+      if (generation(sessionId) === expected) vault.delete(sessionId)
       log({ event: 'paypal_connect_refresh_refused', status: response.status })
       throw new ConnectError('NOT_CONNECTED')
     }
-    if (!response.ok || !keep(sessionId, link.clientId, text, time)) {
+    if (!response.ok || !keep(sessionId, link.clientId, text, time, expected)) {
       log({ event: 'paypal_connect_refresh_failed', status: response.status })
       throw new ConnectError('MCP_FAILED')
     }
@@ -855,6 +932,12 @@ const STARTS_PER_IP = 60
 /** Activity reads per session and per IP per hour; each one is up to seven PayPal MCP calls. */
 const READS_PER_SESSION = 6
 const READS_PER_IP = 20
+/**
+ * Background syncs per session and per IP per hour, counted apart from reads, so failed background
+ * reads never use up what the user's own Connect PayPal needs. Also the back-off for retries.
+ */
+const SYNCS_PER_SESSION = 4
+const SYNCS_PER_IP = 40
 
 /**
  * GET /api/paypal/connect, GET /api/paypal/connect/callback and POST /api/paypal/activity. Mounted
@@ -868,6 +951,8 @@ export function mountPayPalConnect(
   const startsPerIp = new WindowLimiter(STARTS_PER_IP, 60 * 60_000)
   const readsPerSession = new WindowLimiter(READS_PER_SESSION, 60 * 60_000)
   const readsPerIp = new WindowLimiter(READS_PER_IP, 60 * 60_000)
+  const syncsPerSession = new WindowLimiter(SYNCS_PER_SESSION, 60 * 60_000)
+  const syncsPerIp = new WindowLimiter(SYNCS_PER_IP, 60 * 60_000)
   const back = (res: Response, result: ConnectResult | 'off' | 'limited') => {
     // The callback's URL held a code; nothing of it travels on as a referrer.
     res.setHeader('Referrer-Policy', 'no-referrer')
@@ -938,7 +1023,7 @@ export function mountPayPalConnect(
         .status(409)
         .json({ error: 'This plan isn’t from Connect PayPal.', code: 'NOT_SYNCED' })
     const time = now()
-    if (!readsPerSession.take(id, time) || !readsPerIp.take(req.ip ?? 'local', time))
+    if (!syncsPerSession.take(id, time) || !syncsPerIp.take(req.ip ?? 'local', time))
       return void res.status(429).json({
         error: 'Too many PayPal reads. Try again later.',
         code: 'RATE_LIMITED',

@@ -19,6 +19,8 @@ export interface LinkVault {
   get(sessionId: string): PayPalLink | undefined
   set(sessionId: string, link: PayPalLink): void
   delete(sessionId: string): void
+  /** The sessions held, for a store that can't drop expired ones itself (memory only). */
+  sessions?(): string[]
 }
 
 const VERSION = 'v1'
@@ -39,7 +41,9 @@ export function openLink(key: Buffer, sessionId: string, sealed: string): PayPal
   const [version, iv, tag, body] = sealed.split('.')
   if (version !== VERSION || !iv || !tag || !body) return undefined
   try {
-    const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'base64url'))
+    const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'base64url'), {
+      authTagLength: 16,
+    })
     decipher.setAAD(Buffer.from(sessionId))
     decipher.setAuthTag(Buffer.from(tag, 'base64url'))
     const text = Buffer.concat([
@@ -89,6 +93,7 @@ export function memoryVault(max = 5_000): LinkVault {
       while (links.size > max) links.delete(links.keys().next().value!)
     },
     delete: (sessionId) => void links.delete(sessionId),
+    sessions: () => [...links.keys()],
   }
 }
 

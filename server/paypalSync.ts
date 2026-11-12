@@ -28,8 +28,8 @@ export interface SyncOptions {
  * - new transactions are added to Activity (history only: money available is the user's figure);
  * - a Pay in 4 plan is added only when its purchase is new in this read, so a plan the user left out
  *   at review never comes back;
- * - a known plan loses its earliest remaining payments when PayPal now shows them as made; a plan
- *   never gains payments this way.
+ * - a known plan drops a remaining payment PayPal now shows as made, only once that payment is due
+ *   (an early payment changes nothing); a plan never gains payments this way.
  *
  * Bills, paydays, the cushion, money available and everyday spending are never touched, and nothing
  * is applied when the read has rows the import can't use. Returns undefined in that case.
@@ -70,9 +70,12 @@ export function applyConnectedRead(
       changes.plans++
       continue
     }
-    const made = current.length - (plan.left ?? current.length)
+    // Only payments already due are marked made: an early payment leaves the schedule as it is,
+    // so room to spend never rises before the user's own balance shows the money gone.
+    const due = current.filter((flow) => flow.nextDate <= today)
+    const made = Math.min(due.length, current.length - (plan.left ?? current.length))
     if (made <= 0) continue
-    const gone = new Set(current.slice(0, made).map((flow) => flow.id))
+    const gone = new Set(due.slice(0, made).map((flow) => flow.id))
     flows = flows.filter((flow) => !gone.has(flow.id))
     changes.paid += made
   }

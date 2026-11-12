@@ -36,16 +36,21 @@ sessions beyond what is needed to show the problem.
   redirects to a fixed path, so no request chooses where the browser goes. To stay connected,
   Worth keeps PayPal's refresh token for that session only: sealed with AES-256-GCM under
   `PAYPAL_TOKEN_KEY` (a fresh IV each time, the session ID as associated data) in the session
-  database, which deletes it with the session; with no key it is kept in memory only. Access
+  database, which deletes it with the session; with no key it is kept in memory only and cleared
+  when the session expires. Access
   tokens stay in memory for under an hour. Refreshes run one at a time and keep only the newest
   refresh token (PayPal rotates them, and does not revoke the older one, so an old one must never
   be stored). No token is written in the clear, logged, sent to the browser, exported or given to
-  Claude. Disconnect PayPal (Settings), Delete my data, or PayPal refusing the refresh token removes
-  it. PayPal's MCP server ignores narrower scopes, so the same token could create and send
+  Claude. Disconnect PayPal (Settings), Delete my data, an expired session, or PayPal refusing the
+  refresh token removes it; a refresh or read already in flight then keeps nothing and applies
+  nothing. Disconnecting deletes Worth's only copy and asks PayPal to revoke it (RFC 7009, best
+  effort); Worth can't guarantee PayPal honours that, and earlier tokens PayPal issued may stay
+  valid there until they expire. To be sure, remove the connection in the PayPal account's
+  settings. PayPal's MCP server ignores narrower scopes, so the same token could create and send
   invoices: the server calls only `list_transactions` (a hard allow-list, tested, also with
   refreshed tokens) and refuses every other tool before any request is made. Background syncs
-  only add (new transactions, new Pay in 4 plans, payments made) and never change what the user
-  entered. Logins and reads are rate-limited per session and per IP.
+  only add rows and plans, and drop payments PayPal shows as made and that are already due; they
+  never change bills, paydays, the cushion, money available or everyday spending. Logins and reads are rate-limited per session and per IP.
 - **Agent tokens** for `/mcp` are stored as SHA-256 fingerprints, bound to one plan, revocable,
   rate-limited, and grant no capture. See [docs/MCP.md](docs/MCP.md).
 - **Production** sends a Content-Security-Policy that allows only the app and PayPal's SDK

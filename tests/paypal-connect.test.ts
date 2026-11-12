@@ -47,6 +47,8 @@ interface FakeOptions {
   list?: (args: Record<string, unknown>, call: number) => string
   /** How the token endpoint answers a refresh: rotate (default), refuse (400) or be down (503). */
   refresh?: 'rotate' | 'refuse' | 'down'
+  /** How it answers a revocation (RFC 7009): 200 (default) or down (503). */
+  revoke?: 'ok' | 'down'
 }
 /** PayPal's MCP server, enough of it: registration, PKCE-checked token, and JSON-RPC over /mcp. */
 function fakeMcp(options: FakeOptions = {}) {
@@ -59,6 +61,9 @@ function fakeMcp(options: FakeOptions = {}) {
   let refresh = REFRESH
   let issued = 0
   const grants: string[] = []
+  const revoked: string[] = []
+  /** While set, list_transactions waits for it: a read held mid-flight. */
+  let hold: Promise<void> | undefined
   const fetch = vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
     const url = new URL(String(input))
     expect(url.origin).toBe(MCP_ORIGIN)
@@ -70,6 +75,13 @@ function fakeMcp(options: FakeOptions = {}) {
     }
     if (url.pathname === '/token') {
       const form = new URLSearchParams(body)
+      if (form.get('token_type_hint') === 'refresh_token' && !form.has('grant_type')) {
+        revoked.push(form.get('token') ?? '')
+        expect(form.get('client_id')).toBe('client-1')
+        return options.revoke === 'down'
+          ? new Response('unavailable', { status: 503 })
+          : new Response('', { status: 200 })
+      }
       grants.push(form.get('grant_type') ?? '')
       if (form.get('grant_type') === 'refresh_token') {
         if (options.refresh === 'down') return new Response('unavailable', { status: 503 })
@@ -118,6 +130,7 @@ function fakeMcp(options: FakeOptions = {}) {
       if (message.method === 'notifications/initialized') return new Response(null, { status: 202 })
       if (message.method === 'tools/call') {
         tools.push(message.params.name!)
+        if (hold) await hold
         const call = listCalls++
         const text = options.list
           ? options.list(message.params.arguments!, call)
@@ -139,6 +152,16 @@ function fakeMcp(options: FakeOptions = {}) {
     bodies,
     grants,
     access,
+    revoked,
+    /** Holds every list_transactions call until the returned function is called. */
+    holdReads: () => {
+      let release!: () => void
+      hold = new Promise<void>((done) => (release = done))
+      return () => {
+        hold = undefined
+        release()
+      }
+    },
     /** The refresh token the server would honour now. */
     refreshToken: () => refresh,
     /** PayPal stops accepting every access token issued so far (a revocation, or an early expiry). */
@@ -787,6 +810,163 @@ describe('Keeping PayPal connected: reads without a login', () => {
     expect(
       (other.store.db.prepare('SELECT COUNT(*) AS n FROM paypal_links').get() as { n: number }).n,
     ).toBe(0)
+  })
+
+  it('a Disconnect during a refresh keeps nothing, and asks PayPal to revoke both tokens', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((done) => (release = done))
+    const revoked: string[] = []
+    const fetch = (async (input: string | URL | Request, init: RequestInit = {}) => {
+      const form = new URLSearchParams(String(init.body ?? ''))
+      if (new URL(String(input)).pathname === '/token') {
+        if (form.get('grant_type') === 'refresh_token') {
+          await gate
+          return Response.json({
+            access_token: 'tok-new',
+            refresh_token: 'rt-new',
+            expires_in: 3600,
+          })
+        }
+        revoked.push(form.get('token') ?? '')
+        return new Response('', { status: 200 })
+      }
+      return new Response('unavailable', { status: 503 })
+    }) as typeof globalThis.fetch
+    const vault = memoryVault()
+    const connect = createPayPalConnect({
+      origin: ORIGIN,
+      enabled: true,
+      clientId: 'client-1',
+      fetch,
+      vault,
+      log: () => {},
+    })
+    vault.set('S', { clientId: 'client-1', refreshToken: 'rt-old' })
+    const read = connect.read('S', 'UTC')
+    await new Promise((done) => setTimeout(done, 10))
+    connect.disconnect('S')
+    release()
+    await expect(read).rejects.toMatchObject({ code: 'NOT_CONNECTED' })
+    expect(connect.linked('S')).toBe(false)
+    expect(vault.get('S')).toBeUndefined()
+    // The token Worth held, and the one PayPal issued as the Disconnect happened.
+    await vi.waitFor(() => expect(revoked.sort()).toEqual(['rt-new', 'rt-old']))
+  })
+
+  it('a Disconnect while a sync is reading applies nothing to the plan', async () => {
+    const fake = fakeMcp({
+      list: (_args, call) => (call === 1 || call >= 7 ? FIXTURE : 'No transactions found.'),
+    })
+    const context = setup(fake, { key: KEY })
+    const server = context.app.listen(0)
+    try {
+      const agent = request.agent(server)
+      const { state } = await startLogin(agent, fake)
+      await agent.get(`/api/paypal/connect/callback?code=${CODE}&state=${state}`)
+      const csv = (await post(agent, '/api/paypal/activity')).body.csv as string
+      await agent.post('/api/import/commit').set('X-Worth-Client', 'web').send({ csv })
+      const before = (await agent.get('/api/state')).body.profile
+      const release = fake.holdReads()
+      const sync = post(agent, '/api/paypal/sync').then((response) => response)
+      await vi.waitFor(() => expect(fake.tools.length).toBeGreaterThan(6))
+      expect((await post(agent, '/api/paypal/disconnect')).status).toBe(200)
+      release()
+      const answer = await sync
+      expect(answer.status).toBe(409)
+      expect(answer.body.code).toBe('NOT_CONNECTED')
+      const after = (await agent.get('/api/state')).body
+      expect(after.profile).toEqual(before)
+      expect(after.config.paypalLinked).toBeUndefined()
+      expect(fake.revoked).toEqual([REFRESH])
+    } finally {
+      server.close()
+    }
+  })
+
+  it('Delete my data while a sync is reading keeps nothing for the old session', async () => {
+    const fake = fakeMcp({
+      list: (_args, call) => (call === 1 || call >= 7 ? FIXTURE : 'No transactions found.'),
+    })
+    const context = setup(fake, { key: KEY })
+    const server = context.app.listen(0)
+    try {
+      const agent = request.agent(server)
+      const { state } = await startLogin(agent, fake)
+      await agent.get(`/api/paypal/connect/callback?code=${CODE}&state=${state}`)
+      const csv = (await post(agent, '/api/paypal/activity')).body.csv as string
+      await agent.post('/api/import/commit').set('X-Worth-Client', 'web').send({ csv })
+      const release = fake.holdReads()
+      const sync = post(agent, '/api/paypal/sync').then((response) => response)
+      await vi.waitFor(() => expect(fake.tools.length).toBeGreaterThan(6))
+      expect((await post(agent, '/api/reset')).status).toBe(200)
+      release()
+      expect((await sync).status).not.toBe(200)
+      const links = context.store.db.prepare('SELECT COUNT(*) AS n FROM paypal_links').get()
+      expect(links).toEqual({ n: 0 })
+      expect(fake.revoked).toEqual([REFRESH])
+    } finally {
+      server.close()
+    }
+  })
+
+  it('asks PayPal to revoke on Disconnect without waiting for it or failing', async () => {
+    const fake = fakeMcp({ revoke: 'down' })
+    const { agent } = await connected(fake)
+    const off = await post(agent, '/api/paypal/disconnect')
+    expect(off.status).toBe(200)
+    expect(off.body.config.paypalLinked).toBeUndefined()
+    await vi.waitFor(() => expect(fake.revoked).toEqual([REFRESH]))
+  })
+
+  it('keeps the last read time when a sync was skipped, so the row stays truthful', async () => {
+    const future = (call: number) =>
+      call >= 12
+        ? JSON.stringify({
+            transaction_details: [
+              ...JSON.parse(FIXTURE).transaction_details,
+              {
+                transaction_info: {
+                  transaction_id: 'TXFUTURE',
+                  transaction_event_code: 'T0006',
+                  transaction_initiation_date: '2027-01-05T10:00:00Z',
+                  transaction_amount: { currency_code: 'USD', value: '-5.00' },
+                  transaction_status: 'S',
+                },
+              },
+            ],
+          })
+        : call === 1 || call >= 6
+          ? FIXTURE
+          : 'No transactions found.'
+    const fake = fakeMcp({ list: (_args, call) => future(call) })
+    const { agent, clock } = await connected(fake)
+    const csv = (await post(agent, '/api/paypal/activity')).body.csv as string
+    const committed = await agent
+      .post('/api/import/commit')
+      .set('X-Worth-Client', 'web')
+      .send({ csv })
+    const at = committed.body.profile.importedAt
+    clock.t += 20 * 60_000
+    const ok = await post(agent, '/api/paypal/sync')
+    expect(ok.body.skipped).toBeUndefined()
+    expect(ok.body.state.profile.importedAt).toBe(new Date(clock.t).toISOString())
+    clock.t += 20 * 60_000
+    // This read has a row the import can't use: nothing is applied and the time stays.
+    const skipped = await post(agent, '/api/paypal/sync')
+    expect(skipped.status).toBe(200)
+    expect(skipped.body.skipped).toBe(true)
+    expect(skipped.body.state.profile.importedAt).toBe(ok.body.state.profile.importedAt)
+    expect(at).not.toBe(ok.body.state.profile.importedAt)
+  })
+
+  it('drops links held in memory when their session expires', async () => {
+    const fake = fakeMcp()
+    const { app, connect, clock, store } = await connected(fake, undefined)
+    const { id } = store.db.prepare('SELECT id FROM sessions').get() as { id: string }
+    expect(connect.linked(id)).toBe(true)
+    clock.t += 2 * 24 * HOUR
+    app.locals.cleanup()
+    expect(connect.linked(id)).toBe(false)
   })
 
   it('syncs only a plan built from Connect PayPal', async () => {
