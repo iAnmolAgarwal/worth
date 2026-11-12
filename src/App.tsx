@@ -730,10 +730,6 @@ export default function App() {
             }
             onEditPlan={() => navigate('plan/edit')}
             onImport={() => setImporting(true)}
-            onImportFile={(file) => {
-              setChosenFile(file)
-              navigate('import')
-            }}
             onOpenCheckout={openCheckout}
             onConfirmPlan={(purchaseId) => setReview({ kind: 'plan', purchaseId })}
             onReviewRefund={(purchaseId, refundId) =>

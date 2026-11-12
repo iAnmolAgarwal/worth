@@ -727,6 +727,8 @@ export interface ConnectRoutes {
   sessionId: (res: Response) => string
   timezone: (res: Response) => string
   now: () => number
+  /** Told the CSV text of each successful read, so an import of exactly that text is known. */
+  onRead?: (res: Response, csv: string) => void
 }
 
 /**
@@ -746,7 +748,7 @@ const READS_PER_IP = 20
  */
 export function mountPayPalConnect(
   app: Express,
-  { connect, sessionId, timezone, now }: ConnectRoutes,
+  { connect, sessionId, timezone, now, onRead }: ConnectRoutes,
 ) {
   const startsPerSession = new WindowLimiter(STARTS_PER_SESSION, 60 * 60_000)
   const startsPerIp = new WindowLimiter(STARTS_PER_IP, 60 * 60_000)
@@ -793,7 +795,9 @@ export function mountPayPalConnect(
         code: 'RATE_LIMITED',
       })
     try {
-      res.json(await connect.read(id, timezone(res)))
+      const activity = await connect.read(id, timezone(res))
+      onRead?.(res, activity.csv)
+      res.json(activity)
     } catch (error) {
       const failure = error instanceof ConnectError ? error : new ConnectError('MCP_FAILED')
       res.status(failure.status).json({ error: failure.message, code: failure.code })

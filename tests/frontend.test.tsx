@@ -1546,50 +1546,31 @@ describe('first screen: the sample and PayPal (third-party feedback)', () => {
     expect(document.activeElement).toBe(chip)
   })
 
-  it('starts Home with the hero, then a slim strip naming the sample', async () => {
+  it('reaches the import step, the sample export and Enter your bills yourself from the hero', async () => {
     const user = userEvent.setup()
     const state = makeState()
     routeApi((path, data) => (path === '/state' ? state : compare(state, data)))
     render(<App />)
     const hero = await screen.findByRole('region', { name: 'Safe to spend today' })
-    const card = screen.getByRole('region', { name: 'Start with your PayPal activity' })
-    expect(card.textContent).toContain(
-      `This is ${state.profile.name}’s sample plan. Bring your own PayPal activity.`,
-    )
-    expect(card.textContent).toContain('Raw CSV files aren’t saved')
-    // The hero comes first; the PayPal start sits under it.
-    expect(hero.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    await user.click(within(card).getByText('More'))
-    await user.click(within(card).getByRole('button', { name: 'Enter your bills yourself' }))
+    // No strip under the hero any more: its ways in live in the hero's source row.
+    expect(screen.queryByRole('region', { name: 'Start with your PayPal activity' })).toBeNull()
+    expect((await within(hero).findAllByText(/Sample data/)).length).toBeGreaterThan(0)
+    await user.click(within(hero).getByRole('button', { name: 'Import a file' }))
+    await waitFor(() => expect(window.location.hash).toBe('#import'))
+    expect(
+      await screen.findByRole('button', { name: /Try with a sample PayPal export/ }),
+    ).toBeTruthy()
+    expect(screen.getByLabelText('Choose your PayPal activity CSV')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Enter your bills yourself' }))
     await waitFor(() => expect(window.location.hash).toBe('#plan/edit'))
   })
 
-  it('shows no sample intro over imported data', async () => {
+  it('shows no sample wording over imported data', async () => {
     const state = makeState('import')
     routeApi((path, data) => (path === '/state' ? state : compare(state, data)))
     render(<App />)
-    await screen.findByRole('region', { name: 'Safe to spend today' })
-    expect(screen.queryByText(/sample plan/)).toBeNull()
-    expect(screen.queryByRole('button', { name: /Use your own PayPal activity/ })).toBeNull()
-  })
-
-  it('keeps the intro without an import action when Home has no import handler', () => {
-    const state = makeState()
-    apiMock.mockImplementation(((_path: string, input: unknown) =>
-      Promise.resolve(compare(state, input))) as typeof api)
-    render(
-      <Home
-        state={state}
-        onAsk={vi.fn()}
-        onNavigate={vi.fn()}
-        onOpenProduct={vi.fn()}
-        onEditPlan={vi.fn()}
-        onOpenCheckout={vi.fn()}
-        onConfirmPlan={vi.fn()}
-        onReviewRefund={vi.fn()}
-      />,
-    )
-    expect(screen.getByText(/sample plan\./)).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /Use your own PayPal activity/ })).toBeNull()
+    const hero = await screen.findByRole('region', { name: 'Safe to spend today' })
+    expect(screen.queryByText(/sample data/i)).toBeNull()
+    expect(await within(hero).findByRole('button', { name: 'Import again' })).toBeTruthy()
   })
 })

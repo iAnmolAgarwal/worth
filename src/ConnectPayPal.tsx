@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { CircleAlert, FileUp, LoaderCircle, LogIn } from 'lucide-react'
 import { api, ApiError } from './api'
 import type { AppState } from './contract'
@@ -79,12 +80,19 @@ export function ConnectPayPalButton({
   disabled,
   returnTo,
   pop,
+  trigger,
 }: {
   disabled?: boolean
   /** Come back to the store's item on /check after the import. */
   returnTo?: 'check'
   /** Show the line before PayPal as a popover under the button. */
   pop?: boolean
+  /** A control of the caller's own (such as Home's hero row) in place of the standard button. */
+  trigger?: (props: {
+    onClick: () => void
+    'aria-expanded'?: boolean
+    disabled?: boolean
+  }) => ReactNode
 }) {
   const [asking, setAsking] = useState(false)
   const [leaving, setLeaving] = useState(false)
@@ -93,7 +101,13 @@ export function ConnectPayPalButton({
   useEffect(() => {
     if (pop && asking) popover.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
   }, [pop, asking])
-  const button = (
+  const button = trigger ? (
+    trigger({
+      onClick: () => setAsking(pop ? !asking : true),
+      'aria-expanded': pop ? asking : undefined,
+      disabled,
+    })
+  ) : (
     <Button
       icon={LogIn}
       className="connect-btn"

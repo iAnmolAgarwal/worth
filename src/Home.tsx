@@ -26,8 +26,6 @@ import {
 import { dayLabel, daysFrom, money, signed, displayName } from './format'
 import { Hero, upcomingWithPlans } from './Hero'
 import { MonthBuilt, NextThirtyDays, PlanCards, PlanSummaryLine } from './Month'
-import { type ChosenFile } from './Onboarding'
-import { StartStrip } from './StartStrip'
 import { Button, Disc, SkeletonRow } from './ui'
 
 /**
@@ -236,7 +234,6 @@ export function Home({
   onOpenSaved,
   onEditPlan,
   onImport,
-  onImportFile,
   onOpenCheckout,
   onConfirmPlan,
   onReviewRefund,
@@ -251,8 +248,6 @@ export function Home({
   onEditPlan: () => void
   /** Opens the PayPal activity import, offered while the sample persona is showing. */
   onImport?: () => void
-  /** A PayPal export chosen on the sample's first-run card, real or the bundled sample (P3a). */
-  onImportFile?: (file: ChosenFile) => void
   onOpenCheckout: (purchase: Purchase) => void
   onConfirmPlan: (purchaseId: string) => void
   onReviewRefund: (purchaseId: string, refundId: string) => void
@@ -290,7 +285,6 @@ export function Home({
             state={state}
             room={room}
             loading={loading}
-            month={month}
             onAsk={() => onAsk()}
             onPlan={onEditPlan}
             onNavigate={onNavigate}
@@ -298,14 +292,8 @@ export function Home({
             onConfirmFunds={() => setFunds(true)}
             fundsElsewhere={Boolean(ready) && !fundsToday}
           />
-          {state.profile.source === 'demo' && (
-            <StartStrip
-              state={state}
-              onFile={onImportFile}
-              onImport={onImport}
-              onEnterYourself={onEditPlan}
-            />
-          )}
+          {/* Full width under the hero, so "Coming up" and Saved start on one line below. */}
+          <CollisionInsight state={state} onShowPlan={() => onNavigate('plan')} />
         </div>
         <div className="grid">
           <div className="stack">
@@ -393,7 +381,6 @@ export function Home({
                 </div>
               </section>
             ))}
-            <CollisionInsight state={state} onShowPlan={() => onNavigate('plan')} />
             {month ? nextDays : <ComingUp state={state} onShowAll={() => onNavigate('plan')} />}
           </div>
           <aside

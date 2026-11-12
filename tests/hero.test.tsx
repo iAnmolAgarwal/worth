@@ -3,7 +3,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Home } from '../src/Home'
-import { compactMoney, heroSplit, holdChips, upcomingWithPlans } from '../src/Hero'
+import { compactMoney, heroSource, heroSplit, updatedLabel } from '../src/Hero'
 import { api } from '../src/api'
 import { compareOptions } from '../shared/finance'
 import { createDemoState, PRODUCTS } from '../shared/seed'
@@ -50,7 +50,6 @@ function renderHome(state: AppState, props: Partial<Parameters<typeof Home>[0]> 
       onOpenCheckout={vi.fn()}
       onConfirmPlan={vi.fn()}
       onReviewRefund={vi.fn()}
-      onImportFile={vi.fn()}
       {...props}
     />,
   )
@@ -125,31 +124,7 @@ describe('heroSplit', () => {
   })
 })
 
-describe('holdChips', () => {
-  it('names the largest bill up to the low point, the next plan payment and the next payday', () => {
-    const state = makeState()
-    const split = heroSplit(state.profile.balanceCents, room(state))
-    const chips = holdChips(upcomingWithPlans(state), split.lowDate)
-    expect(chips.map((chip) => chip.key)).toEqual(['bill', 'plan', 'payday'])
-    const [bill, plan, payday] = chips
-    const upcoming = upcomingWithPlans(state)
-    const biggest = Math.max(
-      ...upcoming
-        .filter(
-          ({ flow, date }) =>
-            flow.kind !== 'income' && flow.kind !== 'installment' && date <= split.lowDate!,
-        )
-        .map(({ flow }) => flow.amountCents),
-    )
-    expect(bill!.amountCents).toBe(biggest)
-    expect(plan!.label).toBe('Laptop Pay in 4')
-    expect(payday!.date).toBe(upcoming.find(({ flow }) => flow.kind === 'income')!.date)
-  })
-
-  it('leaves out what the plan does not have', () => {
-    expect(holdChips([])).toEqual([])
-  })
-
+describe('compactMoney', () => {
   it('shows cents only when there are some', () => {
     expect(compactMoney(145000)).toBe('$1,450')
     expect(compactMoney(32475)).toBe('$324.75')
@@ -157,7 +132,7 @@ describe('holdChips', () => {
 })
 
 describe('the Home hero', () => {
-  it('comes first, with the exact figure, the split, the chips and one action', async () => {
+  it('comes first, with the exact figure, the pill, the split and its two action rows', async () => {
     const user = userEvent.setup()
     const state = makeState()
     const comparison = room(state)
@@ -167,23 +142,57 @@ describe('the Home hero', () => {
       comparison.spendLess.maxPriceCents / 100,
     )
     await waitFor(() => expect(hero.querySelector('.hero-v .sr')?.textContent).toBe(exact))
+    expect(hero.querySelector('.hero-k')?.textContent).toBe('Safe to spend today')
+    expect(hero.querySelector('.hero-sub')?.textContent).toBe(`${state.profile.name} · Sat, Oct 3`)
+    expect(hero.querySelector('.hero-pill')?.textContent).toMatch(/^Bills covered through \w+ \d+$/)
     const split = within(hero).getByRole('list', { name: /^Your \$/ })
     expect(split.textContent).toContain('Free')
-    expect(split.textContent).toMatch(/Needed through \w+ \d+/)
+    expect(split.textContent).toMatch(/Needed by \w+ \d+/)
     expect(split.textContent).toContain('Cushion$300')
     expect(hero.textContent).toContain('in your account')
-    const chips = within(hero).getByRole('list', { name: 'What holds the rest back' })
-    expect(within(chips).getAllByRole('listitem')).toHaveLength(3)
-    expect(chips.textContent).toContain('Laptop Pay in 4')
-    expect(chips.textContent).toContain('Payday +$')
+    // No chips on the card any more.
+    expect(within(hero).queryByRole('list', { name: 'What holds the rest back' })).toBeNull()
     // The hedging is behind the info, not on the face.
     const info = within(hero).getByLabelText('How Worth worked this out').closest('details')!
     expect(info.open).toBe(false)
     expect(info.textContent).toContain('cushion, if your plan holds')
-    // The first section on the page is the hero.
+    // The first section on the page is the hero; the tour's anchors are on it.
     expect(document.querySelector('section')).toBe(hero)
-    await user.click(within(hero).getByRole('link', { name: /Check a purchase/ }))
+    for (const anchor of ['safe', 'bar', 'check'])
+      expect(hero.querySelector(`[data-tour="${anchor}"]`)).toBeTruthy()
+    const actions = within(hero).getByRole('navigation', { name: 'Next steps' })
+    await user.click(within(actions).getByRole('button', { name: /Check a purchase/ }))
     expect(onAsk).toHaveBeenCalledWith()
+  })
+
+  it.each([
+    [87226, 4],
+    [98765432, 8],
+    [100000000, 10],
+  ])('sizes a %i-cent figure by its %i characters, keeping the cents', (cents, chars) => {
+    const state = makeState(cents + 166774)
+    const comparison = { ...room(state) }
+    comparison.spendLess = { ...comparison.spendLess, maxPriceCents: cents }
+    apiMock.mockImplementation((() => Promise.resolve(comparison)) as unknown as typeof api)
+    render(
+      <Home
+        state={state}
+        onAsk={vi.fn()}
+        onNavigate={vi.fn()}
+        onOpenProduct={vi.fn()}
+        onEditPlan={vi.fn()}
+        onOpenCheckout={vi.fn()}
+        onConfirmPlan={vi.fn()}
+        onReviewRefund={vi.fn()}
+      />,
+    )
+    return waitFor(() => {
+      const figure = document.querySelector<HTMLElement>('.hero-v')!
+      expect(figure.style.getPropertyValue('--chars')).toBe(String(chars))
+      expect(figure.querySelector('.sr')?.textContent).toBe(
+        compactMoney(cents).includes('.') ? compactMoney(cents) : `${compactMoney(cents)}.00`,
+      )
+    })
   })
 
   it.each([
@@ -198,10 +207,12 @@ describe('the Home hero', () => {
     const legend = within(hero).getByRole('list', { name: /^Your \$/ })
     expect(legend.textContent).toContain('Nothing free')
     expect(legend.textContent).not.toMatch(/Nothing free through/)
-    expect(legend.textContent).toContain(`Needed through`)
+    expect(legend.textContent).toContain(`Needed by`)
     expect(legend.textContent).toContain(compactMoney(split.neededCents))
     expect(legend.textContent).not.toMatch(/\$0(?![\d.,])/)
-    expect(legend.textContent).toContain(`Short by ${compactMoney(split.shortCents)} on`)
+    expect(hero.querySelector('.hero-pill.short')?.textContent).toContain(
+      `Short by ${compactMoney(split.shortCents)} on`,
+    )
     if (split.cushionCents) expect(legend.textContent).toContain('Cushion left')
     else expect(legend.textContent).not.toContain('Cushion')
     expect(hero.textContent).toContain('already dips below your $300.00 cushion')
@@ -232,6 +243,139 @@ describe('the Home hero', () => {
     await user.click(summary)
     await user.click(details.querySelector('.hero-pop p')!)
     expect(details.open).toBe(true)
+  })
+
+  it.each([
+    ['sample', undefined, 'on', ['Connect PayPal', 'Sample data now', 'Import a file']],
+    ['sample', undefined, 'off', ['Sample data', 'Import a file']],
+    ['import', 'file', 'on', ['Connect PayPal', 'From your imported file', 'Import again']],
+    ['import', 'paypal', 'on', ['PayPal connected', 'Updated today']],
+  ] as const)(
+    'names where the numbers come from: %s via %s, Connect PayPal %s',
+    async (source, from, connect, words) => {
+      const state = makeState()
+      state.config = { ...state.config, paypalConnect: connect }
+      if (source === 'import')
+        state.profile = {
+          ...state.profile,
+          source: 'import',
+          importedFrom: from,
+          importedAt: `${TODAY}T15:00:00.000Z`,
+          timezone: 'UTC',
+        }
+      renderHome(state)
+      const hero = await screen.findByRole('region', { name: 'Safe to spend today' })
+      const row = hero.querySelector('.hero-src')!
+      for (const word of words) expect(row.textContent).toContain(word)
+      if (connect === 'off') expect(row.textContent).not.toContain('Connect PayPal')
+      // The tour's anchor is the row itself, in every state.
+      expect(row.getAttribute('data-tour')).toBe('connect')
+      if (from === 'paypal')
+        expect(
+          within(row as HTMLElement).getByRole('button', {
+            name: /Read your PayPal activity again/,
+          }),
+        ).toBeTruthy()
+      // A row with no action of its own keeps still on hover.
+      expect(row.classList.contains('static')).toBe(from === 'paypal' || connect === 'off')
+      // Never a button inside a button.
+      expect(row.querySelector('button button')).toBeNull()
+    },
+  )
+
+  it('says why imports wait while a checkout is open', async () => {
+    const state = makeState()
+    state.config = { ...state.config, paypalConnect: 'on' }
+    state.purchases = [
+      {
+        id: 'p-open',
+        status: 'created',
+        amountCents: 34900,
+        name: 'Studio headphones',
+      } as unknown as AppState['purchases'][number],
+    ]
+    // The engine's figure for the same plan; the open checkout only matters to the actions here.
+    const clean = room(makeState())
+    apiMock.mockImplementation((() => Promise.resolve(clean)) as unknown as typeof api)
+    render(
+      <Home
+        state={state}
+        onAsk={vi.fn()}
+        onNavigate={vi.fn()}
+        onOpenProduct={vi.fn()}
+        onEditPlan={vi.fn()}
+        onOpenCheckout={vi.fn()}
+        onConfirmPlan={vi.fn()}
+        onReviewRefund={vi.fn()}
+      />,
+    )
+    const hero = await screen.findByRole('region', { name: 'Safe to spend today' })
+    await waitFor(() => expect(hero.querySelector('.hero-src')).toBeTruthy())
+    const row = hero.querySelector<HTMLElement>('.hero-src')!
+    const line = 'Finish or cancel your active checkout before importing PayPal activity.'
+    expect(row.textContent).toContain(line)
+    const file = within(row).getByRole('button', { name: 'Import a file' })
+    expect((file as HTMLButtonElement).disabled).toBe(true)
+    expect(file.getAttribute('title')).toBe(line)
+  })
+
+  it('capitalises "Updated" the same way in every row', async () => {
+    const state = makeState()
+    state.config = { ...state.config, paypalConnect: 'off' }
+    state.profile = {
+      ...state.profile,
+      source: 'import',
+      importedFrom: 'file',
+      importedAt: `${TODAY}T15:00:00.000Z`,
+      timezone: 'UTC',
+    }
+    renderHome(state)
+    const hero = await screen.findByRole('region', { name: 'Safe to spend today' })
+    await waitFor(() =>
+      expect(hero.querySelector('.hero-src')?.textContent).toContain('Updated today'),
+    )
+  })
+
+  it('says "updated today" only when the import was today', () => {
+    const state = makeState()
+    state.profile = { ...state.profile, source: 'import', importedFrom: 'paypal', timezone: 'UTC' }
+    expect(heroSource(state)).toBe('paypal')
+    state.profile.importedAt = `${TODAY}T08:00:00.000Z`
+    expect(updatedLabel(state)).toBe('updated today')
+    state.profile.importedAt = '2026-10-01T08:00:00.000Z'
+    expect(updatedLabel(state)).toBe('updated Oct 1')
+    state.profile.importedAt = undefined
+    expect(updatedLabel(state)).toBeUndefined()
+    expect(heroSource(makeState())).toBe('sample')
+  })
+
+  it('opens on the whole balance, never "Safe to spend" over a counting figure', async () => {
+    const motion = vi.fn(() => ({ matches: false }))
+    vi.stubGlobal('matchMedia', motion)
+    try {
+      sessionStorage.removeItem('worth.heroEntrance')
+      const state = makeState()
+      renderHome(state)
+      const hero = await screen.findByRole('region', { name: 'Safe to spend today' })
+      const label = hero.querySelector('.hero-k [aria-hidden="true"]')
+      expect(label?.textContent).toBe('In your account')
+      expect(hero.querySelector('.hero-v [aria-hidden="true"]')?.textContent).toBe(
+        compactMoney(state.profile.balanceCents),
+      )
+      // Screen readers hear the answer, never the counting figure.
+      expect(hero.querySelector('.hero-k .sr')?.textContent).toBe('Safe to spend today')
+      await waitFor(
+        () => expect(hero.querySelector('.hero-k')?.textContent).toBe('Safe to spend today'),
+        { timeout: 2000 },
+      )
+      cleanup()
+      // Once per session: the next Home opens on the answer.
+      renderHome(state)
+      const again = await screen.findByRole('region', { name: 'Safe to spend today' })
+      expect(again.querySelector('.hero-k')?.textContent).toBe('Safe to spend today')
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it('has no inline composer, and the rail opens Connect an agent', async () => {

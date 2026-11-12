@@ -1,16 +1,20 @@
 /* =====================================================================
-   Home hero: "Safe to spend today", the split of the balance, and the
-   things holding money back. Tokens come from index.css.
+   Home hero: a flat sky-blue card (the answer) and a column of two action
+   rows beside it. The hero uses the page's own grid (.grid: minmax(0, 1fr)
+   var(--rail), gap var(--s-12)), so the card lines up with "Coming up" and
+   the actions with the Saved column below. All text on the card is dark.
    ===================================================================== */
 
-/* The band above Home's two columns: hero, then the sample strip. It paints the canvas over the
-   rail's white backdrop, so the rail starts where the columns do. */
+/* The band above Home's two columns. It paints the canvas over the rail's white backdrop, so the
+   rail starts where the columns do and the action rows sit on the canvas. */
 .home-band {
   position: relative;
-  z-index: 0;
+  /* Above the columns below, so the hero's popovers (Connect PayPal, the info) are never under
+     the Saved rail. */
+  z-index: 1;
   display: flex;
   flex-direction: column;
-  gap: var(--s-4);
+  gap: var(--s-6);
   margin-bottom: var(--s-8);
 }
 .home-band::before {
@@ -22,135 +26,155 @@
 }
 
 .hero {
-  --hero-free: #ffffff;
-  --hero-needed: #ffc94a;
-  --hero-cushion: rgba(255, 255, 255, 0.32);
-  position: relative;
-  overflow: hidden;
-  color: #fff;
-  border-radius: var(--r-xl);
-  padding: var(--s-8) var(--s-10) var(--s-10);
-  background:
-    radial-gradient(120% 140% at 100% 0%, rgba(96, 205, 255, 0.28) 0%, rgba(96, 205, 255, 0) 55%),
-    linear-gradient(135deg, var(--c-brand) 0%, #005ac8 55%, var(--c-nav) 100%);
-  box-shadow: var(--e-2);
+  --sky: #80ccff;
+  --ink: #001435;
+  --ink-2: #0b2a55;
+  --navy: #001c64;
+  --card-h: 420px;
+  --amount-max: 7rem;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas:
-    'top top'
-    'amount cta'
-    'split split'
-    'chips chips'
-    'hold hold';
-  align-items: end;
-  column-gap: var(--s-8);
+  grid-template-columns: minmax(0, 1fr) var(--rail);
+  gap: var(--s-12);
+  align-items: stretch;
+}
+
+/* ---------- The card ---------- */
+.hero-card {
+  container-type: inline-size;
+  position: relative;
+  min-height: var(--card-h);
+  padding: 30px 36px 26px;
+  border-radius: 20px;
+  background: var(--sky);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(0, 20, 53, 0.06);
+  display: grid;
+  grid-template-rows: auto 1fr auto auto auto;
+  grid-template-areas: 'top' 'amount' 'pill' 'split' 'hold';
 }
 .hero-top {
   grid-area: top;
   display: flex;
-  align-items: center;
-  gap: var(--s-3);
+  align-items: flex-start;
+  gap: var(--s-4);
+}
+.hero-mark {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--navy);
+  display: grid;
+  place-items: center;
+}
+.hero-mark svg {
+  width: 26px;
+  display: block;
+}
+.hero-id {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 .hero-k {
   margin: 0;
-  font-size: 1.375rem;
+  font-size: 1.25rem;
   line-height: 1.75rem;
   font-weight: var(--fw-semibold);
-  color: #fff;
+  color: var(--ink);
 }
-.hero-tag {
-  font-size: var(--fs-caption);
-  line-height: var(--lh-caption);
-  font-weight: var(--fw-semibold);
-  padding: 4px 10px;
-  border-radius: var(--r-pill);
-  background: rgba(255, 255, 255, 0.16);
+.hero-sub {
+  margin: 0;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  color: var(--ink-2);
 }
 
-/* The figure: whole dollars, the cents small. */
+/* The figure: whole dollars heavy, the cents small. Its size follows its character count (set
+   inline as --chars) and the card's width, so $1,000,000 fits as $872 does. */
 .hero-v {
   grid-area: amount;
-  margin: var(--s-2) 0 0;
-  font-size: clamp(4rem, 8vw, 7.5rem);
-  line-height: 1;
-  font-weight: var(--fw-semibold);
-  letter-spacing: -0.035em;
+  align-self: end;
+  margin: var(--s-6) 0 0;
+  font-size: clamp(2.5rem, calc(100cqi / (0.62 * (var(--chars, 4) + 1.4))), var(--amount-max));
+  line-height: 0.92;
+  font-weight: 800;
+  letter-spacing: -0.055em;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
-  animation: hero-rise calc(var(--d-enter) * 2) var(--ease-enter) both;
+  color: var(--ink);
 }
 .hero-v small {
   font-size: 0.36em;
-  font-weight: var(--fw-medium);
-  letter-spacing: 0;
-  vertical-align: 0.95em;
-  margin-left: 0.08em;
-  opacity: 0.85;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  vertical-align: 1.1em;
+  margin-left: 0.06em;
 }
 
-.hero-cta.btn {
-  grid-area: cta;
-  justify-self: end;
-  align-self: end;
-  height: 56px;
-  padding: 0 var(--s-8);
-  font-size: var(--fs-section);
+/* The reference's status pill. */
+.hero-pill {
+  grid-area: pill;
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: var(--s-3) 0 0;
+  padding: 5px 12px 5px 8px;
+  border-radius: var(--r-pill);
+  background: #fff;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  font-weight: var(--fw-semibold);
+}
+.hero-pill svg {
+  flex: none;
+}
+.hero-pill.ok {
+  color: #0c6e11;
+}
+.hero-pill.short {
+  color: var(--c-danger);
+}
+.hero-pill b {
   font-weight: var(--fw-bold);
-  background: #fff;
-  color: var(--c-primary-active);
-  box-shadow: 0 6px 18px rgba(0, 20, 53, 0.22);
-  transition:
-    transform var(--d-hover) var(--ease-move),
-    box-shadow var(--d-hover) linear;
-}
-.hero-cta.btn:hover {
-  background: #fff;
-  transform: translateY(-1px);
-  box-shadow: 0 10px 24px rgba(0, 20, 53, 0.28);
-}
-.hero-cta.btn:focus-visible {
-  outline: 3px solid #fff;
-  outline-offset: 3px;
 }
 
-/* The split bar of the balance. */
+/* The bar of the balance: flat segments with rounded ends. */
 .hero-split {
   grid-area: split;
-  margin-top: var(--s-6);
+  margin-top: var(--s-5);
 }
 .hero-bar {
   display: flex;
-  gap: 3px;
-  height: 20px;
-  border-radius: var(--r-pill);
-  overflow: hidden;
-  background: rgba(255, 255, 255, 0.12);
-  animation: hero-fill calc(var(--d-enter) * 3) var(--ease-enter) 120ms both;
+  gap: 4px;
+  height: 16px;
 }
 .hero-bar i {
   display: block;
   /* Grows by its amount (set inline); a tiny part keeps a sliver so it never disappears. */
   flex: 1 1 0;
-  min-width: 6px;
+  min-width: 10px;
+  border-radius: 999px;
+  transition: flex-grow 650ms var(--ease-enter);
 }
 .hero-bar .free {
-  background: var(--hero-free);
+  background: #fff;
 }
 .hero-bar .needed {
-  background: var(--hero-needed);
+  background: var(--ink);
 }
 .hero-bar .cushion {
-  background: repeating-linear-gradient(
-    -45deg,
-    rgba(255, 255, 255, 0.42) 0 6px,
-    rgba(255, 255, 255, 0.2) 6px 12px
-  );
+  background: repeating-linear-gradient(-45deg, #1f5fbf 0 4px, #3d7bd6 4px 8px);
 }
 .hero-legend {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--s-6);
   margin-top: var(--s-3);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  transition: opacity 300ms linear;
 }
 .hero-legend ul {
   list-style: none;
@@ -158,19 +182,20 @@
   padding: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: var(--s-2) var(--s-6);
+  gap: 4px var(--s-5);
 }
 .hero-legend li {
   display: inline-flex;
   align-items: center;
   gap: var(--s-2);
-  font-size: var(--fs-body);
-  line-height: var(--lh-body);
-  color: #fff;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  color: var(--ink-2);
   white-space: nowrap;
 }
-.hero-legend li:not(.short) b {
-  color: #fff;
+.hero-legend li b {
+  color: var(--ink);
+  font-size: var(--fs-body);
   font-weight: var(--fw-bold);
 }
 .hero-legend li > i {
@@ -180,105 +205,52 @@
   flex: none;
 }
 .hero-legend li.free > i {
-  background: var(--hero-free);
+  background: #fff;
 }
 .hero-legend li.needed > i {
-  background: var(--hero-needed);
+  background: var(--ink);
 }
 .hero-legend li.cushion > i {
-  background: repeating-linear-gradient(
-    -45deg,
-    rgba(255, 255, 255, 0.7) 0 3px,
-    rgba(255, 255, 255, 0.3) 3px 6px
-  );
-}
-.hero-legend li.short {
-  color: var(--c-danger);
-  background: var(--c-danger-bg);
-  border-radius: var(--r-pill);
-  padding: 0 10px;
+  background: repeating-linear-gradient(-45deg, #1f5fbf 0 3px, #3d7bd6 3px 6px);
 }
 .hero-of {
   margin: 0;
-  font-size: var(--fs-body);
-  line-height: var(--lh-body);
-  color: #fff;
-  white-space: nowrap;
-}
-.hero-of b {
-  color: #fff;
-}
-
-/* What holds the rest back. */
-.hero-chips {
-  grid-area: chips;
-  list-style: none;
-  margin: var(--s-6) 0 0;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--s-2) var(--s-3);
-}
-.hero-chips li {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s-2);
-  min-height: 40px;
-  padding: 4px 14px 4px 4px;
-  border-radius: var(--r-pill);
-  background: #fff;
-  color: var(--c-text-strong);
   font-size: var(--fs-meta);
   line-height: var(--lh-meta);
-  font-weight: var(--fw-medium);
+  color: var(--ink-2);
 }
-.hero-chips .ic {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  flex: none;
-  background: var(--c-warning-bg);
-  color: var(--c-warning);
+.hero-of b {
+  color: var(--ink);
 }
-.hero-chips .plan .ic {
-  background: var(--c-info);
-  color: var(--c-navy);
-}
-.hero-chips .payday .ic {
-  background: var(--c-success-bg);
-  color: var(--c-success);
-}
-.hero-chips .payday b {
-  color: var(--c-success);
-}
-.hero-chips b {
-  font-weight: var(--fw-bold);
-}
-.hero-chips .when {
-  color: var(--c-text-2);
-}
-
-.hero > .hold {
+.hero-card > .hold {
   grid-area: hold;
-  color: #fff;
-  margin-top: var(--s-4);
-}
-.hero > .hold .link {
-  color: #fff;
-  text-decoration: underline;
+  margin-top: var(--s-3);
+  color: var(--ink);
 }
 
-/* Nothing free: the figure steps back and the bar carries the story. */
-.hero.zero .hero-v {
-  opacity: 0.9;
+/* ---------- Entrance: the whole balance first, then the split ---------- */
+.hero-card.is-whole .hero-legend,
+.hero-card.is-whole .hero-pill {
+  opacity: 0;
+}
+.hero-card.is-run .hero-legend,
+.hero-card.is-run .hero-pill {
+  opacity: 0.4;
+}
+.hero-card.is-whole .hero-bar i:not(:first-child) {
+  min-width: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-bar i,
+  .hero-legend {
+    transition: none;
+  }
 }
 
-/* The info disclosure: cushion, confirmed balance and the arithmetic. */
+/* ---------- The info disclosure: cushion, confirmed balance and the arithmetic ---------- */
 .hero-info {
   position: relative;
-  margin-left: auto;
+  flex: none;
 }
 .hero-info > summary {
   list-style: none;
@@ -288,8 +260,8 @@
   display: grid;
   place-items: center;
   cursor: pointer;
-  color: #fff;
-  background: rgba(255, 255, 255, 0.14);
+  color: var(--ink);
+  background: rgba(0, 20, 53, 0.08);
   transition: background-color var(--d-hover) linear;
 }
 .hero-info > summary::-webkit-details-marker {
@@ -297,17 +269,17 @@
 }
 .hero-info > summary:hover,
 .hero-info[open] > summary {
-  background: rgba(255, 255, 255, 0.26);
+  background: rgba(0, 20, 53, 0.14);
 }
 .hero-info > summary:focus-visible {
-  outline: 3px solid #fff;
+  outline: 3px solid var(--ink);
   outline-offset: 2px;
 }
 .hero-pop {
   position: absolute;
-  z-index: 2;
+  z-index: 4;
   top: calc(100% + var(--s-2));
-  right: 0;
+  left: 0;
   width: min(360px, calc(100vw - 2 * var(--gutter) - 32px));
   padding: var(--s-4) var(--s-5);
   border-radius: var(--r-lg);
@@ -340,36 +312,6 @@
   font-weight: var(--fw-semibold);
   color: var(--c-text-strong);
 }
-
-/* Loading. */
-.hero[aria-busy='true'] {
-  grid-template-areas: 'top top' 'amount amount';
-  min-height: 280px;
-  align-content: start;
-}
-.hero-sk {
-  grid-area: amount;
-  display: block;
-  width: 240px;
-  height: 96px;
-  margin-top: var(--s-4);
-  opacity: 0.35;
-}
-
-@keyframes hero-rise {
-  from {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-}
-@keyframes hero-fill {
-  from {
-    clip-path: inset(0 100% 0 0);
-  }
-  to {
-    clip-path: inset(0 0 0 0);
-  }
-}
 @keyframes hero-pop {
   from {
     opacity: 0;
@@ -377,202 +319,216 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .hero-v,
-  .hero-bar,
   .hero-pop {
     animation: none;
   }
 }
 
-/* ---------- The sample strip under the hero ---------- */
-.start-strip {
+/* ---------- The action column: two rows sharing the card's height ---------- */
+.hero-actions {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--s-3) var(--s-6);
-  padding: var(--s-3) var(--s-3) var(--s-3) var(--s-6);
-  border-radius: var(--r-lg);
-  background: var(--c-surface);
-  border: 1px solid var(--c-border);
+  flex-direction: column;
+  gap: var(--s-4);
 }
-.start-strip.over {
-  border-color: var(--c-brand);
-  box-shadow: inset 0 0 0 1px var(--c-brand);
-}
-.start-strip-text {
-  margin: 0;
-  flex: 1 1 280px;
-  font-size: var(--fs-body);
-  line-height: var(--lh-body);
-  font-weight: var(--fw-semibold);
-  color: var(--c-text-strong);
-}
-.start-strip-text .soft {
-  font-weight: var(--fw-regular);
-  color: var(--c-text-2);
-}
-.start-strip-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--s-2);
-}
-.start-strip-actions .btn {
-  height: 40px;
-  padding: 0 var(--s-4);
-  font-size: var(--fs-meta);
-}
-/* The CSV is a secondary way in here; a primary action can sit before it. */
-.start-strip-actions .file-btn.btn-primary:not(.is-primary) {
-  background: var(--c-surface);
-  color: var(--c-text-strong);
-  box-shadow: inset 0 0 0 2px var(--c-text-strong);
-}
-.start-strip-actions .file-btn.btn-primary:not(.is-primary):hover {
-  background: var(--c-surface-2);
-}
-.start-strip > .alert,
-.start-strip > .field-error {
-  flex-basis: 100%;
-}
-.start-more {
+.hero-act {
   position: relative;
-}
-.start-more > summary {
-  min-height: 40px;
-  display: inline-flex;
+  flex: 1;
+  display: flex;
   align-items: center;
-  gap: var(--s-2);
-  padding: 0 var(--s-2) 0 var(--s-3);
-}
-.start-pop {
-  position: absolute;
-  z-index: 3;
-  top: calc(100% + var(--s-2));
-  right: 0;
-  width: min(380px, calc(100vw - 2 * var(--gutter)));
-  padding: var(--s-4) var(--s-5);
-  border-radius: var(--r-lg);
-  background: var(--c-surface);
-  box-shadow: var(--e-3);
-}
-.start-pop .t {
-  margin: 0;
-  font-weight: var(--fw-bold);
-  color: var(--c-text-strong);
-}
-
-/* ---------- Rail: Connect an agent ---------- */
-.agent-entry {
-  width: 100%;
-  text-align: left;
-  border-radius: var(--r-lg);
+  gap: var(--s-3);
+  padding: 0 var(--s-5);
+  border-radius: 16px;
   border: 1px solid var(--c-border);
-  padding: var(--s-3) var(--s-4);
-  background: var(--c-surface-2);
+  background: #fff;
+  color: var(--c-text-strong);
+  text-decoration: none;
+}
+.hero-act:hover {
+  text-decoration: none;
+  background: #fafbfe;
+}
+/* A row with no action of its own (Connect PayPal off, or already connected) stays still. */
+.hero-act.static:hover {
+  background: #fff;
+}
+button.hero-act {
+  width: 100%;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
 }
-.agent-entry:hover {
-  background: var(--c-fill);
+.hero-act-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--s-4) 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
 }
-.agent-entry > .ico {
-  color: var(--c-text-3);
+/* The row's main control covers the whole row; the pill and the refresh sit above it. */
+button.hero-act-main::after,
+.hero-act.primary::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+.hero-act .connect-pop-wrap {
+  position: static;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+.hero-act .connect-ask.connect-pop {
+  right: 0;
+  top: calc(100% + var(--s-2));
+}
+.hero-act-t {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-section);
+  line-height: var(--lh-section);
+  font-weight: var(--fw-bold);
+}
+.hero-act-s {
+  font-weight: var(--fw-regular);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  color: var(--c-text-2);
+}
+.hero-act .chev {
   flex: none;
+  color: var(--c-text-2);
+}
+.hero-act.primary {
+  border-color: transparent;
+  background: var(--navy);
+  color: #fff;
+}
+.hero-act.primary:hover {
+  background: #003087;
+}
+.hero-act.primary .hero-act-s {
+  color: #c9d8f5;
+}
+.hero-act.primary .chev {
+  color: #fff;
+}
+.hero-act:focus-visible,
+.hero-act-main:focus-visible,
+.hero-src-alt:focus-visible,
+.hero-src-refresh:focus-visible {
+  outline: 3px solid var(--c-focus);
+  outline-offset: 2px;
+}
+.hero-src-alt {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--c-fill);
+  font: inherit;
+  font-size: var(--fs-meta);
+  font-weight: var(--fw-semibold);
+  color: var(--c-text-strong);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.hero-src-alt:hover {
+  background: #e4e8f3;
+}
+.hero-src-alt:disabled {
+  color: var(--c-text-3);
+  cursor: not-allowed;
+}
+.hero-src-pill i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #0c8a14;
+}
+.hero-src-refresh {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--c-fill);
+  color: var(--c-text-strong);
+  cursor: pointer;
+}
+.hero-src-refresh:hover {
+  background: #e4e8f3;
 }
 
-/* ---------- Laptop and up: the hero and the sample strip fill the first screen ---------- */
-@media (min-width: 1024px) {
+/* Loading. */
+.hero[aria-busy='true'] .hero-card {
+  align-content: start;
+}
+.hero-sk {
+  grid-area: amount;
+  display: block;
+  width: 240px;
+  height: 96px;
+  margin-top: var(--s-8);
+  opacity: 0.35;
+}
+
+/* A short laptop screen (1280×720): a lower card, so "Coming up" still shows above the fold. */
+@media (max-height: 760px) and (min-width: 1024px) {
   .hero {
-    /* 100vh less the top bar, the page's top padding, the strip, the gaps and a peek of what's next. */
-    /* Content-sized on a laptop, so the next section shows above the fold. */
-    min-height: clamp(440px, calc(100vh - var(--topbar-h) - 300px), 560px);
-    align-content: center;
-    padding: var(--s-8) var(--s-12) var(--s-10);
+    --card-h: 320px;
+    --amount-max: 5.25rem;
+  }
+  .hero-card {
+    padding: 24px 32px 20px;
   }
   .hero-v {
-    margin-top: var(--s-4);
-    font-size: clamp(6rem, 11vw, 11rem);
+    margin-top: var(--s-3);
   }
-  .hero-cta.btn {
-    align-self: center;
+  .hero-act-main {
+    padding: var(--s-2) 0;
   }
-  .hero-split {
-    margin-top: var(--s-10);
+}
+
+/* Below 1024 px the page grid stacks; so does the hero, with its rows under the card. */
+@media (max-width: 1023px) {
+  .hero {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--s-3);
+    --card-h: 0px;
   }
-  .hero-bar {
-    height: 48px;
-    border-radius: var(--r-lg);
+  .hero-act {
+    flex: none;
+    min-height: 72px;
   }
-  .hero-chips {
+}
+@media (max-width: 767px) {
+  .hero-card {
+    padding: 22px 20px 20px;
+  }
+  .hero-v {
     margin-top: var(--s-8);
   }
-  .hero-legend li,
-  .hero-of {
-    font-size: var(--fs-section);
-    line-height: var(--lh-section);
-  }
-  .hero-legend li > i {
-    width: 14px;
-    height: 14px;
-  }
-  .hero-chips li {
-    min-height: 44px;
-    font-size: var(--fs-body);
-    line-height: var(--lh-body);
-    padding-right: 18px;
-  }
-  .hero-chips .ic {
-    width: 36px;
-    height: 36px;
-  }
 }
-
-/* ---------- Phone ---------- */
-@media (max-width: 767px) {
-  .home-band {
-    margin-bottom: var(--s-6);
-  }
-  .hero {
-    padding: var(--s-5) var(--s-5) var(--s-6);
-    border-radius: var(--r-lg);
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: 'top' 'amount' 'split' 'chips' 'hold' 'cta';
-  }
-  .hero-k {
-    font-size: var(--fs-section);
-    line-height: var(--lh-section);
-  }
-  .hero-v {
-    font-size: 3.5rem;
-  }
-  .hero-legend {
-    flex-direction: column;
-    gap: var(--s-2);
-  }
-  .hero-legend ul {
-    flex-direction: column;
-    gap: var(--s-1);
-  }
-  .hero-legend li {
-    font-size: var(--fs-meta);
-    white-space: normal;
-  }
-  .hero-chips {
-    margin-top: var(--s-4);
-  }
-  .hero-chips li {
-    max-width: 100%;
-  }
-  .hero-cta.btn {
-    justify-self: stretch;
-    margin-top: var(--s-5);
-    height: var(--tap);
-  }
-  .start-strip {
-    padding: var(--s-3) var(--s-4);
-  }
-  .start-pop {
-    right: auto;
-    left: 0;
-  }
+/* Connected: the status takes the row; the refresh sits at its end. */
+.hero-src.paypal .connect-pop-wrap {
+  flex: none;
+}
+/* Under the hero, "Coming up" and Saved start on one line. */
+.home-band + .grid > .rail {
+  padding-top: 0;
 }
