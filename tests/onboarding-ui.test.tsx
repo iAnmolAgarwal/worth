@@ -183,12 +183,17 @@ describe('Check what Worth found', () => {
     ).toBeTruthy()
     await user.type(screen.getByRole('textbox', { name: /Money available today/ }), '2600')
     await user.type(screen.getByRole('textbox', { name: /Cushion/ }), '300')
+    // The button names the open question, and pressing it stops there first, as it says.
     await user.click(screen.getByRole('button', { name: 'Answer the question above' }))
+    expect(screen.getByRole('alert').textContent).toContain('Choose how many payments of $62.50')
+    expect(screen.getByRole('alert').closest('.check-plan')).toBeTruthy()
+    await user.click(screen.getByRole('radio', { name: '1 left' }))
+    // Then Continue stops on the next missing thing: everyday spending.
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
     expect(screen.getByRole('alert').textContent).toContain('Enter your everyday spending a day')
     expect(calls.some((call) => call.path === '/import/commit')).toBe(false)
 
     await user.type(field, '35')
-    await user.click(screen.getByRole('radio', { name: '1 left' }))
     await user.click(screen.getByRole('button', { name: 'Continue' }))
     await waitFor(() => expect(onDone).toHaveBeenCalled())
     const { profile } = calls.find((call) => call.path === '/profile')!.data as {

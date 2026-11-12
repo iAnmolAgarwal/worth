@@ -884,6 +884,19 @@ export function ImportReview({
   async function confirm() {
     if (busy || !file || !preview) return
     setError(undefined)
+    // The open question comes first, as the button says.
+    const open = toCheck.find((plan) => plan.left === undefined)
+    if (open) {
+      setError({
+        text: `Choose how many payments of ${money(open.paymentCents)} are left, or All paid.`,
+        field: `plan-${open.id}`,
+      })
+      // The question may be far above the sticky Continue bar: bring it to the middle of the view.
+      const row = document.getElementById(`check-plan-${open.id}`)
+      row?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
+      row?.querySelector<HTMLElement>('[role="radio"], button')?.focus({ preventScroll: true })
+      return
+    }
     const balanceCents = readCents(balance)
     const cushionCents = readCents(cushion)
     const dailyCents = readCents(daily)
@@ -899,18 +912,6 @@ export function ImportReview({
       })
     if (dailyCents === undefined)
       return setError({ text: 'Enter your everyday spending a day, such as 35.00.' })
-    const open = toCheck.find((plan) => plan.left === undefined)
-    if (open) {
-      setError({
-        text: `Choose how many payments of ${money(open.paymentCents)} are left, or All paid.`,
-        field: `plan-${open.id}`,
-      })
-      // The question may be far above the sticky Continue bar: bring it to the middle of the view.
-      const row = document.getElementById(`check-plan-${open.id}`)
-      row?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
-      row?.querySelector<HTMLElement>('[role="radio"], button')?.focus({ preventScroll: true })
-      return
-    }
     setBusy(true)
     try {
       imported.current ??= (await api<AppState>('/import/commit', {
