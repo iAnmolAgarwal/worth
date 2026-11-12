@@ -19,6 +19,7 @@ import {
   allPlans,
   boughtProductIds,
   cadenceLabel,
+  fitStatus,
   flowIcon,
   kindLabel,
   useComparison,
@@ -207,10 +208,13 @@ export function SavedRows({
   items,
   products,
   onOpen,
+  fitOf,
 }: {
   items: SavedItem[]
   products: Product[]
   onOpen: (item: SavedItem) => void
+  /** The same fit label as the Saved page: "Fits today", "Fits Tue, Dec 15" or "Over by $X". */
+  fitOf?: (item: SavedItem) => { text: string } | undefined
 }) {
   return (
     <div className="rows">
@@ -231,13 +235,14 @@ export function SavedRows({
               </div>
               <div className="s">
                 <span className="soft">
-                  {item.status === 'ready'
-                    ? 'May fit now'
-                    : item.waitDate
-                      ? `Planned for ${dayLabel(item.waitDate)}`
-                      : product
-                        ? (product.subtitle ?? product.category)
-                        : ASSESSMENT_ONLY}
+                  {(item.status !== 'bought' && fitOf?.(item)?.text) ||
+                    (item.status === 'ready'
+                      ? 'May fit now'
+                      : item.waitDate
+                        ? `Planned for ${dayLabel(item.waitDate)}`
+                        : product
+                          ? (product.subtitle ?? product.category)
+                          : ASSESSMENT_ONLY)}
                 </span>
               </div>
             </div>
@@ -467,7 +472,17 @@ export function Home({
                 </button>
               </div>
               {saved.length ? (
-                <SavedRows items={saved.slice(0, 3)} products={state.products} onOpen={openSaved} />
+                <SavedRows
+                  items={saved.slice(0, 3)}
+                  products={state.products}
+                  onOpen={openSaved}
+                  fitOf={(item) =>
+                    fitStatus(state, item.amountCents, {
+                      productId: item.kind === 'catalog' ? item.productId : undefined,
+                      itemName: item.name,
+                    })
+                  }
+                />
               ) : (
                 <p className="meta">Nothing saved yet.</p>
               )}

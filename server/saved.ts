@@ -19,7 +19,7 @@ import { checkProductLink, LINK_MAX_LENGTH, storeDomain } from '../shared/link.t
 export const MAX_SAVED = 20
 /** Removed items kept as tombstones: the record that the user removed them. */
 const MAX_REMOVED = 20
-export const ASSESSMENT_ONLY = 'Assessment only — no checkout in Worth'
+export const ASSESSMENT_ONLY = 'Check only: Worth can’t pay for this item'
 
 export class SavedError extends Error {
   constructor(

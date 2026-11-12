@@ -3,9 +3,10 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
-import { fitStatus, Saved, Settings } from '../src/Saved'
+import { Decision } from '../src/Decision'
+import { Saved, Settings } from '../src/Saved'
 import { api } from '../src/api'
-import { lowerName } from '../src/engine'
+import { belowWords, fitStatus, lowerName, lowestSentence } from '../src/engine'
 import { nameInSentence } from '../shared/text'
 import { payIn4Lines } from '../src/payIn4Text'
 import { compareOptions } from '../shared/finance'
@@ -260,5 +261,77 @@ describe('Home’s Coming up list', () => {
       within(coming).getByRole('button', { name: /^And \d+ more in the next 30 days$/ }),
     ).toBeTruthy()
     expect(within(coming).queryByRole('button', { name: 'Show all' })).toBeNull()
+  })
+})
+
+describe('below zero reads as overdrawn', () => {
+  it('names under $0 "Overdrawn" and keeps "Below cushion" for between $0 and the cushion', () => {
+    expect(belowWords(-72674)).toBe('Overdrawn')
+    expect(belowWords(22276)).toBe('Below cushion')
+    expect(lowestSentence(-72674, '2026-11-30')).toBe('Overdrawn by $726.74 on Mon, Nov 30')
+    expect(lowestSentence(45878, '2026-12-31')).toBe('Lowest $458.78 on Thu, Dec 31')
+  })
+})
+
+describe('Home’s saved rows', () => {
+  it('show the same fit label as the Saved page', async () => {
+    const state = alexState()
+    state.saved = [
+      {
+        id: 'cam',
+        kind: 'catalog',
+        productId: 'halden-x5',
+        name: 'Halden X5',
+        amountCents: 189900,
+        createdAt: '2026-11-13T12:00:00Z',
+        status: 'active',
+      },
+      {
+        id: 'hp',
+        kind: 'catalog',
+        productId: 'headphones',
+        name: 'Studio headphones',
+        amountCents: 34900,
+        createdAt: '2026-11-13T11:00:00Z',
+        status: 'active',
+      },
+    ]
+    routeApi((path, data) => (path === '/state' ? state : compare(state, data)))
+    render(<App />)
+    expect(await screen.findByText('Fits Tue, Dec 15')).toBeTruthy()
+    expect(screen.getByText('Fits today')).toBeTruthy()
+  })
+})
+
+describe('the answer page after saving', () => {
+  it('reads "Saved" instead of offering to save again', async () => {
+    const state = alexState()
+    state.saved = [
+      {
+        id: 'cam',
+        kind: 'catalog',
+        productId: 'halden-x5',
+        name: 'Halden X5',
+        amountCents: 189900,
+        option: 'wait',
+        waitDate: '2026-12-15',
+        createdAt: '2026-11-13T12:00:00Z',
+        status: 'active',
+      },
+    ]
+    routeApi((_path, data) => compare(state, data))
+    render(
+      <Decision
+        backLabel="Back"
+        onBack={vi.fn()}
+        onBuy={vi.fn()}
+        onSave={vi.fn()}
+        onViewActivity={vi.fn()}
+        state={state}
+        request={{ productId: 'halden-x5' }}
+      />,
+    )
+    expect((await screen.findAllByRole('button', { name: 'Saved' })).length).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: 'Save for Tue, Dec 15' })).toBeNull()
   })
 })
