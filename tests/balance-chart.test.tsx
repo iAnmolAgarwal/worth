@@ -509,6 +509,24 @@ describe('BalanceChart', () => {
     await user.click(screen.getByText('View as table'))
     expect(screen.getByRole('columnheader', { name: 'With Pay in 4' })).toBeTruthy()
     expect(screen.getByRole('table').textContent).toContain('payment 2 of 4')
+    // Each balance cell is red only when that balance is below the cushion (audit B1).
+    const cushion = camera.cushionCents
+    const tableRows = [...screen.getByRole('table').querySelectorAll('tbody tr')]
+    tableRows.forEach((row) => {
+      const [full, , , p4] = [...row.querySelectorAll('td')]
+      const cents = (cell: Element) =>
+        Math.round(
+          Number(
+            cell
+              .textContent!.split(' ·')[0]!
+              .replace(/[^\d.−-]/g, '')
+              .replace('−', '-'),
+          ) * 100,
+        )
+      expect(full!.classList.contains('below')).toBe(cents(full!) < cushion)
+      expect(p4!.classList.contains('below')).toBe(cents(p4!) < cushion)
+    })
+    expect(tableRows.some((row) => row.querySelectorAll('td.below').length === 1)).toBe(true)
   })
 })
 
