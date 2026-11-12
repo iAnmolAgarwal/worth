@@ -15,11 +15,14 @@ export interface TourStep {
   text: string
   /** The sides to try first; the rest follow when there is no room. */
   prefer: Side[]
+  /** Fit the cut-out to what the element shows, not its full width (the big amount). */
+  tight?: boolean
 }
 
 export const TOUR_STEPS: TourStep[] = [
   {
     anchor: 'safe',
+    tight: true,
     title: 'Safe to spend today',
     text: 'What you can spend today and still pay every bill and keep your cushion.',
     prefer: ['right', 'bottom'],
@@ -50,7 +53,7 @@ export const TOUR_STEPS: TourStep[] = [
   },
   {
     anchor: 'connect',
-    title: 'Connect PayPal',
+    title: 'Your PayPal activity',
     text: 'Bring in your own PayPal activity here. Worth only reads it, never pays.',
     prefer: ['bottom', 'top'],
   },
@@ -194,6 +197,30 @@ const boxOf = (element: Element): Box => {
   const { left, top, width, height } = element.getBoundingClientRect()
   return { left, top, width, height }
 }
+/**
+ * The box of the figures `element` shows, for the big amount: the text's own width, not the
+ * block's, without screen-reader-only text, and trimmed top and bottom to the digits (a line's box
+ * holds room for accents and descenders that figures don't use). Falls back to the element's box.
+ */
+export function shownBox(element: Element): Box {
+  const boxes = [...element.children]
+    .filter((child) => {
+      const box = child.getBoundingClientRect()
+      return box.width > 1 && box.height > 1
+    })
+    .map((child) => {
+      const range = document.createRange()
+      range.selectNodeContents(child)
+      return range.getBoundingClientRect?.() ?? child.getBoundingClientRect()
+    })
+  if (!boxes.length) return boxOf(element)
+  const left = Math.min(...boxes.map((box) => box.left))
+  const top = Math.min(...boxes.map((box) => box.top))
+  const right = Math.max(...boxes.map((box) => box.right))
+  const bottom = Math.max(...boxes.map((box) => box.bottom))
+  const trim = (bottom - top) * 0.15
+  return { left, top: top + trim, width: right - left, height: bottom - top - trim * 2 }
+}
 /** The cut-out follows the feature's own corners: round for the guide's launcher. */
 function spotRadius(element: Element) {
   const corner = getComputedStyle(element).borderTopLeftRadius
@@ -202,6 +229,20 @@ function spotRadius(element: Element) {
     ? (parseFloat(corner) / 100) * Math.min(width, height)
     : parseFloat(corner)
   return Math.max(8, (Number.isFinite(px) ? px : 0) + PAD)
+}
+/** Home's entrance (the hero's figures and bar settling in) is still playing. */
+function entering() {
+  const main = document.getElementById('main')
+  return (document.getAnimations?.() ?? []).some((animation) => {
+    const target = (animation.effect as KeyframeEffect | null)?.target
+    const timing = animation.effect?.getComputedTiming()
+    return (
+      animation.playState === 'running' &&
+      timing?.iterations !== Infinity &&
+      target instanceof Element &&
+      Boolean(main?.contains(target))
+    )
+  })
 }
 const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
 /** Space the sticky top bar takes; a feature under it is scrolled into view. */
@@ -252,7 +293,7 @@ export function Tour({
     let timer: ReturnType<typeof setTimeout>
     let seenReady = false
     const poll = () => {
-      const busy = document.querySelector('#main [aria-busy="true"]')
+      const busy = document.querySelector('#main [aria-busy="true"]') || entering()
       const steps = busy ? [] : presentSteps()
       // Ready twice in a row, so the callout never lands on a layout still settling.
       if (steps.length && seenReady) {
@@ -313,6 +354,7 @@ export function Tour({
   useLayoutEffect(() => {
     if (!step) return
     const element = findAnchor(step.anchor)
+    const measure = step.tight ? shownBox : boxOf
     // Gone since the tour began: skipped silently.
     if (!element) {
       // oxlint-disable-next-line react/set-state-in-effect
@@ -329,9 +371,9 @@ export function Tour({
     let frame = 0
     const update = () => {
       cancelAnimationFrame(frame)
-      frame = requestAnimationFrame(() => setTarget(boxOf(element)))
+      frame = requestAnimationFrame(() => setTarget(measure(element)))
     }
-    setTarget(boxOf(element))
+    setTarget(measure(element))
     setRadius(spotRadius(element))
     window.addEventListener('scroll', update, { capture: true, passive: true })
     window.addEventListener('resize', update)

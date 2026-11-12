@@ -9,6 +9,7 @@ import {
   placeCallout,
   presentSteps,
   rememberTour,
+  shownBox,
   Tour,
   TOUR_KEY,
   TOUR_STEPS,
@@ -124,6 +125,21 @@ describe('the steps', () => {
     document.body.append(hidden)
     anchors(['saved'])
     expect(presentSteps().map((step) => step.anchor)).toEqual(['saved'])
+  })
+})
+
+describe('the cut-out for the big amount', () => {
+  it('fits the figures, leaving out screen-reader text and trimming the line box', () => {
+    const amount = document.createElement('p')
+    amount.getBoundingClientRect = () => box(100, 100, 600, 140)
+    const shown = document.createElement('span')
+    shown.getBoundingClientRect = () => box(100, 100, 300, 140)
+    const sr = document.createElement('span')
+    sr.getBoundingClientRect = () => box(100, 100, 1, 1)
+    amount.append(shown, sr)
+    // jsdom has no layout for ranges, so the child's own box stands in for its text.
+    expect(shownBox(amount)).toEqual({ left: 100, top: 121, width: 300, height: 98 })
+    expect(shownBox(document.createElement('p'))).toEqual({ left: 0, top: 0, width: 0, height: 0 })
   })
 })
 

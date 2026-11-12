@@ -18,14 +18,16 @@ test('?tour=1 walks every step beside its feature and remembers it was seen', as
   await expect(callout).toBeVisible()
   const counter = (await callout.locator('.tour-count').innerText()).split(' of ')
   const total = Number(counter[1])
-  expect(total).toBeGreaterThanOrEqual(2)
+  // The sample Home shows every feature: the amount, the bar, Check a purchase, the guide, Saved
+  // and the Connect PayPal row (there in every state, as "Import a file" when Connect is off).
+  expect(total).toBe(6)
   const narrow = page.viewportSize()!.width < 720
   for (let step = 1; step <= total; step++) {
     await expect(callout.locator('.tour-count')).toHaveText(`${step} of ${total}`)
     const anchor = (await callout.getAttribute('data-step'))!
     // Let the scroll into view settle before measuring.
     await page.waitForTimeout(600)
-    const [box, target] = await page.evaluate((name) => {
+    const [box, spot, target] = await page.evaluate((name) => {
       const rect = (element: Element) => {
         const r = element.getBoundingClientRect()
         return { left: r.left, top: r.top, right: r.right, bottom: r.bottom }
@@ -33,25 +35,28 @@ test('?tour=1 walks every step beside its feature and remembers it was seen', as
       const element = [...document.querySelectorAll(`[data-tour="${name}"]`)].find(
         (e) => e.getBoundingClientRect().width > 0,
       )!
-      return [rect(document.querySelector('.tour-callout')!), rect(element)]
+      return [
+        rect(document.querySelector('.tour-callout')!),
+        rect(document.querySelector('.tour-spot')!),
+        rect(element),
+      ]
     }, anchor)
-    // Never on top of its own feature.
-    const overlap =
-      box.left < target.right &&
-      target.left < box.right &&
-      box.top < target.bottom &&
-      target.top < box.bottom
-    expect(overlap, `callout covers ${anchor}`).toBe(false)
+    type Rect = typeof box
+    const overlaps = (a: Rect, b: Rect) =>
+      a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
+    // The bright cut-out is on the feature, and the callout never covers it.
+    expect(overlaps(spot, target), `cut-out on ${anchor}`).toBe(true)
+    expect(overlaps(box, spot), `callout covers ${anchor}`).toBe(false)
     if (!narrow) {
-      // Beside it: the gap is the bright margin plus the arrow.
+      // Beside it: the gap to the cut-out is the arrow's length.
       const gap = Math.max(
-        target.left - box.right,
-        box.left - target.right,
-        target.top - box.bottom,
-        box.top - target.bottom,
+        spot.left - box.right,
+        box.left - spot.right,
+        spot.top - box.bottom,
+        box.top - spot.bottom,
       )
-      expect(gap, `callout beside ${anchor}`).toBeGreaterThanOrEqual(12)
-      expect(gap, `callout beside ${anchor}`).toBeLessThanOrEqual(20)
+      expect(gap, `callout beside ${anchor}`).toBeGreaterThanOrEqual(8)
+      expect(gap, `callout beside ${anchor}`).toBeLessThanOrEqual(12)
     }
     await callout.getByRole('button', { name: step === total ? 'Done' : 'Next' }).click()
   }
