@@ -34,6 +34,7 @@ import { ConnectProgress, returnToCheck } from './ConnectPayPal'
 import { PlanPage, PlanWizard } from './Plan'
 import { ConfirmPlanDialog, RefundDialog } from './Reviews'
 import { migratePlanned, Saved, Settings } from './Saved'
+import { Tour, tourOnLoad } from './Tour'
 import { ASSESSMENT_ONLY, paypalModeLine, pinnedSample, replayToast, SAMPLE_WHO } from './copy'
 import { usePayPalSdk } from './paypal'
 import { Alert, Button, IconButton, Wordmark } from './ui'
@@ -114,6 +115,8 @@ export default function App() {
   /** The address of the screen behind the panel, restored when `#ask` opens it. */
   const behind = useRef(isAskRoute() ? '' : window.location.hash)
   const [menu, setMenu] = useState(false)
+  /** The tour is about to start or running: the guide's nudge waits until it is over. */
+  const [touring, setTouring] = useState(tourOnLoad)
   /** The data chip's details: whose data this is, assistant state and PayPal mode. */
   const [envOpen, setEnvOpen] = useState(false)
   const envButton = useRef<HTMLButtonElement>(null)
@@ -905,6 +908,7 @@ export default function App() {
         mood={mood}
         launcher={launcher}
         nudge={nudgeLine(state)}
+        touring={touring}
         // Wizards and dialogs own the screen; the conversation stays mounted underneath.
         hidden={
           screen === 'import' || screen === 'plan-edit' || Boolean(checkout || review || importing)
@@ -937,6 +941,12 @@ export default function App() {
           }}
         />
       </AgentLauncher>
+      <Tour
+        home={screen === 'home'}
+        blocked={panelOpen || Boolean(checkout || review || importing)}
+        onHome={() => navigate('home')}
+        onActive={setTouring}
+      />
       {checkout && checkoutProduct && (
         <Checkout
           key={`${checkout.productId}-${checkout.purchaseId ?? 'new'}`}

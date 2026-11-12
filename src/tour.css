@@ -1,0 +1,147 @@
+/* The first-visit tour (Tour.tsx): a dimmed page, the feature left bright, a blue callout. */
+.tour {
+  position: relative;
+  z-index: 90;
+  --tour-blue: var(--c-brand);
+  --tour-blue-dark: var(--c-nav);
+  --tour-dim: rgba(0, 20, 53, 0.55);
+}
+.tour-pane {
+  position: fixed;
+  z-index: 90;
+}
+/* The bright cut-out: its shadow is the dim. Clicks pass through to the feature underneath. */
+.tour-spot {
+  position: fixed;
+  z-index: 90;
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 0 200vmax var(--tour-dim);
+  pointer-events: none;
+}
+.tour-callout {
+  position: fixed;
+  z-index: 91;
+  width: min(296px, calc(100vw - 32px));
+  padding: var(--s-4) var(--s-4) var(--s-3);
+  border-radius: var(--r-lg);
+  background: var(--tour-blue);
+  color: #fff;
+  /* A white ring keeps it apart from the blue hero under the dim. */
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 0 3px var(--tour-blue-dark),
+    0 8px 28px rgba(0, 20, 53, 0.35);
+}
+.tour-callout:focus {
+  outline: none;
+}
+.tour-title {
+  margin: 0 0 var(--s-1);
+  font-size: var(--fs-body);
+  line-height: 1.3;
+  font-weight: var(--fw-bold);
+  color: #fff;
+}
+.tour-text {
+  margin: 0;
+  font-size: var(--fs-meta);
+  line-height: 1.45;
+  color: #fff;
+}
+.tour-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+}
+.tour-count {
+  flex: 1;
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+}
+.tour-skip,
+.tour-next {
+  min-height: 36px;
+  padding: 0 var(--s-3);
+  border-radius: var(--r-pill);
+  font: inherit;
+  font-size: var(--fs-meta);
+  font-weight: var(--fw-bold);
+  cursor: pointer;
+}
+.tour-skip {
+  border: 0;
+  background: none;
+  color: #fff;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.tour-skip:hover {
+  background: var(--tour-blue-dark);
+  text-decoration: none;
+}
+.tour-next {
+  border: 2px solid #fff;
+  background: #fff;
+  color: var(--tour-blue-dark);
+  padding: 0 var(--s-4);
+}
+.tour-next:hover {
+  background: var(--tour-blue-dark);
+  color: #fff;
+}
+.tour-skip:focus-visible,
+.tour-next:focus-visible {
+  outline: 2px solid var(--tour-blue-dark);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 4px #fff;
+}
+
+/* The arrow: a square turned 45° on the callout's edge, its tip on the bright edge. */
+.tour-arrow {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  background: var(--tour-blue);
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+.tour-callout[data-side='bottom'] .tour-arrow {
+  top: 0;
+}
+.tour-callout[data-side='top'] .tour-arrow {
+  top: 100%;
+}
+.tour-callout[data-side='right'] .tour-arrow {
+  left: 0;
+}
+.tour-callout[data-side='left'] .tour-arrow {
+  left: 100%;
+}
+
+/* Narrow windows: the callout sits on the edge away from the feature, without an arrow. */
+.tour-callout[data-pinned] {
+  left: 16px;
+  right: 16px;
+  width: auto;
+}
+.tour-callout[data-pinned='top'] {
+  top: calc(16px + var(--topbar-h));
+}
+.tour-callout[data-pinned='bottom'] {
+  bottom: calc(16px + var(--safe-bottom));
+}
+
+/* The tour fades in once. Positions never animate, so the callout keeps up with scrolling. */
+@media (prefers-reduced-motion: no-preference) {
+  .tour {
+    animation: tour-in var(--d-enter) var(--ease-enter);
+  }
+}
+@keyframes tour-in {
+  from {
+    opacity: 0;
+  }
+}

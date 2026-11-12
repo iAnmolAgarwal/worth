@@ -391,7 +391,7 @@ export function Home({
           >
             {month && <PlanCards state={state} room={room} />}
             {month && <MonthBuilt state={state} onImport={onImport} onEditPlan={onEditPlan} />}
-            <section aria-labelledby="saved-title">
+            <section aria-labelledby="saved-title" data-tour="saved">
               <div className="sec-head">
                 <h2 className="h-section" id="saved-title">
                   Saved

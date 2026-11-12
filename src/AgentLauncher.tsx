@@ -13,6 +13,7 @@ import type { AppState, Comparison } from './contract'
 import { fits } from './engine'
 import { capitalize, cx, dayLabel, daysFrom, displayName } from './format'
 import { Guide, useLook, type GuideExpression } from './Guide'
+import { startTour } from './Tour'
 import { IconButton } from './ui'
 
 /**
@@ -106,6 +107,7 @@ export function AgentLauncher({
   mood,
   nudge,
   hidden,
+  touring,
   lifted,
   launcher,
   children,
@@ -117,6 +119,8 @@ export function AgentLauncher({
   nudge?: string
   /** Wizards and dialogs own the screen: the launcher steps aside. */
   hidden?: boolean
+  /** The first-visit tour is about to start or running: the nudge waits for it to end. */
+  touring?: boolean
   /** On screens with a phone action bar, the launcher sits above it. */
   lifted?: boolean
   launcher: RefObject<HTMLButtonElement | null>
@@ -135,14 +139,19 @@ export function AgentLauncher({
 
   // The nudge appears once per session, a moment after the first screen settles.
   useEffect(() => {
-    if (!nudge || hidden || open || nudgedThisSession()) return
+    if (!nudge || hidden || touring || open || nudgedThisSession()) return
     const show = setTimeout(() => {
       rememberNudge()
       setSpot(0)
       setBubbleState('finding')
     }, NUDGE_DELAY)
     return () => clearTimeout(show)
-  }, [nudge, hidden, open])
+  }, [nudge, hidden, touring, open])
+  // A tour starting (a replay from the panel) takes the nudge away with it.
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
+    if (touring) setBubbleState(false)
+  }, [touring])
   // The nudge never covers a control: it takes the first clear spot, or waits for a scroll.
   // Each spot is measured on the page before paint, so the state follows the DOM.
   useLayoutEffect(() => {
@@ -283,7 +292,19 @@ export function AgentLauncher({
           <Guide size={40} expression={mood} title={`Worth, ${MOOD_LABEL[mood]}`} />
           <div className="agent-title">
             <h2 id={titleId}>Ask Worth</h2>
-            <p className="caption">Every number is Worth’s</p>
+            <p className="caption">
+              Every number is Worth’s ·{' '}
+              <button
+                type="button"
+                className="link inline"
+                onClick={() => {
+                  onOpenChange(false)
+                  startTour()
+                }}
+              >
+                Take the tour
+              </button>
+            </p>
           </div>
           <span className="agent-close">
             <kbd aria-hidden="true">Esc</kbd>
