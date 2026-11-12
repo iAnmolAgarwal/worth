@@ -1166,6 +1166,7 @@ function ChartTable({
                       {signed(p4[index]!)}
                       {instalment ? ` · payment ${instalment.number} of 4` : ''}
                       {index === p4LowIndex ? ' · lowest point' : ''}
+                      {p4[index]! < cushionCents ? ' · below cushion' : ''}
                     </td>
                   )}
                 </tr>

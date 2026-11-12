@@ -525,6 +525,8 @@ describe('BalanceChart', () => {
         )
       expect(full!.classList.contains('below')).toBe(cents(full!) < cushion)
       expect(p4!.classList.contains('below')).toBe(cents(p4!) < cushion)
+      // Words too, not colour alone.
+      expect(p4!.textContent!.includes('below cushion')).toBe(cents(p4!) < cushion)
     })
     expect(tableRows.some((row) => row.querySelectorAll('td.below').length === 1)).toBe(true)
   })
@@ -749,7 +751,7 @@ describe('Pay in 4 comparison: its point and its two low dates', () => {
         (cell) => cell.textContent,
       )
     expect(row('Thu, Nov 19')[1]).toBe('$720.53 · lowest point')
-    expect(row('Thu, Oct 22')[4]).toBe('$140.51 · lowest point')
+    expect(row('Thu, Oct 22')[4]).toBe('$140.51 · lowest point · below cushion')
     expect(row('Thu, Oct 22')[1]).not.toMatch(/lowest/)
   })
 })
