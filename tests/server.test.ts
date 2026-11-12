@@ -149,6 +149,7 @@ describe('HTTP sessions, profiles, and calculations', () => {
       paypal: 'demo',
       alternatives: 'off',
       handoff: 'off',
+      paypalConnect: 'off',
     })
     const cookie = (await request(app).get('/api/state')).headers['set-cookie'][0]
     expect(cookie).toContain('HttpOnly')
