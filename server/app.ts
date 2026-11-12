@@ -15,7 +15,7 @@ import {
   WAIT_SEARCH_DAYS,
   withoutOwnHold,
 } from '../shared/finance.ts'
-import { DEMO_MERCHANT, DEMO_TIMEZONE, PRODUCTS, rebaseDemoState } from '../shared/seed.ts'
+import { DEMO_TIMEZONE, PRODUCTS, rebaseDemoState } from '../shared/seed.ts'
 import {
   analyzeHistory,
   foreignPaymentTransaction,
@@ -379,6 +379,7 @@ export function createApp(options: AppOptions = {}) {
           secret: config.paypalSecret,
           origin: config.origin,
           webhookId: config.paypalWebhookId,
+          brandName: config.paypalBrandName,
         })
       : undefined)
   const paypalConnect =
@@ -418,20 +419,6 @@ export function createApp(options: AppOptions = {}) {
   const savedStore = handoff
     ? { origin: handoff.merchantOrigin, allowLocal: !config.production }
     : {}
-  /**
-   * The demo store's own page for a catalog item (decision 0.2): where Ask Worth and outside agents
-   * send someone who wants to buy it. Worth prepares no order; the store sells it. Undefined while
-   * the hand-off is off. A pinned sample day carries over, so both origins show the same dates.
-   */
-  function storeProductUrl(sessionId: string, productId: string) {
-    const product = PRODUCTS.find((p) => p.id === productId && p.merchant === DEMO_MERCHANT)
-    if (!handoff || !product) return undefined
-    const url = new URL(`/p/${encodeURIComponent(product.id)}`, handoff.merchantOrigin)
-    const data = store.get(sessionId)
-    if (data?.profile.source === 'demo' && data.demoClock?.preset)
-      url.searchParams.set('replay', data.demoClock.preset)
-    return url.href
-  }
   const app = express()
   app.disable('x-powered-by')
   // Behind a proxy, req.ip must be the client address the proxy appended, not the proxy itself.
@@ -560,7 +547,8 @@ export function createApp(options: AppOptions = {}) {
       sessionKey: createHash('sha256').update(id).digest('hex').slice(0, 20),
       purchases,
       reviews: purchaseReviews(purchases),
-      products: PRODUCTS,
+      // Worth's own checkout pays the neutral sandbox payee, so that is the name the app shows.
+      products: PRODUCTS.map((product) => ({ ...product, merchant: config.paypalBrandName })),
       saved,
       wishlist: wishlistOf(saved),
       retention: {
@@ -999,7 +987,6 @@ export function createApp(options: AppOptions = {}) {
       }
     },
     payIn4Eligibility,
-    storeProductUrl,
   })
   app.get('/api/health', (_req, res) =>
     res.json({
@@ -2108,10 +2095,14 @@ export function createApp(options: AppOptions = {}) {
     res.json(state(id))
   })
   /** What Claude's tools may ask the server for in this session, each behind its own guard. */
-  function chatActions(req: Request, id: string): ChatActions {
+  function chatActions(req: Request): ChatActions {
     return {
       payIn4Eligibility,
-      storeProductUrl: (productId) => storeProductUrl(id, productId),
+      // Worth's own comparison for a catalog item: the person chooses there, behind its guards.
+      purchaseCheckLink: (productId) =>
+        PRODUCTS.some((p) => p.id === productId)
+          ? `#decision?product=${encodeURIComponent(productId)}`
+          : undefined,
       findAlternatives: (query, maxPriceCents) =>
         channel3.search(query, maxPriceCents, liveSearches(req)),
     }
@@ -2145,7 +2136,7 @@ export function createApp(options: AppOptions = {}) {
       today: current.today,
     }
     const id = session
-    const actions = chatActions(req, id)
+    const actions = chatActions(req)
     // Local answers still search other stores for something cheaper; nothing goes to Claude.
     /** Answers that list similar items record them as shown to this session. */
     const shown = (answer: ChatReply) => {

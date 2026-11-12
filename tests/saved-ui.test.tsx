@@ -254,9 +254,7 @@ describe('a saved wait plan on return', () => {
     })
     const view = render(<Saved {...savedProps} state={state} />)
     expect(screen.getAllByText('Road bike').length).toBeGreaterThan(0)
-    expect(
-      screen.getAllByText(/Assessment only — not sold in the demo store/).length,
-    ).toBeGreaterThan(0)
+    expect(screen.getAllByText(/Assessment only — no checkout in Worth/).length).toBeGreaterThan(0)
     await user.click(screen.getByRole('button', { name: 'Confirm today’s funds' }))
     await user.click(await screen.findByRole('button', { name: 'Confirm and check again' }))
     view.rerender(<Saved {...savedProps} state={state} />)
@@ -366,7 +364,7 @@ describe('Save for later in Ask Worth', () => {
       { waitDate: '2026-10-23' },
     )
     await screen.findByText(/Saved for Fri, Oct 23/)
-    expect(screen.getByText('Assessment only — not sold in the demo store.')).toBeTruthy()
+    expect(screen.getByText('Assessment only — no checkout in Worth.')).toBeTruthy()
   })
 
   it('labels a store price and remembers earlier items', async () => {
@@ -425,7 +423,7 @@ describe('Save for later in Ask Worth', () => {
     await user.type(box, 'Can I afford the camera?')
     await user.click(screen.getByRole('button', { name: 'Send' }))
     const chip = await screen.findByRole('group', { name: 'How Worth read your question' })
-    expect(chip.textContent).toContain('Everyday camera · $1,199.00 (Larkspur price) · today')
+    expect(chip.textContent).toContain('Everyday camera · $1,199.00 (listed price) · today')
     await user.type(box, 'And $349 headphones?')
     await user.click(screen.getByRole('button', { name: 'Send' }))
     await waitFor(() => expect(bodies).toHaveLength(2))

@@ -274,7 +274,7 @@ describe('Check what Worth found', () => {
     const byName = (name: string) => profile.flows.filter((flow) => flow.name === name)
     expect(byName('Maple Court rent')[0]).toMatchObject({ origin: 'you', amountCents: 165000 })
     expect(byName('Tidewave Music')[0]).toMatchObject({ origin: 'paypal', active: false })
-    expect(byName('Larkspur Supply · Headphones · Pay in 4')).toMatchObject([
+    expect(byName('Brightline Audio · Headphones · Pay in 4')).toMatchObject([
       { nextDate: '2026-10-23', planTotalCents: 29988 },
       { nextDate: '2026-11-06', planTotalCents: 29988 },
     ])
@@ -300,7 +300,7 @@ describe('Check what Worth found', () => {
     const plans = new Set(
       profile.flows.filter((flow) => flow.kind === 'installment').map((flow) => flow.name),
     )
-    expect([...plans]).toEqual(['Larkspur Supply · Headphones · Pay in 4'])
+    expect([...plans]).toEqual(['Brightline Audio · Headphones · Pay in 4'])
   })
 
   it('asks for today’s money before importing', async () => {
@@ -524,7 +524,7 @@ describe('the month-led Home for imported PayPal activity', () => {
     const cards = screen.getAllByRole('article')
     expect(cards.map((card) => card.getAttribute('aria-label'))).toEqual([
       'Northline Outfitters Pay in 4 plan',
-      'Larkspur Supply Pay in 4 plan',
+      'Brightline Audio Pay in 4 plan',
     ])
     expect(within(cards[1]!).getByText('2 of 4 paid')).toBeTruthy()
     expect(

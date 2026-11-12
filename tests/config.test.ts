@@ -48,6 +48,12 @@ describe('deployment configuration', () => {
     expect(() => loadConfig({ CHANNEL3_MODE: 'sometimes' })).toThrow(ConfigError)
   })
 
+  it('names a neutral sandbox payee for Worth’s own checkout unless PAYPAL_BRAND_NAME is set', () => {
+    expect(loadConfig({}).paypalBrandName).toBe('Sandbox demo merchant')
+    expect(loadConfig({ PAYPAL_BRAND_NAME: '  Example payee ' }).paypalBrandName).toBe(
+      'Example payee',
+    )
+  })
   it('refuses to start in production on a local or plain-http origin', () => {
     for (const origin of [
       'http://localhost:5173',

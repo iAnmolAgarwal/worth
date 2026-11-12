@@ -93,6 +93,8 @@ const priceNote = (item: SavedItem) =>
 
 const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
 
+/** How many unsaved listed items "More to check" shows. */
+const MORE_TO_CHECK = 3
 /** A catalog item's second line: what it is, never the demo store's name (owner decision). */
 const productLine = (product: Product) => product.subtitle ?? product.category
 
@@ -244,60 +246,6 @@ function SavedCard({
           onClick={onRemove}
         >
           <BookmarkCheck className="ico" aria-hidden="true" />
-        </button>
-      </div>
-    </article>
-  )
-}
-
-function StoreCard({
-  product,
-  onOpen,
-  onSave,
-}: {
-  product: Product
-  onOpen: () => void
-  onSave: () => void
-}) {
-  return (
-    <article className="saved-card" style={{ position: 'relative' }}>
-      <img className="hide-m" src={product.image} alt={product.name} />
-      <div className="row plain show-m" style={{ padding: 0 }}>
-        <img className="thumb" src={product.image} alt="" />
-        <div className="body">
-          <div className="t" style={{ fontSize: 'var(--fs-body)' }}>
-            {product.name}
-          </div>
-          <div className="s soft">{productLine(product)}</div>
-        </div>
-        <div className="amt num" style={{ fontSize: 'var(--fs-body)' }}>
-          {money(product.priceCents)}
-        </div>
-      </div>
-      <div className="hide-m">
-        <div className="t">{product.name}</div>
-        <div className="meta">{productLine(product)}</div>
-        <div className="num strong" style={{ fontWeight: 700, marginTop: 4 }}>
-          {money(product.priceCents)}
-        </div>
-      </div>
-      <div className="foot">
-        <button
-          type="button"
-          className="link"
-          onClick={onOpen}
-          aria-label={`Check ${product.name}`}
-        >
-          Check
-        </button>
-        <button
-          type="button"
-          className="icon-btn quiet"
-          aria-pressed="false"
-          aria-label={`Save ${product.name}`}
-          onClick={onSave}
-        >
-          <Bookmark className="ico" aria-hidden="true" />
         </button>
       </div>
     </article>
@@ -661,18 +609,6 @@ export function Saved({
       onToast((failure as Error).message)
     }
   }
-  async function saveProduct(product: Product) {
-    try {
-      const result = await api<{ state: AppState }>('/saved', {
-        kind: 'catalog',
-        productId: product.id,
-      })
-      onUpdate(result.state)
-      onToast(`${product.name} is in Saved.`)
-    } catch (failure) {
-      onToast((failure as Error).message)
-    }
-  }
   return (
     <div className="page plain">
       <div className="wrap">
@@ -682,7 +618,7 @@ export function Saved({
         <p className="meta" style={{ margin: '-12px 0 var(--s-5)' }}>
           {saved.length
             ? `${saved.length} saved · plans are checked when you come back, never bought for you`
-            : 'Nothing saved yet. Save an item from Ask Worth or the store below to check it again later.'}
+            : 'Nothing saved yet. Save an item from Ask Worth or a comparison to check it again later.'}
         </p>
         {ready.length > 0 && (
           <div className="stack" style={{ marginBottom: 'var(--s-5)' }}>
@@ -715,20 +651,31 @@ export function Saved({
           </div>
         )}
         {more.length > 0 && (
-          <section aria-labelledby="store-title" style={{ marginTop: 'var(--s-6)' }}>
+          // A short plain list of a few more things to check, never a store (final-day plan §0).
+          <section aria-labelledby="more-title" style={{ marginTop: 'var(--s-6)' }}>
             <div className="sec-head">
-              <h2 className="h-section" id="store-title">
+              <h2 className="h-section" id="more-title">
                 More to check
               </h2>
             </div>
-            <div className="saved-grid">
-              {more.map((product) => (
-                <StoreCard
+            <div className="tile rows" style={{ maxWidth: 560 }}>
+              {more.slice(0, MORE_TO_CHECK).map((product) => (
+                <button
+                  type="button"
+                  className="row plain small"
                   key={product.id}
-                  product={product}
-                  onOpen={() => onOpenDecision({ productId: product.id })}
-                  onSave={() => void saveProduct(product)}
-                />
+                  aria-label={`Check ${product.name}`}
+                  onClick={() => onOpenDecision({ productId: product.id })}
+                >
+                  <img className="thumb" src={product.image} alt="" />
+                  <div className="body">
+                    <div className="t">{product.name}</div>
+                    <div className="s">
+                      <span className="soft">{productLine(product)}</span>
+                    </div>
+                  </div>
+                  <div className="amt num">{money(product.priceCents)}</div>
+                </button>
               ))}
             </div>
           </section>

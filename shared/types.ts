@@ -630,11 +630,10 @@ export interface ChatReply {
   /** Tools that ran successfully for this answer. */
   toolCalls: string[]
   /**
-   * The demo store's own page for a catalog item the person wants to buy (decision 0.2). Worth
-   * prepares no order: the store sells it and its own PayPal checkout takes the payment. Absent
-   * while the store hand-off is off.
+   * Worth's own comparison for a catalog item the person wants to buy. Worth prepares no order:
+   * the person chooses there, and Worth's PayPal sandbox checkout opens only behind its guards.
    */
-  storeLink?: StoreLink
+  checkLink?: PurchaseCheckLink
   /** Similar items under what fits today, from other stores. Shown only when some were found. */
   alternatives?: Alternatives
   /** The assessed item, signed for this session, to send back with later questions. */
@@ -689,9 +688,8 @@ export interface AnswerTrace {
   read?: {
     item: string
     amountCents: number
-    /** your_words: the user's own figure; catalog: the store price; earlier: an item from earlier in this chat. */
+    /** your_words: the user's own figure; catalog: the listed price; earlier: an item from earlier in this chat. */
     source: 'your_words' | 'catalog' | 'earlier'
-    store?: string
   }
   date?: {
     phrase?: string
@@ -713,11 +711,10 @@ export interface AnswerTrace {
     rejected?: string
   }
 }
-/** A link to the store's own product page, with the catalog's name and price for the label. */
-export interface StoreLink {
-  /** `MERCHANT_ORIGIN/p/<productId>`, built by the server; never from Claude. */
-  url: string
-  merchant: string
+/** A link to Worth's own comparison for a catalog item, with its name and price for the label. */
+export interface PurchaseCheckLink {
+  /** `#decision?product=<productId>`, built by the server; never from Claude. */
+  href: string
   itemName: string
   amountCents: number
   /** The engine's wait date when waiting is its recommendation for buying it today. */

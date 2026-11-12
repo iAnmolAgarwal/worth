@@ -70,8 +70,8 @@ function CopyButton({
 
 /**
  * Settings → Connect an agent. A token lets an outside agent such as Claude Desktop ask Worth
- * before it pays, at any store: check affordability, list saved plans and link to the demo store's
- * own page for its items. The token is shown once; Worth keeps only its hash.
+ * before it pays, at any store: check affordability, list saved plans and link to Worth's own
+ * comparison for an item, where the person decides. The token is shown once; Worth keeps only its hash.
  */
 export function ConnectAgent({
   state,
@@ -144,7 +144,7 @@ export function ConnectAgent({
         </div>
         <div>
           <dt>It can also</dt>
-          <dd>Send you to the demo store’s own page to buy there</dd>
+          <dd>Send you a link to Worth’s comparison for an item, where you decide</dd>
         </div>
         <div>
           <dt>Pay for you</dt>

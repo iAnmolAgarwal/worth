@@ -20,7 +20,7 @@ import type {
   FactReason,
   Interpretation,
   PayIn4Eligibility,
-  StoreLink,
+  PurchaseCheckLink,
   TraceGuard,
   Transaction,
 } from '../shared/types.ts'
@@ -107,10 +107,10 @@ export interface CategoryReply {
 export interface ChatActions {
   payIn4Eligibility?(amountCents: number): Promise<PayIn4Eligibility>
   /**
-   * The demo store's own page for a catalog item, or undefined while the store hand-off is off.
-   * Worth never prepares an order (decision 0.2): someone who wants to buy goes to the store.
+   * Worth's own comparison for a catalog item. Worth never prepares an order (decision 0.2): the
+   * person chooses there, and Worth's PayPal checkout opens only behind its own guards.
    */
-  storeProductUrl?(productId: string): string | undefined
+  purchaseCheckLink?(productId: string): string | undefined
   /** Similar products from other stores (Channel3), priced at or below the ceiling. */
   findAlternatives?(query: string, maxPriceCents: number): Promise<Alternatives>
 }
@@ -199,7 +199,7 @@ interface Answer {
   suggestions?: string[]
   toolCalls?: string[]
   note?: string
-  storeLink?: StoreLink
+  checkLink?: PurchaseCheckLink
   alternatives?: AlternativesOutcome
   /** A refusal the user's own words call for, such as paying a bill late (C-13). */
   refusal?: LeadIn
@@ -307,7 +307,6 @@ const SOURCE: Record<
   NonNullable<Interpretation['amountSource']>,
   'your_words' | 'catalog' | 'earlier'
 > = { stated: 'your_words', catalog: 'catalog', context: 'earlier' }
-const STORE = PRODUCTS[0]?.merchant.split(' ')[0] ?? 'Store'
 
 /** How Ask Worth read this: what was read, which tools ran, what was shown and what was checked. */
 function traceFor(answer: Answer, data: ChatData, shown: FactId[]): AnswerTrace {
@@ -326,7 +325,7 @@ function traceFor(answer: Answer, data: ChatData, shown: FactId[]): AnswerTrace 
         id: 'amount_grounded',
         label:
           source === 'catalog'
-            ? `The amount is ${STORE}’s catalog price, not a figure Claude supplied`
+            ? 'The amount is the listed price, not a figure Claude supplied'
             : source === 'context'
               ? 'The amount is the one Worth read earlier in this chat'
               : 'The amount appears in your own words',
@@ -397,7 +396,6 @@ function traceFor(answer: Answer, data: ChatData, shown: FactId[]): AnswerTrace 
             item: itemLabel(read.items),
             amountCents: read.amountCents,
             source: SOURCE[read.amountSource ?? 'stated'],
-            ...(read.amountSource === 'catalog' ? { store: STORE } : {}),
           },
           date: {
             ...(read.datePhrase ? { phrase: plainText(read.datePhrase).slice(0, 80) } : {}),
@@ -505,7 +503,7 @@ function compose(answer: Answer, scoped: ChatData, asked = ''): ChatReply {
       categoryChips(answer.alternatives) ??
       (answer.suggestions?.length ? answer.suggestions : DEFAULT_SUGGESTIONS),
     toolCalls: answer.toolCalls ?? [],
-    ...(answer.storeLink ? { storeLink: answer.storeLink } : {}),
+    ...(answer.checkLink ? { checkLink: answer.checkLink } : {}),
     ...(shown ? { alternatives: shown } : {}),
     ...(payIn4 ? { payIn4 } : {}),
     ...(explanation ? { explanation } : {}),
@@ -772,9 +770,9 @@ Scope
 - Anything else (creative writing, trivia, general knowledge, coding, other topics) is out of scope: call no tools and answer with intent "off_topic". The app shows a fixed redirect.
 - You cannot pay, capture a payment, cancel, move money, or change the plan.
 
-Buying from the demo store
-- When the person asks to buy or check out one of the catalog items now, call open_store_checkout with the item. Never call it for a question such as whether they can afford something.
-- Worth sells nothing and prepares no order: the app links to the store's own page, where the person buys it with the store's PayPal checkout.
+Buying a catalog item
+- When the person asks to buy or check out one of the catalog items now, call open_purchase_check with the item. Never call it for a question such as whether they can afford something.
+- Worth prepares no order and never pays: the app links to Worth's comparison for the item, where the person chooses to buy it today with PayPal, wait for the day it fits, or save it.
 
 Reading a purchase question
 - Call interpret_purchase for every question about buying or affording something, including follow-ups about the purchase being discussed. Report what the user said; the engine decides the answer.
@@ -976,10 +974,10 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
 ]
-const OPEN_STORE_CHECKOUT_TOOL: Anthropic.Tool = {
-  name: 'open_store_checkout',
+const OPEN_PURCHASE_CHECK_TOOL: Anthropic.Tool = {
+  name: 'open_purchase_check',
   description:
-    "Link the person to the demo store's own page for a catalog item (Larkspur Supply) when they ask to buy it or check out now. Worth sells nothing, prepares no order and takes no payment: the store sells the item, and the person pays on the store's page with its own PayPal checkout. The server sets the price from the catalog and shows Worth's check of buying it today next to the link.",
+    "Link the person to Worth's own comparison for a catalog item when they ask to buy it or check out now. Worth prepares no order and takes no payment: on the comparison the person chooses to buy today, wait or save it, and presses the buttons themselves. The server sets the price from the catalog and shows Worth's check of buying it today next to the link.",
   strict: true,
   input_schema: {
     type: 'object',
@@ -1025,7 +1023,7 @@ const findSchema = z.object({
   item: z.string().max(200).nullable(),
   max_price_cents: z.number().int().min(0).max(100_000_000).nullable(),
 })
-const storeSchema = z.object({ item_id: z.string().max(100) }).strict()
+const purchaseCheckSchema = z.object({ item_id: z.string().max(100) }).strict()
 /** The person asked about Pay in 4 or paying later, so its availability may be shown. */
 const ASKS_PAY_IN_4 = /\bpay\s*(?:in\s*(?:4|four)|later)\b|\binstal+ments?\b|\bbnpl\b/i
 const FINAL_FORMAT = {
@@ -1152,10 +1150,10 @@ class Turn {
   /** What Claude chose to show, kept per tool so the answer uses the choice made for it. */
   presentations = new Map<string, Presentation>()
   /** The store's own page for the catalog item the person wants to buy. */
-  storeLink?: StoreLink
+  checkLink?: PurchaseCheckLink
   /** What fits today and what Channel3 found, when the person asked for something cheaper. */
   alternatives?: AlternativesOutcome
-  private storeRequested = false
+  private checkRequested = false
   /** Every tool call in order and what the server did with it, for the answer's trace. */
   tools: AnswerTrace['tools'] = []
   /** Server checks a tool ran beyond the reading itself. */
@@ -1188,7 +1186,7 @@ class Turn {
       return { content: 'Tool limit reached. Answer with what you have.', isError: true }
     }
     const input = (raw ?? {}) as Record<string, unknown>
-    if (name === 'open_store_checkout') return this.openStore(input)
+    if (name === 'open_purchase_check') return this.openPurchaseCheck(input)
     const shown = presentationSchema.safeParse(input)
     if (!shown.success)
       return { content: 'points, lead_in and follow_ups did not match the schema.', isError: true }
@@ -1238,24 +1236,24 @@ class Turn {
   }
 
   /**
-   * Links to the store's own page for a catalog item (decision 0.2), with Worth's check of buying
-   * it today. Worth prepares no order: the URL, name and price all come from the server.
+   * Links to Worth's own comparison for a catalog item (decision 0.2), with Worth's check of buying
+   * it today. Worth prepares no order: the link, name and price all come from the server.
    */
-  private openStore(raw: Record<string, unknown>): ToolOutcome {
-    const name = 'open_store_checkout'
-    const storeProductUrl = this.actions.storeProductUrl
-    if (!storeProductUrl) {
+  private openPurchaseCheck(raw: Record<string, unknown>): ToolOutcome {
+    const name = 'open_purchase_check'
+    const purchaseCheckLink = this.actions.purchaseCheckLink
+    if (!purchaseCheckLink) {
       this.mark(name, 'refused')
       return { content: `Unknown tool ${name}. Use only the listed tools.`, isError: true }
     }
-    const parsed = storeSchema.safeParse(raw)
+    const parsed = purchaseCheckSchema.safeParse(raw)
     const product = parsed.success && PRODUCTS.find((p) => p.id === parsed.data.item_id)
     if (!product) return { content: 'item_id must be one of the catalog items.', isError: true }
-    if (this.storeRequested) {
+    if (this.checkRequested) {
       this.mark(name, 'refused')
       return { content: JSON.stringify({ status: 'refused', reason: 'ALREADY_LINKED' }) }
     }
-    this.storeRequested = true
+    this.checkRequested = true
     this.calls.push(name)
     const purchases = withoutOwnHold(this.data.purchases, {
       productId: product.id,
@@ -1266,47 +1264,47 @@ class Turn {
     if (!this.assessment && !this.clarify) {
       this.assessment = assessPurchase(this.data.profile, purchases, item)
     }
-    const url = storeProductUrl(product.id)
+    const href = purchaseCheckLink(product.id)
     this.guards.push(
-      { id: 'catalog_item', label: `The item is in ${product.merchant}’s catalog`, passed: true },
+      { id: 'catalog_item', label: `${product.name} is one of Worth’s listed items`, passed: true },
       {
         id: 'catalog_price',
-        label: 'Name and price come from the store’s catalog, not from Claude',
+        label: 'Name and price come from Worth’s list, not from Claude',
         passed: true,
       },
       {
         id: 'no_order',
-        label: `Worth prepared no order and took no payment: you buy at ${product.merchant}`,
+        label: 'Worth prepared no order and took no payment: you choose on the comparison',
         passed: true,
       },
     )
-    if (!url)
+    if (!href)
       return {
         content: JSON.stringify({
           status: 'no_link',
-          shown_by_app: 'The app shows Worth’s check of buying it today. The store link is off.',
+          shown_by_app: 'The app shows Worth’s check of buying it today.',
         }),
       }
     // Next to the link, the card repeats the engine's wait date when waiting is its advice.
     const comparison = compareOptions(this.data.profile, purchases, item)
     const waitDate =
       comparison.recommendation === 'wait' ? (comparison.wait.date ?? undefined) : undefined
-    this.storeLink = {
-      url,
-      merchant: product.merchant,
+    this.checkLink = {
+      href,
       itemName: product.name,
       amountCents: product.priceCents,
       ...(waitDate ? { waitDate } : {}),
     }
     this.guards.push({
-      id: 'store_link',
-      label: `The link goes only to ${product.merchant}’s own page for this item`,
+      id: 'comparison_link',
+      label: 'The link opens Worth’s own comparison for this item, inside Worth',
       passed: true,
     })
     return {
       content: JSON.stringify({
         status: 'linked',
-        shown_by_app: `The app shows Worth’s check of buying it today and a link to the item on ${product.merchant}’s site, where the person buys it with the store’s own PayPal checkout.`,
+        shown_by_app:
+          'The app shows Worth’s check of buying it today and a link to Worth’s comparison for this item, where the person chooses to buy today with PayPal, wait or save it.',
       }),
     }
   }
@@ -1535,7 +1533,7 @@ function answerFor(turn: Turn, final: Final | undefined): Answer {
         kind: turn.kind ?? commitmentKind(input.message),
       }
   }
-  if (turn.storeLink) answer.storeLink = turn.storeLink
+  if (turn.checkLink) answer.checkLink = turn.checkLink
   // Asked together with a priced item, the similar items follow its verdict.
   if (turn.alternatives) answer.alternatives = turn.alternatives
   // Claude's choice of facts and lead-in applies only with the tool that produced this
@@ -1698,7 +1696,7 @@ export function createChatProvider(
       const tools = [
         ...TOOLS,
         ...(actions.findAlternatives ? [FIND_ALTERNATIVES_TOOL] : []),
-        ...(actions.storeProductUrl ? [OPEN_STORE_CHECKOUT_TOOL] : []),
+        ...(actions.purchaseCheckLink ? [OPEN_PURCHASE_CHECK_TOOL] : []),
       ]
       const messages: Anthropic.MessageParam[] = [
         ...history(input),
@@ -1798,7 +1796,7 @@ export function createChatProvider(
       if (
         !answer.alternatives &&
         !answer.assessment &&
-        !answer.storeLink &&
+        !answer.checkLink &&
         (answer.intent === 'alternatives' ||
           (unanswered && localIntent(input, turn.data) === 'alternatives'))
       ) {

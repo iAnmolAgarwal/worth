@@ -41,7 +41,7 @@ export function weekGroups<T extends { date: string }>(items: T[], today: string
 
 /** The plan name without "· Pay in 4": the store. */
 const merchantOf = (plan: Pick<RunningPlan, 'name'>) => plan.name.split('·')[0]!.trim()
-/** The item, from a plan named "Larkspur Supply · Headphones · Pay in 4". */
+/** The item, from a plan named "Brightline Audio · Headphones · Pay in 4". */
 const itemOf = (name: string) => {
   const parts = name.split('·').map((part) => part.trim())
   return parts.length === 3 ? parts[1] : undefined

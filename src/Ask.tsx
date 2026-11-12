@@ -22,10 +22,10 @@ import type {
   PurchaseContext,
   SavedItem,
   SignedItem,
-  StoreLink,
+  PurchaseCheckLink,
 } from '../shared/types'
 import { api, ApiError } from './api'
-import { alternativeTarget } from './contract'
+import { alternativeTarget, decisionRequestFrom } from './contract'
 import type { AppState, ChatReply, Comparison, SavePlan, SaveTarget } from './contract'
 import { SimilarItems } from './Alternatives'
 import { PayIn4Row, PayIn4Strip, TraceDetails } from './AskTrace'
@@ -40,11 +40,10 @@ import { LinkCheck } from './PasteLink'
 import { Alert, Button, Field, IconButton, Pill, ReadAsChip, Toggle, type Tone } from './ui'
 
 type OnSave = (target: SaveTarget, plan?: SavePlan) => Promise<SavedItem | undefined>
-/** "Read as Everyday camera · $1,199.00 (Larkspur price) · today" for a store price (fix #3). */
-export function priceLabel(read: Interpretation, products: Product[]) {
-  const store = products[0]?.merchant.split(' ')[0] ?? 'Store'
+/** "Read as Everyday camera · $1,199.00 (listed price) · today" for a listed price (fix #3). */
+export function priceLabel(read: Interpretation) {
   return read.items.some((item) => item.priceSource === 'catalog')
-    ? `${money(read.amountCents)} (${store} price)`
+    ? `${money(read.amountCents)} (listed price)`
     : money(read.amountCents)
 }
 
@@ -480,15 +479,18 @@ function AskEdit({
 }
 
 /**
- * The store's own page for an item the person asked to buy (decision 0.2). Worth sells nothing and
- * prepares no order: the store's PayPal checkout takes the payment. Like /check's "Back to <store>",
- * the link leaves in the same tab, and no referrer goes with it.
+ * Worth's own comparison for an item the person asked to buy (decision 0.2). Worth prepares no
+ * order: they choose there, and Worth's PayPal sandbox checkout opens only behind its guards.
  */
-function StoreHandoff({ link }: { link: StoreLink }) {
+function PurchaseCheck({ link, onOpen }: { link: PurchaseCheckLink; onOpen: () => void }) {
   return (
-    <section className="tile" style={{ width: '100%' }} aria-label={`Buy at ${link.merchant}`}>
+    <section
+      className="tile"
+      style={{ width: '100%' }}
+      aria-label={`Decide on the ${link.itemName}`}
+    >
       <div className="h-section">
-        {link.itemName}, {money(link.amountCents)} at {link.merchant}
+        {link.itemName}, {money(link.amountCents)}
       </div>
       {link.waitDate && (
         <p className="meta" style={{ marginTop: 4 }}>
@@ -496,12 +498,18 @@ function StoreHandoff({ link }: { link: StoreLink }) {
         </p>
       )}
       <p className="meta" style={{ marginTop: 4 }}>
-        Worth doesn’t sell this. You buy it on {link.merchant}’s own page and pay with its PayPal
-        checkout.
+        Compare buying it today, waiting or saving it. Nothing is bought until you choose.
       </p>
       <div className="actions" style={{ marginTop: 12 }}>
-        <a className="btn btn-primary" href={link.url} rel="noreferrer">
-          Open at {link.merchant}
+        <a
+          className="btn btn-primary"
+          href={link.href}
+          onClick={(event) => {
+            event.preventDefault()
+            onOpen()
+          }}
+        >
+          Open Worth’s comparison
         </a>
       </div>
     </section>
@@ -1180,7 +1188,7 @@ function Answer({
     points: reply.points?.map((point) => point.text) ?? [],
     toolCalls: reply.toolCalls,
     mode: reply.mode,
-    readAs: read ? `${readName} · ${priceLabel(read, state.products)} · today` : undefined,
+    readAs: read ? `${readName} · ${priceLabel(read)} · today` : undefined,
   }
   return (
     <>
@@ -1192,7 +1200,7 @@ function Answer({
       )}
       {read && !editing && (
         <ReadAsChip
-          value={`${readName} · ${priceLabel(read!, state.products)} · ${read!.dateLabel}`}
+          value={`${readName} · ${priceLabel(read!)} · ${read!.dateLabel}`}
           onAction={onEdit}
           disabled={busy}
         />
@@ -1305,7 +1313,19 @@ function Answer({
           onSave={onSave && ((item) => void onSave(alternativeTarget(item)))}
         />
       )}
-      {reply.storeLink && <StoreHandoff link={reply.storeLink} />}
+      {reply.checkLink && (
+        <PurchaseCheck
+          link={reply.checkLink}
+          onOpen={() =>
+            onOpenDecision(
+              decisionRequestFrom(new URLSearchParams(reply.checkLink!.href.split('?')[1])) ?? {
+                amountCents: reply.checkLink!.amountCents,
+                itemName: reply.checkLink!.itemName,
+              },
+            )
+          }
+        />
+      )}
       {fix && last && (
         <button type="button" className="link" onClick={() => onNavigate(fix.hash)}>
           {fix.label} <ArrowRight size={16} aria-hidden="true" />

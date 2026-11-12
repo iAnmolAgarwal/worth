@@ -18,7 +18,7 @@ flowchart LR
   API --> Import[CSV normalisation]
   API --> Claude[Claude Sonnet 5.5<br/>engine tools]
   Claude --> Engine
-  Claude -.open_store_checkout.-> StoreLink[Store product page link<br/>MERCHANT_ORIGIN/p/id]
+  Claude -.open_purchase_check.-> CheckLink[Worth's own comparison<br/>#decision?product=id]
   API --> Guards[checkoutGuards]
   Guards --> PayPal[PayPal sandbox<br/>Orders v2 · eligibility]
   API --> Channel3[Channel3 search]
@@ -28,7 +28,7 @@ flowchart LR
   Webhook --> Store
   Agent[MCP client] -->|bearer token| MCP["/mcp · Worth guardrail MCP"]
   MCP --> Engine
-  MCP -.store_checkout_link.-> StoreLink
+  MCP -.purchase_check_link.-> CheckLink
 ```
 
 In development, `server/index.ts` mounts Vite middleware in the same Express process. In
@@ -43,7 +43,7 @@ the model name and the Channel3 status).
 | `shared/finance.ts` | Recurrence, commitments, integer-cent forecasts, missing-data precedence, outcomes, the earliest-date search, option comparison, the illustrative Pay in 4 schedule and instalment stacking. |
 | `shared/collision.ts` | Which bill or other instalment a Pay in 4 payment lands next to, and the wording for it. |
 | `shared/csv.ts` | PayPal personal and business export parsing: headers, per-file date order, currency-conversion pairing, transfer/memo/hold rules, Pay in 4 proposals, transaction identity, recurring suggestions and the daily-spending estimate. |
-| `shared/seed.ts` | The sample person Alex (absolute dates from Fri Nov 13 2026), the relative-dated test fixture persona, and the server-owned demo catalog (Larkspur Supply). |
+| `shared/seed.ts` | The sample person Alex (absolute dates from Fri Nov 13 2026), the relative-dated test fixture persona, and the server-owned demo catalog (also sold by the example store in `merchant/`). |
 | `shared/handoff.ts` | The store ↔ Worth hand-off: quote and result tokens signed with direction labels, strict schemas, origin and expiry checks, and outcome-report signatures. Server-only. |
 | `shared/worthCheck.ts` | The `<worth-check>` element a store places beside its PayPal button; the store's build emits it as `worth-check.js`. |
 | `shared/worthSwipe.ts` | Its `mode="swipe"`: Worth's W tab docked on the right of the store's own PayPal button, swiped left (or tapped) to open Worth. |
@@ -120,7 +120,7 @@ Tools, all read-only:
 | `spending_summary` | — | Totals completed USD spending by category for 30 days |
 | `get_plan_summary` | — | Room to spend today, the baseline low point and its cause |
 | `find_alternatives` | A generic kind of item and a ceiling the user wrote | Refuses for "cheaper" about timing, payment method or services; otherwise searches Channel3 within the room today; only the outcome returns to Claude, never product names or prices |
-| `open_store_checkout` | A catalog item ID, when the person asks to buy it | Assesses the item at its catalog price today and links to `MERCHANT_ORIGIN/p/<id>` (no link while the hand-off is off). Worth prepares no order; Claude receives only whether a link was shown |
+| `open_purchase_check` | A catalog item ID, when the person asks to buy it | Assesses the item at its catalog price today and links to Worth's own comparison, `#decision?product=<id>`. Worth prepares no order; Claude receives only whether a link was shown |
 
 Every read tool also takes **presentation fields**: up to three facts from a fixed catalog for
 that tool, a reason for each from a fixed set (`answers_question`, `explains_result`,
@@ -144,12 +144,13 @@ which tool ran, the facts Claude picked with their reasons, every server check t
 stopped the answer, and Claude's raw placeholder sentence with whether it was accepted. The
 client shows it under "How Ask Worth read this".
 
-**Buying from the demo store.** Ask Worth never prepares an order (decision 0.2 of the checkout
-pivot). When the person asks to buy a catalog item, `open_store_checkout` shows the engine's
-assessment of buying it today and an "Open at Larkspur Supply" link to the store's own product
-page. The URL, name and price come from the server's catalog and `MERCHANT_ORIGIN`, never from
-Claude; the link leaves in the same tab with `rel="noreferrer"`, like `/check`'s "Back to
-Larkspur Supply". The store creates its own PayPal order when the person checks out there.
+**Buying a listed item.** Ask Worth never prepares an order (decision 0.2 of the checkout
+pivot). When the person asks to buy a catalog item, `open_purchase_check` shows the engine's
+assessment of buying it today and an "Open Worth's comparison" link to the Decision view for that
+item. The link, name and price come from the server's catalog, never from Claude. On the
+comparison the person presses "Buy today anyway" or "Save for <date>" themselves, and Worth's own
+PayPal sandbox checkout opens only behind `checkoutGuards`. The Worth app never names or links to
+the example store (final-day plan §0): the only exception is `/check` after a verified hand-off.
 
 **Saved-plan checkout.** `checkoutGuards` (`server/checkoutGuards.ts`) guards the saved plan's
 Buy button: no other active checkout, funds confirmed today, a complete plan, the wait date
@@ -207,14 +208,14 @@ the session cookie. Tokens are created in Settings → Connect an agent, stored 
 fingerprints with the last four characters, bound to one session's plan, capped at three per
 plan, and expire with the plan or after 30 days. Worth guardrail MCP has three tools, each
 mapping existing engine functions: `check_affordability` (the guardrail for any store: a decision
-contract checked by `checkDecision` before it is sent), `store_checkout_link` (the demo store's
-checkout link: its product page plus the same verdict, never an order) and `list_saved_plans`.
+contract checked by `checkDecision` before it is sent), `purchase_check_link` (a link to
+Worth's own comparison for a listed item plus the same verdict, never an order) and `list_saved_plans`.
 Orders an agent requested before decision 0.2 stay labelled in Activity. The MCP path makes no
 Anthropic call. Limits, refusals and setup are in [MCP.md](MCP.md).
 
 ## Store hand-off (/check)
 
-A store that takes PayPal places `<worth-check>` beside its PayPal button. The link opens Worth's `/check` in the same tab with a quote the store's server signed; Worth advises and sends the shopper back, and the store sells and creates its own PayPal order. The binding contract is `specs/handoff-contract.md` in the project workspace.
+This is the example store's path (`merchant/`, a separate demo app the hosted Worth app does not link to). A store that takes PayPal places `<worth-check>` beside its PayPal button. The link opens Worth's `/check` in the same tab with a quote the store's server signed; Worth advises and sends the shopper back, and the store sells and creates its own PayPal order. The binding contract is `specs/handoff-contract.md` in the project workspace.
 
 - **Tokens.** `<payload>.<sig>`: base64url JSON and an HMAC-SHA256 over `worth-handoff.v1.<direction>.<payload>` with `HANDOFF_SECRET`, so a quote can't be replayed as a result or the reverse. `shared/handoff.ts` checks, in order: size (4 KB) and format, `kid`/`mid`, the signature in constant time, `v`, a strict schema, `returnUrl` and `imageUrl` on `MERCHANT_ORIGIN`, USD, a lifetime of at most 900 s, expiry and a future `iat` with 60 s of skew. Item and store names lose hidden characters and are capped at 120 and 60 characters.
 - **Intake.** The token rides in `#q=`, so it never reaches a log or a `Referer`; `/check` sends `Referrer-Policy: no-referrer`, and the client removes the fragment before calling `POST /api/handoff/open`. A verified quote is bound to the session that opened it first for 24 hours (`handoff_quotes`), with report-back consent off until the shopper ticks it (`POST /api/handoff/consent`). A first visit gets the sample plan, and `replay: "video"` applies the demo clock only to it.
@@ -225,7 +226,8 @@ A store that takes PayPal places `<worth-check>` beside its PayPal button. The l
 - **Anti-forwarding.** A quote link can be forwarded, so consent alone never records a purchase. Worth marks `returnedAt` on the quote when it signs a result; the store (`merchant/`, which uses the same `shared/handoff.ts`) reports an order's quote only when that store session came back with a verified result for it; and the report-back (C4) records only with consent and `returnedAt`.
 - **Report-back (C4).** After its own PayPal capture completes, the store's server posts `{ v, kid, mid, qid, orderId, captureId, amountCents, currency, status, capturedAt }` to `POST /api/handoff/outcome`, signed over `worth-handoff.v1.outcome.<timestamp>.<raw body>` in `Worth-Handoff-Signature`, with `Worth-Handoff-Timestamp`. The route sits before the browser checks and sets no cookie. It refuses, with one generic body, a body over 2 KB, a timestamp more than 300 s off, a bad or non-canonical signature (401), a shape outside the strict schema, an unknown `kid`/`mid` (401) or a non-USD capture, then limits each merchant to 60 signed reports a minute; an unknown or expired `qid` is a generic 404. `server/outcome.ts` answers once per `captureId` (the `handoff_outcomes` key, deleted with the session), so the store's capture path and webhook can both send and a repeat gets the first answer with no effect. It records only when the quote's session consented, Worth signed a result for it (`returnedAt`) and the session is live, and only once per quote; otherwise `{ recorded: false }`. Recording adds one completed purchase at the captured amount (`reportedBy`, the quote's price kept as `quotedCents` when it differs; the store's order and capture IDs stay in `storeReport`, apart from Worth's own `orderId`/`captureId`), which lowers room to spend once until a funds snapshot reflects it; one Activity row, "Payment to <store> · PayPal" on the plan's day for `capturedAt`; and removes the Saved item for what was sold: by `qid` (a /check save), by `sourceUrl`, or, for the demo store, the catalog item with the quote's product ID (the sample plan's Saved list). The browser names every new report in one notice ("<store> told Worth about your $X payment.") and clears exactly those with `POST /api/handoff/notices/seen`, which, like the other hand-off routes, is a 404 while the hand-off is off. A later PayPal CSV import counts that payment once: the shopper's export names it by their own transaction ID, so `parsePayPalCsv` matches a reported row (`referenceId` `store:<captureId>`) by exact amount within a day: one transaction per report, preferring a row whose name contains the store's name, then the nearest date. Every row of that transaction (pending, then settled) counts once, and the preview names the row it took, in view (`storeMatches`). A committed import keeps the match on the report (`matchedImportId`), so no later import matches that report again, and later copies of the transaction it took are duplicates.
 - **Off switch.** With `HANDOFF_SECRET` and `MERCHANT_ORIGIN` both unset, the hand-off is off: one start-up line says so, `/api/health` and the state config report `handoff: off`, and every `/api/handoff/*` route answers with its generic error. One without the other is refused in production.
-- **Swipe mode.** Larkspur wraps its `<paypal-button>` in `<worth-check mode="swipe">`. PayPal's button stays PayPal's, untouched and uncovered at rest; Worth's outline W tab sits flush on its right edge with a "Swipe left for Worth" hint. Dragging the tab left past half the row (or tapping it, or Enter/Space) opens the same signed `/check` link in the same tab. Reduced motion stills the arrows and leaves the tab a plain link; while PayPal's button is hidden the tab becomes the full-width outline link.
+- **Who is named.** Only here does Worth show a store's name: on `/check` and on items saved from it ("Sold by <store>", "Back to <store>"), and on the Activity row for a payment that store reported. Items reached inside Worth carry no seller line, and Worth's own checkout pays a neutral sandbox payee (`PAYPAL_BRAND_NAME`, default "Sandbox demo merchant").
+- **Swipe mode.** The example store (Larkspur Supply) wraps its `<paypal-button>` in `<worth-check mode="swipe">`. PayPal's button stays PayPal's, untouched and uncovered at rest; Worth's outline W tab sits flush on its right edge with a "Swipe left for Worth" hint. Dragging the tab left past half the row (or tapping it, or Enter/Space) opens the same signed `/check` link in the same tab. Reduced motion stills the arrows and leaves the tab a plain link; while PayPal's button is hidden the tab becomes the full-width outline link.
 - **The element.** The store's Vite build bundles `shared/worthCheck.ts` into `dist-merchant/assets/worth-check.js`, which product pages load beside the PayPal button; the store's checkout module hands it the page's SDK v6 instance. PayPal names Pay in 4 `PAY_LATER_SHORT_TERM` (US); `PAYLATER` or an unknown code leaves the quote's `payLater` unset rather than false (`shared/payLater.ts`, also used by Worth's own checkout).
 - **Claude.** Store text never reaches Claude from the hand-off; an item name reaches it only if the shopper asks about it, through the same quoted path as anything typed.
 
@@ -288,7 +290,7 @@ The webhook route verifies the signature through PayPal, resolves the related or
 
 ## Saved items, wait plans and the demo clock
 
-Saved items live in the session on the server (`server/saved.ts`): a catalog item (name and price from the server catalog) or a custom item from an Ask Worth assessment or a Channel3 "Similar items" row, which is labelled "Assessment only — not sold in the demo store" and never checked out. A session keeps at most 20 (the Phase 5 spec's limit, which replaces the earlier scope's "at most 5" for `save_wait_plan`). A wait plan whose date has come is reported as `ready`; there is no scheduler, email or push. On return the user confirms today's funds (`POST /api/funds/confirm`), the plan is assessed again, and only then can `POST /api/saved/:id/prepare` create the order, through `checkoutGuards` in `server/checkoutGuards.ts`. A saved Channel3 row keeps its product ID (`channel3Id`) only when the session was shown that product; saving registers it with `app.locals.rememberAlternative`, and Saved checks its price once per page load through `GET /api/alternatives/price`, showing "Price dropped to $X" when it fell and nothing on any failure.
+Saved items live in the session on the server (`server/saved.ts`): a catalog item (name and price from the server catalog) or a custom item from an Ask Worth assessment or a Channel3 "Similar items" row, which is labelled "Assessment only — no checkout in Worth" and never checked out. A session keeps at most 20 (the Phase 5 spec's limit, which replaces the earlier scope's "at most 5" for `save_wait_plan`). A wait plan whose date has come is reported as `ready`; there is no scheduler, email or push. On return the user confirms today's funds (`POST /api/funds/confirm`), the plan is assessed again, and only then can `POST /api/saved/:id/prepare` create the order, through `checkoutGuards` in `server/checkoutGuards.ts`. A saved Channel3 row keeps its product ID (`channel3Id`) only when the session was shown that product; saving registers it with `app.locals.rememberAlternative`, and Saved checks its price once per page load through `GET /api/alternatives/price`, showing "Price dropped to $X" when it fell and nothing on any failure.
 
 **Saved with the store link (C6).** A custom item can carry the store page it came from: `sourceUrl`, `merchantName` and `priceSource` (`component` when the store's own Worth button sent the price, `channel3` when Channel3 read it and the shopper kept it, `user` when they typed or changed it). `POST /api/saved` takes the link and price source together, and from the browser only `channel3` or `user`, as `/api/compare` does; `component` is set by the server alone, from a store's verified hand-off. The link goes through `checkProductLink` (https on the default port, at most 2,048 characters, no user name or password, a public domain name, fragment dropped). The store is named by the link's domain, as `/api/compare` names it; a store name the browser sends is ignored. Saving the same link again updates that item's name, price and source rather than adding another. Items saved before C6, the test fixture persona's seed among them, have none of these fields and are returned unchanged; a stored link that no longer passes the checks is dropped with its store details, a missing price source reads as `user`, and only a `component` item keeps a stored store name (`withSource` in `server/saved.ts`). Worth never fetches the link. On the ready day the plan shows **"Back to <store>"**, a plain link to `sourceUrl` (a new tab, unlike /check's same-tab return; `rel="noopener noreferrer"`, no token), and never an in-Worth checkout; items without a link keep the demo-store path above. For a `channel3` price only, opening Saved on or after the plan's day calls `POST /api/saved/:id/recheck` once (never on a timer). It is the paste-a-link lookup itself, `channel3.lookup` with this client's `liveSearches` share, so it shares the 15-minute cache, the daily budget and the hourly per-client limit. A live US dollar price for that store answers `same` or `changed`, and the plan is checked again at the price now ("Price now $X (was $Y)"); a failure, the limit, a missing or non-USD price or a recorded fixture answer `unavailable`, and Saved keeps the saved price with "Couldn't re-check the price". The saved price itself never changes without the shopper.
 

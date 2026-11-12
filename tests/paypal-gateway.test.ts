@@ -7,7 +7,7 @@ import type { StoredPurchase } from '../server/store.ts'
 const BASE = 'https://api-m.sandbox.paypal.com'
 type Reply = Response | Error | ((url: string, init: RequestInit) => Response | Promise<Response>)
 
-function gateway(replies: Reply[], options: { webhookId?: string } = {}) {
+function gateway(replies: Reply[], options: { webhookId?: string; brandName?: string } = {}) {
   const calls: { url: string; init: RequestInit; headers: Record<string, string> }[] = []
   const log = vi.fn()
   // Retries wait through this instead of a timer, so the tests stay fast.
@@ -27,6 +27,7 @@ function gateway(replies: Reply[], options: { webhookId?: string } = {}) {
     secret: 'secret',
     origin: 'https://worth.example.com',
     webhookId: options.webhookId,
+    brandName: options.brandName,
     fetch: fetch as unknown as typeof globalThis.fetch,
     log,
     timeoutMs: 50,
@@ -99,7 +100,17 @@ describe('PayPal Orders v2 gateway contract', () => {
     })
   })
 
-  it('names the demo store as the payee in PayPal, never Worth', async () => {
+  it('names the neutral sandbox payee for Worth’s own checkout, never Worth or the store', async () => {
+    const { paypal, api } = gateway([Response.json(order, { status: 201 })], {
+      brandName: 'Sandbox demo merchant',
+    })
+    await paypal.create(purchase)
+    const body = JSON.parse(String(api()[0]!.init.body))
+    expect(body.payment_source.paypal.experience_context.brand_name).toBe('Sandbox demo merchant')
+    expect(body.purchase_units[0].description).toBe('Studio headphones (PayPal sandbox)')
+    expect(JSON.stringify(body)).not.toMatch(/Worth|Larkspur/)
+  })
+  it('names the demo store as the payee on the store’s own orders, never Worth', async () => {
     const { paypal, api } = gateway([Response.json(order, { status: 201 })])
     await paypal.create(purchase)
     const body = JSON.parse(String(api()[0]!.init.body))

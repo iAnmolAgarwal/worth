@@ -44,8 +44,8 @@ export type SaveTarget =
       priceSource?: SavedPriceSource
     }
 /**
- * A Channel3 row saved for later (spec item 15): a custom item, "Assessment only — not sold in the
- * demo store", that keeps the product's ID so its price can be checked again from Saved.
+ * A Channel3 row saved for later (spec item 15): a custom item, "Assessment only — no checkout in
+ * Worth", that keeps the product's ID so its price can be checked again from Saved.
  */
 export const alternativeTarget = (item: Alternative): SaveTarget => ({
   kind: 'custom',

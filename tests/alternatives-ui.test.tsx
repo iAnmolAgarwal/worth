@@ -217,7 +217,7 @@ describe('where the similar items appear', () => {
     expect(await within(cheaper).findByText('See similar items')).toBeTruthy()
     expect(screen.queryByRole('region', { name: 'Similar items that fit today' })).toBeNull()
     const rail = container.querySelector('.decision-rail')!
-    expect(within(rail as HTMLElement).getByText(/Sold by Larkspur Supply/)).toBeTruthy()
+    expect(rail.querySelector('.product')).toBeTruthy()
     await user.click(cheaper)
     const list = await screen.findByRole('region', { name: 'Similar items that fit today' })
     expect(rail.contains(list)).toBe(true)
@@ -238,20 +238,20 @@ describe('where the similar items appear', () => {
     expect(
       within(list).getByText('From other stores · via Channel3 · prices may change'),
     ).toBeTruthy()
-    expect(within(rail as HTMLElement).queryByText(/Sold by Larkspur Supply/)).toBeNull()
+    expect(rail.querySelector('.product')).toBeNull()
     // The item and its edit stay, compact, above the list.
     const row = rail.querySelector('.item-row') as HTMLElement
     expect(within(row).getByText('Everyday camera')).toBeTruthy()
     expect(within(row).getByText(/\$1,199\.00/)).toBeTruthy()
     expect(within(row).getByRole('button', { name: 'Not right? Edit' })).toBeTruthy()
     expect(row.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    // Beside other stores' items, the buy action names the demo store's own product.
+    // Beside other stores' items, the buy action names Worth's own listed product.
     expect(screen.getAllByRole('button', { name: 'Buy the everyday camera anyway' }).length).toBe(2)
     expect(screen.queryByRole('button', { name: 'Buy today anyway' })).toBeNull()
     // Buy today or Wait brings the item back.
     await user.click(within(group).getByRole('radio', { name: /Buy today/ }))
     expect(screen.queryByRole('region', { name: 'Similar items that fit today' })).toBeNull()
-    expect(within(rail as HTMLElement).getByText(/Sold by Larkspur Supply/)).toBeTruthy()
+    expect(rail.querySelector('.product')).toBeTruthy()
   })
   it('keeps /check’s item, its edit and the price-entered note above the list', async () => {
     const user = userEvent.setup()
@@ -333,7 +333,7 @@ describe('where the similar items appear', () => {
     expect(within(group).queryByText('See similar items')).toBeNull()
     await userEvent.setup().click(within(group).getByRole('radio', { name: /Something cheaper/ }))
     expect(screen.queryByRole('region', { name: 'Similar items that fit today' })).toBeNull()
-    expect(screen.getByText(/Sold by Larkspur Supply/)).toBeTruthy()
+    expect(document.querySelector('.decision-rail .product')).toBeTruthy()
   })
   it('never offers them when the item fits today', async () => {
     const state = makeState()
@@ -487,7 +487,7 @@ describe('saving a similar item for later', () => {
     await waitFor(() => expect(posts).toEqual([saved]))
     expect(
       await screen.findByText(
-        'Interchangeable Lens Camera Body is in Saved. Assessment only — not sold in the demo store.',
+        'Interchangeable Lens Camera Body is in Saved. Assessment only — no checkout in Worth.',
       ),
     ).toBeTruthy()
   })

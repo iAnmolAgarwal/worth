@@ -240,11 +240,14 @@ test('the Decision page leads with the answer too, with the item and its edit on
   await expect(edit).toHaveCount(1)
   if ((page.viewportSize()?.width ?? 0) < 1024) {
     const row = page.locator('.item-row')
-    await expect(row).toContainText('$1,199.00 · Larkspur Supply · today')
+    // Reached inside Worth, the item names no store (final-day plan §0).
+    await expect(row).toHaveText(/\$1,199\.00 · today/)
+    await expect(row).not.toContainText('Larkspur')
     expect((await row.boundingBox())!.y).toBeLessThan((await block.boundingBox())!.y)
   } else {
     const card = page.locator('.decision-rail .tile').first()
     await expect(card.locator('.price-row')).toContainText('$1,199.00 · today')
+    await expect(card).not.toContainText(/Larkspur|Sold by/)
     await expect(card.getByRole('button', { name: 'Not right? Edit' })).toBeVisible()
     expect(
       Math.abs((await card.boundingBox())!.y - (await block.boundingBox())!.y),
