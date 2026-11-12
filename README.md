@@ -17,7 +17,7 @@ prepares a PayPal sandbox order that you approve in PayPal and confirm in Worth.
 **Live:** https://worth.onrender.com, no sign-in needed. Each browser gets its own anonymous
 session with a sample plan (Alex, on the demo day Fri, Nov 13, 2026), kept for 24 hours.
 
-**Demo video:** <!-- TODO(coordinator): YouTube link --> _link added at submission_.
+**Demo video:** `TODO(owner): demo video link`. **Final commit:** `TODO(owner): final commit hash`.
 
 ## Judge quick facts
 
@@ -27,9 +27,8 @@ session with a sample plan (Alex, on the demo day Fri, Nov 13, 2026), kept for 2
   is $872.26); Worth says wait until Tue, Dec 15, the day after a PayPal invoice pays him.
   https://worth.onrender.com/?replay=demo-dec15 opens his return visit, with the camera saved
   and ready.
-<!-- TODO(coordinator): fill in a dedicated judge sandbox buyer account, never the team's own. -->
-- **PayPal sandbox buyer** for the checkout step: email `TODO`, password `TODO`. If these still
-  read `TODO`, ask the maintainer.
+- **PayPal sandbox buyer** for checkout and Connect PayPal:
+  `TODO(owner): sandbox buyer login — see the Devpost testing notes`.
 - **Who's who:** Worth is the shopper's agent. It reads your PayPal activity and your plan, tells
   you the day a purchase fits, and when that day comes you pay with PayPal. It sells nothing.
   Worth's own checkout pays a neutral sandbox merchant ("Sandbox demo merchant",
@@ -39,14 +38,15 @@ session with a sample plan (Alex, on the demo day Fri, Nov 13, 2026), kept for 2
   popup, PayPal Messages for Pay in 4, a server-side Pay Later eligibility check, and verified
   webhooks that turn a refund into a review item. Sandbox only.
 - **What AI does:** Claude Sonnet 5.5 interprets the question, picks up to three engine facts
-  and writes one placeholder-only sentence the server checks; when you ask to buy, it links to
-  Worth's own comparison, where you press the buttons. It never pays or prepares an order.
-- **Three clicks:** Home → "Can I afford the $1,899 Halden X5?" → "See the comparison" →
-  "Compare with PayPal Pay in 4". Then the checkout path in [Try it](#try-it).
+  and writes one placeholder-only sentence the server checks. On the balance chart it picks which
+  of the engine's facts answer the question and what the chart shows; the server writes every
+  sentence. When you ask to buy, it links to Worth's own comparison, where you press the buttons.
+  It never pays or prepares an order.
+- **Two minutes:** the path in [Try it](#try-it).
 
-![Ask Worth answering "If I put the $1,199 camera on PayPal Pay in 4, which bills would the payments land next to?": the engine's verdict, Claude's checked note, the three options, and four illustrative Pay in 4 payments, one landing about a day after rent](docs/img/ask-pay-in-4.png)
+![Home on Alex's sample, Fri, Nov 13, 2026: Safe to spend today $872.26, a bar split into Free $872.26, Needed by Nov 30 $1,367.74 and Cushion $300 of $2,540, the Check a purchase and Connect PayPal rows beside it, a Pay in 4 payment landing a day before a bill, and Coming up and Saved below](docs/img/home.png)
 
-![The Decision view for the camera: wait until Fri, Oct 23 is above the cushion, buying today is not, and the Pay in 4 comparison shows each payment against the nearest bill, the plan already running, and PayPal's own Pay in 4 message](docs/img/decision-pay-in-4.png)
+![The answer for the $1,899 Halden X5: wait until Tue, Dec 15; buying today goes below the cushion from Thu, Nov 19 (lowest −$726.74); waiting keeps $458.78 on Thu, Dec 31; the balance chart below with the Wait pill pressed](docs/img/chart.png)
 
 ## The problem
 
@@ -66,25 +66,41 @@ and 47% of BNPL users say they paid late in the past year
 
 ## What it does
 
-- **Home: room to spend today.** The most you could spend today and still keep your cushion
-  through the forecast, the next payday, what is coming up, and a warning when a running Pay in 4
-  payment lands next to a bill.
+- **Home: safe to spend today.** One card shows the most you could spend today and still pay every
+  bill and keep your cushion ($872.26 for Alex), with a bar that splits the balance into Free,
+  Needed by <the low day> and Cushion. Beside it are two rows: **Check a purchase** and
+  **Connect PayPal** (with **Import a file** for a CSV). Below: a warning when a running Pay in 4
+  payment lands next to a bill, then Coming up and Saved side by side. If even the cushion is not
+  covered, the card says "Short by …" instead.
 - **Ask Worth.** Ask in your own words ("Can I afford the $1,899 Halden X5?", "What's coming up?",
   "If I put it on Pay in 4, which bills would the payments land next to?"). The answer shows how
   Worth read the question, the engine's verdict, Claude's checked note, the facts Claude picked
   and, under **How Ask Worth read this**, the tool that ran, why each fact was picked and every
   server check that passed.
-- **Buy today, wait, or spend less.** The Decision view compares the three: the lowest projected
-  balance for each, the earliest day that keeps the cushion, the most you could spend today, and
-  the low point if everyday spending runs 20% higher.
+- **Buy today, wait, or spend less.** The purchase answer page compares the three: the lowest
+  projected balance for each, the earliest day that keeps the cushion (a 35-day search), the most
+  you could spend today, and the low point if everyday spending runs 20% higher (under **What went into
+  this**).
 - **Pay in 4, payment by payment.** PayPal Pay in 4 is shown as four dated payments, each placed
   against the nearest bill or other instalment within three days, with any plans already
   running and PayPal's own Pay in 4 message beside it. It is a comparison, never a
   recommendation: Worth's sentence checks reject wording that suggests Pay in 4 makes something
   fit.
-- **A balance chart you can read.** The forecast is drawn as the daily low with the cushion, and
-  every payday and bill of $100 or more is a line you can click (or reach with the arrow keys)
-  for its amount and the balance after it. A table view carries the same numbers.
+- **A balance chart you can read.** On the purchase answer page, the pills above the chart are
+  the options (Buy today, Wait until <date>, Pay in 4). Worth's recommendation is pressed when the
+  page opens; press others to compare them, or unpress all of them to see the "No purchase" line.
+  Each pressed option gets one summary box. The cushion is a dotted line, any stretch below it is
+  shaded red, thin green lines mark days money comes in and thin red lines days money goes out.
+  A range control switches between To payday, 30 days and 60 days, a day-in-focus panel explains
+  the day you point at (or pin with the arrow keys), and **View as table** carries the same
+  numbers.
+- **The guide explains the chart.** Ask Worth on that page about the chart ("What does the red
+  shading mean if I buy it today?") and the guide answers from the chart's own facts and changes
+  the view to match: which pills are pressed, the range and the day in focus. A short nudge per
+  screen points to it.
+- **A first-visit tour.** Six steps over Home (safe to spend, the bar, Check a purchase, the
+  guide, Saved, Connect PayPal) on a first visit. **Take the tour** in the Ask Worth panel replays
+  it; `?tour=1` forces it and `?tour=0` suppresses it.
 - **Checkout prepared, never taken.** "Buy today anyway" or "Buy with PayPal" on the comparison
   prepares a PayPal sandbox order behind server guards. "Go ahead and buy the studio headphones"
   in Ask Worth shows the verdict and a link to that comparison; it never buys. You approve in
@@ -96,33 +112,72 @@ and 47% of BNPL users say they paid late in the past year
 - **Something cheaper, from real stores.** Under Spend less, and when you ask for something
   cheaper, Worth lists up to four similar products from other stores priced within what keeps the
   cushion today, found through Channel3. They link out; Worth does not sell them.
-- **Your own history.** Import a PayPal activity CSV (personal or business export, up to 1 MB and
-  10,000 rows). Worth proposes recurring bills, categories and existing Pay in 4 plans for you to
-  confirm; it never deducts history from today's funds a second time. Home starts with "Start
-  with your PayPal activity": choose the file (or **Try with a sample PayPal export**, a fictional
-  export in `src/sample/` that runs through the same import), tick what Worth found in one review
-  screen, each row tagged From PayPal or You added, and Home becomes your month from PayPal. Raw
-  CSV files aren't saved.
+- **Your own PayPal activity.** **Connect PayPal** reads your sandbox account's activity through
+  PayPal's MCP server (see [Try it](#connect-your-paypal-sandbox-account)), or **Import a file**
+  takes a PayPal activity CSV (personal or business export, up to 1 MB and 10,000 rows; a
+  fictional sample export in `src/sample/` runs through the same import). Worth proposes
+  recurring bills, categories and existing Pay in 4 plans for you to confirm in one review
+  screen, each row tagged From PayPal or You added; it never deducts history from today's funds a
+  second time. Afterwards Home reads "PayPal connected · updated today" (or the file's import
+  date). Raw CSV files aren't saved.
 - **Connect an agent.** Any MCP client can ask Worth before it pays. See [Worth guardrail MCP](#worth-guardrail-mcp).
 
-![Saved on a return visit: the camera saved for Fri, Oct 23 now shows "Your plan suggests this may fit now — confirm today's funds"](docs/img/saved-return-visit.png)
+![The balance chart with Buy today and Wait until Tue, Dec 15 pressed: one summary box each, the Buy today line shaded red where it is below the dotted $300 cushion from Nov 19 to Nov 30 and Dec 10 to Dec 14, thin green and red lines on days money comes in and goes out, and the lowest point $458.78 on Thu, Dec 31](docs/img/chart-buy-today.png)
 
-![The balance chart for spending $440.01 on a desk chair: the lowest balance each day as a step line down to the $300 cushion, thin lines on every payday and bill, and the apartment rent line opened into a card that explains how rent and the student loan bring the balance to exactly the cushion on Thu, Oct 22, just before payday](docs/img/chart.png)
+![Ask Worth on the chart: asked what the red shading means if Alex buys today, the guide explains the dotted cushion line, the red shading and the green and red day lines, says Buy today is below the cushion Nov 19 – Nov 30 and Dec 10 – Dec 14, and presses Buy today on the chart](docs/img/ask-chart.png)
+
+![The Pay in 4 comparison for the Halden X5: four payments of $474.75; the balance would first go below the cushion on Sun, Nov 29, lowest $222.76 on Mon, Nov 30, with payment 2 landing about Fri, Nov 27, two days after car insurance; the laptop plan already running; and PayPal's own Pay in 4 message](docs/img/decision-pay-in-4.png)
+
+![Step 1 of the first-visit tour: a blue callout beside the highlighted $872.26 reads "Safe to spend today: What you can spend today and still pay every bill and keep your cushion", with 1 of 6, Skip and Next](docs/img/tour.png)
 
 ## Try it
 
-On https://worth.onrender.com (no sign-in), all inside Worth:
+Open https://worth.onrender.com. No sign-in; each browser gets its own anonymous session.
 
-1. **Home.** See how much you could spend today and still keep your cushion, and what is coming
-   up.
-2. **Check the Halden X5.** Ask Worth "Can I afford the Halden X5?" (or "Go ahead and buy it").
-   Worth answers with the engine's verdict and the day it fits; open **How Ask Worth read this**
-   to see what Claude chose and what the server checked. Open the comparison: buy today, wait, or
-   spend less, and **Compare with PayPal Pay in 4**. **Save for** the day it fits, or **Buy today
-   anyway** to open Worth's PayPal sandbox checkout (the sandbox buyer above; the payee is
-   "Sandbox demo merchant").
-3. **Connect PayPal.** Bring your own sandbox activity through PayPal's MCP server, or **Try with
-   a sample PayPal export**; Home becomes your month from PayPal.
+### Two minutes on Alex's sample
+
+1. **Home.** Alex's month on Fri, Nov 13, 2026: $872.26 safe to spend today, of $2,540 in his
+   account. (A first visit starts a six-step tour; **Skip** ends it.)
+2. **Check a purchase.** Choose **Check a purchase** and ask "Can I afford the $1,899 Halden
+   X5?", then **See the comparison**; or open the Halden X5 under Saved. The answer is **Wait
+   until Tue, Dec 15**: buying today goes below the $300 cushion from Thu, Nov 19.
+3. **The chart.** Press **Buy today** to add it beside the recommended Wait line, and **Pay in 4**
+   for the comparison. Ask Worth "What does the red shading on the chart mean?" and it changes the
+   chart to show you.
+4. **Save for Tue, Dec 15.** The camera waits in Saved with its date.
+5. **The return visit.** Open https://worth.onrender.com/?replay=demo-dec15. It is Tue, Dec 15:
+   Saved says "Fresh check: this fits today" (lowest $458.78 on Thu, Dec 31).
+6. **Buy with PayPal.** Worth checks again and opens PayPal's sandbox checkout. PayPal's page
+   names the payee "Sandbox demo merchant", never Worth. Log in with the sandbox buyer
+   (`TODO(owner): sandbox buyer login — see the Devpost testing notes`), approve, then confirm in
+   Worth.
+
+![Saved on the return visit, Tue, Dec 15: "Fresh check: this fits today" for the Halden X5 planned for Tue, Dec 15, with Buy with PayPal](docs/img/saved-return-visit.png)
+
+### Connect your PayPal sandbox account
+
+1. Open the site. You start on Alex's month, which is sample data.
+2. On Home, choose **Connect PayPal**, read the note, then **Continue to PayPal**.
+3. Log in with the sandbox buyer
+   (`TODO(owner): sandbox buyer login — see the Devpost testing notes`). PayPal's screen names
+   "Default Application" (PayPal's MCP connector) and asks for transaction data. Choose **Agree
+   and Connect**. If you cancel at PayPal, use your browser's Back button to return.
+4. Wait about 30–40 seconds while Worth reads the activity with PayPal's read-only
+   `list_transactions` tool. Then check what it found: this account's $1,299 Laptop bought with
+   Pay in 4 appears as a plan. A purchase PayPal funded with Pay Later, with no payment rows yet,
+   starts as "1 of 4 paid", because PayPal takes the first payment at checkout. **Cancel** or
+   **Back** on this screen returns to Home.
+5. Enter money available, a cushion and everyday spending, then **Continue**. Home shows
+   "PayPal connected · updated today".
+6. To return to Alex: **Settings → Delete my data now → Delete and start over**.
+
+A sandbox account holds only what was done in that sandbox, so it has no payday or bills, and
+Worth does not invent any. Home can then read "Short by … on <date>": with no payday in the plan,
+everyday spending and the remaining Pay in 4 payments draw the projected balance below your
+cushion, and the figure is how far below. Add your payday and bills under Plan. Worth keeps
+PayPal's access for one read only, and cannot pay, invoice or move money with it.
+
+![Connect PayPal's review step for a sandbox account: 3 transactions read through PayPal's MCP server, no repeating pay or bills found, and the $1,299 Laptop Pay in 4 plan from PayPal](docs/img/connect-review.png)
 
 Pay in 4 itself is chosen inside PayPal's checkout. A sandbox buyer can pick it there; Worth
 cannot see which funding the buyer chose (PayPal's order and capture do not say), so after a
@@ -174,12 +229,17 @@ credentials and the browser receives only the public client ID.
   name, so the order description names each one. The access token stays in server memory until one
   read, or at most 10 minutes after the login, and is never sent to the browser. The same token could create and
   send invoices, so the server allow-lists `list_transactions` and refuses every other tool.
-  Opening a session takes PayPal about 12 s and each window about 11 s, so a read takes about
-  25 s; if a session doesn't open in 25 s, Connect is hidden for that visitor's visit (and
-  for everyone for a minute after two such timeouts in a row), and the CSV path remains. `PAYPAL_CONNECT=off` turns it off.
+  Opening a session takes PayPal about 12 s and each window about 11 s (the six run side by side);
+  from Continue to the review screen it took about 35–40 s in our checks. If a session doesn't
+  open in 25 s, Connect is hidden for that visitor's visit (and for everyone for a minute after
+  two such timeouts in a row), and the CSV path remains. `PAYPAL_CONNECT=off` turns it off.
+  When the review is committed, the server itself records where the data came from
+  (`importedFrom`: `paypal` only when the CSV is the exact text it built from that login, else
+  `file`) and when (`importedAt`); Home's "PayPal connected · updated today" reads those two
+  fields, never anything the browser claims.
 
 Verified against the sandbox: SDK v6 popup approval followed by exactly one capture; a US sandbox
-buyer paying $1,199 with Pay in 4 inside PayPal's checkout (4 × $299.75); and, on the hosted
+buyer paying $1,199 (an earlier catalog item) with Pay in 4 inside PayPal's checkout (4 × $299.75); and, on the hosted
 app, a capture followed by a $50 refund whose webhook arrived, passed verification and produced
 the review item.
 
@@ -204,6 +264,15 @@ Claude is the interface and the narrator; the engine is the decision-maker.
   `checkSentence` rejects free numbers or dates, advice, a value in the wrong place, wording that
   rates Pay in 4, and anything that contradicts the engine's outcome; on any failure the
   engine's template sentence is shown instead. The verdict sentence itself is always a template.
+- **Explain and steer the chart.** On the purchase answer page the browser sends what the chart
+  shows (the item, the pressed options, the range, the day in focus). For a question about the
+  chart, the server rebuilds the comparison with the engine and offers Claude one tool,
+  `show_on_chart`, only when such a view is on screen. Claude picks one to three fact IDs and the
+  view to show; the server checks every field and writes each sentence from the engine in the
+  chart's own words (`server/chartGuide.ts`). The browser applies the view through
+  `src/chartControl.ts`: pills, range and day in focus only, never buy, save or navigate. Without
+  Claude, built-in rules pick the facts and the view. Each screen has its own one-line nudge
+  ("Want me to walk you through this chart?" on the chart).
 - **Link to the comparison, never buy.** When you ask to buy a listed item,
   `open_purchase_check` shows Worth's check of buying it today and a link to Worth's own
   comparison for it, built by the server from the catalog. Worth prepares no order: on the
@@ -228,14 +297,14 @@ The [evaluation](#evaluation) runs these paths live against the real model.
 | PayPal Webhooks | Raw-body signature verification; order events reconcile, refunds and reversals become review items |
 | PayPal MCP server (`mcp.sandbox.paypal.com`) | Connect PayPal: OAuth with PKCE, then only its `list_transactions` tool reads the logged-in user's own activity for the import review |
 | PayPal sandbox accounts and negative testing | A US sandbox merchant and buyer; `PayPal-Mock-Response` for the decline and re-approve path |
-| Claude Sonnet 5.5 (Anthropic API) | Interprets questions, picks engine facts, writes one checked sentence, may link to Worth's comparison for an item, suggests import categories |
+| Claude Sonnet 5.5 (Anthropic API) | Interprets questions, picks engine facts, writes one checked sentence, picks chart facts and the chart view (`show_on_chart`), may link to Worth's comparison for an item, suggests import categories |
 | Claude Opus 5.5 (Anthropic API) | Offline only: the independent judge in the live AI eval (`eval/judge.ts`); never called by the app |
 | Channel3 API | `search`, `similar` and product reads for "similar items that fit today"; 6 h cache, daily and per-IP caps, recorded results as fallback |
 | Model Context Protocol SDK | Worth guardrail MCP: the `/mcp` server and stdio relay that let outside agents check affordability at any store before they buy |
 | Render | Hosts the app from `render.yaml`: one Node 24 web service with a 1 GB persistent disk |
 | SQLite (`node:sqlite`) | Session-scoped storage on that disk: plans, purchases, saved items, webhook events, agent tokens |
 | React 19, Vite, Express 5, Zod 4, TypeScript | The client, build, HTTP server and validation at every boundary |
-| Unsplash | The six product photos, each checked for brand marks ([credits](docs/DESIGN-SOURCES.md)) |
+| Unsplash | Six of the seven product photos, each checked for brand marks; the Halden X5 image is generated ([credits](docs/DESIGN-SOURCES.md)) |
 | Figtree, Lucide | The typeface (OFL 1.1) and icons (ISC) |
 | Vitest, oxlint, Prettier, GitHub Actions | Tests, lint, formatting and CI (`npm run check` on every push and pull request) |
 
@@ -252,6 +321,7 @@ The [evaluation](#evaluation) runs these paths live against the real model.
         │        server/chat.ts (Anthropic SDK)
         │        tools ─► interpret · commitments · spending · plan · alternatives
         │        open_purchase_check ─► #decision?product=<id> (no order)
+        │        show_on_chart ─► chart view only (pills · range · day), facts by ID
         │        sentence ─► checkSentence ─► template on any failure
         ▼                    │
   shared/finance.ts (pure TypeScript, integer cents) ◄──┘   the model's tools ARE the engine
