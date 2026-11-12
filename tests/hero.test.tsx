@@ -415,6 +415,25 @@ describe('the Home hero', () => {
     ).toBe(false)
   })
 
+  it.each([
+    ['monthly', 'Monthly paycheck'],
+    ['biweekly', 'Biweekly paycheck'],
+    ['weekly', 'Weekly paycheck'],
+  ] as const)('names a %s income by its frequency, on one line', async (cadence, label) => {
+    const state = makeState()
+    state.profile = {
+      ...state.profile,
+      flows: state.profile.flows.map((flow) =>
+        flow.kind === 'income' ? { ...flow, cadence } : flow,
+      ),
+    }
+    renderHome(state)
+    const card = (await screen.findByRole('heading', { name: 'Your plan' })).closest('section')!
+    const row = within(card).getByText(label).parentElement!
+    expect(row.querySelector('dd')?.textContent).toMatch(/^\$[\d,]+\.\d\d$/)
+    expect(card.textContent).not.toMatch(/Every other|Monthly\$|Paycheck\$/)
+  })
+
   it('has no inline composer, and the rail opens Connect an agent', async () => {
     const user = userEvent.setup()
     const { onNavigate } = renderHome(makeState())
