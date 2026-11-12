@@ -51,6 +51,8 @@ export const fits = (option: OptionResult) => option.outcome === 'fits'
 
 /** Readable label for a bill name inside a sentence: "rent" from "Apartment rent" stays as is. */
 export const lower = (name: string) => name.charAt(0).toLowerCase() + name.slice(1)
+/** An item or bill name inside a sentence; one with another capital ("Halden X5") is a proper name. */
+export const lowerName = (name: string) => (/\p{Lu}/u.test(name.slice(1)) ? name : lower(name))
 
 const ICONS: Record<string, LucideIcon> = {
   briefcase: Banknote,

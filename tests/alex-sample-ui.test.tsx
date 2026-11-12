@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
 import { Settings } from '../src/Saved'
 import { api } from '../src/api'
+import { lowerName } from '../src/engine'
 import { compareOptions } from '../shared/finance'
 import { ALEX_DEMO_DAY, createCameraScenario, PRODUCTS } from '../shared/seed'
 import type { AppState, DemoPreset } from '../shared/types'
@@ -102,5 +103,13 @@ describe('Alex, the default sample', () => {
       expect(onToast).toHaveBeenCalledWith('Showing the sample: Alex on Tue, Dec 15, 2026.'),
     )
     expect(document.body.textContent).not.toMatch(/Maya/)
+  })
+})
+
+describe('item names inside a sentence', () => {
+  it('lowers a common noun but keeps a proper name such as the Halden X5', () => {
+    expect(lowerName('Everyday camera')).toBe('everyday camera')
+    expect(lowerName('Halden X5')).toBe('Halden X5')
+    expect(lowerName('MacBook Pro 14-inch')).toBe('MacBook Pro 14-inch')
   })
 })
