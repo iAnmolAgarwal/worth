@@ -276,12 +276,6 @@ function OptionCard({
   )
 }
 
-function chartTitle(c: Comparison, k: OptionKey) {
-  if (k === 'buyToday') return 'If you buy today'
-  if (k === 'wait' && c.wait.date) return `If you wait until ${dayLabel(c.wait.date)}`
-  return `If you spend ${money(c.spendLess.maxPriceCents)} today`
-}
-
 type P4 = Extract<PayIn4, { available: true }>
 
 export function ChartTile({
@@ -297,7 +291,6 @@ export function ChartTile({
   scaleWith?: P4
 }) {
   const option = optionOf(c, k) ?? c.buyToday
-  const title = chartTitle(c, k)
   const fullName = fullPayName(c, option)
   const thesis = payIn4 ? payIn4Thesis(c, option, payIn4) : ''
   // The chart's pills are the ways to buy this item: the page's option starts pressed, and Pay
@@ -330,18 +323,15 @@ export function ChartTile({
       : []),
   ]
   return (
-    <section className="tile" aria-labelledby="chart-title">
-      <h2 className="h-section" id="chart-title">
-        {title}
-      </h2>
-      <div className="meta">
-        Each day’s lowest balance, {shortDate(c.window.start)} to {shortDate(c.window.end)}.
-      </div>
+    // The card has no visible title: each summary row names the option it is for, so nothing
+    // above the pills can disagree with what is pressed.
+    <section className="tile" aria-label="Your balance day by day">
       {thesis && <p className="chart-thesis">{thesis}</p>}
       <BalanceChart
         options={options}
         selected={options.some((o) => o.key === k) ? k : 'buyToday'}
         cushionCents={c.cushionCents}
+        named
         label={`Projected balance, ${shortDate(c.window.start)} to ${shortDate(c.window.end)}. Each day shows its low, with that day’s bills taken out before pay arrives.`}
       />
     </section>

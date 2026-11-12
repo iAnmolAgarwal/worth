@@ -651,7 +651,13 @@ describe('decision view', () => {
     expect(screen.getAllByRole('img', { name: /^Projected balance/ })).toHaveLength(1)
     fireEvent.keyDown(radios[1]!, { key: 'ArrowRight' })
     expect(radios[2]!.getAttribute('aria-checked')).toBe('true')
-    expect(screen.getByRole('heading', { name: /If you spend/ })).toBeTruthy()
+    // The chart follows the card: its pressed pill is the cheaper option.
+    expect(
+      within(screen.getByRole('group', { name: 'Options on the chart' })).getByRole('button', {
+        name: /^Spend \$/,
+        pressed: true,
+      }),
+    ).toBeTruthy()
     await user.click(screen.getAllByRole('button', { name: /^Save for / })[0]!)
     expect(props.onSave).toHaveBeenCalledWith(
       { kind: 'catalog', productId: 'camera' },

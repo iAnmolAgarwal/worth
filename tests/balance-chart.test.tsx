@@ -74,10 +74,11 @@ const moneyLines = (kind: 'in' | 'out') =>
 
 describe('the default view', () => {
   it('draws the page’s option, the cushion, today and the day it fits, with nothing shaded red', () => {
-    const { container } = render(tile())
-    expect(container.querySelector('.meta')!.textContent).toBe(
-      'Each day’s lowest balance, Nov 13 to Jan 12.',
-    )
+    render(tile())
+    // The card has no visible title or subtitle; its region keeps a name that is always true.
+    const card = screen.getByRole('region', { name: 'Your balance day by day' })
+    expect(card.querySelector('h2, .meta')).toBeNull()
+    expect(card.firstElementChild!.classList.contains('wchart')).toBe(true)
     expect(svg().querySelectorAll('.wchart-line')).toHaveLength(1)
     expect(
       svg().querySelector('.wchart-line')!.parentElement!.classList.contains('tone-main'),
@@ -123,7 +124,8 @@ describe('the default view', () => {
 
   it('says the answer in words above the chart and in the focus panel', () => {
     render(tile())
-    expect(sentences()).toEqual([SENTENCES.wait])
+    // The single row still names its option.
+    expect(sentences()).toEqual([`${WAIT}: ${SENTENCES.wait}`])
     expect(focus().querySelector('.eyebrow')!.textContent).toBe('Lowest point')
     expect(focus().querySelector('.date')!.textContent).toBe('Thu, Dec 31')
     expect(focus().querySelector('.amount')!.textContent).toBe('$458.78')
@@ -226,7 +228,7 @@ describe('the pills are the options', () => {
     expect(
       svg().querySelector('.wchart-line')!.parentElement!.classList.contains('tone-amber'),
     ).toBe(true)
-    expect(sentences()).toEqual([SENTENCES.buy])
+    expect(sentences()).toEqual([`Buy today: ${SENTENCES.buy}`])
     await user.click(pill('Buy today'))
     expect(pill('Buy today').getAttribute('aria-pressed')).toBe('true')
   })

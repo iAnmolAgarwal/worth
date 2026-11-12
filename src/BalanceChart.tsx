@@ -92,6 +92,7 @@ export function BalanceChart({
   selected,
   cushionCents,
   label,
+  named = options.length > 1,
 }: {
   options: ChartOption[]
   /** The option the page is showing. */
@@ -99,6 +100,8 @@ export function BalanceChart({
   cushionCents: number
   /** The text alternative's first sentence. */
   label: string
+  /** Every summary row leads with its option's name; by default only when there is a choice. */
+  named?: boolean
 }) {
   const id = useId().replace(/:/g, '')
   const [wrap, width] = useWidth()
@@ -320,7 +323,7 @@ export function BalanceChart({
         {series.map((s, index) => (
           <li key={s.key} className={cx(s.runs.length > 0 && 'dips')}>
             <span className="words">
-              {series.length > 1 && <b>{s.name}: </b>}
+              {(named || series.length > 1) && <b>{s.name}: </b>}
               {amounts(s.text)}
             </span>
             <span className="jumps">
