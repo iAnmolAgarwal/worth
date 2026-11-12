@@ -2,8 +2,9 @@
 
 Worth is one TypeScript application: a React client, an Express server, a deterministic
 financial engine shared by both, and SQLite. Claude interprets questions and chooses what to
-show through read-only engine tools; its one action, preparing a checkout, is decided by server
-guards. Payment execution belongs to explicit server endpoints and the user's own confirmation.
+show through read-only engine tools; it never prepares an order, and when asked to buy it links
+to Worth's own comparison. Payment execution belongs to explicit server endpoints behind server
+guards and the user's own confirmation.
 
 This document describes the code on `main`. The README is the short version; the
 [evaluation](EVALUATION.md) and the [MCP contract](MCP.md) are separate.
@@ -66,14 +67,14 @@ the model name and the Channel3 status).
 | `server/mcp.ts`, `server/mcpDecision.ts`, `server/mcpStdio.ts` | The MCP server, its decision contract with coherence invariants, and the stdio relay. |
 | `server/config.ts`, `server/csp.ts`, `server/limits.ts` | Environment parsing with production guards, the Content-Security-Policy, and fixed-window rate limiters. |
 | `src/App.tsx` | Routing, state refresh, toasts and the `?replay=` entry. |
-| `src/Home.tsx`, `src/Hero.tsx` | Home: the "Safe to spend today" card and its Free / Needed by / Cushion bar (or "Short by …"), the Check a purchase and Connect PayPal rows, Coming up and Saved. |
+| `src/Home.tsx`, `src/Hero.tsx`, `src/Month.tsx` | Home: the "Safe to spend today" card and its Free / Needed by / Cushion bar (or "Short by …"), the Check a purchase and Connect PayPal rows, Coming up and Saved; for imported activity, the next 30 days by week and the Pay in 4 plans in progress. |
 | `src/Ask.tsx`, `src/AskTrace.tsx`, `src/AgentLauncher.tsx` | The conversation, "How Ask Worth read this", and the guide's launcher, panel and per-screen nudge. |
-| `src/Tour.tsx` | The six-step first-visit tour of Home (`?tour=1` forces it, `?tour=0` suppresses it; "Take the tour" in the panel replays it). |
+| `src/Tour.tsx` | The six-step first-visit tour of Home (`?tour=1` forces it, `?tour=0` suppresses it; "Take the tour" in the top bar, the Ask Worth panel and Settings replays it). |
 | `src/ConnectPayPal.tsx` | Connect PayPal: the note before the redirect, the reading screen, and the one-at-a-time background sync. |
-| `src/Decision.tsx`, `src/BalanceChart.tsx`, `src/chartModel.ts`, `src/chartLayout.ts`, `src/chartControl.ts` | The option comparison, the Pay in 4 panel, the SVG balance chart (model and layout), and the guide's view-only hold on the chart. |
+| `src/Decision.tsx`, `src/BalanceChart.tsx`, `src/chartModel.ts`, `src/chartControl.ts` | The option comparison, the Pay in 4 panel, the SVG balance chart and its model, and the guide's view-only hold on the chart. |
 | `src/Checkout.tsx`, `src/paypal.tsx`, `src/paypalSdk.ts` | The checkout dialog and the SDK v6 loader, button, eligibility and Messages. |
 | `src/Saved.tsx`, `src/Alternatives.tsx`, `src/Activity.tsx`, `src/Reviews.tsx` | Saved items and wait plans, similar items, activity, and the "how did you pay" and refund reviews. |
-| `src/Plan.tsx`, `src/Import.tsx`, `src/ForeignPayments.tsx` | The four-step plan editor, CSV import preview and unresolved foreign payments. |
+| `src/Plan.tsx`, `src/Import.tsx`, `src/ForeignPayments.tsx` | The plan page (Bills, Subscriptions, Pay in 4, Income and Next 30 days tabs) and its four-step editor, CSV import preview and unresolved foreign payments. |
 | `src/Check.tsx` | `/check`: a store's verified item, the decision for it, report-back consent and Back to the store. |
 | `src/ConnectAgent.tsx` | Settings → Connect an agent: create, copy and revoke MCP tokens. |
 | `shared/link.ts`, `src/PasteLink.tsx` | Pasted product links: link checks, title cleaning and the "Is $X right?" card with its manual fallback. |
@@ -200,6 +201,12 @@ Tools, all read-only:
 | `open_purchase_check` | A catalog item ID, when the person asks to buy it | Assesses the item at its catalog price today and links to Worth's own comparison, `#decision?product=<id>`. Worth prepares no order; Claude receives only whether a link was shown |
 | `show_on_chart` | Offered only when the request carries a chart view and the question is about the chart: one to three fact ids, and the pills, range (`payday`, `30`, `60`) and focus day the chart should show, all from enums built for this item | Rebuilds the item's comparison, writes each fact in the chart's own words (`src/chartModel.ts`), drops any option, range or day outside this item and window, and returns the view change as `chart` in the reply. View state only: it cannot navigate, save, buy or edit the plan. Without Claude the same facts and view come from Worth's own rules (`server/chartGuide.ts`) |
 
+**Direct answers.** Two kinds of question get a first line the server writes before Claude's
+facts (`directAnswer` in `server/narration.ts`): a spending question that names a merchant or
+category ("Am I spending too much on coffee?") gets that name's total, count and share of the last
+30 days' completed USD spending, summed by the server, with no judgement of "too much"; and "When
+do I get paid next?" gets the next income in the plan.
+
 Every read tool also takes **presentation fields**: up to three facts from a fixed catalog for
 that tool, a reason for each from a fixed set (`answers_question`, `explains_result`,
 `shows_timing`, `shows_risk`, `adds_context`), an optional lead-in from a fixed set (including
@@ -229,6 +236,13 @@ item. The link, name and price come from the server's catalog, never from Claude
 comparison the person presses "Buy today anyway" or "Save for <date>" themselves, and Worth's own
 PayPal sandbox checkout opens only behind `checkoutGuards`. The Worth app never names or links to
 the example store (final-day plan §0): the only exception is `/check` after a verified hand-off.
+
+**A day agreed in Ask.** When an answer is for a later day ("Can I buy it next Friday?"), its
+"See the comparison" link carries that day as `on=YYYY-MM-DD`. `/api/compare` accepts it only as a
+real day from today through 35 days ahead (otherwise 400; the client drops it), and
+`compareOptions` adds the option of buying in full on that day, judged over the same window. The
+first card then reads "Buy <day>" with that day's numbers, and its button saves the item for that
+day. Without `on=` the comparison is unchanged.
 
 **Saved-plan checkout.** `checkoutGuards` (`server/checkoutGuards.ts`) guards the saved plan's
 Buy button: no other active checkout, funds confirmed today, a complete plan, the wait date
@@ -271,7 +285,7 @@ confirmed fact afterwards, never as a prediction.
 
 `src/BalanceChart.tsx` draws the forecast as inline SVG with no chart library, on the purchase
 answer page; `src/chartModel.ts` turns engine output into the chart's series, stretches and
-sentences, and `src/chartLayout.ts` computes the geometry and label placement.
+sentences.
 
 - **Pills are the options.** Buy today, Wait until <date> and Pay in 4 (Something cheaper when it
   applies) are toggle pills. Worth's recommendation is pressed on load; any pill can be unpressed,
