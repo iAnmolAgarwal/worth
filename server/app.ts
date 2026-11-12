@@ -59,7 +59,13 @@ import {
   mountMcp,
   revokeAgentToken,
 } from './mcp.ts'
-import { categoryCandidates, createChatProvider, fallbackCategories, localReply } from './chat.ts'
+import {
+  categoryCandidates,
+  createChatProvider,
+  fallbackCategories,
+  incomeWhatIfReply,
+  localReply,
+} from './chat.ts'
 import {
   asksAboutChart,
   chartFacts,
@@ -2143,7 +2149,23 @@ export function createApp(options: AppOptions = {}) {
       history: rest.history.map((turn) => ({ ...turn, content: withoutWebsites(turn.content) })),
       ...(items.length ? { items } : {}),
     }
+    // A follow-up on a comparison page that names no item is about the page's item: the chart's
+    // view stands in for the purchase context the conversation lost (a catalog item at its own
+    // price, or the amount and name the page shows). The server still decides, as for any
+    // context, whether the message is about that item.
+    if (!input.context && input.view) {
+      const product = input.view.productId
+        ? PRODUCTS.find((p) => p.id === input.view!.productId)
+        : undefined
+      const amountCents = product?.priceCents ?? input.view.amountCents
+      const itemName = product?.name ?? input.view.itemName
+      if (amountCents && itemName) input.context = { amountCents, itemName }
+    }
     const reply = (answer: ChatReply) => res.json(signer.sign(session, answer))
+    // Extra income as a what-if ("if I sell my lens for $400, could I get it sooner?") is not
+    // something chat can try yet; say so plainly instead of reading the amount as a price.
+    const whatIf = incomeWhatIfReply(input.message)
+    if (whatIf) return reply(whatIf)
     const current = state(session)
     if (input.sessionKey && input.sessionKey !== current.sessionKey)
       throw new HttpError(

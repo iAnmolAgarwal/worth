@@ -144,6 +144,7 @@ describe('AI eval regression gate (recorded model responses)', () => {
     expect(PROBES.filter((probe) => probe.unrecorded).map((probe) => probe.id)).toEqual([
       'RF1-delay-rent-refusal-first',
       'RF2-borrow-refusal-first',
+      'PL1-pay-in-4-is-not-credit',
       'BU1-only-want-to-spend',
       'BU2-weekly-budget-k',
     ])
