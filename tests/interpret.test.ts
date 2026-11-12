@@ -217,3 +217,24 @@ describe('follow-ups about another item', () => {
     )
   })
 })
+
+describe('item names with digits (Halden X5)', () => {
+  it('keeps the "5" and uses the catalog name for the catalog item at its price', () => {
+    const read = accepted(
+      check('Can I afford the $1,899 Halden X5?', raw([item('Halden X5', 189900)])),
+    )
+    expect(read.items.map((i) => i.name)).toEqual(['Halden X5'])
+  })
+
+  it('keeps digits inside a word and drops a bare number from a name it grounds', () => {
+    const read = accepted(
+      check('Can I afford a $900 Lumen X5 2024 lens?', raw([item('Lumen X5 2024 lens', 90000)])),
+    )
+    expect(read.items.map((i) => i.name)).toEqual(['Lumen X5 lens'])
+  })
+
+  it('reads the local fallback with the 5 too', () => {
+    const read = accepted(local('Can I afford the $1,899 Halden X5?'))
+    expect(read.items[0]!.name).toBe('Halden X5')
+  })
+})

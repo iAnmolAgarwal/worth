@@ -200,10 +200,13 @@ export function sameItem(a: string | undefined, b: string | undefined) {
 }
 /** Keep an item name only when its words come from the user's message or confirmed context. */
 export function groundedItemName(name: string, message: string, context?: PurchaseContext) {
+  // Digits stay inside a word ("Halden X5", "14-inch"); a token that is only a number, such as a
+  // price, is dropped.
   const cleaned = name
-    .replace(/[^\p{L}\p{M}\s'&+.-]/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+    .replace(/[^\p{L}\p{M}\p{N}\s'&+.-]/gu, ' ')
+    .split(/\s+/)
+    .filter((token) => !/^[\p{N}.,'&+-]*$/u.test(token))
+    .join(' ')
     .slice(0, 40)
     .trim()
   const source = new Set(words(`${message} ${context?.itemName ?? ''}`))
@@ -548,7 +551,8 @@ export function localItemName(message: string) {
     for (const word of fragment.split(/\s+/)) {
       const bare = word.toLowerCase().replace(/[^a-z'+-]/g, '')
       if (!bare || ITEM_STOP.has(bare) || TIMING_WORD.test(bare) || /^\d/.test(word)) break
-      kept.push(word.replace(/[^\p{L}\p{M}'+-]/gu, ''))
+      // A word that starts with a letter keeps its digits ("X5").
+      kept.push(word.replace(/[^\p{L}\p{M}\p{N}'+-]/gu, ''))
       if (kept.length === 3 || /[?.!,;]$/.test(word)) break
     }
     return kept.length ? kept.join(' ') : undefined
@@ -857,8 +861,14 @@ export function validateInterpretation(
           retryable: true,
           detail: `Quantity ${item.quantity} needs a count written next to the item and a price marked as per item (for example "each"). Otherwise the stated price is the total: report quantity 1.`,
         }
+      // A stated price for a demo-store item the message names keeps the store's own name.
+      const known = catalogItemFor(item.name, message)
       read.push({
-        name: pendingName(item.name) ?? localItemName(message) ?? 'Your purchase',
+        name:
+          (known?.priceCents === item.amount_cents ? known.name : undefined) ??
+          pendingName(item.name) ??
+          localItemName(message) ??
+          'Your purchase',
         amountCents: item.amount_cents,
         quantity: item.quantity,
       })
@@ -983,7 +993,13 @@ export function localInterpretation(input: ChatInput, data: ChatData): Interpret
       /\b(\d{1,2}|two|three|four|five|six|seven|eight|nine|ten)\s+[a-z][\w'-]*\s+(?:at|for|@)\s+\S+\s+(?:each|apiece|a\s+piece|per\s+(?:item|piece|unit))\b/i,
     )?.[1]
     const quantity = each ? Number(each) || COUNT_WORDS.indexOf(each.toLowerCase()) + 2 : 1
-    item = { name: named ?? 'Your purchase', amountCents: prices[0]!.cents, quantity }
+    // The demo-store item named at its own price keeps the store's name.
+    const known = products.length === 1 && products[0]!.priceCents === prices[0]!.cents
+    item = {
+      name: known ? products[0]!.name : (named ?? 'Your purchase'),
+      amountCents: prices[0]!.cents,
+      quantity,
+    }
   } else
     return {
       ok: false,
