@@ -1,0 +1,51 @@
+/* =====================================================================
+   The Plan page on Home's grid: the head's title sits over the list and
+   its two buttons over the rail; the summary is a card level with the
+   tab bar, like the cards beside it.
+   ===================================================================== */
+.plan-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--rail);
+  gap: var(--s-12);
+  align-items: center;
+  margin-bottom: var(--s-6);
+}
+.plan-head .title {
+  margin: 0;
+}
+/* Both buttons inside the rail's edges, each as wide as its label needs. */
+.plan-head .actions {
+  display: flex;
+  gap: var(--s-2);
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+}
+.plan-head .actions .btn {
+  flex: 1 1 auto;
+  padding: 0 var(--s-3);
+}
+.plan-page .grid > .rail {
+  padding-top: 0;
+}
+.plan-summary {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  padding: var(--s-4);
+}
+.plan-summary .sec-head {
+  margin-bottom: var(--s-1);
+}
+/* Below Home's two-column width the head wraps as before. */
+@media (max-width: 1023px) {
+  .plan-head {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: var(--s-4);
+  }
+  .plan-head .actions .btn {
+    flex: none;
+    padding: 0 var(--s-6);
+  }
+}

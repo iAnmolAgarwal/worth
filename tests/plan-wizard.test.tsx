@@ -390,6 +390,32 @@ describe('plan setup wizard', () => {
 })
 
 describe('plan commitments', () => {
+  it('puts the head on the page grid and the summary in a card', () => {
+    const state = createDemoState(TODAY)
+    render(
+      <PlanPage
+        state={{
+          ...state,
+          reviews: [],
+          products: PRODUCTS,
+          today: TODAY,
+          config: { ai: 'demo', paypal: 'demo' },
+        }}
+        onEdit={vi.fn()}
+        onImport={vi.fn()}
+      />,
+    )
+    // The title sits over the list and both buttons over the rail, in one head row.
+    const head = screen.getByRole('heading', { level: 1, name: 'Your plan' }).parentElement!
+    expect(head.className).toBe('plan-head')
+    expect([...head.querySelectorAll('.actions .btn')].map((button) => button.textContent)).toEqual(
+      ['Import PayPal activity', 'Edit your plan'],
+    )
+    const summary = screen.getByRole('complementary', { name: 'Plan summary' }).firstElementChild!
+    expect(summary.className).toBe('plan-summary')
+    expect(summary.textContent).toContain('Money available')
+  })
+
   it('lists commitments by kind with Edit as the only action and shows running plans with progress', async () => {
     const user = userEvent.setup()
     const onEdit = vi.fn()
