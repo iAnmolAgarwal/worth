@@ -197,14 +197,14 @@ export function AgentLauncher({
           close()
         }}
       >
-        <header className="agent-head">
+        <div className="agent-head">
           <Guide size={40} expression={mood} title={`Worth, ${MOOD_LABEL[mood]}`} />
           <div className="agent-title">
             <h2 id={titleId}>Ask Worth</h2>
             <p className="caption">Every number is Worth’s</p>
           </div>
           <IconButton label="Close Ask Worth" icon={X} quiet onClick={close} />
-        </header>
+        </div>
         {children}
       </section>
     </>

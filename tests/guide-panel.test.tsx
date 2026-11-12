@@ -275,6 +275,18 @@ describe('the item a screen offers the panel', () => {
     expect(screen.queryByRole('button', { name: /Don’t ask about/ })).toBeNull()
   })
 
+  it('offers the item again after Start over', async () => {
+    const user = userEvent.setup()
+    apiMock.mockImplementation((() => Promise.resolve(reply('Answer'))) as never)
+    render(<Ask {...askProps} state={makeState()} layout="panel" offer={offer} />)
+    await user.click(screen.getByRole('button', { name: 'What if I wait a week?' }))
+    await screen.findByText('Answer')
+    expect(screen.queryByRole('button', { name: 'Don’t ask about Everyday camera' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Start over' }))
+    expect(screen.getByRole('button', { name: 'Don’t ask about Everyday camera' })).toBeTruthy()
+    expect(screen.getByText('Ask about the Everyday camera, or anything else.')).toBeTruthy()
+  })
+
   it('can be removed before asking, and then nothing about it is sent', async () => {
     const user = userEvent.setup()
     const requests: Request[] = []
@@ -352,8 +364,12 @@ describe('the launcher and panel in the app', () => {
     )
     // The page behind stays usable.
     expect(screen.getByRole('navigation', { name: 'Main' })).toBeTruthy()
+    // It makes room for the panel on wide screens (agent.css), and adds no second banner.
+    expect(document.querySelector('.panel-open')).toBeTruthy()
+    expect(within(panel).queryByRole('banner')).toBeNull()
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('dialog', { name: 'Ask Worth' })).toBeNull()
+    expect(document.querySelector('.panel-open')).toBeNull()
     await waitFor(() => expect(document.activeElement).toBe(launcher))
   })
 

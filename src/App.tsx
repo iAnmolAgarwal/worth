@@ -25,7 +25,7 @@ import type { AppState, Purchase, SavePlan, SaveTarget } from './contract'
 import { alternativeTarget, decisionRequestFrom, saveRequest } from './contract'
 import { Decision, type DecisionRequest, type Explanation } from './Decision'
 import { envLabel } from './engine'
-import { dayLabel, fullDate, money } from './format'
+import { cx, dayLabel, fullDate, money } from './format'
 import type { GuideExpression } from './Guide'
 import { Home, HomeSkeleton } from './Home'
 import { ImportDialog } from './Import'
@@ -486,7 +486,7 @@ export default function App() {
   const checkoutProduct = checkout && state.products.find((p) => p.id === checkout.productId)
 
   return (
-    <div className={detail ? 'detail' : undefined}>
+    <div className={cx(detail && 'detail', panelOpen && 'panel-open') || undefined}>
       <a
         className="skip"
         href="#main"

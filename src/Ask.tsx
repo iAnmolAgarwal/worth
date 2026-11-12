@@ -811,6 +811,8 @@ export function Ask({
   const update = (id: number, link: LinkTurn) =>
     setEntries((prev) => prev.map((entry) => (entry.id === id ? { ...entry, link } : entry)))
   const startOver = () => {
+    // A fresh conversation offers the item on screen again.
+    setUsedOffer(undefined)
     setEntries([])
     setContext(undefined)
     remembered.current = []

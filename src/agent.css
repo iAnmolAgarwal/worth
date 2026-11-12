@@ -374,3 +374,45 @@
     padding-bottom: calc(var(--s-2) + var(--safe-bottom));
   }
 }
+
+/* While the panel is open on a wide screen, the page makes room for it, so the actions in a
+   right rail (Save for a date, Buy today anyway, Back to the store) stay reachable. */
+@media (min-width: 1024px) {
+  .panel-open main {
+    padding-right: calc(420px + 24px);
+  }
+}
+/* Phones: the last control on a page stays clear of the launcher. */
+@media (max-width: 767px) {
+  main {
+    padding-bottom: 72px;
+  }
+}
+/* With the room taken, Decision's main column is as narrow as at 1024–1279, so its option cards
+   stack as rows the same way (index.css, "1024–1279"). */
+@media (min-width: 1024px) {
+  .panel-open .options {
+    grid-template-columns: 1fr;
+    gap: var(--s-2);
+  }
+  .panel-open .opt {
+    min-height: 0;
+    gap: 4px;
+    padding: var(--s-3) var(--s-4);
+  }
+  .panel-open .opt .head {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+  .panel-open .opt .kv {
+    margin-top: 0;
+    flex-direction: row;
+    align-items: baseline;
+    gap: var(--s-2);
+  }
+  .panel-open .opt .v {
+    font-size: var(--fs-body);
+    line-height: var(--lh-body);
+    font-weight: var(--fw-bold);
+  }
+}
