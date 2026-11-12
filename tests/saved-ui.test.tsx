@@ -284,7 +284,7 @@ describe('a saved wait plan on return', () => {
     expect(screen.getAllByRole('button', { name: 'Confirm today’s funds' })).toHaveLength(1)
   })
 
-  it('shows the ready prompt on Home, with the camera starter first', () => {
+  it('shows the ready prompt on Home, under the hero', () => {
     routeApi((_path, data) => compare(makeState(), data))
     const state = makeState([item({ option: 'wait', waitDate: TODAY, status: 'ready' })])
     const onNavigate = vi.fn()
@@ -305,11 +305,10 @@ describe('a saved wait plan on return', () => {
     })
     within(prompt).getByRole('button', { name: 'Confirm today’s funds' }).click()
     expect(onNavigate).toHaveBeenCalledWith('saved?check=saved-camera')
-    const chips = screen
-      .getAllByRole('button')
-      .filter((button) => button.classList.contains('chip-suggest'))
-    expect(chips[0]!.textContent).toBe('Can I afford a $1,199 camera?')
-    expect(chips[0]!.className).not.toContain('hide-m')
+    // The hero comes first on the page; the prompt follows it.
+    const hero = document.querySelector('section')!
+    expect(hero.compareDocumentPosition(prompt) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(document.querySelector('.chip-suggest')).toBeNull()
   })
 })
 

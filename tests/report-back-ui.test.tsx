@@ -183,7 +183,7 @@ describe('the one-time notice', () => {
     const seen = serve(makeState([own, seenBefore]))
     render(<App />)
     // Home has the state: room to spend is showing.
-    expect((await screen.findAllByText(/Room to spend today/)).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText(/Safe to spend today/)).length).toBeGreaterThan(0)
     expect(screen.queryByText(/told Worth about your/)).toBeNull()
     expect(seen).toEqual([])
   })

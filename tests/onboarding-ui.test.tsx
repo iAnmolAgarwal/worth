@@ -400,20 +400,23 @@ describe('Start with your PayPal activity', () => {
     await waitFor(() => expect(onFile).toHaveBeenCalledWith({ csv: SAMPLE, name: 'Download.CSV' }))
   })
 
-  it('is one compact row: the actions first, the steps and privacy behind a disclosure', async () => {
+  it('is one slim row under the hero: the actions first, the steps and privacy behind More', async () => {
     const user = userEvent.setup()
     const onFile = vi.fn()
     renderHome(demoState(), { onImportFile: onFile })
-    const hero = await screen.findByRole('region', { name: 'Room to spend today' })
+    const hero = await screen.findByRole('region', { name: 'Safe to spend today' })
     const card = screen.getByRole('region', { name: 'Start with your PayPal activity' })
-    expect(card.compareDocumentPosition(hero) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(within(card).getByText(/^You’re viewing Maya’s sample month\./)).toBeTruthy()
+    expect(hero.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(card).getByText(/^This is Maya’s sample plan\./)).toBeTruthy()
+    expect(within(card).getByRole('button', { name: /Try a sample export/ })).toBeTruthy()
+    expect(within(card).getByLabelText('Choose your PayPal activity CSV')).toBeTruthy()
     const how = card.querySelector('details')!
     expect(how.open).toBe(false)
-    expect(within(how).getByText('How to get the file from PayPal').closest('summary')).toBeTruthy()
+    expect(within(how).getByText('More').closest('summary')).toBeTruthy()
     expect(within(how).getAllByRole('listitem', { hidden: true })).toHaveLength(3)
+    expect(how.textContent).toContain('How to get the file from PayPal')
     expect(how.textContent).toContain('Raw CSV files aren’t saved')
-    await user.click(within(how).getByText('How to get the file from PayPal'))
+    await user.click(within(how).getByText('More'))
     expect(how.open).toBe(true)
     // A CSV dropped anywhere on the card is read like a chosen one.
     const file = new File([CSV], 'Download.CSV', { type: 'text/csv' })
@@ -429,7 +432,7 @@ describe('Start with your PayPal activity', () => {
         path === '/state' ? state : path === '/import/preview' ? preview : compare(state),
       )) as typeof api)
     render(<App />)
-    await user.click(await screen.findByRole('button', { name: /Try with a sample PayPal export/ }))
+    await user.click(await screen.findByRole('button', { name: /Try a sample export/ }))
     await waitFor(() => expect(window.location.hash).toBe('#import'))
     expect(await screen.findByRole('heading', { name: 'Check what Worth found' })).toBeTruthy()
     expect(await screen.findByText('Sample PayPal export (fictional)')).toBeTruthy()
@@ -464,10 +467,8 @@ describe('the month-led Home for imported PayPal activity', () => {
 
   it('leads with the month from PayPal, the next 30 days by week and the plans in progress', async () => {
     renderHome(monthState())
-    const hero = await screen.findByRole('region', {
-      name: 'Your month from PayPal · room to spend today, estimated',
-    })
-    await waitFor(() => expect(hero.textContent).toContain('With what you’ve confirmed'))
+    const hero = await screen.findByRole('region', { name: 'Safe to spend today' })
+    await waitFor(() => expect(hero.textContent).toContain('From your PayPal activity'))
     expect(hero.textContent).toMatch(/Your lowest point is about \$[\d,]+ on/)
     const next = screen.getByRole('region', { name: 'Next 30 days' })
     expect(
@@ -498,14 +499,14 @@ describe('the month-led Home for imported PayPal activity', () => {
     expect(screen.queryByText(/You’re viewing Maya’s sample month/)).toBeNull()
   })
 
-  it('orders a phone screen: the answer, the plan summary, the next days, then the composer', async () => {
+  it('orders a phone screen: the answer, the plan summary, then the next days', async () => {
     renderHome(monthState())
-    const hero = await screen.findByRole('region', { name: /Your month from PayPal/ })
+    const hero = await screen.findByRole('region', { name: 'Safe to spend today' })
     const line = screen.getByText(/in progress · next about Oct 16/).closest('p')!
     const next = screen.getByRole('region', { name: 'Next 30 days' })
-    const ask = screen.getByRole('region', { name: 'Thinking about buying something?' })
     const plans = screen.getByRole('region', { name: 'PayPal Pay in 4 plans in progress (2)' })
-    const order = [hero, line, next, ask, plans]
+    expect(screen.queryByRole('region', { name: 'Thinking about buying something?' })).toBeNull()
+    const order = [hero, line, next, plans]
     for (let index = 1; index < order.length; index++)
       expect(
         order[index - 1]!.compareDocumentPosition(order[index]!) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -545,7 +546,7 @@ describe('the month-led Home for imported PayPal activity', () => {
       ],
     }
     renderHome(state)
-    const hero = await screen.findByRole('region', { name: /Your month from PayPal/ })
+    const hero = await screen.findByRole('region', { name: 'Safe to spend today' })
     const room = compare(state)
     // The low is dated on a payday: a bill that day leaves before the pay lands.
     expect(room.buyToday.lowestDate).toBe('2026-11-03')
@@ -568,9 +569,9 @@ describe('the month-led Home for imported PayPal activity', () => {
     expect(desk.textContent).toContain('Last payment Wed, Oct 14')
   })
 
-  it('keeps Maya’s sample Home as it was', async () => {
+  it('keeps the sample Home’s own lists under the same hero', async () => {
     renderHome(demoState(), { onImportFile: vi.fn() })
-    expect(await screen.findByRole('region', { name: 'Room to spend today' })).toBeTruthy()
+    expect(await screen.findByRole('region', { name: 'Safe to spend today' })).toBeTruthy()
     expect(screen.getByRole('region', { name: 'Coming up' })).toBeTruthy()
     expect(screen.getByRole('complementary', { name: 'Saved and your plan' })).toBeTruthy()
     expect(screen.queryByRole('region', { name: 'Next 30 days' })).toBeNull()

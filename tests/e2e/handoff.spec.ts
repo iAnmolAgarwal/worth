@@ -30,7 +30,7 @@ test('analyse at Larkspur, consent, go back and pay: Worth shows the payment onc
 }) => {
   // A Worth user with the sample plan, whose Saved list has the camera.
   await page.goto(`${origins.worth}/`)
-  const room = page.locator('.balance .v')
+  const room = page.locator('.hero-v .sr')
   await expect(room).toHaveText('$440.01')
   const lowestBefore = await lowestBalance(page)
   await page.goto(`${origins.worth}/#saved`)
