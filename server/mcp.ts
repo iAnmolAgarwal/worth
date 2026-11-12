@@ -51,7 +51,7 @@ import {
 import { ACTIONS, checkDecision, decide, STATUSES } from './mcpDecision.ts'
 import type { Decision } from './mcpDecision.ts'
 import { publicSaved } from './saved.ts'
-import { plainText } from '../shared/text.ts'
+import { nameInSentence, plainText } from '../shared/text.ts'
 import type { AgentTokenRow, Store } from './store.ts'
 
 // ---- Tokens -------------------------------------------------------------------------------
@@ -699,7 +699,7 @@ async function purchaseCheckLink(
     plan.today,
     [
       verdict.summary,
-      `The person can compare buying the ${product.name.toLowerCase()} today, waiting or saving it in Worth, and decide there: ${url}`,
+      `The person can compare buying the ${nameInSentence(product.name)} today, waiting or saving it in Worth, and decide there: ${url}`,
       'Worth prepared no order and nothing has been paid.',
     ].join(' '),
     structured,

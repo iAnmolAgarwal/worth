@@ -1,5 +1,6 @@
 import { compareOptions, money, WAIT_SEARCH_DAYS } from '../shared/finance.ts'
 import type { FinancialProfile, Product, Purchase } from '../shared/types.ts'
+import { nameInSentence } from '../shared/text.ts'
 import { dateLabel } from './dates.ts'
 
 export type CheckoutOption = 'buyToday' | 'wait' | 'spendLess'
@@ -67,7 +68,7 @@ export function checkoutGuards(input: {
     if (product.priceCents > comparison.spendLess.maxPriceCents)
       return refuse(
         'OVER_SPEND_LESS_LIMIT',
-        `The ${product.name.toLowerCase()} costs ${money(product.priceCents)}, more than the ${money(comparison.spendLess.maxPriceCents)} that keeps your cushion today.`,
+        `The ${nameInSentence(product.name)} costs ${money(product.priceCents)}, more than the ${money(comparison.spendLess.maxPriceCents)} that keeps your cushion today.`,
       )
     fits = comparison.buyToday.outcome === 'fits'
   } else fits = comparison.buyToday.outcome === 'fits'

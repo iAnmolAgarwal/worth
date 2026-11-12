@@ -20,6 +20,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { confirmedSchedule } from '../shared/finance'
+import { nameInSentence } from '../shared/text'
 import type { ForecastPoint, OptionResult, ScheduledFlow } from '../shared/types'
 import { api } from './api'
 import type { AppState, Comparison } from './contract'
@@ -51,12 +52,8 @@ export const fits = (option: OptionResult) => option.outcome === 'fits'
 
 /** Readable label for a bill name inside a sentence: "rent" from "Apartment rent" stays as is. */
 export const lower = (name: string) => name.charAt(0).toLowerCase() + name.slice(1)
-/**
- * An item or bill name inside a sentence; one whose first part has another capital ("Halden X5")
- * is a proper name. What follows " · " ("Laptop · Pay in 4") doesn't count.
- */
-export const lowerName = (name: string) =>
-  /\p{Lu}/u.test(name.split(' · ')[0]!.slice(1)) ? name : lower(name)
+/** An item or bill name inside a sentence, keeping a proper name's case (shared/text.ts). */
+export const lowerName = nameInSentence
 
 const ICONS: Record<string, LucideIcon> = {
   briefcase: Banknote,

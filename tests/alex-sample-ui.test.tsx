@@ -6,6 +6,7 @@ import App from '../src/App'
 import { fitStatus, Saved, Settings } from '../src/Saved'
 import { api } from '../src/api'
 import { lowerName } from '../src/engine'
+import { nameInSentence } from '../shared/text'
 import { payIn4Lines } from '../src/payIn4Text'
 import { compareOptions } from '../shared/finance'
 import { ALEX_DEMO_DAY, createCameraScenario, PRODUCTS } from '../shared/seed'
@@ -125,6 +126,15 @@ describe('item names inside a sentence', () => {
     expect(lowerName('Everyday camera')).toBe('everyday camera')
     expect(lowerName('Halden X5')).toBe('Halden X5')
     expect(lowerName('MacBook Pro 14-inch')).toBe('MacBook Pro 14-inch')
+  })
+})
+
+describe('nameInSentence, shared with the server', () => {
+  it('keeps a word with a digit in it as written', () => {
+    expect(nameInSentence('Halden X5')).toBe('Halden X5')
+    expect(nameInSentence('Lumen x5 lens')).toBe('Lumen x5 lens')
+    expect(nameInSentence('Desk chair')).toBe('desk chair')
+    expect(nameInSentence('Laptop · Pay in 4')).toBe('laptop · Pay in 4')
   })
 })
 

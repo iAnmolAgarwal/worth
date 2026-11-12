@@ -320,6 +320,19 @@
 html:has(.import-review) {
   scroll-padding-bottom: calc(96px + var(--safe-bottom));
 }
+/*
+ * From tablet width up, the review's Back and Continue sit at the end of the page, in flow, so the
+ * bar never covers a card while the page scrolls (or in a full-page capture). Phones keep the
+ * sticky bar within thumb reach; an open question is still brought into view on Continue.
+ */
+@media (min-width: 768px) {
+  .import-review .wizard-foot {
+    position: static;
+  }
+  html:has(.import-review) {
+    scroll-padding-bottom: 0;
+  }
+}
 
 /* ---------- Timeline note ---------- */
 .tl-note {
