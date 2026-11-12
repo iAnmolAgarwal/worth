@@ -9,8 +9,8 @@ import { lowerName } from '../src/engine'
 import { nameInSentence } from '../shared/text'
 import { payIn4Lines } from '../src/payIn4Text'
 import { compareOptions } from '../shared/finance'
-import { ALEX_DEMO_DAY, createCameraScenario, PRODUCTS } from '../shared/seed'
-import type { AppState, DemoPreset } from '../shared/types'
+import { ALEX_DEMO_DAY, ALEX_RETURN_DAY, createCameraScenario, PRODUCTS } from '../shared/seed'
+import type { AppState, DemoPreset, Purchase } from '../shared/types'
 
 // The default sample in the browser: Alex pinned to his sample day, labelled in one short line,
 // with no "Back to today" and no Maya anywhere on screen.
@@ -175,6 +175,44 @@ describe('Saved says whether each item fits', () => {
     const over = fitStatus(state, 900000)!
     expect(over.tone).toBe('bad')
     expect(over.text).toBe('Over by $8,127.74')
+  })
+
+  it('leaves an item’s own open checkout out of its status, and counts it once for the rest', () => {
+    const state = alexState(ALEX_RETURN_DAY, 'demo-dec15')
+    const camera = { productId: 'halden-x5', itemName: 'Halden X5' }
+    const headphones = { productId: 'headphones', itemName: 'Studio headphones' }
+    expect(fitStatus(state, 189900, camera)).toEqual({ tone: 'ok', text: 'Fits today' })
+    expect(fitStatus(state, 34900, headphones)).toEqual({ tone: 'ok', text: 'Fits today' })
+    // Buy with PayPal on the camera: its $1,899 is held while the checkout is open.
+    const hold: Purchase = {
+      id: 'p-camera',
+      productId: 'halden-x5',
+      name: 'Halden X5',
+      amountCents: 189900,
+      currency: 'USD',
+      mode: 'sandbox',
+      status: 'pending',
+      createdAt: '2026-12-15T10:00:00.000Z',
+      profileVersion: state.profile.version,
+      assessmentDate: ALEX_RETURN_DAY,
+    }
+    const open = { ...state, purchases: [...state.purchases, hold] }
+    // The camera is what the checkout pays for: it still fits.
+    expect(fitStatus(open, 189900, camera)).toEqual({ tone: 'ok', text: 'Fits today' })
+    // The headphones are judged with the camera's $1,899 reserved once: $158.78 of room is left.
+    const engine = compareOptions(open.profile, open.purchases, {
+      amountCents: 34900,
+      today: ALEX_RETURN_DAY,
+    })
+    expect(engine.spendLess.maxPriceCents).toBe(15878)
+    expect(fitStatus(open, 34900, headphones)).toEqual({ tone: 'bad', text: 'Over by $190.22' })
+    // Cancelling the checkout releases the hold: both are back to their normal status.
+    const cancelled = {
+      ...state,
+      purchases: [...state.purchases, { ...hold, status: 'cancelled' as const }],
+    }
+    expect(fitStatus(cancelled, 189900, camera)).toEqual({ tone: 'ok', text: 'Fits today' })
+    expect(fitStatus(cancelled, 34900, headphones)).toEqual({ tone: 'ok', text: 'Fits today' })
   })
 
   it('shows it on each saved card as the main status', () => {

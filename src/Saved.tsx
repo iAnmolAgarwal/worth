@@ -15,7 +15,7 @@ import {
   Store,
   Trash2,
 } from 'lucide-react'
-import { addDays, compareOptions, WAIT_SEARCH_DAYS } from '../shared/finance'
+import { addDays, compareOptions, WAIT_SEARCH_DAYS, withoutOwnHold } from '../shared/finance'
 import { DEMO_PRESET_DAYS } from '../shared/seed'
 import type { Product, SavedItem, SavedPriceCheck } from '../shared/types'
 import { api, ApiError } from './api'
@@ -168,12 +168,20 @@ function Picture({
 /**
  * Whether a saved item fits, from the engine on this plan today: "Fits today", "Fits <day>" (the
  * wait date) or "Over by $X" (past the most that fits today, with no day in the search). Undefined
- * while the plan can't give an answer, so the older plan pills show instead.
+ * while the plan can't give an answer, so the older plan pills show instead. The item's own open
+ * checkout is left out: its hold already reduces the plan, and the item is what it is paying for.
  */
-export function fitStatus(state: AppState, amountCents: number) {
+export function fitStatus(
+  state: AppState,
+  amountCents: number,
+  item: { productId?: string; itemName?: string } = {},
+) {
   let c
   try {
-    c = compareOptions(state.profile, state.purchases, { amountCents, today: state.today })
+    c = compareOptions(state.profile, withoutOwnHold(state.purchases, { ...item, amountCents }), {
+      amountCents,
+      today: state.today,
+    })
   } catch {
     return undefined
   }
@@ -623,7 +631,16 @@ export function Saved({
       new Map(
         (state.saved ?? [])
           .filter((item) => item.status !== 'bought')
-          .map((item) => [item.id, fitStatus(state, item.amountCents)] as const),
+          .map(
+            (item) =>
+              [
+                item.id,
+                fitStatus(state, item.amountCents, {
+                  productId: item.kind === 'catalog' ? item.productId : undefined,
+                  itemName: item.name,
+                }),
+              ] as const,
+          ),
       ),
     [state],
   )

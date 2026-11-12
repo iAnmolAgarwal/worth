@@ -1048,7 +1048,7 @@ export function clarificationText(
     case 'alternatives':
       return 'Which one should I check? Tell me the item and its price, or say if you plan to buy them together.'
     case 'amount_unclear':
-      return 'I couldn’t read one of the amounts. What is the total price in US dollars, written like $1,199.00?'
+      return 'I couldn’t read one of the amounts. What is the total price in US dollars, written like $1,899.00?'
     case 'items_unclear':
       return 'I see more than one amount. Which total should I check, and are you buying these together?'
     case 'payday_missing':
@@ -1061,6 +1061,6 @@ export function clarificationText(
     case 'date_unresolved':
       if (result.choices && result.choices.length > 1 && result.choices.length <= 3)
         return `Which day do you mean: ${result.choices.map((d) => dateLabel(d, data.today)).join(' or ')}?`
-      return `Which day would you buy ${item}? Pick a day from today through ${end}, for example “tomorrow”, “next Friday” or “Oct 16”.`
+      return `Which day would you buy ${item}? Pick a day from today through ${end}, for example “tomorrow”, “next Friday” or “Dec 15”.`
   }
 }
