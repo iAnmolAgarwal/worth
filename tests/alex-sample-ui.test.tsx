@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
@@ -247,5 +247,18 @@ describe('Saved says whether each item fits', () => {
     )
     expect(screen.getByText('Fits Tue, Dec 15')).toBeTruthy()
     expect(screen.getByText('Fits today')).toBeTruthy()
+  })
+})
+
+describe('Home’s Coming up list', () => {
+  it('has one link to the full list: "And N more" when the list is cut, no second "Show all"', async () => {
+    const state = alexState()
+    routeApi((path, data) => (path === '/state' ? state : compare(state, data)))
+    render(<App />)
+    const coming = await screen.findByRole('region', { name: 'Coming up' })
+    expect(
+      within(coming).getByRole('button', { name: /^And \d+ more in the next 30 days$/ }),
+    ).toBeTruthy()
+    expect(within(coming).queryByRole('button', { name: 'Show all' })).toBeNull()
   })
 })

@@ -187,8 +187,9 @@ export function Check({
     const qid = token ? undefined : rememberedQid()
     // Tokens over 4 KB are refused unread, so one is never sent.
     if ((!token && !qid) || (token && token.length > 4096)) {
+      // With no store link at all there is nothing to fail to verify: just the plain form.
       // oxlint-disable-next-line react/set-state-in-effect
-      setView({ kind: 'unverified', message: UNVERIFIED })
+      setView({ kind: 'unverified', message: token ? UNVERIFIED : '' })
       return
     }
     const request: Promise<{ quote: HandoffQuote; state?: AppState; replay?: boolean }> = token
@@ -253,13 +254,17 @@ export function Check({
                     ? 'Worth couldn’t open this link'
                     : 'Check an item yourself'}
             </h1>
-            <Alert
-              tone={view.kind === 'currency' ? 'info' : 'warn'}
-              icon={view.kind === 'expired' ? Clock : view.kind === 'currency' ? Info : CircleAlert}
-              live
-            >
-              {view.message}
-            </Alert>
+            {view.message && (
+              <Alert
+                tone={view.kind === 'currency' ? 'info' : 'warn'}
+                icon={
+                  view.kind === 'expired' ? Clock : view.kind === 'currency' ? Info : CircleAlert
+                }
+                live
+              >
+                {view.message}
+              </Alert>
+            )}
             {view.kind === 'failed' && (
               <div>
                 <Button

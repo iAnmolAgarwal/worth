@@ -525,10 +525,11 @@ describe('/check error states (contract §3.4)', () => {
     expect(params.get('item')).toBe('Desk lamp')
   })
 
-  it('shows the unverified state without asking the server when there is no link at all', async () => {
+  it('shows the plain form, with no warning and no server call, when there is no link at all', async () => {
     route()
     visit('')
-    expect(await screen.findByText(UNVERIFIED)).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'Check an item yourself' })).toBeTruthy()
+    expect(screen.queryByText(UNVERIFIED)).toBeNull()
     expect(calls('/handoff/open')).toHaveLength(0)
     expect(storeLinks()).toHaveLength(0)
   })
