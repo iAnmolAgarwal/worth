@@ -198,7 +198,9 @@ export function SavedRows({
                     ? 'May fit now'
                     : item.waitDate
                       ? `Planned for ${dayLabel(item.waitDate)}`
-                      : (product?.merchant ?? ASSESSMENT_ONLY)}
+                      : product
+                        ? (product.subtitle ?? product.category)
+                        : ASSESSMENT_ONLY}
                 </span>
               </div>
             </div>
