@@ -378,6 +378,34 @@ describe('the Home hero', () => {
     }
   })
 
+  it('starts Coming up and Saved with a card right under each heading', async () => {
+    const state = makeState()
+    state.saved = [
+      {
+        id: 'saved-camera',
+        productId: PRODUCTS[0]!.id,
+        name: PRODUCTS[0]!.name,
+        amountCents: PRODUCTS[0]!.priceCents,
+        status: 'saved',
+      } as unknown as NonNullable<AppState['saved']>[number],
+    ]
+    renderHome(state)
+    const coming = await screen.findByRole('region', { name: 'Coming up' })
+    // "Next 2 weeks" is on the heading line, not between the heading and the first card.
+    expect(coming.querySelector('.sec-head')?.textContent).toContain('Next 2 weeks')
+    expect(within(coming).queryByRole('heading', { level: 3, name: 'Next 2 weeks' })).toBeNull()
+    expect(coming.querySelector('.sec-head')?.nextElementSibling?.className).toBe('rows')
+    const saved = screen.getByRole('region', { name: 'Saved' })
+    expect(saved.querySelector('.sec-head')?.nextElementSibling?.className).toBe('rows')
+    // Saved items are bordered cards like Coming up's, and keep their accessible names.
+    const card = within(saved).getByRole('button', { name: new RegExp(PRODUCTS[0]!.name) })
+    expect(card.classList.contains('row')).toBe(true)
+    expect(card.classList.contains('plain')).toBe(false)
+    expect(
+      screen.getByRole('button', { name: /Connect an agent/ }).classList.contains('plain'),
+    ).toBe(false)
+  })
+
   it('has no inline composer, and the rail opens Connect an agent', async () => {
     const user = userEvent.setup()
     const { onNavigate } = renderHome(makeState())

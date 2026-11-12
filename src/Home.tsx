@@ -130,9 +130,14 @@ function ComingUp({ state, onShowAll }: { state: AppState; onShowAll: () => void
   return (
     <section aria-labelledby="coming-title">
       <div className="sec-head">
-        <h2 className="h-section" id="coming-title">
-          Coming up
-        </h2>
+        {/* The first group's label sits on the heading line, so the first card lines up with
+            Saved's first card beside it. */}
+        <div className="sec-title">
+          <h2 className="h-section" id="coming-title">
+            Coming up
+          </h2>
+          {soon.length > 0 && <span className="sec-sub">Next 2 weeks</span>}
+        </div>
         <button type="button" className="link" onClick={onShowAll}>
           Show all
         </button>
@@ -140,12 +145,7 @@ function ComingUp({ state, onShowAll }: { state: AppState; onShowAll: () => void
       {!upcoming.length && (
         <p className="meta">Nothing scheduled in the next 30 days. Add your bills in your plan.</p>
       )}
-      {soon.length > 0 && (
-        <>
-          <h3 className="group-label">Next 2 weeks</h3>
-          <div className="rows">{soon.map(row)}</div>
-        </>
-      )}
+      {soon.length > 0 && <div className="rows">{soon.map(row)}</div>}
       {later.length > 0 && (
         <>
           <h3 className="group-label" style={{ marginTop: 'var(--s-4)' }}>
@@ -177,19 +177,18 @@ export function SavedRows({
       {items.map((item) => {
         const product = products.find((p) => p.id === item.productId)
         return (
-          <button
-            type="button"
-            className="row plain small"
-            key={item.id}
-            onClick={() => onOpen(item)}
-          >
+          <button type="button" className="row" key={item.id} onClick={() => onOpen(item)}>
             {product ? (
               <img className="thumb" src={product.image} alt="" />
             ) : (
               <Disc icon={Bookmark} kind="plan" />
             )}
             <div className="body">
-              <div className="t">{item.name}</div>
+              {/* The name and price share the first line; the sub-line spans the column below. */}
+              <div className="top">
+                <div className="t">{item.name}</div>
+                <div className="amt num">{money(item.amountCents)}</div>
+              </div>
               <div className="s">
                 <span className="soft">
                   {item.status === 'ready'
@@ -202,7 +201,6 @@ export function SavedRows({
                 </span>
               </div>
             </div>
-            <div className="amt num">{money(item.amountCents)}</div>
           </button>
         )
       })}
@@ -213,7 +211,7 @@ export function SavedRows({
 /** The rail's way in to Settings › Connect an agent: Worth as a tool an AI shopping agent calls. */
 function AgentEntry({ onOpen }: { onOpen: () => void }) {
   return (
-    <button type="button" className="row plain small agent-entry" onClick={onOpen}>
+    <button type="button" className="row small agent-entry" onClick={onOpen}>
       <Disc icon={Bot} kind="plan" />
       <div className="body">
         <div className="t">Connect an agent</div>
@@ -277,7 +275,7 @@ export function Home({
   )
   const nextDays = <NextThirtyDays state={state} onShowAll={() => onNavigate('plan')} />
   return (
-    <div className="page">
+    <div className="page home-page">
       <div className="wrap">
         <h1 className="sr">Home</h1>
         <div className="home-band">
@@ -410,7 +408,7 @@ export function Home({
             </section>
             <AgentEntry onOpen={() => onNavigate('settings')} />
             {!month && (
-              <section aria-labelledby="plan-title">
+              <section className="rail-card" aria-labelledby="plan-title">
                 <div className="sec-head">
                   <h2 className="h-section" id="plan-title">
                     Your plan
