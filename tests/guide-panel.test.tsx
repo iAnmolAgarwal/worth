@@ -3,7 +3,7 @@ import { act, cleanup, render, screen, waitFor, within } from '@testing-library/
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
-import { nudgeLine, offerVerdict } from '../src/AgentLauncher'
+import { clearSpot, nudgeLine, offerVerdict } from '../src/AgentLauncher'
 import { Ask, moodFor, offerStarters, splitVerdict } from '../src/Ask'
 import { Decision } from '../src/Decision'
 import { Guide } from '../src/Guide'
@@ -164,6 +164,28 @@ describe('the nudge', () => {
     expect(nudgeLine({ ...state, profile: { ...state.profile, confirmed: false } })).toBe(
       'Thinking about buying something? Ask me first.',
     )
+  })
+})
+
+describe('where the nudge sits', () => {
+  it('takes a spot only when it is on screen and covers no control outside the launcher', () => {
+    const dock = document.createElement('div')
+    const own = document.createElement('button')
+    dock.append(own)
+    const page = document.createElement('a')
+    page.href = '#saved'
+    document.body.append(dock, page)
+    const rect = (left: number, top: number, width: number, height: number) =>
+      ({ left, top, width, height, right: left + width, bottom: top + height }) as DOMRect
+    own.getBoundingClientRect = () => rect(900, 600, 56, 56)
+    page.getBoundingClientRect = () => rect(700, 500, 80, 20)
+    // Over the page's link: not clear. Over the launcher's own button only: clear.
+    expect(clearSpot(rect(650, 480, 260, 80), dock)).toBe(false)
+    expect(clearSpot(rect(800, 560, 200, 30), dock)).toBe(true)
+    // Off screen to the left: not clear.
+    expect(clearSpot(rect(-20, 560, 200, 30), dock)).toBe(false)
+    dock.remove()
+    page.remove()
   })
 })
 
@@ -364,12 +386,12 @@ describe('the launcher and panel in the app', () => {
     )
     // The page behind stays usable.
     expect(screen.getByRole('navigation', { name: 'Main' })).toBeTruthy()
-    // It makes room for the panel on wide screens (agent.css), and adds no second banner.
-    expect(document.querySelector('.panel-open')).toBeTruthy()
+    // It overlaps the page: nothing behind it is restyled or moved. No second banner either.
+    expect(document.querySelector('.panel-open')).toBeNull()
+    expect(document.querySelector('main')!.getAttribute('style')).toBeNull()
     expect(within(panel).queryByRole('banner')).toBeNull()
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('dialog', { name: 'Ask Worth' })).toBeNull()
-    expect(document.querySelector('.panel-open')).toBeNull()
     await waitFor(() => expect(document.activeElement).toBe(launcher))
   })
 

@@ -1,4 +1,12 @@
-import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react'
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from 'react'
 import { X } from 'lucide-react'
 import { getUpcomingFlows } from '../shared/finance'
 import type { AppState, Comparison } from './contract'
@@ -43,6 +51,33 @@ export function nudgeLine(state: AppState) {
   const days = daysFrom(state.today, due.date)
   const when = days <= 0 ? 'today' : days === 1 ? 'tomorrow' : `in ${days} days`
   return `${capitalize(displayName(due.flow.name))} is due ${when}. Ask me before you buy.`
+}
+
+/** Where the nudge may sit, in order: above the launcher, narrower above it, or to its left. */
+const SPOTS = [
+  { place: 'above', width: 260 },
+  { place: 'above', width: 200 },
+  // Fits the 136 px margin beside a 1,120 px page at 1440.
+  { place: 'above', width: 128 },
+  { place: 'left', width: 260 },
+] as const
+const CONTROLS =
+  'a[href], button, input, select, textarea, summary, [role="button"], [tabindex]:not([tabindex="-1"])'
+/** True when `box` is on screen and covers no control outside the launcher's own dock. */
+export function clearSpot(box: DOMRect, dock: Element) {
+  if (box.left < 0 || box.top < 0 || box.right > window.innerWidth) return false
+  return ![...document.querySelectorAll(CONTROLS)].some((element) => {
+    if (dock.contains(element)) return false
+    const r = element.getBoundingClientRect()
+    return (
+      r.width > 0 &&
+      r.height > 0 &&
+      r.right > box.left - 4 &&
+      r.left < box.right + 4 &&
+      r.bottom > box.top - 4 &&
+      r.top < box.bottom + 4
+    )
+  })
 }
 
 function nudgedThisSession() {
@@ -92,20 +127,57 @@ export function AgentLauncher({
   const panel = useRef<HTMLElement>(null)
   const look = useLook(launcher, !open && !hidden)
   const [blinking, setBlinking] = useState(false)
-  const [bubble, setBubble] = useState(false)
+  /** `finding` measures each spot unseen; `waiting` retries on scroll; `shown` is on screen. */
+  const [bubble, setBubbleState] = useState<false | 'finding' | 'waiting' | 'shown'>(false)
+  const [spot, setSpot] = useState(0)
+  const dock = useRef<HTMLDivElement>(null)
+  const nudgeBox = useRef<HTMLDivElement>(null)
 
   // The nudge appears once per session, a moment after the first screen settles.
   useEffect(() => {
     if (!nudge || hidden || open || nudgedThisSession()) return
     const show = setTimeout(() => {
       rememberNudge()
-      setBubble(true)
+      setSpot(0)
+      setBubbleState('finding')
     }, NUDGE_DELAY)
     return () => clearTimeout(show)
   }, [nudge, hidden, open])
+  // The nudge never covers a control: it takes the first clear spot, or waits for a scroll.
+  // Each spot is measured on the page before paint, so the state follows the DOM.
+  useLayoutEffect(() => {
+    if (bubble !== 'finding' || !nudgeBox.current || !dock.current) return
+    const clear = clearSpot(nudgeBox.current.getBoundingClientRect(), dock.current)
+    const next = clear ? 'shown' : spot < SPOTS.length - 1 ? undefined : 'waiting'
+    // oxlint-disable-next-line react/set-state-in-effect
+    if (next) setBubbleState(next)
+    // oxlint-disable-next-line react/set-state-in-effect
+    else setSpot(spot + 1)
+  }, [bubble, spot])
   useEffect(() => {
-    if (!bubble) return
-    const hide = setTimeout(() => setBubble(false), NUDGE_FOR)
+    if (bubble !== 'waiting') return
+    let timer: ReturnType<typeof setTimeout>
+    const retry = () => {
+      clearTimeout(timer)
+      timer = setTimeout(() => {
+        setSpot(0)
+        setBubbleState('finding')
+      }, 150)
+    }
+    window.addEventListener('scroll', retry, { passive: true })
+    window.addEventListener('resize', retry)
+    // Nowhere clear for the whole time it would have shown: it gives up for this session.
+    const giveUp = setTimeout(() => setBubbleState(false), NUDGE_FOR)
+    return () => {
+      clearTimeout(timer)
+      clearTimeout(giveUp)
+      window.removeEventListener('scroll', retry)
+      window.removeEventListener('resize', retry)
+    }
+  }, [bubble])
+  useEffect(() => {
+    if (bubble !== 'shown') return
+    const hide = setTimeout(() => setBubbleState(false), NUDGE_FOR)
     return () => clearTimeout(hide)
   }, [bubble])
   // A blink now and then (CSS keeps it still under reduced motion).
@@ -145,21 +217,31 @@ export function AgentLauncher({
   }
   return (
     <>
-      <div className={cx('agent-dock', lifted && 'lifted')} hidden={hidden || open}>
-        {bubble && nudge && (
-          <div className="agent-nudge" role="status">
+      <div ref={dock} className={cx('agent-dock', lifted && 'lifted')} hidden={hidden || open}>
+        {bubble && bubble !== 'waiting' && nudge && (
+          <div
+            ref={nudgeBox}
+            className="agent-nudge"
+            role={bubble === 'shown' ? 'status' : undefined}
+            data-place={SPOTS[spot]!.place}
+            data-narrow={SPOTS[spot]!.width < 200 || undefined}
+            style={{
+              width: SPOTS[spot]!.width,
+              visibility: bubble === 'shown' ? undefined : 'hidden',
+            }}
+          >
             <button
               type="button"
               className="agent-nudge-text"
               onClick={() => {
-                setBubble(false)
+                setBubbleState(false)
                 onOpenChange(true)
               }}
             >
               <span className="agent-nudge-who">Worth</span>
               {nudge}
             </button>
-            <IconButton label="Dismiss" icon={X} quiet onClick={() => setBubble(false)} />
+            <IconButton label="Dismiss" icon={X} quiet onClick={() => setBubbleState(false)} />
           </div>
         )}
         <button
@@ -171,7 +253,7 @@ export function AgentLauncher({
           aria-expanded={open}
           aria-controls={panelId}
           onClick={() => {
-            setBubble(false)
+            setBubbleState(false)
             onOpenChange(true)
           }}
         >
@@ -203,7 +285,10 @@ export function AgentLauncher({
             <h2 id={titleId}>Ask Worth</h2>
             <p className="caption">Every number is Worth’s</p>
           </div>
-          <IconButton label="Close Ask Worth" icon={X} quiet onClick={close} />
+          <span className="agent-close">
+            <kbd aria-hidden="true">Esc</kbd>
+            <IconButton label="Close Ask Worth" icon={X} quiet onClick={close} />
+          </span>
         </div>
         {children}
       </section>
