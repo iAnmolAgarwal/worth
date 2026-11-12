@@ -92,6 +92,11 @@ export function autoStart(search: string, seen: boolean, automated: boolean) {
   return !seen && !automated
 }
 
+/** Whether this page load will try to start the tour: the guide's nudge waits for it. */
+export function tourOnLoad() {
+  return autoStart(window.location.search, tourSeen(), Boolean(navigator.webdriver))
+}
+
 /** Starts the tour from anywhere, such as the guide panel's "Take the tour". */
 export function startTour() {
   window.dispatchEvent(new Event(TOUR_EVENT))
@@ -244,6 +249,9 @@ function entering() {
     )
   })
 }
+const POLL = 250
+/** How long a step's feature may be missing (still mounting) before it is skipped. */
+const FIRST_WAIT = 2000
 const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
 /** Space the sticky top bar takes; a feature under it is scrolled into view. */
 const TOP_CLEAR = 96
@@ -252,6 +260,7 @@ export function Tour({
   home,
   blocked,
   onHome,
+  onActive,
 }: {
   /** Home is showing: the tour starts and stays only there. */
   home: boolean
@@ -259,13 +268,15 @@ export function Tour({
   blocked: boolean
   /** Goes to Home, for a replay asked for elsewhere. */
   onHome: () => void
+  /** Told when the tour is waiting to start or running, and when it is over. */
+  onActive?: (active: boolean) => void
 }) {
-  const [wanted, setWanted] = useState(() =>
-    autoStart(window.location.search, tourSeen(), Boolean(navigator.webdriver)),
-  )
+  const [wanted, setWanted] = useState(tourOnLoad)
   const [run, setRun] = useState<{ steps: TourStep[]; index: number }>()
   const [target, setTarget] = useState<Box>()
   const [radius, setRadius] = useState(8)
+  /** Bumped when a step's missing feature turns up, to measure it again. */
+  const [retry, setRetry] = useState(0)
   const [place, setPlace] = useState<Placement | 'pinned-top' | 'pinned-bottom'>()
   const callout = useRef<HTMLDivElement>(null)
   /** Where focus was when the tour began; it goes back there at the end. */
@@ -275,6 +286,10 @@ export function Tour({
   const titleId = useId()
   const textId = useId()
   const step = run?.steps[run.index]
+  const active = wanted || Boolean(run)
+  const tell = useRef(onActive)
+  tell.current = onActive
+  useEffect(() => tell.current?.(active), [active])
 
   // "Take the tour": back to Home, then the same start as a first visit.
   useEffect(() => {
@@ -290,34 +305,43 @@ export function Tour({
   useEffect(() => {
     if (!wanted || run || !home || blocked) return
     let tries = 0
+    /** Polls since Home stopped loading and animating. */
+    let settled = 0
     let timer: ReturnType<typeof setTimeout>
     let seenReady = false
     const poll = () => {
+      tries += 1
       const busy = document.querySelector('#main [aria-busy="true"]') || entering()
+      settled = busy ? 0 : settled + 1
       const steps = busy ? [] : presentSteps()
+      // The amount comes first: while the hero is still mounting, give it a moment.
+      const first = steps[0] === TOUR_STEPS[0] || settled * POLL >= FIRST_WAIT
       // Ready twice in a row, so the callout never lands on a layout still settling.
-      if (steps.length && seenReady) {
+      if (steps.length && first && seenReady) {
         opener.current = document.activeElement
         setWanted(false)
         setRun({ steps, index: 0 })
         return
       }
-      seenReady = steps.length > 0
-      if (++tries < 50) timer = setTimeout(poll, 250)
-      // Nothing to point at (a plan that never loaded): no tour this time, and not marked as seen.
-      else setWanted(false)
+      seenReady = steps.length > 0 && first
+      // Nothing to point at once Home has settled, or a plan that never loaded: no tour this time,
+      // and not marked as seen.
+      if ((!steps.length && settled >= 3) || tries >= 50) setWanted(false)
+      else timer = setTimeout(poll, POLL)
     }
-    timer = setTimeout(poll, 250)
+    timer = setTimeout(poll, POLL)
     return () => clearTimeout(timer)
   }, [wanted, run, home, blocked])
 
-  const finish = useCallback(() => {
+  /** Ends the tour. Focus goes back only when the visitor ended it here (Skip, Done, Escape). */
+  const finish = useCallback((restore = true) => {
     rememberTour()
     setRun(undefined)
     setTarget(undefined)
     setPlace(undefined)
     const back = opener.current
     opener.current = null
+    if (!restore) return
     requestAnimationFrame(() => {
       const visible = (element: Element | null): element is HTMLElement =>
         element instanceof HTMLElement && element.isConnected && element.getClientRects().length > 0
@@ -339,27 +363,30 @@ export function Tour({
   // Leaving Home, or opening the panel or a dialog, ends the tour.
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect
-    if (run && (!home || blocked)) finish()
+    if (run && (!home || blocked)) finish(false)
   }, [run, home, blocked, finish])
 
-  // The page under a running tour: the guide's nudge waits (tour.css), and the step's feature is
-  // scrolled into view and followed through scrolling and resizing.
-  useEffect(() => {
-    if (!run) return
-    document.documentElement.dataset.touring = ''
-    return () => {
-      delete document.documentElement.dataset.touring
-    }
-  }, [run])
+  // The step's feature is scrolled into view and followed through scrolling and resizing.
   useLayoutEffect(() => {
     if (!step) return
     const element = findAnchor(step.anchor)
     const measure = step.tight ? shownBox : boxOf
-    // Gone since the tour began: skipped silently.
+    // Not on the page (gone, or still mounting): wait a moment, then skip it silently.
     if (!element) {
       // oxlint-disable-next-line react/set-state-in-effect
-      move(1)
-      return
+      setTarget(undefined)
+      let waited = 0
+      const timer = setInterval(() => {
+        waited += 100
+        if (findAnchor(step.anchor)) {
+          clearInterval(timer)
+          setRetry((value) => value + 1)
+        } else if (waited >= FIRST_WAIT) {
+          clearInterval(timer)
+          move(1)
+        }
+      }, 100)
+      return () => clearInterval(timer)
     }
     const box = element.getBoundingClientRect()
     const fitsHeight = box.height <= window.innerHeight - TOP_CLEAR - 24
@@ -387,7 +414,7 @@ export function Tour({
     }
     // A new step, not a new `run` object, moves the spotlight.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [step])
+  }, [step, retry])
   // The callout is measured on the page, then placed beside the feature before paint.
   useLayoutEffect(() => {
     if (!step || !target || !callout.current) return
@@ -420,13 +447,29 @@ export function Tour({
     focused.current = true
     callout.current?.focus()
   }, [shown])
-  // Escape skips, Enter or → goes on, ← goes back. Enter and Space on the callout's own buttons
-  // press those buttons.
+  // With focus in the callout (or nowhere): Escape skips, Enter or → goes on, ← goes back, and
+  // Enter or Space on its own buttons press them. Keys meant for anything else on the page pass
+  // through. Tab stays in the callout while it is open, so nobody tabs into the dimmed page.
   useEffect(() => {
     if (!run) return
     const onKey = (event: KeyboardEvent) => {
-      const onButton =
-        event.target instanceof HTMLButtonElement && callout.current?.contains(event.target)
+      const box = callout.current
+      if (!box) return
+      const target = event.target as Node | null
+      const inside = target === document.body || Boolean(target && box.contains(target))
+      if (event.key === 'Tab') {
+        const controls = [...box.querySelectorAll<HTMLElement>('button')]
+        if (!controls.length) return
+        const at = controls.indexOf(document.activeElement as HTMLElement)
+        const next = event.shiftKey
+          ? controls[at <= 0 ? controls.length - 1 : at - 1]!
+          : controls[at < 0 || at === controls.length - 1 ? 0 : at + 1]!
+        event.preventDefault()
+        next.focus()
+        return
+      }
+      if (!inside) return
+      const onButton = target instanceof HTMLButtonElement
       if (event.key === 'Escape') finish()
       else if (event.key === 'ArrowRight' || (event.key === 'Enter' && !onButton)) move(1)
       else if (event.key === 'ArrowLeft') move(-1)
@@ -461,7 +504,13 @@ export function Tour({
   return (
     <div className="tour">
       {panes.map((style, index) => (
-        <div key={index} className="tour-pane" style={style} aria-hidden="true" onClick={finish} />
+        <div
+          key={index}
+          className="tour-pane"
+          style={style}
+          aria-hidden="true"
+          onClick={() => finish()}
+        />
       ))}
       {hole && (
         <div className="tour-spot" style={{ ...hole, borderRadius: radius }} aria-hidden="true" />
@@ -496,7 +545,12 @@ export function Tour({
           <span className="tour-count" aria-hidden="true">
             {counter}
           </span>
-          <button type="button" className="tour-skip" onClick={finish}>
+          {run.index > 0 && (
+            <button type="button" className="tour-skip" onClick={() => move(-1)}>
+              Back
+            </button>
+          )}
+          <button type="button" className="tour-skip" onClick={() => finish()}>
             Skip
           </button>
           <button type="button" className="tour-next" onClick={() => move(1)}>

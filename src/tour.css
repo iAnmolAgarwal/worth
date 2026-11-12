@@ -145,8 +145,3 @@
     opacity: 0;
   }
 }
-
-/* The guide's once-a-session nudge waits while the tour runs; it keeps its place for afterwards. */
-html[data-touring] .agent-nudge {
-  visibility: hidden !important;
-}

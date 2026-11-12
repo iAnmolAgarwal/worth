@@ -190,7 +190,6 @@ describe('the tour on Home', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
     busy.remove()
     expect((await dialog()).textContent).toContain('1 of 2')
-    expect(document.documentElement.dataset.touring).toBe('')
   })
 
   it('does not start on a return visit, or while the panel is open', async () => {
@@ -216,19 +215,18 @@ describe('the tour on Home', () => {
     render(<Tour home blocked={false} onHome={() => {}} />)
     const callout = await dialog()
     await waitFor(() => expect(document.activeElement).toBe(callout))
-    fireEvent.keyDown(document, { key: 'ArrowRight' })
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' })
     expect(screen.getByRole('dialog', { name: 'Where the rest goes' })).toBeTruthy()
     expect(screen.getByRole('dialog').textContent).toContain('2 of 3')
-    fireEvent.keyDown(document, { key: 'ArrowLeft' })
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowLeft' })
     expect(screen.getByRole('dialog', { name: 'Safe to spend today' })).toBeTruthy()
-    fireEvent.keyDown(document, { key: 'Enter' })
-    fireEvent.keyDown(document, { key: 'Enter' })
+    fireEvent.keyDown(document.activeElement!, { key: 'Enter' })
+    fireEvent.keyDown(document.activeElement!, { key: 'Enter' })
     expect(screen.getByRole('button', { name: 'Done' })).toBeTruthy()
     expect(tourSeen()).toBe(false)
-    fireEvent.keyDown(document, { key: 'Enter' })
+    fireEvent.keyDown(document.activeElement!, { key: 'Enter' })
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(tourSeen()).toBe(true)
-    expect(document.documentElement.dataset.touring).toBeUndefined()
     await waitFor(() => expect(document.activeElement).toBe(opener))
   })
 
@@ -236,8 +234,9 @@ describe('the tour on Home', () => {
     setSearch('?tour=1')
     anchors(['safe', 'bar'])
     const { unmount } = render(<Tour home blocked={false} onHome={() => {}} />)
-    await dialog()
-    fireEvent.keyDown(document, { key: 'Escape' })
+    const callout = await dialog()
+    await waitFor(() => expect(document.activeElement).toBe(callout))
+    fireEvent.keyDown(callout, { key: 'Escape' })
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(tourSeen()).toBe(true)
     unmount()
@@ -261,7 +260,10 @@ describe('the tour on Home', () => {
     await dialog()
     act(() => document.querySelector('[data-tour="bar"]')!.remove())
     await userEvent.click(screen.getByRole('button', { name: 'Next' }))
-    expect(screen.getByRole('dialog', { name: 'Saved for later' })).toBeTruthy()
+    // It may still be mounting: the tour gives it a moment before moving on.
+    expect(
+      await screen.findByRole('dialog', { name: 'Saved for later' }, { timeout: 3000 }),
+    ).toBeTruthy()
   })
 
   it('leaving Home or opening the panel ends it', async () => {
@@ -272,6 +274,78 @@ describe('the tour on Home', () => {
     rerender(<Tour home blocked onHome={() => {}} />)
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(tourSeen()).toBe(true)
+  })
+
+  it('leaves keys meant for the page alone, and keeps Tab inside the callout', async () => {
+    setSearch('?tour=1')
+    anchors(['safe', 'bar'])
+    render(<Tour home blocked={false} onHome={() => {}} />)
+    const callout = await dialog()
+    await waitFor(() => expect(document.activeElement).toBe(callout))
+    // Enter on a control of the page (the bright feature, say) reaches that control.
+    const feature = document.querySelector<HTMLElement>('[data-tour="safe"]')!
+    const pressed = vi.fn()
+    feature.addEventListener('keydown', (event) => pressed(event.key, event.defaultPrevented))
+    for (const key of ['Enter', 'ArrowRight', 'ArrowLeft', 'Escape'])
+      fireEvent.keyDown(feature, { key })
+    expect(pressed.mock.calls).toEqual([
+      ['Enter', false],
+      ['ArrowRight', false],
+      ['ArrowLeft', false],
+      ['Escape', false],
+    ])
+    expect(screen.getByRole('dialog', { name: 'Safe to spend today' })).toBeTruthy()
+    // Tab from the callout goes to its first control and cycles; Shift+Tab goes the other way.
+    fireEvent.keyDown(callout, { key: 'Tab' })
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Skip' }))
+    fireEvent.keyDown(document.activeElement!, { key: 'Tab' })
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Next' }))
+    fireEvent.keyDown(document.activeElement!, { key: 'Tab' })
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Skip' }))
+    fireEvent.keyDown(document.activeElement!, { key: 'Tab', shiftKey: true })
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Next' }))
+    // Tab from the page comes back into the callout.
+    feature.focus()
+    fireEvent.keyDown(feature, { key: 'Tab' })
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Skip' }))
+  })
+
+  it('shows Back from step 2', async () => {
+    setSearch('?tour=1')
+    anchors(['safe', 'bar'])
+    render(<Tour home blocked={false} onHome={() => {}} />)
+    await dialog()
+    expect(screen.queryByRole('button', { name: 'Back' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Back' }))
+    expect(screen.getByRole('dialog', { name: 'Safe to spend today' })).toBeTruthy()
+  })
+
+  it('waits for the amount while the hero is still mounting, then starts on it', async () => {
+    setSearch('?tour=1')
+    const main = anchors(['bar', 'guide'])
+    render(<Tour home blocked={false} onHome={() => {}} />)
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    const amount = document.createElement('p')
+    amount.dataset.tour = 'safe'
+    amount.getBoundingClientRect = () => box(100, 40, 200, 60)
+    main.prepend(amount)
+    expect((await dialog()).textContent).toContain('1 of 3')
+  })
+
+  it('ending because the screen changed leaves focus alone', async () => {
+    setSearch('?tour=1')
+    anchors(['safe', 'guide'])
+    const { rerender } = render(<Tour home blocked={false} onHome={() => {}} />)
+    const callout = await dialog()
+    await waitFor(() => expect(document.activeElement).toBe(callout))
+    const field = document.createElement('input')
+    document.body.append(field)
+    field.focus()
+    rerender(<Tour home={false} blocked={false} onHome={() => {}} />)
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    expect(document.activeElement).toBe(field)
   })
 
   it('"Take the tour" in the guide panel closes it and replays the tour from Home', async () => {
@@ -291,5 +365,39 @@ describe('the tour on Home', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false)
     expect(onHome).toHaveBeenCalled()
     expect((await dialog()).textContent).toContain('1 of 2')
+  })
+})
+
+describe('the guide’s nudge and the tour', () => {
+  it('does not arm while a tour is pending or running, and arms once it is over', () => {
+    vi.useFakeTimers()
+    try {
+      sessionStorage.clear()
+      const props = {
+        open: false,
+        onOpenChange: () => {},
+        mood: 'neutral' as const,
+        launcher: createRef<HTMLButtonElement>(),
+        nudge: 'Rent is due in 18 days. Ask me before you buy.',
+      }
+      const { rerender } = render(
+        <AgentLauncher {...props} touring>
+          <p>Conversation</p>
+        </AgentLauncher>,
+      )
+      act(() => vi.advanceTimersByTime(15_000))
+      expect(document.querySelector('.agent-nudge')).toBeNull()
+      expect(sessionStorage.getItem('worth.guide.nudged')).toBeNull()
+      rerender(
+        <AgentLauncher {...props} touring={false}>
+          <p>Conversation</p>
+        </AgentLauncher>,
+      )
+      act(() => vi.advanceTimersByTime(1600))
+      expect(document.querySelector('.agent-nudge')?.textContent).toContain('Rent is due')
+      expect(sessionStorage.getItem('worth.guide.nudged')).toBe('1')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

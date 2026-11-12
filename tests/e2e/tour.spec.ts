@@ -68,3 +68,23 @@ test('?tour=1 walks every step beside its feature and remembers it was seen', as
   await page.waitForTimeout(1500)
   await expect(callout).toHaveCount(0)
 })
+
+test('a real first visit starts on the amount, and the guide’s nudge waits for the tour', async ({
+  page,
+}) => {
+  // As a person's browser: no automation flag, nothing stored.
+  await page.addInitScript(() =>
+    Object.defineProperty(Navigator.prototype, 'webdriver', { get: () => false }),
+  )
+  await page.goto(`${origins.worth}/`)
+  const callout = page.locator('.tour-callout')
+  await expect(callout.locator('.tour-count')).toHaveText('1 of 6')
+  await expect(callout).toHaveAttribute('data-step', 'safe')
+  // The nudge neither shows nor uses up its one showing while the tour is open.
+  await page.waitForTimeout(2500)
+  await expect(page.locator('.agent-nudge')).toHaveCount(0)
+  expect(await page.evaluate(() => sessionStorage.getItem('worth.guide.nudged'))).toBeNull()
+  await page.keyboard.press('Escape')
+  await expect(callout).toHaveCount(0)
+  await expect(page.locator('.agent-nudge[role="status"]')).toBeVisible({ timeout: 5000 })
+})
