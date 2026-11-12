@@ -140,8 +140,11 @@ export function optionWhy(c: Comparison, k: OptionKey, option: OptionResult) {
       : `fits today if you skip the ${lowerName(c.itemName)}`
   if (option.headroomCents === 0)
     return `Leaves exactly your cushion on ${dayLabel(option.lowestDate)}`
+  // The verdict states the recommended option's margin, so its card names only the day.
   if (option.lowestBalanceCents >= c.cushionCents)
-    return `${dayLabel(option.lowestDate)}, ${money(option.headroomCents)} above cushion`
+    return c.recommendation === k
+      ? `on ${dayLabel(option.lowestDate)}`
+      : `${dayLabel(option.lowestDate)}, ${money(option.headroomCents)} above cushion`
   return smallMiss(option, c.amountCents)
     ? `Just ${money(-option.headroomCents)} under your cushion on ${dayLabel(option.lowestDate)}`
     : breachLine(option, c.cushionCents)
@@ -652,10 +655,8 @@ export function Decision({
         <Skeleton />
       </Frame>
     )
-  // When the item fits, spending less isn't an option worth showing.
-  const keys: OptionKey[] = fits(c.buyToday)
-    ? ['buyToday', 'wait']
-    : ['buyToday', 'wait', 'spendLess']
+  // When the item fits, neither waiting nor spending less applies, so only buying today shows.
+  const keys: OptionKey[] = fits(c.buyToday) ? ['buyToday'] : ['buyToday', 'wait', 'spendLess']
   const selected: OptionKey = picked ?? c.recommendation ?? 'buyToday'
   const enabled = keys.filter((key) => optionOf(c, key))
   const move = (event: KeyboardEvent, key: OptionKey) => {

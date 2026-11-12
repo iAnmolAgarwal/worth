@@ -1277,12 +1277,17 @@ describe('blocking fixes', () => {
     expect(onViewActivity).toHaveBeenCalledOnce()
   })
 
-  it('marks Wait as not needed when buying today fits', async () => {
+  it('shows only Buy today when it fits: no empty Wait card, and the margin said once', async () => {
     const state = makeState()
     routeApi((_path, data) => compare(state, data))
     render(<Decision {...decisionProps} state={state} request={{ productId: 'backpack' }} />)
     const group = await screen.findByRole('radiogroup', { name: 'Your options' })
-    expect(within(group).getByText('Not needed')).toBeTruthy()
+    expect(within(group).getAllByRole('radio')).toHaveLength(1)
+    expect(within(group).queryByText('Not needed')).toBeNull()
+    // The verdict states the margin; the card does not repeat it.
+    const margin = /above your \$300\.00 cushion|above cushion/
+    expect(document.querySelector('.verdict-block')!.textContent).toMatch(margin)
+    expect(group.textContent).not.toMatch(margin)
     expect(screen.queryByText(/Wait until/)).toBeNull()
     expect(screen.getAllByRole('button', { name: 'Buy now' }).length).toBeGreaterThan(0)
   })
