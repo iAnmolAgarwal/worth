@@ -37,6 +37,9 @@ export function offerVerdict(c: Comparison) {
 const NUDGE_KEY = 'worth.guide.nudged'
 const NUDGE_DELAY = 1500
 const NUDGE_FOR = 10_000
+/** The questions bubble's delays: a beat before it shows, a moment before it goes. */
+const HOVER_IN = 150
+const HOVER_OUT = 250
 
 /**
  * The once-a-session line by the launcher, from the plan itself: the largest payment due in the
@@ -175,6 +178,24 @@ export function AgentLauncher({
   const [bubble, setBubbleState] = useState<false | 'finding' | 'waiting' | 'shown'>(false)
   const [spot, setSpot] = useState(0)
   const dock = useRef<HTMLDivElement>(null)
+  /**
+   * The screen's nudge again, on hover or keyboard focus, every time. It is the same bubble: an
+   * automatic nudge already showing simply stays (nothing stacks or flickers), and a hover never
+   * counts as the once-per-screen nudge having been shown or dismissed.
+   */
+  const [asking, setAsking] = useState(false)
+  const hoverTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const canAsk = Boolean(nudge) && !open && !hidden && !touring
+  const later = (show: boolean, ms: number) => {
+    clearTimeout(hoverTimer.current)
+    hoverTimer.current = setTimeout(() => setAsking(show), ms)
+  }
+  const hovered = asking && canAsk
+  const shown = bubble === 'shown' || hovered
+  // A hover with no automatic nudge on screen uses the first spot: above the launcher.
+  const at = bubble ? spot : 0
+  useEffect(() => () => clearTimeout(hoverTimer.current), [])
+  const hoverable = () => window.matchMedia?.('(hover: hover)').matches !== false
   const nudgeBox = useRef<HTMLDivElement>(null)
 
   // Each screen's nudge appears once per session, a moment after the screen settles; moving to
@@ -270,34 +291,31 @@ export function AgentLauncher({
   }
   return (
     <>
-      <div ref={dock} className={cx('agent-dock', lifted && 'lifted')} hidden={hidden || open}>
-        {bubble && bubble !== 'waiting' && nudge && (
-          <div
-            ref={nudgeBox}
-            className="agent-nudge"
-            role={bubble === 'shown' ? 'status' : undefined}
-            data-place={SPOTS[spot]!.place}
-            data-narrow={SPOTS[spot]!.width < 200 || undefined}
-            style={{
-              width: SPOTS[spot]!.width,
-              visibility: bubble === 'shown' ? undefined : 'hidden',
-            }}
-          >
-            <button
-              type="button"
-              className="agent-nudge-text"
-              onClick={() => {
-                setBubbleState(false)
-                if (onNudge) onNudge(nudge.ask)
-                else onOpenChange(true)
-              }}
-            >
-              <span className="agent-nudge-who">Worth</span>
-              {nudge.text}
-            </button>
-            <IconButton label="Dismiss" icon={X} quiet onClick={() => setBubbleState(false)} />
-          </div>
-        )}
+      <div
+        ref={dock}
+        className={cx('agent-dock', lifted && 'lifted')}
+        hidden={hidden || open}
+        // Hover or keyboard focus shows the nudge after a beat; leaving both hides it again.
+        onPointerEnter={(event) => {
+          if (event.pointerType !== 'touch' && canAsk) later(true, HOVER_IN)
+        }}
+        onPointerLeave={(event) => {
+          if (event.pointerType !== 'touch') later(false, HOVER_OUT)
+        }}
+        onFocus={(event) => {
+          if (canAsk && hoverable() && event.target.matches(':focus-visible')) later(true, HOVER_IN)
+        }}
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node)) later(false, HOVER_OUT)
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== 'Escape' || !asking) return
+          event.stopPropagation()
+          clearTimeout(hoverTimer.current)
+          setAsking(false)
+          launcher.current?.focus()
+        }}
+      >
         <button
           ref={launcher}
           type="button"
@@ -308,6 +326,8 @@ export function AgentLauncher({
           aria-controls={panelId}
           onClick={() => {
             setBubbleState(false)
+            clearTimeout(hoverTimer.current)
+            setAsking(false)
             onOpenChange(true)
           }}
         >
@@ -318,6 +338,45 @@ export function AgentLauncher({
             blink={blinking}
           />
         </button>
+        {/* After the launcher in the tab order, so Tab reaches it from there. */}
+        {nudge && ((bubble && bubble !== 'waiting') || hovered) && (
+          <div
+            ref={nudgeBox}
+            className="agent-nudge"
+            role={shown ? 'status' : undefined}
+            data-place={SPOTS[at]!.place}
+            data-narrow={SPOTS[at]!.width < 200 || undefined}
+            style={{
+              width: SPOTS[at]!.width,
+              visibility: shown ? undefined : 'hidden',
+            }}
+          >
+            <button
+              type="button"
+              className="agent-nudge-text"
+              onClick={() => {
+                setBubbleState(false)
+                clearTimeout(hoverTimer.current)
+                setAsking(false)
+                if (onNudge) onNudge(nudge.ask)
+                else onOpenChange(true)
+              }}
+            >
+              <span className="agent-nudge-who">Worth</span>
+              {nudge.text}
+            </button>
+            <IconButton
+              label="Dismiss"
+              icon={X}
+              quiet
+              onClick={() => {
+                setBubbleState(false)
+                clearTimeout(hoverTimer.current)
+                setAsking(false)
+              }}
+            />
+          </div>
+        )}
       </div>
       <section
         ref={panel}

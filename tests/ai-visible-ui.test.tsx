@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event'
 import Anthropic from '@anthropic-ai/sdk'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
-import { Ask } from '../src/Ask'
+import { Ask, ClaudeSwitch } from '../src/Ask'
 import { Decision } from '../src/Decision'
 import { Home } from '../src/Home'
 import { api } from '../src/api'
@@ -206,12 +206,9 @@ describe('Ask Worth shows its work', () => {
     expect(answer.trace?.reader).toBe('local')
   })
 
-  it('says what the assistant does, without claiming it explains every answer', async () => {
-    const state = makeState()
-    await ask(
-      state,
-      fallbackReply({ message: 'What bills are coming up?', history: [] }, data(state)),
-    )
+  it('says what the assistant does, without claiming it explains every answer', () => {
+    // The switch and its note live in Settings → Assistant now, not under the chat input.
+    render(<ClaudeSwitch state={makeState()} />)
     expect(
       screen.getAllByText(
         'On: Claude reads your question, picks which of Worth’s facts to show and adds one checked sentence. Every number is Worth’s.',
