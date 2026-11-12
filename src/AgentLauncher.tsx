@@ -13,6 +13,7 @@ import type { AppState, Comparison } from './contract'
 import { fits } from './engine'
 import { capitalize, cx, dayLabel, daysFrom, displayName } from './format'
 import { Guide, useLook, type GuideExpression } from './Guide'
+import { startTour } from './Tour'
 import { IconButton } from './ui'
 
 /**
@@ -283,7 +284,19 @@ export function AgentLauncher({
           <Guide size={40} expression={mood} title={`Worth, ${MOOD_LABEL[mood]}`} />
           <div className="agent-title">
             <h2 id={titleId}>Ask Worth</h2>
-            <p className="caption">Every number is Worth’s</p>
+            <p className="caption">
+              Every number is Worth’s ·{' '}
+              <button
+                type="button"
+                className="link inline"
+                onClick={() => {
+                  onOpenChange(false)
+                  startTour()
+                }}
+              >
+                Take the tour
+              </button>
+            </p>
           </div>
           <span className="agent-close">
             <kbd aria-hidden="true">Esc</kbd>

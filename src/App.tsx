@@ -34,6 +34,7 @@ import { ConnectProgress, returnToCheck } from './ConnectPayPal'
 import { PlanPage, PlanWizard } from './Plan'
 import { ConfirmPlanDialog, RefundDialog } from './Reviews'
 import { migratePlanned, Saved, Settings } from './Saved'
+import { Tour } from './Tour'
 import { ASSESSMENT_ONLY, paypalModeLine, pinnedSample, replayToast, SAMPLE_WHO } from './copy'
 import { usePayPalSdk } from './paypal'
 import { Alert, Button, IconButton, Wordmark } from './ui'
@@ -937,6 +938,11 @@ export default function App() {
           }}
         />
       </AgentLauncher>
+      <Tour
+        home={screen === 'home'}
+        blocked={panelOpen || Boolean(checkout || review || importing)}
+        onHome={() => navigate('home')}
+      />
       {checkout && checkoutProduct && (
         <Checkout
           key={`${checkout.productId}-${checkout.purchaseId ?? 'new'}`}
