@@ -211,6 +211,8 @@ describe('the tab arrow’s nudge', () => {
     expect(box.classList.contains('dragging')).toBe(false)
     expect(box.style.getPropertyValue('--d')).toBe('')
     expect(go).not.toHaveBeenCalled()
+    // The hint says what works: a tap, not a swipe.
+    expect(element.shadowRoot!.querySelector('.hint')!.textContent).toBe('Tap the W for Worth')
   })
 
   it('hides the hint once the tab is tapped or swiped', () => {

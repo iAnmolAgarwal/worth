@@ -9,7 +9,8 @@
  *   springs back.
  * - The tab is a real link, so a tap, Enter (and Space here) open Worth too. A left arrow in the
  *   tab nudges left on a gentle loop, over a plain "Swipe left for Worth" hint; reduced motion
- *   keeps the arrow still and turns the drag off, leaving the tab a plain link.
+ *   keeps the arrow still and turns the drag off, leaving the tab a plain link, and the hint
+ *   then says "Tap the W for Worth".
  * - Without PayPal's button (still loading, ineligible or failed) the tab becomes the default
  *   full-width outline link, so Worth stays one tap away.
  */
@@ -41,6 +42,10 @@ export function swipeCommits(progress: number, speed: number) {
 export function prefersReducedMotion() {
   return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
 }
+
+/** The hint's words: a swipe only where it works; under reduced motion the tab is a plain link. */
+export const hintText = (reduced: boolean) =>
+  reduced ? 'Tap the W for Worth' : 'Swipe left for Worth'
 
 /** The Worth mark's front layer (devpost-assets/worth-mark.svg), simplified for ~20px. */
 const W_PATH =
@@ -355,6 +360,9 @@ export class SwipeControl {
   private settleTimer?: ReturnType<typeof setTimeout>
   private watcher?: MutationObserver
   private viewer?: IntersectionObserver
+  private hint: HTMLElement
+  private motion?: MediaQueryList
+  private onMotion = () => (this.hint.textContent = hintText(prefersReducedMotion()))
 
   constructor(
     private host: HTMLElement,
@@ -362,11 +370,13 @@ export class SwipeControl {
   ) {
     this.box = document.createElement('div')
     this.box.className = 'swipe'
-    this.box.innerHTML = `<div class="row" part="row"><slot></slot><span class="seam" aria-hidden="true"></span><div class="panel" aria-hidden="true"><div class="label"><span class="words">Analyse with Worth</span>${ARROW}</div></div><a class="tab" part="link" draggable="false" aria-label="Analyse with Worth">${CHEVRON}${MARK}<span class="text">Analyse with Worth</span></a></div><p class="hint" aria-hidden="true">Swipe left for Worth</p>`
+    this.box.innerHTML = `<div class="row" part="row"><slot></slot><span class="seam" aria-hidden="true"></span><div class="panel" aria-hidden="true"><div class="label"><span class="words">Analyse with Worth</span>${ARROW}</div></div><a class="tab" part="link" draggable="false" aria-label="Analyse with Worth">${CHEVRON}${MARK}<span class="text">Analyse with Worth</span></a></div><p class="hint" aria-hidden="true"></p>`
     this.tab = this.box.querySelector('.tab')!
     this.label = this.box.querySelector('.label')!
     this.words = this.box.querySelector('.words')!
     this.slot = this.box.querySelector('slot')!
+    this.hint = this.box.querySelector('.hint')!
+    this.onMotion()
     const tab = this.tab
     tab.addEventListener('dragstart', (event) => event.preventDefault())
     tab.addEventListener('pointerdown', (event) => this.down(event))
@@ -389,6 +399,12 @@ export class SwipeControl {
       attributeFilter: ['hidden'],
     })
     this.sync()
+    // The hint follows the motion setting live, as the drag does on each press.
+    if (typeof matchMedia === 'function') {
+      this.motion ??= matchMedia('(prefers-reduced-motion: reduce)')
+      this.motion.addEventListener?.('change', this.onMotion)
+    }
+    this.onMotion()
     // The arrow starts nudging once the row is first fully in view, so the loop isn't spent unseen.
     if (this.box.classList.contains('hinting')) return
     if (typeof IntersectionObserver !== 'function') return void this.box.classList.add('hinting')
@@ -406,6 +422,7 @@ export class SwipeControl {
   disconnect() {
     this.watcher?.disconnect()
     this.viewer?.disconnect()
+    this.motion?.removeEventListener?.('change', this.onMotion)
   }
 
   /** Shows the tab only with a link; shows it alone when PayPal's button isn't on the page. */
