@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Bookmark,
   BookmarkCheck,
@@ -15,7 +15,7 @@ import {
   Store,
   Trash2,
 } from 'lucide-react'
-import { addDays, WAIT_SEARCH_DAYS } from '../shared/finance'
+import { addDays, compareOptions, WAIT_SEARCH_DAYS } from '../shared/finance'
 import { DEMO_PRESET_DAYS } from '../shared/seed'
 import type { Product, SavedItem, SavedPriceCheck } from '../shared/types'
 import { api, ApiError } from './api'
@@ -165,7 +165,29 @@ function Picture({
   )
 }
 
-function statusPill(item: SavedItem) {
+/**
+ * Whether a saved item fits, from the engine on this plan today: "Fits today", "Fits <day>" (the
+ * wait date) or "Over by $X" (past the most that fits today, with no day in the search). Undefined
+ * while the plan can't give an answer, so the older plan pills show instead.
+ */
+export function fitStatus(state: AppState, amountCents: number) {
+  let c
+  try {
+    c = compareOptions(state.profile, state.purchases, { amountCents, today: state.today })
+  } catch {
+    return undefined
+  }
+  if (c.recommendation === null) return undefined
+  if (c.buyToday.outcome === 'fits') return { tone: 'ok' as const, text: 'Fits today' }
+  if (c.wait.date) return { tone: 'sug' as const, text: `Fits ${dayLabel(c.wait.date)}` }
+  return {
+    tone: 'bad' as const,
+    text: `Over by ${money(amountCents - Math.max(0, c.spendLess.maxPriceCents))}`,
+  }
+}
+
+function statusPill(item: SavedItem, fit?: ReturnType<typeof fitStatus>) {
+  if (fit) return <Pill tone={fit.tone}>{fit.text}</Pill>
   if (item.status === 'ready') return <Pill tone="ok">May fit now</Pill>
   if (item.waitDate) return <Pill tone="sug">Planned for {shortDate(item.waitDate)}</Pill>
   return null
@@ -174,11 +196,14 @@ function statusPill(item: SavedItem) {
 function SavedCard({
   item,
   product,
+  fit,
   onOpen,
   onRemove,
 }: {
   item: SavedItem
   product?: Product
+  /** Whether it fits on the plan today, as the card's main status. */
+  fit?: ReturnType<typeof fitStatus>
   onOpen: () => void
   onRemove: () => void
 }) {
@@ -223,7 +248,7 @@ function SavedCard({
         </p>
       )}
       {item.status === 'bought' && <span className="corner-pill">Bought</span>}
-      {item.status !== 'bought' && statusPill(item) && <div>{statusPill(item)}</div>}
+      {item.status !== 'bought' && statusPill(item, fit) && <div>{statusPill(item, fit)}</div>}
       {item.status !== 'bought' && dropped !== undefined && (
         <div>
           <Pill tone="ok">Price dropped to {money(dropped)}</Pill>
@@ -592,6 +617,16 @@ export function Saved({
   const productOf = (item: SavedItem) =>
     item.kind === 'catalog' ? state.products.find((p) => p.id === item.productId) : undefined
   const ready = saved.filter((item) => item.status === 'ready')
+  // One engine run per saved amount, again only when the plan or Saved changes.
+  const fits = useMemo(
+    () =>
+      new Map(
+        (state.saved ?? [])
+          .filter((item) => item.status !== 'bought')
+          .map((item) => [item.id, fitStatus(state, item.amountCents)] as const),
+      ),
+    [state],
+  )
   const more = state.products.filter(
     (p) => !saved.some((item) => item.kind === 'catalog' && item.productId === p.id),
   )
@@ -644,6 +679,7 @@ export function Saved({
                 key={item.id}
                 item={item}
                 product={productOf(item)}
+                fit={fits.get(item.id)}
                 onOpen={() => onOpenDecision(decisionFor(item))}
                 onRemove={() => void remove(item)}
               />

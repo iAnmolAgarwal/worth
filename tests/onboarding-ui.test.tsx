@@ -183,12 +183,17 @@ describe('Check what Worth found', () => {
     ).toBeTruthy()
     await user.type(screen.getByRole('textbox', { name: /Money available today/ }), '2600')
     await user.type(screen.getByRole('textbox', { name: /Cushion/ }), '300')
+    // The button names the open question, and pressing it stops there first, as it says.
+    await user.click(screen.getByRole('button', { name: 'Answer the question above' }))
+    expect(screen.getByRole('alert').textContent).toContain('Choose how many payments of $62.50')
+    expect(screen.getByRole('alert').closest('.check-plan')).toBeTruthy()
+    await user.click(screen.getByRole('radio', { name: '1 left' }))
+    // Then Continue stops on the next missing thing: everyday spending.
     await user.click(screen.getByRole('button', { name: 'Continue' }))
     expect(screen.getByRole('alert').textContent).toContain('Enter your everyday spending a day')
     expect(calls.some((call) => call.path === '/import/commit')).toBe(false)
 
     await user.type(field, '35')
-    await user.click(screen.getByRole('radio', { name: '1 left' }))
     await user.click(screen.getByRole('button', { name: 'Continue' }))
     await waitFor(() => expect(onDone).toHaveBeenCalled())
     const { profile } = calls.find((call) => call.path === '/profile')!.data as {
@@ -230,6 +235,9 @@ describe('Check what Worth found', () => {
     const onDone = vi.fn()
     renderReview(onDone)
     await screen.findByText('Northwind Payroll')
+    // Continue goes straight to Home, so the counter has two steps, not three.
+    expect(screen.getByText('Step 2 of 2')).toBeTruthy()
+    expect(screen.getByRole('list', { name: 'Setup steps' }).children).toHaveLength(2)
     expect(screen.queryByText(/the day after Maple Court rent/)).toBeNull()
     await user.click(screen.getByRole('button', { name: 'Add a bill PayPal doesn’t see' }))
     await user.type(screen.getByRole('textbox', { name: 'Bill name' }), 'Maple Court rent')
@@ -250,10 +258,12 @@ describe('Check what Worth found', () => {
     // The undated plan must be answered before Continue goes on.
     await user.type(screen.getByRole('textbox', { name: /Money available today/ }), '2600')
     await user.type(screen.getByRole('textbox', { name: /Cushion/ }), '300')
-    await user.click(screen.getByRole('button', { name: 'Continue' }))
-    expect(screen.getByRole('alert').textContent).toContain(
-      'Choose how many payments of $62.50 are left, or All paid.',
-    )
+    // Continue names what is missing, and the error sits under the question, not under the bar.
+    await user.click(screen.getByRole('button', { name: 'Answer the question above' }))
+    const alert = screen.getByRole('alert')
+    expect(alert.textContent).toContain('Choose how many payments of $62.50 are left, or All paid.')
+    expect(alert.closest('.check-plan')).toBeTruthy()
+    expect(document.activeElement?.getAttribute('role')).toBe('radio')
     expect(calls.some((call) => call.path === '/import/commit')).toBe(false)
     // Chips work from the keyboard.
     const chip = screen.getByRole('radio', { name: '1 left' })

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Ask } from '../src/Ask'
 import { Decision } from '../src/Decision'
 import { decisionRequestFrom } from '../src/contract'
+import { slugName } from '../src/PasteLink'
 import { api, ApiError } from '../src/api'
 import { compareOptions } from '../shared/finance'
 import { createDemoState, PRODUCTS } from '../shared/seed'
@@ -187,6 +188,11 @@ describe('pasting a product link in Ask Worth', () => {
     await paste(LINK)
     await screen.findByRole('heading', { name: 'We couldn’t read that page. What’s the price?' })
     expect(screen.getByText(new RegExp(note))).toBeTruthy()
+    // The item starts from the link's own words, for the shopper to confirm or edit.
+    expect(screen.getByRole('textbox', { name: 'Item' })).toHaveProperty(
+      'value',
+      'Trailhead daypack 28l',
+    )
     expect(screen.getByText('At shop.larkspur.example')).toBeTruthy()
     expect(calledPaths()).not.toContain('/chat')
   })
@@ -353,5 +359,36 @@ describe('a decision link from the address bar', () => {
     expect(
       decisionRequestFrom(params({ amount: '500', item: 'Router', link: 'https://10.0.0.1/a' })),
     ).toEqual({ amountCents: 500, itemName: 'Router' })
+  })
+})
+
+describe('slugName', () => {
+  it('names an item from the worded part of a store link, never from ids', () => {
+    expect(
+      slugName('https://www.bestbuy.com/site/sony-alpha-a6400-mirrorless-camera/6535578.p'),
+    ).toBe('Sony alpha a6400 mirrorless camera')
+    expect(slugName('https://shop.example/p/12345')).toBeUndefined()
+    expect(slugName('https://shop.example/')).toBeUndefined()
+    expect(slugName('not a url')).toBeUndefined()
+  })
+
+  it('never throws on a stray % and drops control and bidi characters', () => {
+    expect(slugName('https://shop.example.com/50%-off-hiking-boots')).toBe('Off hiking boots')
+    expect(() =>
+      slugName('https://shop.example.com/trailhead-daypack%E0%A4%A-moss-green'),
+    ).not.toThrow()
+    expect(slugName('https://shop.example.com/trailhead-daypack%E0%A4%A-moss-green')).toMatch(
+      /^Trailhead daypack/,
+    )
+    expect(slugName('https://shop.example.com/evil-%E2%80%AEname-camera')).toBe('Evil name camera')
+  })
+
+  it('pasting such a link still shows the manual card instead of breaking the page', async () => {
+    answer(new ApiError('x', 502, 'LOOKUP_FAILED'))
+    await paste('https://shop.example.com/50%-off-hiking-boots')
+    await screen.findByRole('heading', { name: 'We couldn’t read that page. What’s the price?' })
+    expect((screen.getByRole('textbox', { name: 'Item' }) as HTMLInputElement).value).toMatch(
+      /hiking boots/,
+    )
   })
 })

@@ -1145,9 +1145,11 @@ function ChartTable({
               const value = values[index]!
               const instalment = instalments?.find((i) => i.date === point.date)
               return (
-                <tr key={point.date} className={value < cushionCents ? 'below' : undefined}>
+                // Each balance is red only when it is itself below the cushion: the Pay in 4 column
+                // is judged on its own value, as the engine judges it.
+                <tr key={point.date}>
                   <th scope="row">{dayLabel(point.date)}</th>
-                  <td className="num">
+                  <td className={value < cushionCents ? 'num below' : 'num'}>
                     {signed(value)}
                     {p4 && index === lowIndex ? ' · lowest point' : ''}
                   </td>
@@ -1160,10 +1162,11 @@ function ChartTable({
                   </td>
                   <td>{namedOn(point).map(eventText).join(', ') || '—'}</td>
                   {p4 && (
-                    <td className="num">
+                    <td className={p4[index]! < cushionCents ? 'num below' : 'num'}>
                       {signed(p4[index]!)}
                       {instalment ? ` · payment ${instalment.number} of 4` : ''}
                       {index === p4LowIndex ? ' · lowest point' : ''}
+                      {p4[index]! < cushionCents ? ' · below cushion' : ''}
                     </td>
                   )}
                 </tr>

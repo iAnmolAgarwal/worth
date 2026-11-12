@@ -3900,11 +3900,8 @@ textarea.input {
   font-weight: var(--fw-semibold);
   color: var(--c-text-strong);
 }
-.bchart-scroll tr.below td,
-.bchart-scroll tr.below th {
+.bchart-scroll td.num.below {
   background: rgba(213, 1, 2, 0.04);
-}
-.bchart-scroll tr.below td.num {
   color: var(--c-danger);
 }
 

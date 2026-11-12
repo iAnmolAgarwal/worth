@@ -1255,15 +1255,8 @@ function Answer({
         </>
       )}
       {assessment && reply.payIn4?.asked && (
-        <PayIn4Strip
-          p4={reply.payIn4}
-          today={assessment.today}
-          onCompare={
-            assessment.outcome !== 'incomplete'
-              ? () => onOpenDecision(requestFor(reply, state), explanation)
-              : undefined
-          }
-        />
+        // The verdict's "See the comparison" is the one link to the comparison (audit B11).
+        <PayIn4Strip p4={reply.payIn4} today={assessment.today} />
       )}
       {!!picked.length && (
         <section className="picked" aria-label="Picked for your question">

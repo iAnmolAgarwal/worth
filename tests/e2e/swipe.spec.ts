@@ -119,6 +119,8 @@ test.describe('the swipe button', () => {
     await expect.poll(animations).toEqual(['worth-nudge'])
     await page.emulateMedia({ reducedMotion: 'reduce' })
     await expect.poll(animations).toEqual(['none'])
+    // Dragging is off then, so the hint asks for a tap instead.
+    await expect(page.locator('worth-check .hint')).toHaveText('Tap the W for Worth')
   })
 })
 

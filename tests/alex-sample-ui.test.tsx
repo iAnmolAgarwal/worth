@@ -3,9 +3,10 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
-import { Settings } from '../src/Saved'
+import { fitStatus, Saved, Settings } from '../src/Saved'
 import { api } from '../src/api'
 import { lowerName } from '../src/engine'
+import { payIn4Lines } from '../src/payIn4Text'
 import { compareOptions } from '../shared/finance'
 import { ALEX_DEMO_DAY, createCameraScenario, PRODUCTS } from '../shared/seed'
 import type { AppState, DemoPreset } from '../shared/types'
@@ -136,5 +137,68 @@ describe('lowerName keeps a plan payment in sentence case', () => {
     expect(lowerName('Halden X5 · Pay in 4 payment 2 of 4')).toBe(
       'Halden X5 · Pay in 4 payment 2 of 4',
     )
+  })
+})
+
+describe('the Pay in 4 card on Alex’s camera', () => {
+  it('names the first dip, the lowest point and the payment that sets it', () => {
+    const { profile } = createCameraScenario(ALEX_DEMO_DAY)
+    const c = compareOptions(profile, [], {
+      amountCents: 189900,
+      itemName: 'Halden X5',
+      today: ALEX_DEMO_DAY,
+      payIn4Eligible: true,
+    })
+    if (!c.payIn4.available) throw new Error('Pay in 4 is in range for $1,899')
+    expect(payIn4Lines(c.payIn4, c.cushionCents)).toEqual({
+      lead: 'With Pay in 4, your balance would first go below your cushion on Sun, Nov 29',
+      low: 'Lowest point $222.76 on Mon, Nov 30, before payday. Payment 2 ($474.75) lands about Fri, Nov 27.',
+    })
+  })
+})
+
+describe('Saved says whether each item fits', () => {
+  it('reads Fits today, Fits <wait day> or Over by $X from the engine', () => {
+    const state = alexState()
+    expect(fitStatus(state, 34900)).toEqual({ tone: 'ok', text: 'Fits today' })
+    expect(fitStatus(state, 189900)).toEqual({ tone: 'sug', text: 'Fits Tue, Dec 15' })
+    const over = fitStatus(state, 900000)!
+    expect(over.tone).toBe('bad')
+    expect(over.text).toBe('Over by $8,127.74')
+  })
+
+  it('shows it on each saved card as the main status', () => {
+    const state = alexState()
+    state.saved = [
+      {
+        id: 'cam',
+        kind: 'catalog',
+        productId: 'halden-x5',
+        name: 'Halden X5',
+        amountCents: 189900,
+        createdAt: '2026-11-13T12:00:00Z',
+        status: 'active',
+      },
+      {
+        id: 'hp',
+        kind: 'catalog',
+        productId: 'headphones',
+        name: 'Studio headphones',
+        amountCents: 34900,
+        createdAt: '2026-11-13T11:00:00Z',
+        status: 'active',
+      },
+    ]
+    render(
+      <Saved
+        state={state}
+        onOpenDecision={vi.fn()}
+        onOpenCheckout={vi.fn()}
+        onUpdate={vi.fn()}
+        onToast={vi.fn()}
+      />,
+    )
+    expect(screen.getByText('Fits Tue, Dec 15')).toBeTruthy()
+    expect(screen.getByText('Fits today')).toBeTruthy()
   })
 })
