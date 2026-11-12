@@ -468,7 +468,12 @@ describe('Ask answers', () => {
     const onOpenDecision = vi.fn()
     render(<Ask {...askProps} state={state} onOpenDecision={onOpenDecision} />)
     await sendMessage(user, 'Can I afford a $1,199 camera?')
-    await screen.findByText('Camera at $1,199 would dip below your cushion if you buy it today.')
+    await screen.findByText(
+      (_text, element) =>
+        element?.className === 'verdict' &&
+        element.textContent ===
+          'Camera at $1,199 would dip below your cushion if you buy it today.',
+    )
     const chip = screen.getByRole('group', { name: 'How Worth read your question' })
     expect(chip.textContent).toContain('Read as')
     expect(chip.textContent).toContain('Everyday camera · $1,199.00 · today')

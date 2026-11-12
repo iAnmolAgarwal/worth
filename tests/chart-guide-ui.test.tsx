@@ -244,3 +244,19 @@ describe('the nudge for each screen', () => {
     expect(screenNudge('activity', s)).toBeUndefined()
   })
 })
+
+describe('amounts in an answer', () => {
+  it('keep each amount and its minus sign on one line', async () => {
+    const { amountsOnOneLine } = await import('../src/Ask')
+    render(
+      <p data-testid="p">
+        {amountsOnOneLine('Lowest -$726.74 on Mon, Nov 30, then $1,650.00 lands.')}
+      </p>,
+    )
+    const spans = [...screen.getByTestId('p').querySelectorAll('.nowrap')].map((s) => s.textContent)
+    expect(spans).toEqual(['−$726.74', '$1,650.00'])
+    expect(screen.getByTestId('p').textContent).toBe(
+      'Lowest −$726.74 on Mon, Nov 30, then $1,650.00 lands.',
+    )
+  })
+})

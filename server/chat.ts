@@ -1657,7 +1657,10 @@ export function createChatProvider(
           max_tokens: 600,
           system: CHART_SYSTEM,
           tools: [tool as Anthropic.Tool],
-          tool_choice: { type: 'tool', name: tool.name },
+          // The model in use refuses a forced tool choice; the prompt asks for exactly one call, and
+          // an answer without one falls back to Worth's own rules.
+          tool_choice: { type: 'auto' },
+          output_config: { effort: 'low' },
           messages: [{ role: 'user', content: chartPrompt(message, facts, view) }],
         },
         { signal: AbortSignal.timeout(deadlineMs), timeout: deadlineMs, maxRetries: 0 },

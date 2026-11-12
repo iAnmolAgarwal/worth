@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import {
   ArrowRight,
   ArrowUp,
@@ -142,6 +142,22 @@ const curly = (text: string) => text.replace(/'/g, '’')
 /** Money in sentences uses a true minus sign: −$458.99. */
 export const minus = (text: string) => text.replace(/-\$/g, '−$')
 
+/** Each amount, its minus sign included, stays on one line: "Lowest −$726.74" never breaks. */
+export function amountsOnOneLine(text: string): ReactNode {
+  const parts = minus(text).split(/(−?\$[\d,]+(?:\.\d{2})?)/)
+  return parts.length === 1
+    ? text
+    : parts.map((part, index) =>
+        index % 2 ? (
+          <span className="nowrap" key={index}>
+            {part}
+          </span>
+        ) : (
+          part
+        ),
+      )
+}
+
 export function itemLabel(read: Interpretation) {
   return capitalize(
     read.items
@@ -210,7 +226,7 @@ function Explanation({ reply }: { reply: ChatReply }) {
           Claude’s note · Worth’s numbers
         </span>
       )}
-      {minus(reply.explanation)}
+      {amountsOnOneLine(reply.explanation)}
     </p>
   )
 }
@@ -370,9 +386,9 @@ function VerdictTile({
       style={{ width: '100%', padding: 'var(--s-5)' }}
       aria-label="Purchase assessment"
     >
-      <p className="verdict">{minus(headline)}</p>
+      <p className="verdict">{amountsOnOneLine(headline)}</p>
       {/* The rest of the verdict repeats the option rows; it shows only when they can't. */}
-      {rest && !comparison && <p className="meta">{minus(rest)}</p>}
+      {rest && !comparison && <p className="meta">{amountsOnOneLine(rest)}</p>}
       <Explanation reply={reply} />
       {stale && (
         <div style={{ marginTop: 12 }}>
@@ -1285,7 +1301,7 @@ function Answer({
       ) : (
         <>
           {paragraphs(reply).map((text, index) => (
-            <p key={index}>{text}</p>
+            <p key={index}>{amountsOnOneLine(text)}</p>
           ))}
           <Explanation reply={reply} />
           {reply.chart &&
@@ -1339,7 +1355,7 @@ function Answer({
             {reply.lead && <p style={{ marginTop: 8 }}>{reply.lead}</p>}
             <ul>
               {(allFacts ? picked : picked.slice(0, 2)).map((point) => (
-                <li key={point.id}>{minus(point.text)}</li>
+                <li key={point.id}>{amountsOnOneLine(point.text)}</li>
               ))}
             </ul>
             {picked.length > 2 && (

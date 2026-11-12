@@ -30,7 +30,10 @@ describe('the chart’s facts', () => {
       'Wait until Tue, Dec 15: Stays above your $300.00 cushion. Lowest $458.78 on Thu, Dec 31.',
     )
     expect(text('line_buyToday')).toBe(
-      'Buy today: Below your $300.00 cushion from Thu, Nov 19 and below zero from Fri, Nov 20. Lowest −$726.74 on Mon, Nov 30. It is below the cushion Nov 19 – Nov 30 and Dec 10 – Dec 14.',
+      'Buy today: Below your $300.00 cushion from Thu, Nov 19 and below zero from Fri, Nov 20. Lowest −$726.74 on Mon, Nov 30.',
+    )
+    expect(text('dips_buyToday')).toBe(
+      'Buy today is below the cushion Nov 19 – Nov 30 and Dec 10 – Dec 14.',
     )
     expect(text('line_payIn4')).toBe(
       'Pay in 4: Below your $300.00 cushion from Sun, Nov 29. Lowest $222.76 on Mon, Nov 30. Back above on Tue, Dec 1.',
@@ -83,6 +86,8 @@ describe('reading a chart question', () => {
       'demo',
     )
     expect(red.message).toMatch(/^The dotted line is your \$300\.00 cushion and red shading/)
+    // With only Wait pressed nothing is red, so Buy today's line joins it to show the shading.
+    expect(red.chart).toMatchObject({ options: ['wait', 'buyToday'], focusDay: '2026-11-30' })
   })
 })
 
@@ -181,7 +186,9 @@ describe('POST /api/chat with a chart view', () => {
     expect(response.body.mode).toBe('anthropic')
     expect(response.body.toolCalls).toEqual(['show_on_chart'])
     const { item, ...shown } = response.body.chart
-    expect(shown).toEqual({ options: ['buyToday'], range: 'payday' })
+    // Narrowed to payday with an invented day: the session's first payday is put in focus.
+    expect(shown).toMatchObject({ options: ['buyToday'], range: 'payday' })
+    expect(shown.focusDay).toMatch(/^2026-11-\d{2}$/)
     expect(item.productId).toBe(ALEX_CAMERA_ID)
   })
 
