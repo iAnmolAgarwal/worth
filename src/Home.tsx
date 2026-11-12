@@ -292,6 +292,8 @@ export function Home({
             onConfirmFunds={() => setFunds(true)}
             fundsElsewhere={Boolean(ready) && !fundsToday}
           />
+          {/* Full width under the hero, so "Coming up" and Saved start on one line below. */}
+          <CollisionInsight state={state} onShowPlan={() => onNavigate('plan')} />
         </div>
         <div className="grid">
           <div className="stack">
@@ -379,7 +381,6 @@ export function Home({
                 </div>
               </section>
             ))}
-            <CollisionInsight state={state} onShowPlan={() => onNavigate('plan')} />
             {month ? nextDays : <ComingUp state={state} onShowAll={() => onNavigate('plan')} />}
           </div>
           <aside

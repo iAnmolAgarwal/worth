@@ -161,7 +161,7 @@ describe('the Home hero', () => {
     for (const anchor of ['safe', 'bar', 'check'])
       expect(hero.querySelector(`[data-tour="${anchor}"]`)).toBeTruthy()
     const actions = within(hero).getByRole('navigation', { name: 'Next steps' })
-    await user.click(within(actions).getByRole('link', { name: /Check a purchase/ }))
+    await user.click(within(actions).getByRole('button', { name: /Check a purchase/ }))
     expect(onAsk).toHaveBeenCalledWith()
   })
 
@@ -268,22 +268,73 @@ describe('the Home hero', () => {
       const row = hero.querySelector('.hero-src')!
       for (const word of words) expect(row.textContent).toContain(word)
       if (connect === 'off') expect(row.textContent).not.toContain('Connect PayPal')
-      if (from !== 'paypal' && connect === 'on')
-        expect(row.querySelector('[data-tour="connect"]')?.textContent).toContain('Connect PayPal')
-      if (from === 'paypal') {
-        expect(row.querySelector('[data-tour="connect"]')?.textContent).toContain(
-          'PayPal connected',
-        )
+      // The tour's anchor is the row itself, in every state.
+      expect(row.getAttribute('data-tour')).toBe('connect')
+      if (from === 'paypal')
         expect(
           within(row as HTMLElement).getByRole('button', {
             name: /Read your PayPal activity again/,
           }),
         ).toBeTruthy()
-      }
+      // A row with no action of its own keeps still on hover.
+      expect(row.classList.contains('static')).toBe(from === 'paypal' || connect === 'off')
       // Never a button inside a button.
       expect(row.querySelector('button button')).toBeNull()
     },
   )
+
+  it('says why imports wait while a checkout is open', async () => {
+    const state = makeState()
+    state.config = { ...state.config, paypalConnect: 'on' }
+    state.purchases = [
+      {
+        id: 'p-open',
+        status: 'created',
+        amountCents: 34900,
+        name: 'Studio headphones',
+      } as unknown as AppState['purchases'][number],
+    ]
+    // The engine's figure for the same plan; the open checkout only matters to the actions here.
+    const clean = room(makeState())
+    apiMock.mockImplementation((() => Promise.resolve(clean)) as unknown as typeof api)
+    render(
+      <Home
+        state={state}
+        onAsk={vi.fn()}
+        onNavigate={vi.fn()}
+        onOpenProduct={vi.fn()}
+        onEditPlan={vi.fn()}
+        onOpenCheckout={vi.fn()}
+        onConfirmPlan={vi.fn()}
+        onReviewRefund={vi.fn()}
+      />,
+    )
+    const hero = await screen.findByRole('region', { name: 'Safe to spend today' })
+    await waitFor(() => expect(hero.querySelector('.hero-src')).toBeTruthy())
+    const row = hero.querySelector<HTMLElement>('.hero-src')!
+    const line = 'Finish or cancel your active checkout before importing PayPal activity.'
+    expect(row.textContent).toContain(line)
+    const file = within(row).getByRole('button', { name: 'Import a file' })
+    expect((file as HTMLButtonElement).disabled).toBe(true)
+    expect(file.getAttribute('title')).toBe(line)
+  })
+
+  it('capitalises "Updated" the same way in every row', async () => {
+    const state = makeState()
+    state.config = { ...state.config, paypalConnect: 'off' }
+    state.profile = {
+      ...state.profile,
+      source: 'import',
+      importedFrom: 'file',
+      importedAt: `${TODAY}T15:00:00.000Z`,
+      timezone: 'UTC',
+    }
+    renderHome(state)
+    const hero = await screen.findByRole('region', { name: 'Safe to spend today' })
+    await waitFor(() =>
+      expect(hero.querySelector('.hero-src')?.textContent).toContain('Updated today'),
+    )
+  })
 
   it('says "updated today" only when the import was today', () => {
     const state = makeState()

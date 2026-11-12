@@ -383,6 +383,9 @@ function Mark() {
 const W_PATH =
   'M 2.136 9.729 Q 2 2 10 2 L 76 2 Q 84 2 83.777 9.812 L 77.733 221.071 Q 77.649 224 79.154 221.104 L 188.987 9.723 Q 193 2 201 2 L 247 2 Q 255 2 255.162 9.723 L 259.589 221.104 Q 259.649 224 261.026 221.071 L 360.328 9.812 Q 364 2 372 2 L 438 2 Q 446 2 442.01 9.729 L 282.208 319.304 Q 277.719 328 268.719 328 L 210.719 328 Q 201.719 328 201.234 319.393 L 191.001 137.869 Q 190.839 135 189.247 137.869 L 88.496 319.393 Q 83.719 328 74.719 328 L 16.719 328 Q 7.719 328 7.567 319.304 Z'
 
+/** The old start strip's line for an open checkout, which blocks importing until it's resolved. */
+const BUSY_LINE = 'Finish or cancel your active checkout before importing PayPal activity.'
+
 /** Where the card's numbers come from: the sample, an imported file, or Connect PayPal. */
 export type HeroSource = 'sample' | 'file' | 'paypal'
 
@@ -417,39 +420,40 @@ export function HeroActions({
   const busy = state.purchases.some(isActive)
   const connect = connectAvailable(state)
   const updated = updatedLabel(state)
+  const Updated = updated && `${updated[0]!.toUpperCase()}${updated.slice(1)}`
+  // While a checkout is open, imports wait; the row says why instead of greying out silently.
+  const why = busy ? BUSY_LINE : undefined
   const importLink = (label: string) => (
-    <button type="button" className="hero-src-alt" onClick={onImport} disabled={busy}>
+    <button type="button" className="hero-src-alt" onClick={onImport} disabled={busy} title={why}>
       {label}
     </button>
   )
   return (
     <nav className="hero-actions" aria-label="Next steps">
-      <a
-        className="hero-act primary hero-cta"
-        href="#ask"
-        data-tour="check"
-        onClick={(event) => {
-          event.preventDefault()
-          onAsk()
-        }}
-      >
+      <button type="button" className="hero-act primary hero-cta" data-tour="check" onClick={onAsk}>
         <span className="hero-act-main">
           <span className="hero-act-t">Check a purchase</span>
           <span className="hero-act-s">See the day it fits</span>
         </span>
         <ChevronRight className="chev" size={20} aria-hidden="true" />
-      </a>
-      <div className={cx('hero-act', 'hero-src', source)}>
+      </button>
+      <div
+        className={cx(
+          'hero-act',
+          'hero-src',
+          source,
+          (source === 'paypal' || !connect) && 'static',
+        )}
+        data-tour="connect"
+      >
         {source === 'paypal' ? (
           <>
             <span className="hero-act-main">
-              <span className="hero-act-t hero-src-pill" data-tour="connect">
+              <span className="hero-act-t hero-src-pill">
                 <i aria-hidden="true" />
                 PayPal connected
               </span>
-              <span className="hero-act-s">
-                {updated ? `${updated[0]!.toUpperCase()}${updated.slice(1)}` : 'From PayPal'}
-              </span>
+              <span className="hero-act-s">{why ?? Updated ?? 'From PayPal'}</span>
             </span>
             {connect && (
               <ConnectPayPalButton
@@ -460,7 +464,7 @@ export function HeroActions({
                     type="button"
                     className="hero-src-refresh"
                     aria-label="Read your PayPal activity again"
-                    title="Read your PayPal activity again"
+                    title={why ?? 'Read your PayPal activity again'}
                     {...props}
                   >
                     <RefreshCw size={18} aria-hidden="true" />
@@ -475,10 +479,10 @@ export function HeroActions({
               pop
               disabled={busy}
               trigger={(props) => (
-                <button type="button" className="hero-act-main" data-tour="connect" {...props}>
+                <button type="button" className="hero-act-main" title={why} {...props}>
                   <span className="hero-act-t">Connect PayPal</span>
                   <span className="hero-act-s">
-                    {source === 'sample' ? 'Sample data now' : 'From your imported file'}
+                    {why ?? (source === 'sample' ? 'Sample data now' : 'From your imported file')}
                   </span>
                 </button>
               )}
@@ -493,9 +497,10 @@ export function HeroActions({
                 {source === 'sample' ? 'Sample data' : 'Your PayPal activity'}
               </span>
               <span className="hero-act-s">
-                {source === 'sample'
-                  ? 'Bring your own PayPal activity'
-                  : (updated ?? 'From a file')}
+                {why ??
+                  (source === 'sample'
+                    ? 'Bring your own PayPal activity'
+                    : (Updated ?? 'From a file'))}
               </span>
             </span>
             {importLink(source === 'sample' ? 'Import a file' : 'Import again')}

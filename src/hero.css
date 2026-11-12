@@ -9,7 +9,12 @@
    rail starts where the columns do and the action rows sit on the canvas. */
 .home-band {
   position: relative;
-  z-index: 0;
+  /* Above the columns below, so the hero's popovers (Connect PayPal, the info) are never under
+     the Saved rail. */
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-6);
   margin-bottom: var(--s-8);
 }
 .home-band::before {
@@ -342,6 +347,16 @@
   text-decoration: none;
   background: #fafbfe;
 }
+/* A row with no action of its own (Connect PayPal off, or already connected) stays still. */
+.hero-act.static:hover {
+  background: #fff;
+}
+button.hero-act {
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
 .hero-act-main {
   flex: 1;
   min-width: 0;
@@ -512,4 +527,8 @@ button.hero-act-main::after,
 /* Connected: the status takes the row; the refresh sits at its end. */
 .hero-src.paypal .connect-pop-wrap {
   flex: none;
+}
+/* Under the hero, "Coming up" and Saved start on one line. */
+.home-band + .grid > .rail {
+  padding-top: 0;
 }
