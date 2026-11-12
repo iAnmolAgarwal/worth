@@ -651,7 +651,13 @@ describe('decision view', () => {
     expect(screen.getAllByRole('img', { name: /^Projected balance/ })).toHaveLength(1)
     fireEvent.keyDown(radios[1]!, { key: 'ArrowRight' })
     expect(radios[2]!.getAttribute('aria-checked')).toBe('true')
-    expect(screen.getByRole('heading', { name: /If you spend/ })).toBeTruthy()
+    // The chart follows the card: its pressed pill is the cheaper option.
+    expect(
+      within(screen.getByRole('group', { name: 'Options on the chart' })).getByRole('button', {
+        name: /^Spend \$/,
+        pressed: true,
+      }),
+    ).toBeTruthy()
     await user.click(screen.getAllByRole('button', { name: /^Save for / })[0]!)
     expect(props.onSave).toHaveBeenCalledWith(
       { kind: 'catalog', productId: 'camera' },
@@ -1417,7 +1423,7 @@ describe('iteration 4 fixes', () => {
     expect(document.activeElement).toBe(chip)
   })
 
-  it('leads the decision with the verdict and makes the bill and payday lines one tab stop', async () => {
+  it('leads the decision with the verdict and makes the chart one tab stop after its toggles', async () => {
     const user = userEvent.setup()
     const state = makeState()
     routeApi((_path, data) => compare(state, data))
@@ -1435,13 +1441,22 @@ describe('iteration 4 fixes', () => {
     expect(
       await screen.findByRole('heading', { level: 1, name: /^Wait until \w{3}, \w{3} \d+$/ }),
     ).toBeTruthy()
-    const group = screen.getByRole('group', { name: /Paydays and big bills/ })
-    const lines = within(group).getAllByRole('button')
-    expect(lines.filter((line) => line.tabIndex === 0)).toHaveLength(1)
-    lines[0]!.focus()
-    await user.keyboard('{ArrowRight}')
-    expect(document.activeElement).toBe(lines[1])
-    expect(lines[1]!.tabIndex).toBe(0)
+    // The chart's pills are the options, the page's one pressed; its days are one slider.
+    const chips = within(screen.getByRole('group', { name: 'Options on the chart' })).getAllByRole(
+      'button',
+    )
+    expect(chips.map((chip) => chip.getAttribute('aria-pressed'))).toEqual([
+      'false',
+      'true',
+      'false',
+    ])
+    const days = screen.getAllByRole('slider', { name: /Balance by day/ })
+    expect(days).toHaveLength(1)
+    expect(days[0]!.tabIndex).toBe(0)
+    days[0]!.focus()
+    const before = days[0]!.getAttribute('aria-valuenow')
+    await user.keyboard('{ArrowLeft}')
+    expect(Number(days[0]!.getAttribute('aria-valuenow'))).toBe(Number(before) - 1)
   })
 })
 

@@ -1,0 +1,702 @@
+/* =====================================================================
+   The balance chart (src/BalanceChart.tsx): a line per option, the cushion,
+   money in and out, and the day in focus in words. Tokens are index.css.
+   ===================================================================== */
+.wchart {
+  --w-line: var(--c-brand);
+  --w-sky: #80ccff;
+  --w-ink: var(--c-text-strong);
+  --w-quiet: var(--c-text-3);
+  --w-bad: var(--c-danger);
+  --w-cushion: var(--c-text-strong);
+  --w-today: #6c7378;
+  --w-payday: var(--c-navy);
+  --w-income: #4a6fa5;
+  --w-bill: #44546f;
+  --tone: var(--w-line);
+  container-type: inline-size;
+  margin-top: var(--s-4);
+}
+.wchart .nowrap {
+  white-space: nowrap;
+}
+.wchart-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* The summary in words, with chips that jump to the day they name. */
+.wchart-summary {
+  list-style: none;
+  margin: 0 0 var(--s-4);
+  padding: 0;
+  display: grid;
+  gap: var(--s-2);
+}
+.wchart-summary:empty {
+  display: none;
+}
+.wchart-summary li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px var(--s-2);
+  padding: 10px var(--s-3);
+  border-radius: var(--r-md);
+  background: var(--c-surface-2);
+  color: var(--w-ink);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  font-weight: var(--fw-medium);
+}
+.wchart-summary li.dips {
+  background: var(--c-danger-bg);
+}
+.wchart-summary .words {
+  flex: 1 1 280px;
+}
+.wchart-summary .jumps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.wchart-jump {
+  appearance: none;
+  border: 1px solid var(--c-border-strong);
+  background: var(--c-surface);
+  color: var(--w-ink);
+  font: inherit;
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  font-weight: var(--fw-semibold);
+  padding: 5px 10px;
+  border-radius: var(--r-pill);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.wchart-jump.bad {
+  border-color: var(--w-bad);
+  color: #a80001;
+}
+.wchart-jump:hover {
+  background: var(--c-fill);
+}
+
+/* Every line has one solid colour of its own, shared by its chip, its labels and its legend
+   entry. Red and green are never a line's colour: they mean below the cushion and "fits". */
+/* --tone-ink is the darker shade for an option's name in running text. */
+.wchart .tone-main {
+  --tone: var(--w-line);
+  --tone-ink: var(--c-primary);
+}
+/* The balance with nothing bought: neutral, never an option's colour. */
+.wchart .tone-none {
+  --tone: #000;
+  --tone-ink: #000;
+}
+.wchart .tone-amber {
+  --tone: #b85c00;
+  --tone-ink: #8a4500;
+}
+.wchart .tone-violet {
+  --tone: #7a3ff2;
+  --tone-ink: #5b2bc4;
+}
+.wchart .tone-teal {
+  --tone: #007a8a;
+  --tone-ink: #005f6b;
+}
+.wchart-swatch {
+  flex: none;
+  display: inline-block;
+  width: 16px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--tone);
+  vertical-align: middle;
+}
+/* Toggles: what is drawn right now. */
+.wchart-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2) var(--s-4);
+  margin-bottom: var(--s-2);
+}
+.wchart-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+.wchart-chip {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 4px 14px;
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--r-pill);
+  background: var(--c-surface);
+  color: var(--c-text-2);
+  font: inherit;
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+}
+.wchart-chip[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--tone) 20%, var(--c-surface));
+  border-color: var(--tone);
+  box-shadow: inset 0 0 0 1px var(--tone);
+  color: var(--c-text-strong);
+}
+/* Without colours the pressed chip keeps a heavier border. */
+@media (forced-colors: active) {
+  .wchart-chip[aria-pressed='true'] {
+    border-width: 3px;
+  }
+}
+.wchart-chip:hover {
+  border-color: var(--tone);
+}
+.wchart-range {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: var(--r-pill);
+  background: var(--c-fill);
+}
+.wchart-range button {
+  appearance: none;
+  border: 0;
+  background: none;
+  min-height: 28px;
+  padding: 4px 12px;
+  border-radius: var(--r-pill);
+  color: var(--c-text-2);
+  font: inherit;
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+}
+.wchart-range button[aria-pressed='true'] {
+  background: var(--c-surface);
+  color: var(--c-navy);
+  box-shadow: 0 1px 3px rgba(0, 20, 53, 0.16);
+}
+.wchart-jump:focus-visible,
+.wchart-chip:focus-visible,
+.wchart-range button:focus-visible,
+.wchart-pin:focus-visible,
+.wchart-scrub:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+
+/* The plot. */
+.wchart-body {
+  display: grid;
+  gap: var(--s-3);
+}
+.wchart-frame {
+  position: relative;
+  min-width: 0;
+}
+.wchart-svg {
+  display: block;
+  overflow: visible;
+  font-family: var(--font-sans);
+}
+.wchart-grid {
+  stroke: var(--c-divider);
+  stroke-width: 1;
+}
+.wchart-tick {
+  fill: var(--w-quiet);
+  font-size: 11px;
+  font-weight: 500;
+}
+.wchart-area-top {
+  stop-color: var(--w-sky);
+  stop-opacity: 0.34;
+}
+.wchart-area-end {
+  stop-color: var(--w-sky);
+  stop-opacity: 0.04;
+}
+.wchart-line {
+  fill: none;
+  stroke: var(--tone);
+  stroke-width: 2.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.wchart-dot {
+  fill: var(--c-surface);
+  stroke: var(--tone);
+  stroke-width: 1.2;
+}
+.wchart-alt {
+  fill: none;
+  stroke: var(--tone);
+  stroke-width: 1.75;
+  stroke-linecap: round;
+}
+/* Below the cushion the shaded region is red, never blue; below zero it is a little stronger. */
+.wchart-dip rect,
+.wchart-dip path {
+  fill: var(--w-bad);
+  fill-opacity: 0.13;
+}
+/* (Each option colour measures at least 3.2:1 on the strongest of these tints.) */
+.wchart-dip .deep {
+  fill-opacity: 0.07;
+}
+.wchart-dip .ground {
+  fill: var(--c-surface);
+  fill-opacity: 1;
+}
+/* The cushion is the chart's one dotted line: round dots, evenly spaced. */
+.wchart-level.cushion line {
+  stroke: var(--w-cushion);
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  stroke-dasharray: 0.1 6;
+}
+.wchart-level text {
+  fill: var(--w-cushion);
+  font-size: 11px;
+  font-weight: 600;
+}
+.wchart-level.zero line {
+  stroke: var(--w-bad);
+  stroke-width: 1;
+}
+.wchart-level.zero text {
+  fill: #a80001;
+}
+/* Money in is a green hairline and money out a red one, quiet and behind everything else. */
+.wchart-money {
+  stroke-width: 1;
+  stroke-opacity: 0.4;
+}
+.wchart-money.in {
+  stroke: var(--c-positive);
+}
+.wchart-money.out {
+  stroke: var(--w-bad);
+}
+.wchart-edge {
+  fill: var(--c-text-2);
+  font-size: 11px;
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: var(--c-surface);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+/* Today, payday, income and the purchase: thin solid lines, each kind in its own quiet colour. */
+.wchart-mark {
+  --mark: var(--w-today);
+}
+.wchart-mark.payday {
+  --mark: var(--w-payday);
+}
+.wchart-mark.income {
+  --mark: var(--w-income);
+}
+.wchart-mark.bill {
+  --mark: var(--w-bill);
+}
+.wchart-mark.buy {
+  --mark: var(--c-navy);
+}
+.wchart-mark.fits {
+  --mark: var(--c-success);
+}
+.wchart-mark line {
+  stroke: var(--mark);
+  stroke-opacity: 0.55;
+  stroke-width: 1;
+}
+.wchart-mark text {
+  fill: var(--mark);
+  font-size: 11px;
+  font-weight: 600;
+}
+.wchart-mark.buy line,
+.wchart-mark.fits line {
+  stroke-opacity: 0.85;
+}
+.wchart-mark.buy text,
+.wchart-mark.fits text {
+  font-weight: 700;
+}
+.wchart-low {
+  fill: var(--c-surface);
+  stroke: var(--tone);
+  stroke-width: 2;
+}
+.wchart-buy {
+  fill: var(--c-navy);
+  stroke: var(--c-surface);
+  stroke-width: 2;
+}
+.wchart-buy.fits {
+  fill: var(--c-positive);
+}
+
+.wchart-focus line {
+  stroke: var(--w-ink);
+  stroke-opacity: 0.35;
+  stroke-width: 1;
+}
+.wchart-focus.pinned line {
+  stroke-opacity: 0.8;
+}
+.wchart-focus circle {
+  fill: var(--tone);
+  stroke: var(--c-surface);
+  stroke-width: 2;
+}
+.wchart-scrub {
+  position: absolute;
+  cursor: crosshair;
+  border-radius: var(--r-xs);
+  touch-action: pan-y;
+}
+
+/* The day in focus, in words. */
+.wchart-day {
+  display: grid;
+  grid-template-columns: minmax(150px, auto) 1fr;
+  column-gap: var(--s-6);
+  align-items: start;
+  padding: var(--s-4);
+  border-radius: var(--r-md);
+  background: var(--c-surface-2);
+  border-left: 4px solid var(--w-sky);
+}
+.wchart-day.below,
+.wchart-day.negative {
+  border-left-color: var(--w-bad);
+}
+.wchart-day .head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+  min-height: 24px;
+}
+.wchart-day .eyebrow {
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--c-text-2);
+}
+.wchart-pin {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: var(--c-navy);
+  color: #fff;
+  font: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.wchart-pin svg {
+  width: 12px;
+  height: 12px;
+}
+.wchart-day .date {
+  grid-column: 1;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  font-weight: var(--fw-semibold);
+  color: var(--w-ink);
+}
+.wchart-day .amount {
+  grid-column: 1;
+  font-size: 2rem;
+  line-height: 2.5rem;
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--tracking-tight);
+  color: var(--w-ink);
+}
+.wchart-day.below .amount,
+.wchart-day.negative .amount {
+  color: var(--w-bad);
+}
+.wchart-day .state {
+  grid-column: 1;
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  font-weight: var(--fw-semibold);
+  color: var(--c-text-2);
+}
+.wchart-day.below .state,
+.wchart-day.negative .state {
+  color: #a80001;
+}
+.wchart-day .words {
+  grid-column: 2;
+  grid-row: 2 / span 2;
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--c-text);
+}
+.wchart-day .also {
+  grid-column: 2;
+  margin: var(--s-2) 0 0;
+  display: grid;
+  gap: 2px;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+.wchart-day .also-head {
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  font-weight: var(--fw-semibold);
+  color: var(--c-text-2);
+}
+.wchart-day .also dd span {
+  font-weight: var(--fw-medium);
+}
+.wchart-day .also > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+.wchart-day .also dt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--c-text-2);
+}
+.wchart-day .also dd {
+  margin: 0;
+  font-weight: var(--fw-semibold);
+  color: var(--w-ink);
+}
+.wchart-day .also dd.below,
+.wchart-day .also dd.negative {
+  color: var(--w-bad);
+}
+
+.wchart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px var(--s-4);
+  margin-top: var(--s-3);
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  color: var(--c-text-2);
+}
+.wchart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.wchart-swatch.in,
+.wchart-swatch.out {
+  width: 2px;
+  height: 12px;
+  border-radius: 0;
+  background: var(--c-positive);
+}
+.wchart-swatch.out {
+  background: var(--w-bad);
+}
+.wchart-swatch.cushion {
+  height: 0;
+  background: none;
+  border-top: 3px dotted var(--w-cushion);
+  border-radius: 0;
+}
+.wchart-pill.below {
+  display: inline-block;
+  width: 12px;
+  height: 8px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--w-bad) 22%, var(--c-surface));
+}
+
+/* The same days as a table: text runs left, amounts right, one row height, hairlines only. */
+.wchart-table {
+  margin-top: var(--s-2);
+}
+.wchart-table > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  list-style: none;
+  cursor: pointer;
+  padding: 4px 2px;
+  border-radius: var(--r-xs);
+  color: var(--c-brand);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  font-weight: var(--fw-semibold);
+}
+.wchart-table > summary::-webkit-details-marker {
+  display: none;
+}
+.wchart-table > summary::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+}
+.wchart-table[open] > summary::after {
+  transform: translateY(1px) rotate(-135deg);
+}
+.wchart-table > summary:hover {
+  text-decoration: underline;
+}
+.wchart-table > summary:focus {
+  outline: none;
+}
+.wchart-table > summary:focus-visible,
+.wchart-scroll:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+.wchart-table-title {
+  margin: var(--s-3) 0 var(--s-2);
+  text-align: left;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  font-weight: var(--fw-medium);
+  color: var(--c-text-2);
+}
+.wchart-scroll {
+  max-height: 392px;
+  overflow: auto;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  background: var(--c-surface);
+}
+.wchart-scroll table {
+  width: 100%;
+  min-width: 520px;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  font-feature-settings: 'tnum' 1;
+  color: var(--c-text);
+}
+.wchart-scroll th,
+.wchart-scroll td {
+  height: 56px;
+  padding: 10px var(--s-3);
+  text-align: left;
+  vertical-align: top;
+  font-weight: var(--fw-medium);
+  border-bottom: 1px solid var(--c-divider);
+  overflow-wrap: anywhere;
+}
+.wchart-scroll tr > :first-child {
+  padding-left: var(--s-4);
+}
+.wchart-scroll tr > :last-child {
+  padding-right: var(--s-4);
+}
+.wchart-scroll tbody tr:last-child > * {
+  border-bottom: 0;
+}
+.wchart-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: auto;
+  padding-top: var(--s-3);
+  padding-bottom: var(--s-3);
+  vertical-align: bottom;
+  background: var(--c-surface-2);
+  color: var(--c-text-2);
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  font-weight: var(--fw-semibold);
+}
+.wchart-scroll .num {
+  text-align: right;
+}
+.wchart-scroll tbody th {
+  color: var(--c-text-strong);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+}
+.wchart-scroll td .amount {
+  display: block;
+  white-space: nowrap;
+  font-weight: var(--fw-semibold);
+  color: var(--c-text-strong);
+}
+/* The one accent: an amount that is itself below the cushion, with the words under it. */
+.wchart-scroll td.below .amount {
+  color: var(--c-danger);
+}
+.wchart-scroll td .note {
+  display: block;
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  color: var(--c-text-2);
+}
+.wchart-scroll td .sep {
+  display: none;
+}
+.wchart-scroll td.none {
+  color: var(--c-text-3);
+}
+
+/* Wide cards: the day in focus sits beside the plot. */
+@container (min-width: 860px) {
+  .wchart-body {
+    grid-template-columns: minmax(0, 1fr) 260px;
+    gap: var(--s-6);
+    align-items: start;
+  }
+  .wchart-day {
+    grid-template-columns: 1fr;
+    margin-top: 30px;
+  }
+  .wchart-day .words,
+  .wchart-day .also {
+    grid-column: 1;
+    grid-row: auto;
+    margin-top: var(--s-3);
+  }
+}
+/* Narrow cards: everything stacks. */
+@container (max-width: 480px) {
+  .wchart-day {
+    grid-template-columns: 1fr;
+  }
+  .wchart-day .words,
+  .wchart-day .also {
+    grid-column: 1;
+    grid-row: auto;
+    margin-top: var(--s-2);
+  }
+}

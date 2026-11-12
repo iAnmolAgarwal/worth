@@ -31,7 +31,7 @@ import {
 import type { Alternative, OptionResult, Product } from '../shared/types'
 import { offerVerdict, type AskOffer } from './AgentLauncher'
 import { AlternativesLoading, SimilarItems, useSimilarItems } from './Alternatives'
-import { BalanceChart } from './BalanceChart'
+import { BalanceChart, type ChartOption } from './BalanceChart'
 import type { AppState, Comparison, PayIn4, SavePlan, SaveTarget } from './contract'
 import { sourceTarget } from './contract'
 import { ASSESSMENT_ONLY } from './copy'
@@ -45,12 +45,10 @@ import {
   lowerName,
   missingFix,
   optionTitle,
-  paydayOn,
   purchasePlans,
   useComparison,
 } from './engine'
-import { cushionGap } from './chartLayout'
-import { boughtOn, cx, dayLabel, fromMoney, fullDate, money, shortDate, signed } from './format'
+import { boughtOn, cx, dayLabel, fromMoney, money, shortDate, signed } from './format'
 import { PayPalMessage } from './paypal'
 import type { PayPalSdkInstance } from './paypalSdk'
 import { Alert, Button, Dialog, Disc, Field, Pill, Ring, type Tone } from './ui'
@@ -278,13 +276,18 @@ function OptionCard({
   )
 }
 
-function chartTitle(c: Comparison, k: OptionKey) {
-  if (k === 'buyToday') return 'If you buy today'
-  if (k === 'wait' && c.wait.date) return `If you wait until ${dayLabel(c.wait.date)}`
-  return `If you spend ${money(c.spendLess.maxPriceCents)} today`
-}
-
 type P4 = Extract<PayIn4, { available: true }>
+
+/**
+ * The plan with nothing bought, as the engine projects it beside every option: each day's
+ * baseline low, and the day's events without the purchase.
+ */
+export const noPurchase = (c: Comparison) =>
+  c.buyToday.points.map((point) => ({
+    ...point,
+    minimumCents: point.baselineMinimumCents,
+    events: point.events.filter((event) => event.kind !== 'purchase'),
+  }))
 
 export function ChartTile({
   c,
@@ -295,57 +298,55 @@ export function ChartTile({
   c: Comparison
   k: OptionKey
   payIn4?: P4
-  /** The Pay in 4 scenario, open or not, so opening the comparison never rescales the chart. */
+  /** The Pay in 4 scenario, open or not, so the chart can offer it as a line. */
   scaleWith?: P4
 }) {
   const option = optionOf(c, k) ?? c.buyToday
-  const cause = option.lowPointCause
-  const payday = paydayOn(option.points, option.lowestDate)
-  const title = chartTitle(c, k)
   const fullName = fullPayName(c, option)
   const thesis = payIn4 ? payIn4Thesis(c, option, payIn4) : ''
+  // The chart's pills are the ways to buy this item: the page's option starts pressed, and Pay
+  // in 4 joins it while its comparison is open.
+  const p4 = scaleWith ?? payIn4
+  const purchase = (o: OptionResult) => ({ date: o.purchaseDate, fits: fits(o) })
+  const options: ChartOption[] = [
+    ...(['buyToday', 'wait', 'spendLess'] as const)
+      .filter((key) => (key === 'spendLess' ? k === key : optionOf(c, key)))
+      .map((key) => ({
+        key,
+        name: key === 'spendLess' ? fullName : optionTitle(key, c),
+        short: key === 'wait' && c.wait.date ? `Wait · ${shortDate(c.wait.date)}` : undefined,
+        points: optionOf(c, key)!.points,
+        tone: key === 'buyToday' ? ('amber' as const) : ('teal' as const),
+        purchase: purchase(optionOf(c, key)!),
+      })),
+    ...(p4
+      ? [
+          {
+            key: 'payIn4',
+            name: 'Pay in 4',
+            points: p4.points,
+            tone: 'violet' as const,
+            on: Boolean(payIn4),
+            instalments: p4.instalments,
+            purchase: { date: p4.purchaseDate },
+            note: `Compared with PayPal Pay in 4. ${payIn4Thesis(c, option, p4)}`,
+          },
+        ]
+      : []),
+  ]
   return (
-    <section className="tile" aria-labelledby="chart-title">
-      <h2 className="h-section" id="chart-title">
-        {title}
-      </h2>
-      <div className="meta">
-        Your balance each day, {shortDate(c.window.start)} to {shortDate(c.window.end)}. Each day
-        shows its low, with that day’s bills taken out before pay arrives.
-      </div>
+    // The card has no visible title: each summary row names the option it is for, so nothing
+    // above the pills can disagree with what is pressed.
+    <section className="tile" aria-label="Your balance day by day">
       {thesis && <p className="chart-thesis">{thesis}</p>}
       <BalanceChart
-        points={option.points}
+        options={options}
+        selected={options.some((o) => o.key === k) ? k : 'buyToday'}
         cushionCents={c.cushionCents}
-        purchase={{ date: option.purchaseDate, amountCents: option.amountCents }}
-        payIn4={payIn4}
-        scaleWith={scaleWith?.points}
-        fullName={fullName}
-        highlight={{
-          billDate:
-            cause && cause.kind !== 'spending' && cause.kind !== 'purchase'
-              ? cause.date
-              : undefined,
-          paydayDate: option.points.find(
-            (point) =>
-              point.date >= option.lowestDate &&
-              point.events.some((event) => event.kind === 'income'),
-          )?.date,
-        }}
-        label={`Projected balance ${title.replace(/^If/, 'if')}${payIn4 ? `, compared with PayPal Pay in 4. ${thesis}` : '.'} Each day shows its low, with that day’s bills taken out before pay arrives. ${payIn4 ? `${fullName}: lowest point` : 'Lowest point'} ${signed(option.lowestBalanceCents)} on ${fullDate(option.lowestDate)}, ${cushionGap(option.lowestBalanceCents, c.cushionCents)}.`}
+        named
+        baseline={{ name: 'No purchase', points: noPurchase(c) }}
+        label={`Projected balance, ${shortDate(c.window.start)} to ${shortDate(c.window.end)}. Each day shows its low, with that day’s bills taken out before pay arrives.`}
       />
-      {/* With Pay in 4 open, the chart's own two-row comparison already states both lows. */}
-      {!payIn4 && (
-        <p className="meta" style={{ marginTop: 12, color: 'var(--c-text-strong)' }}>
-          Lowest point: <b className="num">{signed(option.lowestBalanceCents)}</b> on{' '}
-          {dayLabel(option.lowestDate)} ({cushionGap(option.lowestBalanceCents, c.cushionCents)})
-          {cause && cause.date === option.lowestDate && payday
-            ? `: ${lowerName(cause.name)} leaves before your paycheck lands that day.`
-            : cause
-              ? `, after ${lowerName(cause.name)} on ${dayLabel(cause.date)}.`
-              : '.'}
-        </p>
-      )}
     </section>
   )
 }

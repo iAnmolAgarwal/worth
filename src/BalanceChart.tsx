@@ -1,45 +1,60 @@
-import type { ForecastEvent, ForecastPoint, InstalmentDetail } from '../shared/types'
+import type { ForecastPoint, InstalmentDetail } from '../shared/types'
+import { Fragment, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { Pin } from 'lucide-react'
 import {
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type Ref,
-} from 'react'
-import { X } from 'lucide-react'
-import {
-  bandPath,
   BIG_BILL_CENTS,
-  byWeight,
-  chartModel,
-  cushionGap,
   dateTicks,
-  dockLeft,
-  isBill,
-  LEADER_MIN,
-  leaderEnd,
-  stepPath,
+  daySentence,
+  dayState,
+  frame,
+  incomeKind,
+  lowestIndex,
+  moneyDays,
+  namedEvents,
+  paymentDays,
+  rangeOptions,
+  seriesSummary,
+  smoothPath,
+  STATE_WORDS,
+  stretchDates,
+  stretches,
   textWidth,
-  type ChartInput,
-  type EventRule,
-} from './chartLayout'
-import { lower, lowerName } from './engine'
-import { dayLabel, money, shortDate, signed } from './format'
+  tickLabel,
+  type RangeKey,
+} from './chartModel'
+import { cx, dayLabel, money, shortDate, signed } from './format'
+import './chart.css'
 
-/** Chart ticks are the one place money drops its cents: "$1k", "−$1k" (brief §7). */
-function tick(cents: number) {
-  if (cents === 0) return '$0'
-  const thousands = Math.abs(cents) / 100_000
-  return `${cents < 0 ? '−' : ''}$${Number.isInteger(thousands) ? thousands : thousands.toFixed(1)}k`
+export type Tone = 'amber' | 'violet' | 'teal'
+const TONES: Tone[] = ['amber', 'violet', 'teal']
+const NO_DAYS: ForecastPoint[] = []
+/** The key of the line drawn when no pill is pressed. */
+const NONE = 'no-purchase'
+
+/** One way to make the purchase (or the plan as it stands), as a line on the chart. */
+export interface ChartOption {
+  key: string
+  /** The pill, summary and legend name: "Buy today". */
+  name: string
+  /** A shorter name for a table column header: "Wait · Dec 15". */
+  short?: string
+  points: ForecastPoint[]
+  /** Its colour when it is not the option the page is showing; red and green keep their meanings. */
+  tone?: Tone
+  /** Starts pressed although the page shows another option (the page opened this comparison). */
+  on?: boolean
+  /** The day the purchase is paid for on this line; `fits` marks it as the day it fits. */
+  purchase?: { date: string; fits?: boolean }
+  /** Pay in 4's payments, named on their days in the table. */
+  instalments?: InstalmentDetail[]
+  /** A sentence for the text alternative while this line is drawn beside the page's option. */
+  note?: string
 }
 
 /** Tracks the rendered width; tests (no ResizeObserver) get a desktop-sized default. */
 function useWidth() {
   const ref = useRef<HTMLDivElement>(null)
-  const [width, setWidth] = useState(640)
+  const [width, setWidth] = useState(660)
   useLayoutEffect(() => {
     const element = ref.current
     if (!element) return
@@ -56,203 +71,176 @@ function useWidth() {
   return [ref, width] as const
 }
 
-const reducedMotion = () =>
-  typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
-
-const spendingOn = (point: ForecastPoint) =>
-  point.events
-    .filter((event) => event.kind === 'spending')
-    .reduce((sum, event) => sum + event.amountCents, 0)
-const namedOn = (point: ForecastPoint) =>
-  point.events.filter((event) => event.kind !== 'spending').sort(byWeight)
-const netOf = (rule: EventRule) => rule.events.reduce((sum, event) => sum + event.amountCents, 0)
-const eventText = (event: ForecastEvent) =>
+const eventText = (event: { name: string; amountCents: number }) =>
   `${event.name} ${signed(event.amountCents, event.amountCents > 0)}`
-const joinAnd = (items: string[]) =>
-  items.length < 2 ? (items[0] ?? '') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`
-
-/** On wide charts the day card docks under the plot at this width, shifted toward its rule. */
-const DOCK_WIDTH = 340
+/** Amounts never break between the minus sign and the figure. */
+const amounts = (text: string) =>
+  text.split(/(−?\$[\d,.]*\d)/).map((part, index) =>
+    index % 2 ? (
+      <span className="num nowrap" key={index}>
+        {part}
+      </span>
+    ) : (
+      <Fragment key={index}>{part}</Fragment>
+    ),
+  )
 
 /**
- * The balance chart for one option (§5.3), drawn as plain SVG so every label is measured and
- * placed without collisions:
- * - the daily lowest balance as a step (money moves on event days, never on a slope);
- * - a soft fill for the room above the cushion, red hatching for any dip below it;
- * - each payday and big bill as a thin rule across the plot where it moves the balance; the two
- *   behind the answer are drawn at full strength, and any rule opens a card for that day, docked
- *   under the plot so it never covers the balance it explains;
- * - a day-snapped scrubber for mouse, touch and keyboard, and a table alternative.
- * When the Pay in 4 comparison is open, its illustrative line and numbered instalments join it.
+ * The balance chart: one line per option against the cushion. The pills are the options; the one
+ * the page is showing starts pressed and is the bold line, the others add theirs when pressed.
+ * Days money comes in carry a green line and days it goes out a red one. Where a line is below
+ * the cushion the region is shaded red, and the day in focus is spelled out in words. Plain SVG,
+ * with a keyboard scrubber and a table.
  */
 export function BalanceChart({
-  points,
+  options,
+  selected,
   cushionCents,
-  purchase,
   label,
-  payIn4,
-  scaleWith,
-  highlight,
-  fullName = 'Pay in full',
-}: Omit<ChartInput, 'width'> & {
+  named = options.length > 1,
+  baseline,
+}: {
+  options: ChartOption[]
+  /** The option the page is showing. */
+  selected: string
+  cushionCents: number
+  /** The text alternative's first sentence. */
   label: string
-  /** With Pay in 4 open: what the plain line means, such as "Pay in full on Oct 23". */
-  fullName?: string
+  /** Every summary row leads with its option's name; by default only when there is a choice. */
+  named?: boolean
+  /**
+   * The engine's projection with nothing bought, drawn when no pill is pressed. Without it one
+   * pill always stays pressed.
+   */
+  baseline?: { name: string; points: ForecastPoint[] }
 }) {
   const id = useId().replace(/:/g, '')
   const [wrap, width] = useWidth()
-  const [active, setActive] = useState<number | null>(null)
-  /** The rule whose card is open. */
-  const [open, setOpen] = useState<number | null>(null)
-  /** The target under the mouse; its summary takes the readout slot. */
-  const [peek, setPeek] = useState<number | null>(null)
-  const [focusTarget, setFocusTarget] = useState(0)
+  const defaults = options
+    .filter((option) => option.key === selected || option.on)
+    .map((option) => option.key)
+    .join('|')
+  const [shown, setShown] = useState(() => new Set(defaults.split('|')))
+  const [range, setRange] = useState<RangeKey>('all')
+  const [hover, setHover] = useState<number | null>(null)
+  const [pinned, setPinned] = useState<number | null>(null)
   const [spoken, setSpoken] = useState('')
-  const touch = useRef(false)
-  /** Set while a press focuses the scrubber, so focus does not jump to the low point. */
-  const pressed = useRef(false)
-  const targetButtons = useRef<(HTMLButtonElement | null)[]>([])
-  const popover = useRef<HTMLDivElement>(null)
-  const focusCard = useRef(false)
-  const drag = useRef<{ x: number; scrubbing: boolean } | null>(null)
 
-  const layout = useMemo(
-    () => chartModel({ points, cushionCents, width, purchase, payIn4, scaleWith, highlight }),
-    [points, cushionCents, width, purchase, payIn4, scaleWith, highlight],
+  // A new option on the page, or the page opening a comparison itself, resets what is pressed
+  // and which day is pinned (adjusted during render, not in an effect).
+  const window = `${selected}|${options[0]?.points[0]?.date}|${options[0]?.points.length}`
+  const [seen, setSeen] = useState({ window, defaults })
+  if (seen.window !== window || seen.defaults !== defaults) {
+    setShown(new Set(defaults.split('|')))
+    if (seen.window !== window) {
+      setPinned(null)
+      setHover(null)
+    }
+    setSeen({ window, defaults })
+  }
+
+  // The bold line is the page's option while it is pressed, otherwise the first pressed one;
+  // with no pill pressed it is the balance with nothing bought.
+  const pressed = options.filter((option) => shown.has(option.key))
+  const none: ChartOption | undefined = baseline && { key: NONE, ...baseline }
+  const primary =
+    pressed.find((option) => option.key === selected) ?? pressed[0] ?? none ?? options[0]
+  const points = primary?.points ?? NO_DAYS
+  if (!primary || !points.length) return null
+  const ranges = rangeOptions(points)
+  const days = Math.min(
+    points.length,
+    (ranges.find((option) => option.key === range) ?? ranges.at(-1))?.days ?? 0,
+  )
+  const visible = points.slice(0, days)
+  // Lowest point, stretches and the words are always for the whole window; the range only
+  // changes what is drawn.
+  const allValues = points.map((point) => point.minimumCents)
+  const values = allValues.slice(0, days)
+  const toneOf = (option: ChartOption) =>
+    option.key === NONE
+      ? 'tone-none'
+      : option.key === selected
+        ? 'tone-main'
+        : `tone-${option.tone ?? TONES[options.filter((o) => o.key !== selected).indexOf(option) % 3]}`
+  const series = (primary ? [primary, ...pressed.filter((option) => option !== primary)] : []).map(
+    (option) => {
+      const byDate = new Map(option.points.map((point) => [point.date, point]))
+      const all = points.map((point) => byDate.get(point.date))
+      const own = all.flatMap((point) => (point ? [point] : []))
+      const ownValues = own.map((point) => point.minimumCents)
+      const cents = all.slice(0, days).map((point) => point?.minimumCents)
+      // The days a line is below the cushion, and below zero, as the engine's numbers have
+      // them: its red region starts and ends on those days, never where the curve crosses. A
+      // day exactly at the cushion is not below it.
+      const drawn = cents.map((value) => value ?? cushionCents)
+      return {
+        key: option.key,
+        name: option.name,
+        short: option.short ?? option.name,
+        purchaseDate: option.purchase?.date,
+        style: toneOf(option),
+        instalments: option.instalments,
+        all,
+        own,
+        cents,
+        // Its own lowest day in the window (the first, as the engine counts a tie).
+        low: all.indexOf(own[lowestIndex(ownValues)]),
+        text: seriesSummary(own, ownValues, cushionCents),
+        runs: stretches(ownValues, cushionCents),
+        dips: stretches(drawn, cushionCents),
+        deep: stretches(drawn, 0),
+      }
+    },
+  )
+  const g = frame(
+    width,
+    Math.max(1, days),
+    series.flatMap((s) => s.cents.flatMap((value) => (value === undefined ? [] : [value]))),
+    cushionCents,
+    24,
   )
 
-  // A new option or comparison closes any open card (adjusted during render, not in an effect).
-  const [shownFor, setShownFor] = useState({ points, payIn4 })
-  if (shownFor.points !== points || shownFor.payIn4 !== payIn4) {
-    setShownFor({ points, payIn4 })
-    setOpen(null)
-    setPeek(null)
-    setActive(null)
-  }
-
-  // Close an open card, or a touch readout, on a press anywhere else.
-  useEffect(() => {
-    const touchReadout = active !== null && touch.current
-    if (open === null && !touchReadout) return
-    const close = (event: globalThis.PointerEvent) => {
-      const target = event.target as Node
-      if (popover.current?.contains(target)) return
-      if (targetButtons.current.some((button) => button?.contains(target))) return
-      if (open !== null) setOpen(null)
-      if (touchReadout && !wrap.current?.contains(target)) setActive(null)
-    }
-    document.addEventListener('pointerdown', close)
-    return () => document.removeEventListener('pointerdown', close)
-  }, [open, active, wrap])
-
-  // A keyboard-opened card takes focus, so Esc and Tab work from inside it. The docked card
-  // scrolls into view if the plot pushed it below the fold.
-  const isOpen = open !== null
-  useEffect(() => {
-    if (!isOpen) return
-    if (focusCard.current) {
-      focusCard.current = false
-      popover.current?.focus({ preventScroll: true })
-    }
-    popover.current?.scrollIntoView?.({
-      block: 'nearest',
-      behavior: reducedMotion() ? 'auto' : 'smooth',
-    })
-  }, [isOpen])
-
-  if (!layout) return null
-  const { g, height, compact, values, p4Values, rules, targets, story, dot, low, placed } = layout
   const { plot } = g
-  const below = values.some((value) => value < cushionCents)
-  const p4Below = !!layout.p4Low?.below
-  const isStory = (index: number) => index === story.bill || index === story.payday
-  /** With Pay in 4 open: which line's lowest point falls on this day, in words, or ''. */
-  const lowsOn = (index: number) => {
-    const full = index === low.index
-    const p4 = !!p4Values && index === layout.p4Low?.index
-    if (!p4Values) return ''
-    if (full && p4) return 'Lowest point of both lines'
-    return full ? `Lowest point, ${lower(fullName)}` : p4 ? 'Lowest point with Pay in 4' : ''
-  }
-  const targetOf = (rule: number) => targets.findIndex((target) => target.rules.includes(rule))
-  const openTarget = open === null ? -1 : targetOf(open)
-  const shownRule =
-    open !== null ? rules[open] : peek !== null ? rules[targets[peek]!.primary] : undefined
-  const hot = new Set([
-    ...(open !== null ? [open] : []),
-    ...(peek !== null ? targets[peek]!.rules : []),
-  ])
+  const narrow = width < 480
+  const main = series[0]!
+  const low = lowestIndex(allValues)
+  const anyNegative = series.some((s) => s.cents.some((value) => value !== undefined && value < 0))
+  const focus = Math.min(hover ?? pinned ?? low, points.length - 1)
+  const focusPoint = points[focus]!
+  const focusValue = allValues[focus]!
+  const focusState = dayState(focusValue, cushionCents)
+  const buyIndex = primary.purchase
+    ? visible.findIndex((point) => point.date === primary.purchase!.date)
+    : -1
 
-  const describeDay = (index: number) => {
-    const point = points[index]!
-    const value = values[index]!
-    const parts = [
-      `${dayLabel(point.date)}. Day’s low ${signed(value)}${value < cushionCents ? ', below your cushion' : ''}.`,
-      ...namedOn(point).map((event) => `${eventText(event)}.`),
-    ]
-    const spending = spendingOn(point)
-    if (spending) parts.push(`Everyday spending ${signed(spending)}.`)
-    if (p4Values) parts.push(`With Pay in 4, day’s low ${signed(p4Values[index]!)}.`)
-    const lows = lowsOn(index)
-    if (lows) parts.push(`${lows}.`)
-    return parts.join(' ')
+  const sentence = (index: number) =>
+    daySentence(points[index]!, allValues[index]!, cushionCents, incomeKind(points[index]!, points))
+  const describe = (index: number) =>
+    `${dayLabel(points[index]!.date)}. Day’s low ${signed(allValues[index]!)}. ${sentence(index)}`
+  const move = (index: number) => {
+    const next = Math.max(0, Math.min(days - 1, index))
+    setHover(null)
+    setPinned(next)
+    setSpoken(describe(next))
   }
-  const ruleStory = (index: number) => {
-    const rule = rules[index]!
-    const after = points[rule.index]!.purchaseCents
-    const lowValue = values[low.index]!
-    if (index === story.bill) {
-      const bill = rule.events.filter(isBill).sort(byWeight)[0]
-      const payday = story.payday !== undefined ? rules[story.payday] : undefined
-      const name = bill?.name ?? 'This bill'
-      const beforePay = payday && payday.index >= low.index ? ', just before payday' : ''
-      if (low.index === rule.index)
-        return `${name} sets your lowest point: ${signed(lowValue)} that day${beforePay}.`
-      // Name the big bills between this one and the low, so the sentence matches the lines.
-      const between = points
-        .slice(rule.index + 1, low.index + 1)
-        .flatMap((point) => point.events.filter(isBill))
-      const big = between.filter((event) => -event.amountCents >= BIG_BILL_CENTS)
-      const parts = [
-        ...big.map((event) => `your ${lowerName(event.name)} (${signed(event.amountCents)})`),
-        ...(between.length > big.length ? ['smaller bills'] : []),
-      ]
-      const by = `${signed(lowValue)} by ${dayLabel(points[low.index]!.date)}${beforePay}`
-      const then = !parts.length
-        ? `Everyday spending brings it to ${by}`
-        : parts.length === 1
-          ? `Spending and ${parts[0]} bring it to ${by}`
-          : `Spending, ${joinAnd(parts)} bring it to ${by}`
-      return `${name} leaves ${signed(after)} at day’s end. ${then}.`
-    }
-    if (index === story.payday) {
-      const lift =
-        after >= cushionCents ? 'lifts you back above your cushion' : 'lifts your balance again'
-      return low.index === rule.index
-        ? `Your lowest point comes just before this paycheck lands. It ${lift}.`
-        : `This paycheck ${lift}.`
-    }
-    if (after < cushionCents) return 'You end this day below your cushion.'
-    return ''
+  /** A chip above the chart jumps to a day in the full window, widening the range if needed. */
+  const jump = (date: string) => {
+    const index = points.findIndex((point) => point.date === date)
+    if (index < 0) return
+    if (index >= days) setRange('all')
+    setHover(null)
+    setPinned(index)
+    setSpoken('')
   }
-  const describeRule = (index: number) => {
-    const rule = rules[index]!
-    const point = points[rule.index]!
-    const note = ruleStory(index)
-    return `${dayLabel(rule.date)}: ${rule.events.map(eventText).join(', ')}. Balance after this day ${signed(
-      point.purchaseCents,
-    )}.${note ? ` ${note}` : ''}`
-  }
-  const describeTarget = (index: number) =>
-    targets[index]!.rules.map((rule) => describeRule(rule)).join(' ')
-
-  const moveDay = (index: number, speak: boolean) => {
-    const next = Math.max(0, Math.min(points.length - 1, index))
-    setActive(next)
-    if (speak) setSpoken(describeDay(next))
-  }
-  const onDayKey = (event: KeyboardEvent<HTMLDivElement>) => {
-    const from = active ?? low.index
+  /** Any pill can be unpressed; the last one too, when there is a no-purchase line to show. */
+  const toggle = (key: string) =>
+    setShown((previous) => {
+      const next = new Set(previous)
+      if (!next.delete(key)) next.add(key)
+      return next.size || baseline ? next : previous
+    })
+  const onKey = (event: KeyboardEvent<HTMLDivElement>) => {
     const step: Record<string, number> = {
       ArrowRight: 1,
       ArrowUp: 1,
@@ -261,914 +249,628 @@ export function BalanceChart({
       PageUp: 7,
       PageDown: -7,
     }
-    if (event.key in step) moveDay(from + step[event.key]!, true)
-    else if (event.key === 'Home') moveDay(0, true)
-    else if (event.key === 'End') moveDay(points.length - 1, true)
-    else if (event.key === 'Escape' && active !== null) setActive(null)
+    if (event.key in step) move(Math.min(focus, days - 1) + step[event.key]!)
+    else if (event.key === 'Home') move(0)
+    else if (event.key === 'End') move(days - 1)
+    else if (event.key === 'Escape' && pinned !== null) setPinned(null)
     else return
     event.preventDefault()
   }
-  /** The day under a pointer, measured against the chart frame. */
-  const dayAt = (clientX: number) => {
-    const box = wrap.current?.getBoundingClientRect()
-    return g.indexAt(clientX - (box?.left ?? 0))
-  }
-  const closeCard = (refocus: boolean) => {
-    const target = openTarget
-    setOpen(null)
-    if (refocus && target >= 0) targetButtons.current[target]?.focus()
-  }
-  /** ←/→ on the lines move focus between them; focus itself announces each line. */
-  const onTargetKey = (event: KeyboardEvent<HTMLElement>, index: number) => {
-    if (event.key === 'Escape' && open !== null) {
-      event.preventDefault()
-      closeCard(true)
-      return
-    }
-    const last = targets.length - 1
-    const next =
-      event.key === 'ArrowRight' || event.key === 'ArrowDown'
-        ? Math.min(last, index + 1)
-        : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
-          ? Math.max(0, index - 1)
-          : event.key === 'Home'
-            ? 0
-            : event.key === 'End'
-              ? last
-              : null
-    if (next === null) return
-    event.preventDefault()
-    setFocusTarget(next)
-    targetButtons.current[next]?.focus()
-    if (open !== null) setOpen(targets[next]!.primary)
-  }
-  /** ←/→ inside an open card step through every line; focus stays in the card, so speak it once. */
-  const showRule = (next: number, speak: boolean) => {
-    setOpen(next)
-    setFocusTarget(targetOf(next))
-    if (speak) setSpoken(describeRule(next))
-  }
-  const onCardKey = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'Escape') {
-      event.preventDefault()
-      closeCard(true)
-      return
-    }
-    if (open === null) return
-    const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0
-    if (!step) return
-    event.preventDefault()
-    const next = Math.max(0, Math.min(rules.length - 1, open + step))
-    if (next === open) return
-    showRule(next, true)
-    popover.current?.focus({ preventScroll: true })
-  }
+  const dayAt = (clientX: number) =>
+    g.indexAt(clientX - (wrap.current?.getBoundingClientRect().left ?? 0))
 
-  const activeIndex = open !== null ? null : active
-  const tickIndices = dateTicks(points.length, compact)
-  const endLabel = shortDate(points.at(-1)!.date)
-  const endRoom = textWidth(endLabel, 12, 500) + 8
-  // Weekly dates that neither touch each other nor the closing date.
-  const pill = activeIndex === null ? null : dayLabel(points[activeIndex]!.date)
-  const pillW = pill ? textWidth(pill, 12, 700) + 16 : 0
-  const pillLeft = pill
-    ? Math.max(2, Math.min(width - 2 - pillW, g.x(activeIndex!) - pillW / 2))
-    : 0
-  const underPill = (from: number, w: number) =>
-    pill !== null && from < pillLeft + pillW + 4 && from + w > pillLeft - 4
-  const xTicks: number[] = []
-  let edge = -Infinity
-  for (const index of tickIndices) {
-    const w = textWidth(shortDate(points[index]!.date), 12, 500)
-    const from = index === 0 ? g.x(0) : g.x(index) - w / 2
-    if (from < edge + 10 || underPill(from, w)) continue
-    if (g.x(points.length - 1) - (from + w) < endRoom) continue
-    xTicks.push(index)
-    edge = from + w
-  }
-  const cushionShort = money(cushionCents, cushionCents % 100 !== 0)
-  // Phones tag the cushion on the y-axis. A tick that would touch the tag stays (so $0 is always
-  // labelled) and the tag steps aside by a few pixels instead.
-  const clash = compact ? g.ticks.find((value) => Math.abs(g.y(value) - layout.cy) < 16) : undefined
-  const tagY =
-    clash === undefined ? layout.cy : g.y(clash) > layout.cy ? g.y(clash) - 17 : g.y(clash) + 17
-  const lineD = stepPath(values, g)
-  const bandD = bandPath(values, g, cushionCents)
-  const byId = new Map(placed.map((box) => [box.id, box]))
-  const lowBox = byId.get('low')
-  const buyBox = byId.get('buy')
-  const storyBox = byId.get('story')
-  const lowEnd = lowBox ? leaderEnd(lowBox, low) : null
-  const lowLeader = !!lowEnd && Math.hypot(lowEnd.x - low.x, lowEnd.y - low.y) > LEADER_MIN
-  const lowRed = values[low.index]! < cushionCents
-  const p4Box = byId.get('p4low')
-  const p4End = p4Box && layout.p4Low ? leaderEnd(p4Box, layout.p4Low) : null
-  const popId = `${id}-pop`
-  const ruleClass = (index: number) =>
-    `${rules[index]!.kind}${isStory(index) ? ' story' : ''}${hot.has(index) ? ' on' : ''}`
-  const instalmentToday =
-    activeIndex === null
-      ? undefined
-      : layout.instalments.find((instalment) => instalment.index === activeIndex)
-
-  const openRule = open !== null ? rules[open] : undefined
-  const dock = openRule && !compact ? dockLeft(openRule.x, width, DOCK_WIDTH) : null
-  const ruleCard = openRule && open !== null && (
-    <RuleCard
-      ref={popover}
-      id={popId}
-      rule={openRule}
-      after={points[openRule.index]!.purchaseCents}
-      lowest={values[openRule.index]!}
-      note={ruleStory(open)}
-      story={isStory(open)}
-      cushionCents={cushionCents}
-      choices={targets[openTarget]!.rules.map((index) => ({ index, rule: rules[index]! }))}
-      current={open}
-      caret={Math.max(14, Math.min(width - 14, openRule.x)) - (dock ?? 0)}
-      dock={dock}
-      onChoose={(index) => showRule(index, false)}
-      onClose={() => closeCard(true)}
-      onKeyDown={onCardKey}
-    />
+  const linePoints = (cents: (number | undefined)[]) =>
+    cents.flatMap((value, index) => (value === undefined ? [] : [{ x: g.x(index), y: g.y(value) }]))
+  const mainPoints = linePoints(values)
+  const mainPath = smoothPath(mainPoints)
+  const floor = plot.y + plot.h
+  const cushionY = g.y(cushionCents)
+  const zeroY = Math.max(g.y(0), cushionY + 13)
+  const areaPath = `${mainPath}L${g.x(days - 1)},${floor}L${g.x(0)},${floor}Z`
+  /** The columns of a run of days, as a clip rectangle. */
+  const columns = (run: { from: number; to: number }) => ({
+    x: g.x(run.from) - g.step / 2,
+    y: plot.y,
+    width: (run.to - run.from + 1) * g.step,
+    height: plot.h + 4,
+  })
+  // The blue fill covers only the days at or above the cushion.
+  const clear = stretches(
+    values.map((value) => (value < cushionCents ? 0 : -1)),
+    0,
   )
 
+  // Money in and money out: a green line on every day pay or other income lands, a red one on
+  // every day a bill, subscription or plan payment leaves. A day with both draws both.
+  // A drawn option's own later payments (Pay in 4) are money out on their days too.
+  const shared = moneyDays(visible)
+  const flows = [
+    ...shared,
+    ...[...new Set(series.flatMap((s) => paymentDays(s.all.slice(0, days), s.purchaseDate)))]
+      .filter((index) => !shared.some((day) => day.kind === 'out' && day.index === index))
+      .map((index) => ({
+        index,
+        date: visible[index]!.date,
+        kind: 'out' as const,
+        cents: 0,
+        name: '',
+      })),
+  ]
+  const both = new Set(
+    flows
+      .filter(
+        (day) => day.kind === 'in' && flows.some((o) => o.kind === 'out' && o.index === day.index),
+      )
+      .map((day) => day.index),
+  )
+  const moneyX = (day: { index: number; kind: 'in' | 'out' }) =>
+    g.x(day.index) + (both.has(day.index) ? (day.kind === 'in' ? -1.5 : 1.5) : 0)
+
+  // The lane above the plot: the purchase first, then today, then money in, then the largest
+  // money out; a label that would touch one already placed is left out (its line stays).
+  const marks = [
+    ...(buyIndex >= 0
+      ? [
+          {
+            index: buyIndex,
+            x: g.x(buyIndex),
+            kind: primary.purchase!.fits ? 'fits' : 'buy',
+            text: `${primary.purchase!.fits ? 'Fits' : 'Buy'} ${shortDate(primary.purchase!.date)}`,
+          },
+        ]
+      : []),
+    ...(buyIndex !== 0 ? [{ index: 0, x: g.x(0), kind: 'today', text: 'Today' }] : []),
+    ...flows
+      .filter((day) => day.kind === 'in')
+      .map((day) => {
+        const text = incomeKind(visible[day.index]!, points) ?? 'Payday'
+        return { index: day.index, x: moneyX(day), kind: text.toLowerCase(), text }
+      }),
+    ...flows
+      .filter((day) => day.kind === 'out' && -day.cents >= BIG_BILL_CENTS)
+      .sort((a, b) => a.cents - b.cents)
+      .map((day) => ({ index: day.index, x: moneyX(day), kind: 'bill', text: day.name })),
+  ]
+  const taken: [number, number][] = []
+  /** Money-in days whose label found no room: nothing else may be named beside them. */
+  const unnamed: number[] = []
+  const lane = marks.map((mark) => {
+    const w = textWidth(mark.text, 11, 600)
+    const x = Math.max(plot.x + w / 2, Math.min(plot.x + plot.w - w / 2, mark.x))
+    const span: [number, number] = [x - w / 2 - 5, x + w / 2 + 5]
+    const flow = mark.kind === 'payday' || mark.kind === 'income' || mark.kind === 'bill'
+    const labelled =
+      taken.every(([a, b]) => span[1] < a || span[0] > b) &&
+      // A money label sits on its own line or not at all, and a bill is never named next to
+      // an unnamed payday, where it would read as the payday's label.
+      (!flow || Math.abs(x - mark.x) <= 4) &&
+      (mark.kind !== 'bill' || unnamed.every((index) => Math.abs(index - mark.index) > 1))
+    if (labelled) taken.push(span)
+    else if (mark.kind === 'payday' || mark.kind === 'income') unnamed.push(mark.index)
+    return { ...mark, labelX: x, labelled }
+  })
+
+  const others = series.slice(1)
+  const notes = options
+    .filter((option) => option.note && shown.has(option.key) && shown.has(selected))
+    .map((option) => `${option.note} `)
+    .join('')
+  const alt = `${label} ${notes}${series.map((s) => `${s.name}: ${s.text}`).join(' ')}`
+  const axisY = g.height - 6
+
   return (
-    <div className="bchart">
-      <div className="bchart-key" aria-hidden="true">
-        <span>
-          <i className="k-line" />
-          {p4Values ? fullName : 'Balance (day’s low)'}
-        </span>
-        {p4Values && (
-          <span>
-            <i className="k-p4" />
-            {payIn4?.instalments[0]
-              ? `Pay in 4 from ${shortDate(payIn4.instalments[0].date)}`
-              : 'Pay in 4'}
-          </span>
-        )}
-        <span>
-          <i className="k-rule payday" />
-          Payday
-        </span>
-        <span>
-          <i className="k-rule bill" />
-          Bill $100+
-        </span>
-        {(below || p4Below) && (
-          <span>
-            <i className="k-below" />
-            Below cushion
-          </span>
-        )}
-      </div>
-      <div className="bchart-frame" ref={wrap} style={{ height }}>
-        <svg
-          className="bchart-svg"
-          width={width}
-          height={height}
-          viewBox={`0 0 ${width} ${height}`}
-          role="img"
-          aria-label={label + summary(rules)}
-        >
-          <defs>
-            <clipPath id={`${id}-above`}>
-              <rect x={0} y={0} width={width} height={layout.cy} />
-            </clipPath>
-            <clipPath id={`${id}-below`}>
-              <rect x={0} y={layout.cy} width={width} height={height} />
-            </clipPath>
-            <linearGradient
-              id={`${id}-fill`}
-              x1="0"
-              x2="0"
-              y1={plot.y}
-              y2={layout.cy}
-              gradientUnits="userSpaceOnUse"
-            >
-              <stop offset="0" stopColor="#0070e0" stopOpacity={0.16} />
-              <stop offset="1" stopColor="#0070e0" stopOpacity={0.03} />
-            </linearGradient>
-            <pattern
-              id={`${id}-hatch`}
-              width={6}
-              height={6}
-              patternUnits="userSpaceOnUse"
-              patternTransform="rotate(45)"
-            >
-              <rect width={6} height={6} fill="rgba(213,1,2,.06)" />
-              <line
-                x1={0}
-                y1={0}
-                x2={0}
-                y2={6}
-                stroke="#d50102"
-                strokeOpacity={0.3}
-                strokeWidth={2}
-              />
-            </pattern>
-          </defs>
-
-          <g className="bchart-grid">
-            {g.ticks.map((value) => (
-              <line
-                key={value}
-                x1={plot.x}
-                x2={plot.x + plot.w}
-                y1={g.y(value)}
-                y2={g.y(value)}
-                className={value === 0 ? 'zero' : undefined}
-              />
-            ))}
-            {g.ticks.map((value) => (
-              <text key={value} x={plot.x - 8} y={g.y(value) + 4} textAnchor="end">
-                {tick(value)}
-              </text>
-            ))}
-            {xTicks.map((index) => (
-              <text
-                key={index}
-                x={g.x(index)}
-                y={plot.y + plot.h + 19}
-                textAnchor={index === 0 ? 'start' : 'middle'}
-              >
-                {shortDate(points[index]!.date)}
-              </text>
-            ))}
-            {!underPill(plot.x + plot.w - endRoom + 8, endRoom - 8) && (
-              <text x={plot.x + plot.w} y={plot.y + plot.h + 19} textAnchor="end">
-                {endLabel}
-              </text>
-            )}
-          </g>
-
-          <path d={bandD} fill={`url(#${id}-fill)`} clipPath={`url(#${id}-above)`} />
-          <path d={bandD} fill={`url(#${id}-hatch)`} clipPath={`url(#${id}-below)`} />
-
-          <g className="bchart-rules">
-            {rules.map((rule, index) => (
-              <line
-                key={rule.date}
-                className={`bchart-rule ${ruleClass(index)}`}
-                x1={rule.x}
-                x2={rule.x}
-                y1={plot.y}
-                y2={plot.y + plot.h}
-              />
-            ))}
-          </g>
-
-          {storyBox && story.bill !== undefined && (
-            <g className="bchart-storylabel">
-              <line
-                className="bchart-rule bill story"
-                x1={rules[story.bill]!.x}
-                x2={rules[story.bill]!.x}
-                y1={storyBox.y + 2}
-                y2={plot.y}
-              />
-              <text
-                x={storyBox.x + (storyBox.x >= rules[story.bill]!.x ? 0 : storyBox.w)}
-                y={storyBox.y + 13}
-                textAnchor={storyBox.x >= rules[story.bill]!.x ? 'start' : 'end'}
-              >
-                {layout.storyText}
-              </text>
-            </g>
-          )}
-
-          <line
-            className="bchart-cushion"
-            x1={plot.x}
-            x2={compact ? plot.x + plot.w : plot.x + plot.w + 6}
-            y1={layout.cy}
-            y2={layout.cy}
-          />
-          {compact ? (
-            <g className="bchart-cushion-tag">
-              {tagY !== layout.cy && <line x1={plot.x - 4} x2={plot.x} y1={tagY} y2={layout.cy} />}
-              <rect x={2} y={tagY - 9} width={plot.x - 6} height={18} rx={9} />
-              <text x={(plot.x - 4) / 2 + 1} y={tagY + 4} textAnchor="middle">
-                {cushionShort}
-              </text>
-            </g>
-          ) : (
-            <text className="bchart-gutter" x={plot.x + plot.w + 10} y={layout.cy - 3}>
-              <tspan className="k">Cushion</tspan>
-              <tspan x={plot.x + plot.w + 10} dy={15} className="v">
-                {cushionShort}
-              </tspan>
-            </text>
-          )}
-
-          {p4Values && <path className="bchart-p4" d={stepPath(p4Values, g)} />}
-          <path
-            key={`${points[0]!.date}-${values[low.index]}-${low.index}`}
-            className="bchart-line draw"
-            d={lineD}
-            pathLength={1}
-            clipPath={`url(#${id}-above)`}
-          />
-          <path
-            key={`below-${values[low.index]}-${low.index}`}
-            className="bchart-line below draw"
-            d={lineD}
-            pathLength={1}
-            clipPath={`url(#${id}-below)`}
-          />
-
-          {shownRule && (
-            <circle
-              className={`bchart-hit ${shownRule.kind}`}
-              cx={shownRule.x}
-              cy={g.y(values[shownRule.index]!)}
-              r={4.5}
-            />
-          )}
-
-          {layout.buyIndex >= 0 && buyBox && (
-            <g className="bchart-buy">
-              <line
-                x1={g.x(layout.buyIndex)}
-                x2={g.x(layout.buyIndex)}
-                y1={buyBox.y + buyBox.h / 2}
-                y2={g.y(values[layout.buyIndex]!) - 5}
-              />
-              <circle cx={g.x(layout.buyIndex)} cy={g.y(values[layout.buyIndex]!)} r={4.5} />
-              <text
-                x={buyBox.x + (buyBox.x >= g.x(layout.buyIndex) ? 0 : buyBox.w)}
-                y={buyBox.y + 13}
-                textAnchor={buyBox.x >= g.x(layout.buyIndex) ? 'start' : 'end'}
-              >
-                {layout.buyText}
-              </text>
-            </g>
-          )}
-
-          {layout.instalments.map((instalment) => (
-            <g
-              key={instalment.number}
-              className={`bchart-inst${instalment.value < cushionCents ? ' below' : ''}`}
-            >
-              <circle cx={instalment.x} cy={instalment.y} r={dot} />
-              <text x={instalment.x} y={instalment.y + (compact ? 3 : 3.5)} textAnchor="middle">
-                {instalment.number}
-              </text>
-            </g>
-          ))}
-
-          {layout.p4Low && (
-            <circle
-              className={`bchart-p4low${layout.p4Low.below ? ' below' : ''}`}
-              cx={layout.p4Low.x}
-              cy={layout.p4Low.y}
-              r={4.5}
-            />
-          )}
-          <circle className={`bchart-low${lowRed ? ' below' : ''}`} cx={low.x} cy={low.y} r={5.5} />
-          {lowBox && (
-            <g className={`bchart-lowpill${lowRed ? ' below' : ''}`}>
-              {lowLeader && lowEnd && <line x1={low.x} y1={low.y} x2={lowEnd.x} y2={lowEnd.y} />}
-              <rect
-                x={lowBox.x}
-                y={lowBox.y}
-                width={lowBox.w}
-                height={lowBox.h}
-                rx={lowBox.h / 2 > 10 ? 10 : lowBox.h / 2}
-              />
-              <text x={lowBox.x + 10} y={lowBox.y + 15} className="t">
-                {layout.lowTop}
-              </text>
-              {layout.lowBottom && (
-                <text x={lowBox.x + 10} y={lowBox.y + 29} className="s">
-                  {layout.lowBottom}
-                </text>
-              )}
-            </g>
-          )}
-          {p4Box && layout.p4Low && (
-            <g className={`bchart-lowpill p4${layout.p4Low.below ? ' below' : ''}`}>
-              {p4End &&
-                Math.hypot(p4End.x - layout.p4Low.x, p4End.y - layout.p4Low.y) > LEADER_MIN && (
-                  <line x1={layout.p4Low.x} y1={layout.p4Low.y} x2={p4End.x} y2={p4End.y} />
+    <div className="wchart">
+      <ul className="wchart-summary">
+        {series
+          .filter((s) => s.key !== NONE)
+          .map((s, index) => (
+            <li key={s.key} className={cx(s.runs.length > 0 && 'dips')}>
+              <span className="words">
+                {(named || series.length > 1) && <b>{s.name}: </b>}
+                {amounts(s.text)}
+              </span>
+              <span className="jumps">
+                {s.runs.map((run) => (
+                  <button
+                    type="button"
+                    className="wchart-jump bad"
+                    key={run.from}
+                    onClick={() => jump(s.own[run.from]!.date)}
+                  >
+                    Below cushion {stretchDates(run, s.own)}
+                  </button>
+                ))}
+                {index === 0 && (
+                  <button
+                    type="button"
+                    className="wchart-jump"
+                    onClick={() => jump(points[low]!.date)}
+                  >
+                    Lowest point {shortDate(points[low]!.date)}
+                  </button>
                 )}
-              <rect
-                x={p4Box.x}
-                y={p4Box.y}
-                width={p4Box.w}
-                height={p4Box.h}
-                rx={p4Box.h / 2 > 10 ? 10 : p4Box.h / 2}
-              />
-              <text x={p4Box.x + 10} y={p4Box.y + 15} className="t">
-                {layout.p4Top}
-              </text>
-              {layout.p4Bottom && (
-                <text x={p4Box.x + 10} y={p4Box.y + 29} className="s">
-                  {layout.p4Bottom}
-                </text>
-              )}
-            </g>
-          )}
+              </span>
+            </li>
+          ))}
+      </ul>
 
-          {activeIndex !== null && (
-            <g className="bchart-scrub" aria-hidden="true">
-              <line
-                x1={g.x(activeIndex)}
-                x2={g.x(activeIndex)}
-                y1={plot.y - 4}
-                y2={plot.y + plot.h}
-              />
-              {/* The numbered instalment already marks Pay in 4 on its days. */}
-              {p4Values && !instalmentToday && (
-                <circle
-                  className="p4"
-                  cx={g.x(activeIndex)}
-                  cy={g.y(p4Values[activeIndex]!)}
-                  r={4}
-                />
-              )}
-              <circle
-                className={values[activeIndex]! < cushionCents ? 'below' : undefined}
-                cx={g.x(activeIndex)}
-                cy={g.y(values[activeIndex]!)}
-                r={5}
-              />
-              <DatePill
-                x={g.x(activeIndex)}
-                y={plot.y + plot.h + 5}
-                text={dayLabel(points[activeIndex]!.date)}
-                min={2}
-                max={width - 2}
-              />
-            </g>
-          )}
-        </svg>
-        <div
-          className="bchart-scrubber"
-          style={{ left: plot.x, top: 0, width: plot.w, height: plot.y + plot.h }}
-          role="slider"
-          tabIndex={0}
-          aria-label="Balance by day. Use the arrow keys to move one day, Page Up and Page Down to move a week."
-          aria-valuemin={0}
-          aria-valuemax={points.length - 1}
-          aria-valuenow={active ?? low.index}
-          aria-valuetext={dayLabel(points[active ?? low.index]!.date)}
-          onFocus={() => {
-            if (pressed.current) pressed.current = false
-            else if (active === null) moveDay(low.index, true)
-          }}
-          onBlur={() => setActive(null)}
-          onKeyDown={onDayKey}
-          onPointerDown={(event) => {
-            pressed.current = true
-            touch.current = event.pointerType !== 'mouse'
-            if (open !== null) setOpen(null)
-            moveDay(dayAt(event.clientX), false)
-          }}
-          onPointerMove={(event) => {
-            if (event.pointerType === 'mouse' || event.buttons) moveDay(dayAt(event.clientX), false)
-          }}
-          onPointerLeave={(event) => {
-            if (event.pointerType === 'mouse') setActive(null)
-          }}
-        />
-        {targets.length > 0 && (
-          <div
-            className="bchart-rulebar"
-            role="group"
-            aria-label="Paydays and big bills. Use the arrow keys to move between them."
-          >
-            {targets.map((target, index) => (
+      <div className="wchart-controls">
+        {options.length > 1 && (
+          <div className="wchart-toggles" role="group" aria-label="Options on the chart">
+            {options.map((option) => (
               <button
-                key={rules[target.rules[0]!]!.date}
                 type="button"
-                ref={(element) => {
-                  targetButtons.current[index] = element
+                key={option.key}
+                className={cx('wchart-chip', toneOf(option))}
+                aria-pressed={shown.has(option.key)}
+                onClick={() => toggle(option.key)}
+              >
+                {option.name}
+              </button>
+            ))}
+          </div>
+        )}
+        {ranges.length > 1 && (
+          <div className="wchart-range" role="group" aria-label="Days shown">
+            {ranges.map((option) => (
+              <button
+                type="button"
+                key={option.key}
+                aria-pressed={option.key === range}
+                onClick={() => {
+                  setRange(option.key)
+                  setPinned(null)
+                  setHover(null)
                 }}
-                className={`bchart-rulehit ${rules[target.primary]!.kind}`}
-                style={{
-                  left: target.left,
-                  width: target.right - target.left,
-                  top: plot.y,
-                  height: plot.h,
-                }}
-                tabIndex={index === focusTarget ? 0 : -1}
-                aria-label={describeTarget(index)}
-                aria-expanded={openTarget === index}
-                aria-controls={openTarget === index ? popId : undefined}
-                onFocus={() => setFocusTarget(index)}
-                onKeyDown={(event) => onTargetKey(event, index)}
-                onPointerEnter={(event) => {
-                  if (event.pointerType === 'mouse') setPeek(index)
-                }}
-                onPointerLeave={(event) => {
-                  if (event.pointerType === 'mouse') setPeek(null)
-                }}
-                // A sideways drag that starts on a line scrubs the days instead of opening it.
-                onPointerDown={(event) => {
-                  drag.current = { x: event.clientX, scrubbing: false }
-                }}
-                onPointerMove={(event) => {
-                  const start = drag.current
-                  if (!start || event.pointerType === 'mouse' || !event.buttons) return
-                  if (!start.scrubbing && Math.abs(event.clientX - start.x) < 8) return
-                  start.scrubbing = true
-                  touch.current = true
-                  if (open !== null) setOpen(null)
-                  moveDay(dayAt(event.clientX), false)
-                }}
-                onClick={(event) => {
-                  const dragged = drag.current?.scrubbing
-                  drag.current = null
-                  if (dragged) return
-                  setActive(null)
-                  setPeek(null)
-                  if (openTarget === index) {
-                    setOpen(null)
-                    return
-                  }
-                  // A keyboard press (detail 0) moves focus into the card.
-                  focusCard.current = event.detail === 0
-                  setFocusTarget(index)
-                  setOpen(target.primary)
-                }}
-              />
+              >
+                {option.label}
+              </button>
             ))}
           </div>
         )}
       </div>
-      {ruleCard}
-      <p className="sr" aria-live="polite">
-        {spoken}
-      </p>
-      <div className="bchart-foot">
-        {activeIndex !== null ? (
-          <Readout
-            point={points[activeIndex]!}
-            value={values[activeIndex]!}
-            p4={p4Values?.[activeIndex]}
-            instalment={instalmentToday}
-            cushionCents={cushionCents}
+
+      <div className="wchart-body">
+        <div className="wchart-frame" ref={wrap}>
+          <svg
+            className="wchart-svg"
+            role="img"
+            aria-label={alt}
+            width={g.width}
+            height={g.height}
+            viewBox={`0 0 ${g.width} ${g.height}`}
+          >
+            <defs>
+              <linearGradient id={`${id}-area`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" className="wchart-area-top" />
+                <stop offset="1" className="wchart-area-end" />
+              </linearGradient>
+              {/* Below the cushion the region turns red, on the line's below days; the line itself
+                  keeps its option's colour for its whole length. */}
+              <clipPath id={`${id}-under`}>
+                <rect
+                  x={0}
+                  y={cushionY}
+                  width={g.width}
+                  height={Math.max(0, floor - cushionY + 4)}
+                />
+              </clipPath>
+              <clipPath id={`${id}-zero`}>
+                <rect x={0} y={g.y(0)} width={g.width} height={Math.max(0, floor - g.y(0) + 4)} />
+              </clipPath>
+              <clipPath id={`${id}-clear`}>
+                {clear.map((run) => (
+                  <rect key={run.from} {...columns(run)} />
+                ))}
+              </clipPath>
+              {series.map((s) => (
+                <Fragment key={s.key}>
+                  <clipPath
+                    id={`${id}-dips-${s.key}`}
+                    className="wchart-dipdays"
+                    data-series={s.key}
+                  >
+                    {s.dips.map((run) => (
+                      <rect
+                        key={run.from}
+                        {...columns(run)}
+                        data-from={visible[run.from]!.date}
+                        data-to={visible[run.to]!.date}
+                      />
+                    ))}
+                  </clipPath>
+                  <clipPath id={`${id}-deep-${s.key}`}>
+                    {s.deep.map((run) => (
+                      <rect key={run.from} {...columns(run)} />
+                    ))}
+                  </clipPath>
+                </Fragment>
+              ))}
+            </defs>
+
+            {g.ticks.map((cents) => (
+              <g key={cents}>
+                <line
+                  className="wchart-grid"
+                  x1={plot.x}
+                  x2={plot.x + plot.w}
+                  y1={g.y(cents)}
+                  y2={g.y(cents)}
+                />
+                <text className="wchart-tick" x={plot.x - 8} y={g.y(cents) + 4} textAnchor="end">
+                  {tickLabel(cents)}
+                </text>
+              </g>
+            ))}
+
+            {/* Money in (green) and money out (red), behind the fills and the option lines. */}
+            {flows.map((day) => (
+              <line
+                key={`${day.kind}${day.index}`}
+                className={cx('wchart-money', day.kind)}
+                data-date={day.date}
+                x1={moneyX(day)}
+                x2={moneyX(day)}
+                y1={plot.y}
+                y2={floor}
+              />
+            ))}
+            {lane.map((mark) => (
+              <g key={`${mark.kind}${mark.x}`} className={cx('wchart-mark', mark.kind)}>
+                {(mark.kind === 'today' || mark.kind === 'fits' || mark.kind === 'buy') && (
+                  <line x1={mark.x} x2={mark.x} y1={plot.y} y2={floor} />
+                )}
+                {mark.labelled && (
+                  <text x={mark.labelX} y={plot.y - 10} textAnchor="middle">
+                    {mark.text}
+                  </text>
+                )}
+              </g>
+            ))}
+
+            <path
+              className="wchart-area"
+              d={areaPath}
+              fill={`url(#${id}-area)`}
+              clipPath={`url(#${id}-clear)`}
+            />
+            {/* The bold option below its cushion: red from the cushion down, on those days. */}
+            {main.dips.length > 0 && (
+              <g className="wchart-dip main">
+                <rect
+                  x={plot.x}
+                  y={cushionY}
+                  width={plot.w}
+                  height={floor - cushionY}
+                  clipPath={`url(#${id}-dips-${main.key})`}
+                />
+                <rect
+                  className="deep"
+                  x={plot.x}
+                  y={g.y(0)}
+                  width={plot.w}
+                  height={Math.max(0, floor - g.y(0))}
+                  clipPath={`url(#${id}-deep-${main.key})`}
+                />
+              </g>
+            )}
+            {/* Another option below the cushion: the gap between the cushion and its line, laid
+                over a plain ground so the blue fill never shows through the red. A thin strip
+                at the cushion keeps a shallow dip from vanishing. */}
+            {others.map((s) => {
+              if (!s.dips.length) return null
+              const gap = `${smoothPath(linePoints(s.cents))}L${g.x(days - 1)},${cushionY}L${g.x(0)},${cushionY}Z`
+              return (
+                <g key={s.key} className="wchart-dip">
+                  <g clipPath={`url(#${id}-dips-${s.key})`}>
+                    <path className="ground" d={gap} clipPath={`url(#${id}-under)`} />
+                    <path d={gap} clipPath={`url(#${id}-under)`} />
+                    <rect className="edge" x={plot.x} y={cushionY} width={plot.w} height={3} />
+                  </g>
+                  <g clipPath={`url(#${id}-deep-${s.key})`}>
+                    <path className="deep" d={gap} clipPath={`url(#${id}-zero)`} />
+                  </g>
+                </g>
+              )
+            })}
+
+            {anyNegative && (
+              <g className="wchart-level zero">
+                <line x1={plot.x} x2={plot.x + plot.w} y1={g.y(0)} y2={g.y(0)} />
+                <text x={plot.x + plot.w + 8} y={zeroY + 4}>
+                  {narrow ? '$0' : 'Zero $0'}
+                </text>
+              </g>
+            )}
+            <g className="wchart-level cushion">
+              <line x1={plot.x} x2={plot.x + plot.w} y1={cushionY} y2={cushionY} />
+              <text x={plot.x + plot.w + 8} y={cushionY + (anyNegative ? -1 : 4)}>
+                {narrow ? money(cushionCents, false) : `Cushion ${money(cushionCents, false)}`}
+              </text>
+            </g>
+
+            {others.map((s) => (
+              <path
+                key={s.key}
+                className={cx('wchart-alt', s.style)}
+                d={smoothPath(linePoints(s.cents))}
+              />
+            ))}
+            <g className={main.style}>
+              <path className="wchart-line" d={mainPath} />
+              {g.step >= 7 &&
+                mainPoints.map((point, index) => (
+                  <circle key={index} className="wchart-dot" cx={point.x} cy={point.y} r={1.6} />
+                ))}
+              {low < days && (
+                <circle className="wchart-low" cx={g.x(low)} cy={g.y(values[low]!)} r={5} />
+              )}
+            </g>
+            {/* The lowest day is out of view: say where it is instead of marking another day. */}
+            {low >= days && (
+              <text
+                className="wchart-edge"
+                x={plot.x + plot.w - 4}
+                y={plot.y + 14}
+                textAnchor="end"
+              >
+                Lowest point {shortDate(points[low]!.date)} →
+              </text>
+            )}
+            {buyIndex >= 0 && (
+              <circle
+                className={cx('wchart-buy', primary.purchase!.fits && 'fits')}
+                cx={g.x(buyIndex)}
+                cy={g.y(values[buyIndex]!)}
+                r={5.5}
+              />
+            )}
+
+            {dateTicks(days, plot.w).map((index) => (
+              <text
+                key={index}
+                className="wchart-tick"
+                x={g.x(index)}
+                y={axisY}
+                textAnchor={index === 0 ? 'start' : 'middle'}
+                dx={index === 0 ? -g.step / 2 : 0}
+              >
+                {shortDate(visible[index]!.date)}
+              </text>
+            ))}
+
+            {focus < days && (
+              <g className={cx('wchart-focus', pinned !== null && hover === null && 'pinned')}>
+                <line x1={g.x(focus)} x2={g.x(focus)} y1={plot.y} y2={floor} />
+                {[...series]
+                  .reverse()
+                  .map((s) =>
+                    s.cents[focus] === undefined ? null : (
+                      <circle
+                        key={s.key}
+                        className={s.style}
+                        cx={g.x(focus)}
+                        cy={g.y(s.cents[focus]!)}
+                        r={s === main ? 5 : 3.5}
+                      />
+                    ),
+                  )}
+              </g>
+            )}
+          </svg>
+          <div
+            className="wchart-scrub"
+            role="slider"
+            tabIndex={0}
+            aria-label="Balance by day. Arrow keys move a day and pin it; Escape unpins."
+            aria-valuemin={0}
+            aria-valuemax={days - 1}
+            aria-valuenow={Math.min(focus, days - 1)}
+            aria-valuetext={dayLabel(focusPoint.date)}
+            style={{ left: plot.x, width: plot.w, top: plot.y, height: plot.h }}
+            onKeyDown={onKey}
+            onPointerMove={(event) =>
+              event.pointerType === 'mouse' && setHover(dayAt(event.clientX))
+            }
+            onPointerLeave={() => setHover(null)}
+            onClick={(event) => {
+              const index = dayAt(event.clientX)
+              setPinned(pinned === index ? null : index)
+              setHover(null)
+            }}
           />
-        ) : peek !== null && open === null ? (
-          <Peek rules={targets[peek]!.rules.map((index) => rules[index]!)} points={points} />
-        ) : (
-          <p className="bchart-hint bchart-slot">
-            <span className="on-touch">
-              Drag across the chart to read any day. Tap a bill or payday line for details.
+        </div>
+
+        <aside className={cx('wchart-day', focusState)} aria-label="Day in focus">
+          <div className="head">
+            <span className="eyebrow">
+              {hover === null && pinned === null ? 'Lowest point' : 'Day in focus'}
             </span>
-            <span className="on-pointer">
-              Move across the chart to read any day. Select a bill or payday line for details.
-            </span>
-          </p>
-        )}
+            {pinned !== null && hover === null && (
+              <button
+                type="button"
+                className="wchart-pin"
+                onClick={() => setPinned(null)}
+                aria-label="Pinned. Unpin this day"
+              >
+                <Pin aria-hidden="true" /> Pinned
+              </button>
+            )}
+          </div>
+          <div className="date">{dayLabel(focusPoint.date)}</div>
+          <div className="amount num">{signed(focusValue)}</div>
+          <div className="state">{STATE_WORDS[focusState]}</div>
+          <p className="words">{amounts(sentence(focus))}</p>
+          {others.length > 0 && (
+            <dl className="also" aria-label="The other options on this day">
+              <div className="also-head">Same day, other options</div>
+              {others.map((s) => {
+                const cents = s.all[focus]?.minimumCents
+                return cents === undefined ? null : (
+                  <div key={s.key}>
+                    <dt>
+                      <span className={cx('wchart-swatch', s.style)} aria-hidden />
+                      {s.name}
+                    </dt>
+                    <dd className={cx('num', dayState(cents, cushionCents))}>
+                      {signed(cents)}
+                      <span> · {STATE_WORDS[dayState(cents, cushionCents)]}</span>
+                    </dd>
+                  </div>
+                )
+              })}
+            </dl>
+          )}
+        </aside>
       </div>
-      {layout.p4Low && (
-        <dl className="bchart-compare">
-          {[
-            { key: 'full', name: fullName, index: low.index, value: values[low.index]! },
-            {
-              key: 'p4',
-              name: 'Pay in 4',
-              index: layout.p4Low.index,
-              value: p4Values![layout.p4Low.index]!,
-            },
-          ].map((row) => (
-            <div key={row.key} className={row.value < cushionCents ? 'below' : undefined}>
-              <dt>
-                <i className={`k-${row.key === 'p4' ? 'p4' : 'line'}`} aria-hidden="true" />
-                {row.name}
-              </dt>
-              <dd>
-                lowest point <b>{signed(row.value)}</b> on {dayLabel(points[row.index]!.date)},{' '}
-                {cushionGap(row.value, cushionCents)}
-              </dd>
-            </div>
-          ))}
-        </dl>
-      )}
-      <ChartTable
+
+      <div className="wchart-legend" aria-hidden="true">
+        {series.map((s) => (
+          <span key={s.key} className={s.style}>
+            <i className="wchart-swatch" />
+            {s.name}
+          </span>
+        ))}
+        <span>
+          <i className="wchart-swatch in" />
+          Money in
+        </span>
+        <span>
+          <i className="wchart-swatch out" />
+          Money out
+        </span>
+        <span>
+          <i className="wchart-swatch cushion" />
+          Cushion
+        </span>
+        <span>
+          <i className="wchart-pill below" />
+          Below cushion
+        </span>
+      </div>
+      <div className="wchart-live" aria-live="polite">
+        {spoken}
+      </div>
+
+      <DayTable
+        id={id}
         points={points}
-        values={values}
-        p4={p4Values}
         cushionCents={cushionCents}
-        instalments={payIn4?.instalments}
-        fullName={fullName}
-        lowIndex={low.index}
-        p4LowIndex={layout.p4Low?.index}
+        columns={series.map((s) => ({
+          key: s.key,
+          name: s.short,
+          low: s.low,
+          days: s.all,
+          instalments: s.instalments,
+        }))}
       />
     </div>
   )
 }
 
-/** The selected day on the x-axis, kept inside the chart. */
-function DatePill({
-  x,
-  y,
-  text,
-  min,
-  max,
-}: {
-  x: number
-  y: number
-  text: string
-  min: number
-  max: number
-}) {
-  const w = Math.ceil(textWidth(text, 12, 700)) + 16
-  const left = Math.max(min, Math.min(max - w, x - w / 2))
-  return (
-    <g className="bchart-datepill">
-      <rect x={left} y={y} width={w} height={20} rx={10} />
-      <text x={left + w / 2} y={y + 14} textAnchor="middle">
-        {text}
-      </text>
-    </g>
-  )
-}
-
-function EventList({ events }: { events: ForecastEvent[] }) {
-  if (!events.length) return null
-  return (
-    <ul className="bc-events">
-      {events.map((event, index) => (
-        <li key={`${event.id}-${index}`} className={event.amountCents > 0 ? 'in' : 'out'}>
-          <span>{event.name}</span>
-          <b>{signed(event.amountCents, event.amountCents > 0)}</b>
-        </li>
-      ))}
-    </ul>
-  )
-}
-
-/** The scrub readout for any day, in a fixed slot under the plot so it never covers the line. */
-function Readout({
-  point,
-  value,
-  p4,
-  instalment,
-  cushionCents,
-}: {
-  point: ForecastPoint
-  value: number
-  p4?: number
-  instalment?: InstalmentDetail
-  cushionCents: number
-}) {
-  const named = namedOn(point)
-  const spending = spendingOn(point)
-  const moves = [
-    ...named.map((event) => ({ text: eventText(event), income: event.amountCents > 0 })),
-    ...(spending ? [{ text: `Everyday spending ${signed(spending)}`, income: false }] : []),
-  ]
-  return (
-    <div className="bchart-readout bchart-slot" aria-hidden="true">
-      <div className="r1">
-        <span className="d">Selected: {dayLabel(point.date)}</span>
-        <b className={value < cushionCents ? 'neg' : undefined}>{signed(value)}</b>
-        <span className={`vs${value < cushionCents ? ' neg' : ''}`}>
-          at the day’s low{value < cushionCents ? ' · below your cushion' : ''}
-        </span>
-      </div>
-      <div className="r2">
-        {moves.map((move, index) => (
-          <span key={index} className={move.income ? 'in' : undefined}>
-            {move.text}
-          </span>
-        ))}
-        {p4 !== undefined && (
-          <span className={`p4${p4 < cushionCents ? ' neg' : ''}`}>
-            {instalment
-              ? `Pay in 4: payment ${instalment.number} of 4 ${signed(-instalment.amountCents)}, day’s low `
-              : 'With Pay in 4, day’s low '}
-            {signed(p4)}
-          </span>
-        )}
-      </div>
-    </div>
-  )
-}
+/** How a balance sits, in the words the table puts under an amount; nothing when it is fine. */
+const stateNote = (cents: number, cushionCents: number) =>
+  cents < 0 ? 'below zero' : cents < cushionCents ? 'below cushion' : ''
 
 /**
- * A hovered line's one-line summary in the readout slot: the day, its movement and the balance
- * after. The full card opens on click, so a hover never covers the chart or leaves the tile.
+ * The same days as a table, and the chart's alternative for anyone who would rather read than
+ * look: one row a day for the whole window, what happens that day, and each pressed option's
+ * balance at that day's low. Text runs left and amounts right, so the decimal points line up;
+ * an amount is red only when it is itself below the cushion, and says so in words under it.
  */
-function Peek({ rules, points }: { rules: EventRule[]; points: ForecastPoint[] }) {
-  const first = rules[0]!
-  const last = rules.at(-1)!
-  const after = points[last.index]!.purchaseCents
-  const many = rules.length > 1
-  const net = netOf(first)
-  return (
-    <div className="bchart-readout bchart-slot bchart-peek" aria-hidden="true">
-      <div className="r1">
-        <span className="d">
-          {many ? `${dayLabel(first.date)} to ${dayLabel(last.date)}` : dayLabel(first.date)}
-        </span>
-        {!many && <b className={net > 0 ? 'pos' : undefined}>{signed(net, net > 0)}</b>}
-        <span className="vs">balance after {signed(after)}</span>
-        <span className="act">Click for details</span>
-      </div>
-      <div className="r2">
-        {rules.flatMap((rule) =>
-          rule.events.map((event, index) => (
-            <span
-              key={`${rule.date}-${index}`}
-              className={event.amountCents > 0 ? 'in' : undefined}
-            >
-              {many ? `${shortDate(rule.date)} · ` : ''}
-              {eventText(event)}
-            </span>
-          )),
-        )}
-      </div>
-    </div>
-  )
-}
-
-/**
- * What happened on a payday or bill day, opened by click, tap or Enter on its line. It leads with
- * the day's net movement, lists each event, gives the balance after the day and one line on why
- * it matters. It docks under the plot (its caret on the line), so it never covers the step it
- * explains. Lines on nearby days share one target, and the card offers a day chooser for them.
- */
-function RuleCard({
-  ref,
+function DayTable({
   id,
-  rule,
-  after,
-  lowest,
-  note,
-  story,
-  cushionCents,
-  choices,
-  current,
-  caret,
-  dock,
-  onChoose,
-  onClose,
-  onKeyDown,
-}: {
-  ref: Ref<HTMLDivElement>
-  id: string
-  rule: EventRule
-  after: number
-  lowest: number
-  note: string
-  story: boolean
-  cushionCents: number
-  choices: { index: number; rule: EventRule }[]
-  current: number
-  /** The caret's offset from the card's left edge. */
-  caret: number
-  /** Wide charts: the card's left offset; null on phones (full width). */
-  dock: number | null
-  onChoose: (index: number) => void
-  onClose: () => void
-  onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void
-}) {
-  const income = rule.events.some((event) => event.kind === 'income')
-  const net = netOf(rule)
-  const title = `${rule.kind === 'payday' ? 'Payday' : 'Bill'} · ${dayLabel(rule.date)}`
-  const style =
-    dock === null
-      ? { ['--caret' as string]: `${caret}px` }
-      : { width: DOCK_WIDTH, marginLeft: dock, ['--caret' as string]: `${caret}px` }
-  return (
-    <div
-      ref={ref}
-      id={id}
-      className={`bchart-pop ${rule.kind}${story ? ' story' : ''}`}
-      style={style}
-      role="dialog"
-      aria-label={title}
-      tabIndex={-1}
-      onKeyDown={onKeyDown}
-    >
-      <div className="bc-head">
-        <span className="bc-kind">{title}</span>
-        <button type="button" className="bc-close" aria-label="Close" onClick={onClose}>
-          <X aria-hidden="true" />
-        </button>
-      </div>
-      {choices.length > 1 && (
-        <div className="bc-days" role="group" aria-label="Lines on nearby days">
-          {choices.map((choice) => (
-            <button
-              key={choice.rule.date}
-              type="button"
-              className={choice.rule.kind}
-              aria-pressed={choice.index === current}
-              onClick={() => onChoose(choice.index)}
-            >
-              {shortDate(choice.rule.date)}
-            </button>
-          ))}
-        </div>
-      )}
-      <div className={`bc-net${net > 0 ? ' pos' : ''}`}>{signed(net, net > 0)}</div>
-      {rule.events.length === 1 ? (
-        <div className="bc-name">{rule.events[0]!.name}</div>
-      ) : (
-        <EventList events={rule.events} />
-      )}
-      <dl className="bc-after">
-        {income && lowest !== after && (
-          <div>
-            <dt>Day’s low</dt>
-            <dd className={lowest < cushionCents ? 'neg' : undefined}>{signed(lowest)}</dd>
-          </div>
-        )}
-        <div>
-          <dt>Balance after this day</dt>
-          <dd className={after < cushionCents ? 'neg' : undefined}>{signed(after)}</dd>
-        </div>
-      </dl>
-      {note && <p className="bc-story">{note}</p>}
-    </div>
-  )
-}
-
-/** The chart as a table: every day's low balance, how it sits against the cushion, and why. */
-function ChartTable({
   points,
-  values,
-  p4,
   cushionCents,
-  instalments,
-  fullName,
-  lowIndex,
-  p4LowIndex,
+  columns,
 }: {
+  id: string
   points: ForecastPoint[]
-  values: number[]
-  p4: number[] | null
   cushionCents: number
-  instalments?: InstalmentDetail[]
-  fullName: string
-  lowIndex: number
-  p4LowIndex?: number
+  columns: {
+    key: string
+    name: string
+    /** The option's own lowest day. */
+    low: number
+    /** The option's own day, for its balance and its own purchase or payment. */
+    days: (ForecastPoint | undefined)[]
+    instalments?: InstalmentDetail[]
+  }[]
 }) {
-  const spend = points[0] ? spendingOn(points[0]) : 0
-  const lowText = (value: number, index: number) =>
-    `Lowest point ${signed(value)} on ${dayLabel(points[index]!.date)}${value < cushionCents ? ', below your cushion' : ''}`
+  // Fixed, balanced widths: the day, then what happens takes what the balances leave.
+  const balance = columns.length > 2 ? 19 : columns.length === 2 ? 21 : 24
   return (
-    <details className="bchart-table">
+    <details className="wchart-table">
       <summary>View as table</summary>
-      <div
-        className="bchart-scroll"
-        tabIndex={0}
-        role="region"
-        aria-label="Balance by day, as a table"
-      >
-        <table>
-          <caption className="sr">
-            Projected balance each day at its low, with that day’s bills taken out before pay
-            arrives, against your {money(cushionCents)} cushion.
-            {spend ? ` Each day also includes about ${money(-spend)} of everyday spending.` : ''}
-            {p4 && p4LowIndex !== undefined
-              ? ` ${fullName}: ${lower(lowText(values[lowIndex]!, lowIndex))}. With Pay in 4: ${lower(lowText(p4[p4LowIndex]!, p4LowIndex))}.`
-              : ''}
-          </caption>
+      <p className="wchart-table-title" id={`${id}-table`}>
+        Each day’s lowest balance, {shortDate(points[0]!.date)} to {shortDate(points.at(-1)!.date)}
+      </p>
+      <div className="wchart-scroll" tabIndex={0} role="region" aria-labelledby={`${id}-table`}>
+        <table aria-labelledby={`${id}-table`}>
+          <colgroup>
+            <col style={{ width: '17%' }} />
+            <col />
+            {columns.map((column) => (
+              <col key={column.key} style={{ width: `${balance}%` }} />
+            ))}
+          </colgroup>
           <thead>
             <tr>
               <th scope="col">Day</th>
-              <th scope="col">{p4 ? `${fullName} (day’s low)` : 'Balance (day’s low)'}</th>
-              <th scope="col">Against your cushion</th>
               <th scope="col">What happens</th>
-              {p4 && <th scope="col">With Pay in 4</th>}
+              {columns.map((column) => (
+                <th scope="col" className="num" key={column.key}>
+                  {column.name}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {points.map((point, index) => {
-              const value = values[index]!
-              const instalment = instalments?.find((i) => i.date === point.date)
+              // What happens to the plan whatever is bought: bills, pay, other income. An
+              // option's own purchase or payment is a note under its own amount.
+              const events = namedEvents(point)
+                .filter((event) => event.kind !== 'purchase')
+                .map(eventText)
               return (
-                // Each balance is red only when it is itself below the cushion: the Pay in 4 column
-                // is judged on its own value, as the engine judges it.
                 <tr key={point.date}>
                   <th scope="row">{dayLabel(point.date)}</th>
-                  <td className={value < cushionCents ? 'num below' : 'num'}>
-                    {signed(value)}
-                    {p4 && index === lowIndex ? ' · lowest point' : ''}
-                  </td>
-                  <td>
-                    {value === cushionCents
-                      ? 'At cushion'
-                      : value > cushionCents
-                        ? 'Above'
-                        : 'Below'}
-                  </td>
-                  <td>{namedOn(point).map(eventText).join(', ') || '—'}</td>
-                  {p4 && (
-                    <td className={p4[index]! < cushionCents ? 'num below' : 'num'}>
-                      {signed(p4[index]!)}
-                      {instalment ? ` · payment ${instalment.number} of 4` : ''}
-                      {index === p4LowIndex ? ' · lowest point' : ''}
-                      {p4[index]! < cushionCents ? ' · below cushion' : ''}
-                    </td>
-                  )}
+                  <td className={cx(!events.length && 'none')}>{events.join(', ') || '—'}</td>
+                  {columns.map((column) => {
+                    const own = column.days[index]
+                    const cents = own?.minimumCents
+                    if (!own || cents === undefined)
+                      return (
+                        <td className="num none" key={column.key}>
+                          —
+                        </td>
+                      )
+                    const instalment = column.instalments?.find((i) => i.date === point.date)
+                    const paid = own.events.filter((event) => event.kind === 'purchase')
+                    const notes = [
+                      ...paid.map((event) =>
+                        instalment
+                          ? `payment ${instalment.number} of 4 ${signed(event.amountCents)}`
+                          : `buys ${event.name} ${signed(event.amountCents)}`,
+                      ),
+                      instalment && !paid.length ? `payment ${instalment.number} of 4` : '',
+                      index === column.low ? 'lowest point' : '',
+                      stateNote(cents, cushionCents),
+                    ].filter(Boolean)
+                    return (
+                      // Red only when this balance is itself below the cushion: every column is
+                      // judged on its own value, as the engine judges it.
+                      <td className={cx('num', cents < cushionCents && 'below')} key={column.key}>
+                        <span className="amount">{signed(cents)}</span>
+                        {notes.length > 0 && (
+                          <span className="note">
+                            <span className="sep"> · </span>
+                            {notes.join(' · ')}
+                          </span>
+                        )}
+                      </td>
+                    )
+                  })}
                 </tr>
               )
             })}
@@ -1177,18 +879,4 @@ function ChartTable({
       </div>
     </details>
   )
-}
-
-/** The rules, in words, for the chart's text alternative. */
-function summary(rules: EventRule[]) {
-  if (!rules.length) return ''
-  const paydays = rules.filter((rule) => rule.events.some((event) => event.kind === 'income'))
-  const bills = rules.flatMap((rule) =>
-    rule.events
-      .filter((event) => isBill(event) && -event.amountCents >= BIG_BILL_CENTS)
-      .map((event) => `${event.name} ${dayLabel(rule.date)}`),
-  )
-  return ` Paydays: ${paydays.map((rule) => dayLabel(rule.date)).join(', ') || 'none'}. Big bills: ${
-    bills.join(', ') || 'none'
-  }.`
 }

@@ -15,7 +15,7 @@ import type { AppState } from './contract'
 import { isActive } from './contract'
 import { DEMO_CLOCK_EDIT, pinnedSample } from './copy'
 import { allPlans, cadenceLabel, flowIcon, kindLabel, runningPlans } from './engine'
-import { cx, dayLabel, money, shortDate, signed, displayName } from './format'
+import { cx, dayLabel, money, signed, displayName } from './format'
 import { Alert, Button, DateStepper, Disc, Field, Pill, Ring, Toggle } from './ui'
 
 type FlowDraft = Omit<ScheduledFlow, 'amountCents'> & { amount: string }
@@ -1242,18 +1242,20 @@ function Review({
           <h2 className="h-section" id="preview-title">
             Your balance, next {preview.points.length - 1} days
           </h2>
-          <p className="meta">
-            {shortDate(preview.points[0]!.date)} to {shortDate(preview.points.at(-1)!.date)}, before
-            any purchase. Each day shows its low, with that day’s bills taken out before pay
-            arrives.
-          </p>
           <BalanceChart
-            points={preview.points.map((point) => ({
-              ...point,
-              minimumCents: point.baselineMinimumCents,
-            }))}
+            options={[
+              {
+                key: 'plan',
+                name: 'Balance',
+                points: preview.points.map((point) => ({
+                  ...point,
+                  minimumCents: point.baselineMinimumCents,
+                })),
+              },
+            ]}
+            selected="plan"
             cushionCents={preview.cushionCents}
-            label={`Projected balance before any purchase. Each day shows its low, with that day’s bills taken out before pay arrives. Lowest point ${signed(preview.baselineLowestCents)}.`}
+            label="Projected balance before any purchase. Each day shows its low, with that day’s bills taken out before pay arrives."
           />
         </section>
       )}
