@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import {
   ArrowRight,
   ArrowUp,
@@ -34,6 +34,7 @@ import { optionStatus, type DecisionRequest, type Explanation } from './Decision
 import { claudeOn, envLabel, fits, missingFix, useComparison } from './engine'
 import { capitalize, cx, dayLabel, fromMoney, money, signed } from './format'
 import type { AskOffer } from './AgentLauncher'
+import { chartSnapshot, sameItem, sendChartCommand } from './chartControl'
 import { Guide, type GuideExpression } from './Guide'
 import { countedHold, ReservationNote } from './Reservation'
 import { LinkCheck } from './PasteLink'
@@ -64,6 +65,38 @@ type Entry = ChatMessage & {
   link?: LinkTurn
   /** The item the screen behind offered, sent with this question as quoted data. */
   about?: AskOffer
+  /** A chart answer: `moved` the chart on screen, left it as it was, or found no such chart. */
+  chartApplied?: ChartResult
+}
+
+/** What the chart on screen shows, for the server to check and answer about. */
+export function chartView(shown = chartSnapshot()) {
+  if (!shown) return undefined
+  return {
+    screen: 'decision' as const,
+    ...(shown.item.productId
+      ? { productId: shown.item.productId }
+      : { amountCents: shown.item.amountCents, itemName: shown.item.name.slice(0, 150) }),
+    options: shown.pressed,
+    range: shown.range,
+    ...(shown.focusDay ? { focusDay: shown.focusDay } : {}),
+  }
+}
+
+type ChartResult = 'moved' | 'unchanged' | 'absent'
+/** Applies a reply's chart change when the chart for that same item is on screen. */
+export function applyChart(reply: ChatReply): ChartResult {
+  const target = reply.chart
+  if (!target || !sameItem({ ...target.item, itemName: target.item.name }, chartSnapshot()))
+    return 'absent'
+  const { options, range, focusDay } = target
+  const command = {
+    ...(options ? { options } : {}),
+    ...(range ? { range } : {}),
+    ...(focusDay ? { focusDay } : {}),
+  }
+  if (!Object.keys(command).length) return 'unchanged'
+  return sendChartCommand(command) ? 'moved' : 'absent'
 }
 
 const offerKey = (offer: AskOffer) => `${offer.itemName}|${offer.amountCents}`
@@ -108,6 +141,22 @@ const curly = (text: string) => text.replace(/'/g, '’')
 
 /** Money in sentences uses a true minus sign: −$458.99. */
 export const minus = (text: string) => text.replace(/-\$/g, '−$')
+
+/** Each amount, its minus sign included, stays on one line: "Lowest −$726.74" never breaks. */
+export function amountsOnOneLine(text: string): ReactNode {
+  const parts = minus(text).split(/(−?\$[\d,]+(?:\.\d{2})?)/)
+  return parts.length === 1
+    ? text
+    : parts.map((part, index) =>
+        index % 2 ? (
+          <span className="nowrap" key={index}>
+            {part}
+          </span>
+        ) : (
+          part
+        ),
+      )
+}
 
 export function itemLabel(read: Interpretation) {
   return capitalize(
@@ -177,7 +226,7 @@ function Explanation({ reply }: { reply: ChatReply }) {
           Claude’s note · Worth’s numbers
         </span>
       )}
-      {minus(reply.explanation)}
+      {amountsOnOneLine(reply.explanation)}
     </p>
   )
 }
@@ -337,9 +386,9 @@ function VerdictTile({
       style={{ width: '100%', padding: 'var(--s-5)' }}
       aria-label="Purchase assessment"
     >
-      <p className="verdict">{minus(headline)}</p>
+      <p className="verdict">{amountsOnOneLine(headline)}</p>
       {/* The rest of the verdict repeats the option rows; it shows only when they can't. */}
-      {rest && !comparison && <p className="meta">{minus(rest)}</p>}
+      {rest && !comparison && <p className="meta">{amountsOnOneLine(rest)}</p>}
       <Explanation reply={reply} />
       {stale && (
         <div style={{ marginTop: 12 }}>
@@ -737,7 +786,9 @@ export function Ask({
           history,
           context: purchase,
           ...(remembered.current.length ? { items: remembered.current } : {}),
+          ...(chartView() ? { view: chartView() } : {}),
         })) as ChatReply
+        const chartApplied = reply.chart ? applyChart(reply) : undefined
         // The server signs each assessed item; only signed items count when sent back.
         if (reply.remember) {
           const item = reply.remember
@@ -756,6 +807,7 @@ export function Ask({
             reply,
             id: Date.now() + 1,
             trace: traceText(reply, stateRef.current),
+            ...(chartApplied !== undefined ? { chartApplied } : {}),
           },
         ])
         // The server decides whether a later message is about the same purchase.
@@ -1249,9 +1301,30 @@ function Answer({
       ) : (
         <>
           {paragraphs(reply).map((text, index) => (
-            <p key={index}>{text}</p>
+            <p key={index}>{amountsOnOneLine(text)}</p>
           ))}
           <Explanation reply={reply} />
+          {reply.chart &&
+            (entry.chartApplied === 'moved' ? (
+              <p className="caption">The chart now shows this.</p>
+            ) : entry.chartApplied === 'unchanged' ? null : (
+              <button
+                type="button"
+                className="link"
+                onClick={() =>
+                  onOpenDecision(
+                    reply.chart!.item.productId
+                      ? { productId: reply.chart!.item.productId }
+                      : {
+                          amountCents: reply.chart!.item.amountCents,
+                          itemName: reply.chart!.item.name,
+                        },
+                  )
+                }
+              >
+                Open Worth’s comparison <ArrowRight size={16} aria-hidden="true" />
+              </button>
+            ))}
         </>
       )}
       {assessment && reply.payIn4?.asked && (
@@ -1282,7 +1355,7 @@ function Answer({
             {reply.lead && <p style={{ marginTop: 8 }}>{reply.lead}</p>}
             <ul>
               {(allFacts ? picked : picked.slice(0, 2)).map((point) => (
-                <li key={point.id}>{minus(point.text)}</li>
+                <li key={point.id}>{amountsOnOneLine(point.text)}</li>
               ))}
             </ul>
             {picked.length > 2 && (

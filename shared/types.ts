@@ -657,6 +657,18 @@ export interface ChatReply {
   explanation?: string
   /** How Ask Worth read the question, which tool ran, what it chose and what the server checked. */
   trace?: AnswerTrace
+  /**
+   * A chart question's view change (`show_on_chart`), checked by the server against this item.
+   * The page applies it only while the chart for this same item is on screen. View state only.
+   */
+  chart?: ChartDirectiveReply
+}
+export interface ChartDirectiveReply {
+  /** Pills to press; empty means "No purchase". */
+  options?: ('buyToday' | 'wait' | 'spendLess' | 'payIn4')[]
+  range?: 'payday' | '30' | '60'
+  focusDay?: string
+  item: { name: string; amountCents: number; productId?: string }
 }
 /** One illustrative Pay in 4 payment as Ask Worth shows it. */
 export interface PayIn4ChatPayment {

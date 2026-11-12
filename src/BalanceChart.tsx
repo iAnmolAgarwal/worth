@@ -22,6 +22,13 @@ import {
   tickLabel,
   type RangeKey,
 } from './chartModel'
+import {
+  useChartCommands,
+  usePublishChart,
+  type ChartOptionId,
+  type ChartRange,
+  type ChartSnapshot,
+} from './chartControl'
 import { cx, dayLabel, money, shortDate, signed } from './format'
 import './chart.css'
 
@@ -99,6 +106,7 @@ export function BalanceChart({
   label,
   named = options.length > 1,
   baseline,
+  item,
 }: {
   options: ChartOption[]
   /** The option the page is showing. */
@@ -113,6 +121,8 @@ export function BalanceChart({
    * pill always stays pressed.
    */
   baseline?: { name: string; points: ForecastPoint[] }
+  /** The item this chart is for; with it, Ask Worth's guide can read and steer the chart. */
+  item?: ChartSnapshot['item']
 }) {
   const id = useId().replace(/:/g, '')
   const [wrap, width] = useWidth()
@@ -138,6 +148,56 @@ export function BalanceChart({
     }
     setSeen({ window, defaults })
   }
+
+  // Ask Worth's guide steers the view through the same setters as the pills, range and scrubber
+  // (src/chartControl.ts), and reads back what is shown. No options pressed is "No purchase".
+  const base = (options.find((option) => option.key === selected) ?? options[0])?.points ?? NO_DAYS
+  const toKey: Record<ChartRange, RangeKey> = { payday: 'payday', '30': 'month', '60': 'all' }
+  const fromKey: Record<RangeKey, ChartRange> = { payday: 'payday', month: '30', all: '60' }
+  useChartCommands((command) => {
+    if (!item) return
+    const keys = options.map((option) => option.key)
+    const wanted = command.options?.filter((key) => keys.includes(key))
+    const next =
+      wanted === undefined || (!wanted.length && command.options!.length)
+        ? shown
+        : !wanted.length && !baseline
+          ? shown
+          : new Set<string>(wanted)
+    setShown(next)
+    const ranges = rangeOptions(base)
+    const nextRange =
+      command.range && ranges.some((r) => r.key === toKey[command.range!])
+        ? toKey[command.range]
+        : range
+    const days = (ranges.find((r) => r.key === nextRange) ?? ranges.at(-1))?.days ?? base.length
+    const index = command.focusDay ? base.findIndex((p) => p.date === command.focusDay) : -1
+    setRange(index >= days ? 'all' : nextRange)
+    setHover(null)
+    if (index >= 0) setPinned(index)
+    else if (nextRange !== range) setPinned(null)
+    const names = next.size
+      ? options.filter((option) => next.has(option.key)).map((option) => option.name)
+      : [baseline?.name ?? 'No purchase']
+    setSpoken(
+      `Chart updated: ${names.join(' and ')}` +
+        (index >= 0 ? `, ${dayLabel(base[index]!.date)} in focus.` : '.'),
+    )
+  })
+  usePublishChart(
+    item && base.length
+      ? {
+          available: options.map((option) => option.key as ChartOptionId),
+          pressed: options
+            .filter((option) => shown.has(option.key))
+            .map((option) => option.key as ChartOptionId),
+          range: fromKey[range],
+          focusDay: pinned !== null ? (base[pinned]?.date ?? null) : null,
+          window: { start: base[0]!.date, end: base.at(-1)!.date },
+          item,
+        }
+      : null,
+  )
 
   // The bold line is the page's option while it is pressed, otherwise the first pressed one;
   // with no pill pressed it is the balance with nothing bought.

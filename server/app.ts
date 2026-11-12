@@ -60,6 +60,14 @@ import {
   revokeAgentToken,
 } from './mcp.ts'
 import { categoryCandidates, createChatProvider, fallbackCategories, localReply } from './chat.ts'
+import {
+  asksAboutChart,
+  chartFacts,
+  chartReply,
+  chartViewSchema,
+  claudeChoice,
+  localChartChoice,
+} from './chartGuide.ts'
 import type { ChatActions, ChatProvider } from './chat.ts'
 import { allowedOrigins, handoffEnabled, loadConfig } from './config.ts'
 import type { AppConfig } from './config.ts'
@@ -278,6 +286,8 @@ const chatSchema = z
       .max(16)
       .default([]),
     context: assessmentSchema.optional(),
+    /** What the person is looking at (the chart), untrusted: it only steers facts and tools. */
+    view: chartViewSchema.optional(),
     /**
      * Items assessed earlier in this conversation, so a later question can return to one. Only
      * items this session's replies signed are used; any other entry is dropped.
@@ -2156,6 +2166,56 @@ export function createApp(options: AppOptions = {}) {
       return answer
     }
     const local = async (reason?: string) => shown(await localReply(input, data, reason, actions))
+    // A question about the chart on screen is answered from the chart's own facts. Claude, when
+    // allowed, only chooses the facts and the view (show_on_chart); everything is checked here.
+    const { view, ...asked } = input
+    const onScreen = view?.productId
+      ? PRODUCTS.find((p) => p.id === view.productId)?.name
+      : view?.itemName
+    if (view && asksAboutChart(asked.message, onScreen)) {
+      const amount = view.productId
+        ? PRODUCTS.find((p) => p.id === view.productId)?.priceCents
+        : view.amountCents
+      const eligible = amount ? (await payIn4Eligibility(amount)) !== 'unavailable' : false
+      // The same purchases /api/compare judges with, so the facts match the chart on screen.
+      const product = view.productId ? PRODUCTS.find((p) => p.id === view.productId) : undefined
+      const facts = chartFacts(
+        view,
+        {
+          ...data,
+          purchases: withoutOwnHold(current.purchases, {
+            productId: product?.id,
+            itemName: product?.name ?? view.itemName,
+            amountCents: amount ?? 0,
+          }),
+        },
+        eligible,
+      )
+      if (facts) {
+        const fallback = () =>
+          chartReply(
+            facts,
+            localChartChoice(asked.message, facts, view),
+            view,
+            'demo',
+            asked.message,
+          )
+        if (!mayUseExternalAi(current.profile) || !chat?.chooseChart || claudeLimit(req))
+          return reply(fallback())
+        try {
+          const choice = claudeChoice(await chat.chooseChart(asked.message, facts, view), facts)
+          return reply(
+            choice ? chartReply(facts, choice, view, 'anthropic', asked.message) : fallback(),
+          )
+        } catch (error) {
+          console.warn(
+            'Worth chart chat used local fallback:',
+            error instanceof Error ? error.name : 'Error',
+          )
+          return reply(fallback())
+        }
+      }
+    }
     if (!mayUseExternalAi(current.profile))
       return reply(
         await local(
