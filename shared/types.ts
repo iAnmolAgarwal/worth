@@ -544,6 +544,8 @@ export interface AppState {
     handoff?: 'on' | 'off'
     /** Connect PayPal (PayPal's MCP server, sandbox): unavailable after PayPal didn't answer in time. */
     paypalConnect?: 'on' | 'off' | 'unavailable'
+    /** Worth can re-read this visitor's PayPal activity without another login. */
+    paypalLinked?: boolean
     /** Who a new session starts as (SAMPLE_PERSONA): Alex on the demo day, or Maya on today. */
     sample?: SamplePersona
   }

@@ -14,6 +14,7 @@ import {
 } from '../server/paypalConnect.ts'
 import type { TransactionInfo } from '../server/paypalConnect.ts'
 import { Store } from '../server/store.ts'
+import { databaseVault, memoryVault, openLink, sealLink, tokenKey } from '../server/paypalVault.ts'
 import { parsePayPalCsv } from '../shared/csv.ts'
 import { CSV_IMPORT_LIMITS, utf8Bytes } from '../shared/limits.ts'
 
@@ -44,6 +45,8 @@ interface FakeOptions {
   hang?: boolean
   /** What list_transactions answers; the first window gets the fixture by default. */
   list?: (args: Record<string, unknown>, call: number) => string
+  /** How the token endpoint answers a refresh: rotate (default), refuse (400) or be down (503). */
+  refresh?: 'rotate' | 'refuse' | 'down'
 }
 /** PayPal's MCP server, enough of it: registration, PKCE-checked token, and JSON-RPC over /mcp. */
 function fakeMcp(options: FakeOptions = {}) {
@@ -51,6 +54,11 @@ function fakeMcp(options: FakeOptions = {}) {
   let listCalls = 0
   const tools: string[] = []
   const bodies: string[] = []
+  /** Access tokens the MCP server accepts, and the one refresh token it honours (rotated). */
+  const access = new Set<string>()
+  let refresh = REFRESH
+  let issued = 0
+  const grants: string[] = []
   const fetch = vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
     const url = new URL(String(input))
     expect(url.origin).toBe(MCP_ORIGIN)
@@ -62,17 +70,35 @@ function fakeMcp(options: FakeOptions = {}) {
     }
     if (url.pathname === '/token') {
       const form = new URLSearchParams(body)
+      grants.push(form.get('grant_type') ?? '')
+      if (form.get('grant_type') === 'refresh_token') {
+        if (options.refresh === 'down') return new Response('unavailable', { status: 503 })
+        if (form.get('client_id') !== 'client-1')
+          return Response.json({ error: 'invalid_client' }, { status: 401 })
+        if (options.refresh === 'refuse' || form.get('refresh_token') !== refresh)
+          return Response.json(
+            { error: 'invalid_grant', error_description: 'Invalid refresh token' },
+            { status: 400 },
+          )
+        issued++
+        const token = `tok-SECRET-refreshed-${issued}`
+        access.add(token)
+        refresh = `refresh-SECRET-${issued}`
+        return Response.json({ access_token: token, refresh_token: refresh, expires_in: 3600 })
+      }
       const verifier = form.get('code_verifier') ?? ''
       const ok =
         form.get('code') === CODE &&
         form.get('redirect_uri') === CALLBACK &&
         createHash('sha256').update(verifier).digest('base64url') === challenge
+      if (ok) access.add(TOKEN)
       return ok
         ? Response.json({ access_token: TOKEN, refresh_token: REFRESH, expires_in: 3600 })
         : Response.json({ error: 'invalid_grant' }, { status: 400 })
     }
     if (url.pathname === '/mcp') {
-      expect((init.headers as Record<string, string>).Authorization).toBe(`Bearer ${TOKEN}`)
+      const bearer = (init.headers as Record<string, string>).Authorization?.replace(/^Bearer /, '')
+      if (!access.has(bearer ?? '')) return new Response('unauthorized', { status: 401 })
       if (init.method === 'DELETE') return new Response(null, { status: 200 })
       const message = JSON.parse(body) as {
         id?: number
@@ -111,19 +137,32 @@ function fakeMcp(options: FakeOptions = {}) {
     fetch,
     tools,
     bodies,
+    grants,
+    access,
+    /** The refresh token the server would honour now. */
+    refreshToken: () => refresh,
+    /** PayPal stops accepting every access token issued so far (a revocation, or an early expiry). */
+    revokeAccess: () => access.clear(),
     setChallenge: (value: string) => (challenge = value),
   }
 }
 
-function setup(fake = fakeMcp(), extra: { sessionTimeoutMs?: number } = {}) {
+function setup(
+  fake = fakeMcp(),
+  { key, ...extra }: { sessionTimeoutMs?: number; key?: Buffer } = {},
+) {
   const store = new Store(':memory:')
   stores.push(store)
   const logs: Record<string, unknown>[] = []
+  /** The servers' clock, moved by tests to let an access token lapse. */
+  const clock = { t: Date.parse('2026-11-12T06:00:00Z') }
   const connect = createPayPalConnect({
     origin: ORIGIN,
     enabled: true,
     fetch: fake.fetch as unknown as typeof fetch,
     log: (event) => logs.push(event),
+    now: () => clock.t,
+    ...(key ? { vault: databaseVault(store.db, key) } : {}),
     ...extra,
   })
   const app = createApp({
@@ -135,9 +174,9 @@ function setup(fake = fakeMcp(), extra: { sessionTimeoutMs?: number } = {}) {
       paypalSecret: undefined,
     },
     paypalConnect: connect,
-    now: () => new Date('2026-11-12T06:00:00Z'),
+    now: () => new Date(clock.t),
   })
-  return { app, agent: request.agent(app), connect, logs, fake }
+  return { app, agent: request.agent(app), connect, logs, fake, clock, store }
 }
 
 /** Starts a login and returns the state PayPal would send back, as the fake server saw it. */
@@ -349,7 +388,7 @@ describe('Connect PayPal login', () => {
     expect(url.search).not.toContain('code_verifier')
   })
 
-  it('completes for the session that started it, then reads once and forgets the token', async () => {
+  it('completes for the session that started it, and stays connected without exposing a token', async () => {
     const { agent, fake, logs } = setup()
     const { state } = await startLogin(agent, fake)
     const back = await agent.get(`/api/paypal/connect/callback?code=${CODE}&state=${state}`)
@@ -367,9 +406,11 @@ describe('Connect PayPal login', () => {
     expect(new Set(fake.tools)).toEqual(new Set(['list_transactions']))
     expect(fake.tools).toHaveLength(6)
 
+    // Connected: a second read needs no login, and still only lists transactions.
     const again = await post(agent, '/api/paypal/activity')
-    expect(again.status).toBe(409)
-    expect(again.body.code).toBe('NOT_CONNECTED')
+    expect(again.status).toBe(200)
+    expect(new Set(fake.tools)).toEqual(new Set(['list_transactions']))
+    expect((await agent.get('/api/state')).body.config.paypalLinked).toBe(true)
 
     // No secret in any response, header or log line.
     for (const response of [back, read, again]) {
@@ -571,5 +612,200 @@ describe('PAYPAL_CONNECT', () => {
     } finally {
       vi.unstubAllGlobals()
     }
+  })
+})
+
+describe('Keeping PayPal connected: the refresh-token vault', () => {
+  const KEY = Buffer.alloc(32, 7)
+  const link = { clientId: 'client-1', refreshToken: REFRESH }
+
+  it('seals a link so nothing of the token shows, and opens it only for its own session and key', () => {
+    const sealed = sealLink(KEY, 'session-a', link)
+    expect(sealed).not.toContain(REFRESH)
+    expect(sealed).not.toContain('client-1')
+    expect(openLink(KEY, 'session-a', sealed)).toEqual(link)
+    // A fresh IV every time.
+    expect(sealLink(KEY, 'session-a', link)).not.toBe(sealed)
+    expect(openLink(KEY, 'session-b', sealed)).toBeUndefined()
+    expect(openLink(Buffer.alloc(32, 8), 'session-a', sealed)).toBeUndefined()
+    // Any altered part fails authentication.
+    const parts = sealed.split('.')
+    for (const index of [1, 2, 3]) {
+      const changed = [...parts]
+      const value = changed[index]!
+      changed[index] = `${value[0] === 'A' ? 'B' : 'A'}${value.slice(1)}`
+      expect(openLink(KEY, 'session-a', changed.join('.'))).toBeUndefined()
+    }
+    expect(openLink(KEY, 'session-a', 'v0.x.y.z')).toBeUndefined()
+  })
+
+  it('takes PAYPAL_TOKEN_KEY only as 32 bytes of base64', () => {
+    const key = Buffer.alloc(32, 1)
+    expect(tokenKey(key.toString('base64'))).toEqual(key)
+    expect(tokenKey(key.toString('base64url'))).toEqual(key)
+    expect(tokenKey(Buffer.alloc(16).toString('base64'))).toBeUndefined()
+    expect(tokenKey('not a key')).toBeUndefined()
+    expect(() => loadConfig({ PAYPAL_TOKEN_KEY: 'short' })).toThrow(/PAYPAL_TOKEN_KEY/)
+    expect(loadConfig({ PAYPAL_TOKEN_KEY: key.toString('base64') }).paypalTokenKey).toBeTruthy()
+  })
+
+  it('stores only the sealed link with the session, and deletes it with the session', () => {
+    const store = new Store(':memory:')
+    stores.push(store)
+    const id = store.create({} as never)
+    const vault = databaseVault(store.db, KEY)
+    vault.set(id, link)
+    const rows = store.db.prepare('SELECT * FROM paypal_links').all()
+    expect(JSON.stringify(rows)).not.toContain(REFRESH)
+    expect(vault.get(id)).toEqual(link)
+    store.delete(id)
+    expect(store.db.prepare('SELECT COUNT(*) AS n FROM paypal_links').get()).toEqual({ n: 0 })
+  })
+
+  it('keeps links in memory only without a key, oldest dropped past the cap', () => {
+    const vault = memoryVault(2)
+    vault.set('a', link)
+    vault.set('b', link)
+    vault.set('c', link)
+    expect([vault.get('a'), vault.get('b'), vault.get('c')]).toEqual([undefined, link, link])
+    vault.delete('b')
+    expect(vault.get('b')).toBeUndefined()
+  })
+})
+
+describe('Keeping PayPal connected: reads without a login', () => {
+  const KEY = Buffer.alloc(32, 9)
+  const HOUR = 60 * 60_000
+  async function connected(fake = fakeMcp(), key: Buffer | undefined = KEY) {
+    const context = setup(fake, key ? { key } : {})
+    const { state } = await startLogin(context.agent, fake)
+    await context.agent.get(`/api/paypal/connect/callback?code=${CODE}&state=${state}`)
+    return context
+  }
+
+  it('refreshes the access token once it lapses, keeping only the newest refresh token', async () => {
+    const fake = fakeMcp()
+    const { agent, clock, store, logs } = await connected(fake)
+    expect((await post(agent, '/api/paypal/activity')).status).toBe(200)
+    expect(fake.grants).toEqual(['authorization_code'])
+    clock.t += HOUR
+    const second = await post(agent, '/api/paypal/activity')
+    expect(second.status).toBe(200)
+    expect(fake.grants).toEqual(['authorization_code', 'refresh_token'])
+    // PayPal honours only the newest refresh token: a second refresh works only if Worth kept it.
+    clock.t += HOUR
+    expect((await post(agent, '/api/paypal/activity')).status).toBe(200)
+    expect(fake.grants).toEqual(['authorization_code', 'refresh_token', 'refresh_token'])
+    const stored = JSON.stringify(store.db.prepare('SELECT * FROM paypal_links').all())
+    const seen = JSON.stringify({ second: second.body, logs })
+    for (const secret of [REFRESH, 'refresh-SECRET-1', 'refresh-SECRET-2', fake.refreshToken()]) {
+      expect(stored).not.toContain(secret)
+      expect(seen).not.toContain(secret)
+    }
+    for (const token of fake.access) expect(seen).not.toContain(token)
+  })
+
+  it('refreshes once when PayPal turns a held access token down', async () => {
+    const fake = fakeMcp()
+    const { agent } = await connected(fake)
+    expect((await post(agent, '/api/paypal/activity')).status).toBe(200)
+    fake.revokeAccess()
+    expect((await post(agent, '/api/paypal/activity')).status).toBe(200)
+    expect(fake.grants.at(-1)).toBe('refresh_token')
+  })
+
+  it('returns to not connected when PayPal refuses the refresh token, leaving the plan as it is', async () => {
+    const fake = fakeMcp({ refresh: 'refuse' })
+    const { agent, clock } = await connected(fake)
+    const before = (await agent.get('/api/state')).body.profile
+    clock.t += HOUR
+    const read = await post(agent, '/api/paypal/activity')
+    expect(read.status).toBe(409)
+    expect(read.body.code).toBe('NOT_CONNECTED')
+    const after = (await agent.get('/api/state')).body
+    expect(after.config.paypalLinked).toBeUndefined()
+    expect(after.profile).toEqual(before)
+    // The link is gone: no further refresh is attempted.
+    const grants = fake.grants.length
+    expect((await post(agent, '/api/paypal/sync')).body.code).toBe('NOT_CONNECTED')
+    expect(fake.grants).toHaveLength(grants)
+  })
+
+  it('keeps the link through a network failure, for a later visit', async () => {
+    const fake = fakeMcp({ refresh: 'down' })
+    const { agent, clock } = await connected(fake)
+    clock.t += HOUR
+    const read = await post(agent, '/api/paypal/activity')
+    expect(read.status).toBe(502)
+    expect(read.body.code).toBe('MCP_FAILED')
+    expect((await agent.get('/api/state')).body.config.paypalLinked).toBe(true)
+  })
+
+  it('never calls another tool with a refreshed token', async () => {
+    const fake = fakeMcp()
+    const { agent, clock, connect } = await connected(fake)
+    clock.t += HOUR
+    expect((await post(agent, '/api/paypal/activity')).status).toBe(200)
+    const refreshed = [...fake.access].find((token) => token !== TOKEN)!
+    const calls = fake.fetch.mock.calls.length
+    for (const tool of ['create_invoice', 'send_invoice', 'list_invoices'])
+      await expect(connect.callTool(refreshed, 'mcp-1', tool, {})).rejects.toMatchObject({
+        code: 'TOOL_REFUSED',
+      })
+    expect(fake.fetch.mock.calls).toHaveLength(calls)
+    expect(new Set(fake.tools)).toEqual(new Set(['list_transactions']))
+  })
+
+  it('reads one at a time per session', async () => {
+    const { connect, store } = await connected()
+    const { id } = store.db.prepare('SELECT id FROM sessions').get() as { id: string }
+    // The review's read and a background sync at once: the second is refused, never run twice.
+    const first = connect.read(id, 'UTC')
+    await expect(connect.read(id, 'UTC')).rejects.toMatchObject({ code: 'BUSY' })
+    await expect(first).resolves.toMatchObject({ summary: { transactions: 39 } })
+    await expect(connect.read(id, 'UTC')).resolves.toBeTruthy()
+  })
+
+  it('disconnects without touching the plan, and deleting the data deletes the link', async () => {
+    const { agent, store } = await connected()
+    const before = (await agent.get('/api/state')).body.profile
+    const count = () =>
+      (store.db.prepare('SELECT COUNT(*) AS n FROM paypal_links').get() as { n: number }).n
+    expect(count()).toBe(1)
+    const off = await post(agent, '/api/paypal/disconnect')
+    expect(off.status).toBe(200)
+    expect(off.body.config.paypalLinked).toBeUndefined()
+    expect(off.body.profile).toEqual(before)
+    expect(count()).toBe(0)
+    expect((await post(agent, '/api/paypal/activity')).body.code).toBe('NOT_CONNECTED')
+
+    const other = await connected()
+    expect(
+      (other.store.db.prepare('SELECT COUNT(*) AS n FROM paypal_links').get() as { n: number }).n,
+    ).toBe(1)
+    await post(other.agent, '/api/reset')
+    expect(
+      (other.store.db.prepare('SELECT COUNT(*) AS n FROM paypal_links').get() as { n: number }).n,
+    ).toBe(0)
+  })
+
+  it('syncs only a plan built from Connect PayPal', async () => {
+    const fake = fakeMcp({
+      list: (_args, call) => (call === 1 || call === 7 ? FIXTURE : 'No transactions found.'),
+    })
+    const { agent, clock } = await connected(fake)
+    // Still the sample: nothing to keep up to date, and PayPal isn't read for it.
+    expect((await post(agent, '/api/paypal/sync')).body.code).toBe('NOT_SYNCED')
+    expect(fake.tools).toHaveLength(0)
+    const read = await post(agent, '/api/paypal/activity')
+    const csv = read.body.csv as string
+    const commit = await agent.post('/api/import/commit').set('X-Worth-Client', 'web').send({ csv })
+    expect(commit.body.profile.importedFrom).toBe('paypal')
+    clock.t += 20 * 60_000
+    const sync = await post(agent, '/api/paypal/sync')
+    expect(sync.status).toBe(200)
+    expect(sync.body.changes).toEqual({ transactions: 0, plans: 0, paid: 0 })
+    expect(sync.body.state.profile.importedAt).toBe(new Date(clock.t).toISOString())
+    expect(JSON.stringify(sync.body)).not.toMatch(/SECRET/)
   })
 })

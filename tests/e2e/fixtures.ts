@@ -64,6 +64,8 @@ export interface Origins {
   store: string
   /** A Worth with the hand-off off: no HANDOFF_SECRET or MERCHANT_ORIGIN. */
   worthOff: string
+  /** A Worth with Connect PayPal on, against a fake MCP server. */
+  connect: string
 }
 function env(name: string) {
   const value = process.env[name]
@@ -80,6 +82,9 @@ export const origins: Origins = {
   },
   get worthOff() {
     return env('E2E_WORTH_OFF')
+  },
+  get connect() {
+    return env('E2E_WORTH_CONNECT')
   },
 }
 

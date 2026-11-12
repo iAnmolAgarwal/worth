@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react'
 import { ChevronRight, CircleAlert, CircleCheck, Info, RefreshCw } from 'lucide-react'
 import { dateInTimezone, getUpcomingFlows } from '../shared/finance'
 import type { Comparison, ScheduledFlow } from '../shared/types'
-import { connectAvailable, ConnectPayPalButton } from './ConnectPayPal'
+import { connectAvailable, ConnectPayPalButton, syncFromPayPal, useSyncing } from './ConnectPayPal'
 import type { AppState, Purchase } from './contract'
 import { isActive } from './contract'
 import { countedHold, ReservationNote } from './Reservation'
@@ -391,7 +391,8 @@ export type HeroSource = 'sample' | 'file' | 'paypal'
 
 export function heroSource(state: AppState): HeroSource {
   if (state.profile.source !== 'import') return 'sample'
-  return state.profile.importedFrom === 'paypal' ? 'paypal' : 'file'
+  // "PayPal connected" only while Worth can still read it; otherwise Connect PayPal is offered again.
+  return state.profile.importedFrom === 'paypal' && state.config.paypalLinked ? 'paypal' : 'file'
 }
 
 /** "updated today", or the day of the import when it was earlier. */
@@ -419,6 +420,7 @@ export function HeroActions({
   const source = heroSource(state)
   const busy = state.purchases.some(isActive)
   const connect = connectAvailable(state)
+  const syncing = useSyncing()
   const updated = updatedLabel(state)
   const Updated = updated && `${updated[0]!.toUpperCase()}${updated.slice(1)}`
   // While a checkout is open, imports wait; the row says why instead of greying out silently.
@@ -456,21 +458,17 @@ export function HeroActions({
               <span className="hero-act-s">{why ?? Updated ?? 'From PayPal'}</span>
             </span>
             {connect && (
-              <ConnectPayPalButton
-                pop
-                disabled={busy}
-                trigger={(props) => (
-                  <button
-                    type="button"
-                    className="hero-src-refresh"
-                    aria-label="Read your PayPal activity again"
-                    title={why ?? 'Read your PayPal activity again'}
-                    {...props}
-                  >
-                    <RefreshCw size={18} aria-hidden="true" />
-                  </button>
-                )}
-              />
+              <button
+                type="button"
+                className="hero-src-refresh"
+                aria-label="Read your PayPal activity again"
+                title={why ?? 'Read your PayPal activity again'}
+                disabled={busy || syncing}
+                aria-busy={syncing || undefined}
+                onClick={() => void syncFromPayPal()}
+              >
+                <RefreshCw size={18} className={syncing ? 'spin' : undefined} aria-hidden="true" />
+              </button>
             )}
           </>
         ) : connect ? (
@@ -482,7 +480,12 @@ export function HeroActions({
                 <button type="button" className="hero-act-main" title={why} {...props}>
                   <span className="hero-act-t">Connect PayPal</span>
                   <span className="hero-act-s">
-                    {why ?? (source === 'sample' ? 'Sample data now' : 'From your imported file')}
+                    {why ??
+                      (source === 'sample'
+                        ? 'Sample data now'
+                        : state.profile.importedFrom === 'paypal'
+                          ? (Updated ?? 'From PayPal')
+                          : 'From your imported file')}
                   </span>
                 </button>
               )}

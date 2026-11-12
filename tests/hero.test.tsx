@@ -250,11 +250,18 @@ describe('the Home hero', () => {
     ['sample', undefined, 'off', ['Sample data', 'Import a file']],
     ['import', 'file', 'on', ['Connect PayPal', 'From your imported file', 'Import again']],
     ['import', 'paypal', 'on', ['PayPal connected', 'Updated today']],
+    // Worth no longer holds the connection (disconnected, or PayPal refused it): Connect again.
+    ['import', 'paypal-unlinked', 'on', ['Connect PayPal', 'Updated today', 'Import again']],
   ] as const)(
     'names where the numbers come from: %s via %s, Connect PayPal %s',
-    async (source, from, connect, words) => {
+    async (source, via, connect, words) => {
+      const from = via === 'paypal-unlinked' ? 'paypal' : via
       const state = makeState()
-      state.config = { ...state.config, paypalConnect: connect }
+      state.config = {
+        ...state.config,
+        paypalConnect: connect,
+        ...(via === 'paypal' ? { paypalLinked: true } : {}),
+      }
       if (source === 'import')
         state.profile = {
           ...state.profile,
@@ -270,14 +277,14 @@ describe('the Home hero', () => {
       if (connect === 'off') expect(row.textContent).not.toContain('Connect PayPal')
       // The tour's anchor is the row itself, in every state.
       expect(row.getAttribute('data-tour')).toBe('connect')
-      if (from === 'paypal')
+      if (via === 'paypal')
         expect(
           within(row as HTMLElement).getByRole('button', {
             name: /Read your PayPal activity again/,
           }),
         ).toBeTruthy()
       // A row with no action of its own keeps still on hover.
-      expect(row.classList.contains('static')).toBe(from === 'paypal' || connect === 'off')
+      expect(row.classList.contains('static')).toBe(via === 'paypal' || connect === 'off')
       // Never a button inside a button.
       expect(row.querySelector('button button')).toBeNull()
     },
@@ -339,6 +346,8 @@ describe('the Home hero', () => {
   it('says "updated today" only when the import was today', () => {
     const state = makeState()
     state.profile = { ...state.profile, source: 'import', importedFrom: 'paypal', timezone: 'UTC' }
+    expect(heroSource(state)).toBe('file')
+    state.config = { ...state.config, paypalLinked: true }
     expect(heroSource(state)).toBe('paypal')
     state.profile.importedAt = `${TODAY}T08:00:00.000Z`
     expect(updatedLabel(state)).toBe('updated today')

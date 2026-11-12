@@ -6,6 +6,8 @@ import { createApp } from '../../server/app.ts'
 import { Store } from '../../server/store.ts'
 import { createMerchantApp } from '../../merchant/app.ts'
 import { fakePayPalGateway } from './fakePayPal.ts'
+import { fakeMcpFetch } from './fakeMcp.ts'
+import { createPayPalConnect } from '../../server/paypalConnect.ts'
 
 /**
  * Starts the E2E's three servers on free ports and prints their origins as one JSON line:
@@ -34,9 +36,21 @@ function serveWorth(app: Express) {
   return app
 }
 
-function worth(port: number, handoff?: { merchantOrigin: string }) {
+function worth(port: number, handoff?: { merchantOrigin: string }, connect = false) {
+  const origin = `http://127.0.0.1:${port}`
   return serveWorth(
     createApp({
+      // Connect PayPal against a fake MCP server, on its own Worth only.
+      ...(connect
+        ? {
+            paypalConnect: createPayPalConnect({
+              origin,
+              enabled: true,
+              fetch: fakeMcpFetch(),
+              log: () => {},
+            }),
+          }
+        : {}),
       store: new Store(':memory:'),
       config: {
         production: false,
@@ -63,9 +77,11 @@ function worth(port: number, handoff?: { merchantOrigin: string }) {
 const worthServer = await listen('127.0.0.1')
 const storeServer = await listen('127.0.0.1')
 const offServer = await listen('127.0.0.1')
+const connectServer = await listen('127.0.0.1')
 const worthOrigin = `http://127.0.0.1:${worthServer.port}`
 const storeOrigin = `http://localhost:${storeServer.port}`
 const offOrigin = `http://127.0.0.1:${offServer.port}`
+const connectOrigin = `http://127.0.0.1:${connectServer.port}`
 
 // A browser may reach localhost over IPv6 first; the store answers there too when it can.
 const storeV6 = createServer()
@@ -76,6 +92,7 @@ await new Promise<void>((done) => {
 
 worthServer.server.on('request', worth(worthServer.port, { merchantOrigin: storeOrigin }))
 offServer.server.on('request', worth(offServer.port))
+connectServer.server.on('request', worth(connectServer.port, undefined, true))
 
 const store = createMerchantApp({
   env: {},
@@ -101,10 +118,16 @@ store.use((_req, res) => res.status(404).type('text').send('Not found.'))
 storeServer.server.on('request', store)
 storeV6.on('request', store)
 
-const servers: Server[] = [worthServer.server, storeServer.server, offServer.server, storeV6]
+const servers: Server[] = [
+  worthServer.server,
+  storeServer.server,
+  offServer.server,
+  connectServer.server,
+  storeV6,
+]
 for (const signal of ['SIGINT', 'SIGTERM'] as const)
   process.on(signal, () => {
     for (const server of servers) server.close()
     process.exit(0)
   })
-console.log(JSON.stringify({ ready: true, worthOrigin, storeOrigin, offOrigin }))
+console.log(JSON.stringify({ ready: true, worthOrigin, storeOrigin, offOrigin, connectOrigin }))

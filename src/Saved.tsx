@@ -18,6 +18,7 @@ import {
   Sparkles,
   Store,
   Trash2,
+  Unplug,
   Wallet,
 } from 'lucide-react'
 import { addDays, compareOptions, WAIT_SEARCH_DAYS, withoutOwnHold } from '../shared/finance'
@@ -972,6 +973,20 @@ export function Settings({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const active = state.purchases.some(isActive)
+  const [disconnecting, setDisconnecting] = useState(false)
+  /** Forgets the kept PayPal connection; the plan stays exactly as it is. */
+  async function disconnect() {
+    setDisconnecting(true)
+    setError('')
+    try {
+      onUpdate((await api<AppState>('/paypal/disconnect', {})) as AppState)
+      onToast?.('PayPal disconnected. Your plan stays as it is.')
+    } catch (failure) {
+      setError((failure as Error).message)
+    } finally {
+      setDisconnecting(false)
+    }
+  }
   async function reset() {
     setBusy(true)
     setError('')
@@ -1167,6 +1182,15 @@ export function Settings({
           </SettingsGroup>
 
           <SettingsGroup title="Your data" danger>
+            {state.config.paypalLinked && (
+              <SettingsAction
+                icon={Unplug}
+                label="Disconnect PayPal"
+                sub="Worth stops reading your PayPal activity. Your plan stays as it is."
+                onClick={() => void disconnect()}
+                disabled={disconnecting}
+              />
+            )}
             <SettingsAction
               icon={Trash2}
               label="Delete my data now"

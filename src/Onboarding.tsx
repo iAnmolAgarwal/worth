@@ -57,7 +57,7 @@ export const PRIVACY_LINE =
   'With a CSV, you choose the file: there’s no PayPal login and no account link. Raw CSV files aren’t saved: Worth reads the file in this session.'
 /** The review's privacy line for activity read through Connect PayPal instead of a file. */
 export const CONNECTED_PRIVACY_LINE =
-  'Worth read this through PayPal’s MCP server with one read-only tool and kept no PayPal access afterwards.'
+  'Worth read this through PayPal’s MCP server with one read-only tool, and keeps the connection only to refresh your activity; disconnect in Settings.'
 /** Connected activity shorter than this doesn't pre-fill everyday spending. */
 export const SHORT_COVERAGE_DAYS = 14
 const ESTIMATE_NOTE =

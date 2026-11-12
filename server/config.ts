@@ -1,4 +1,5 @@
 import { secretBytes } from '../shared/handoff.ts'
+import { tokenKey } from './paypalVault.ts'
 import type { SamplePersona } from '../shared/types.ts'
 
 type Env = Record<string, string | undefined>
@@ -51,6 +52,11 @@ export interface AppConfig {
   paypalConnect: boolean
   /** A client already registered on the MCP server for this origin's callback; else one is registered. */
   paypalMcpClientId?: string
+  /**
+   * PAYPAL_TOKEN_KEY: 32 random bytes, base64. Seals the refresh token that keeps PayPal connected
+   * (AES-256-GCM) so it can be stored with the session; without it the token is held in memory only.
+   */
+  paypalTokenKey?: string
   /** Sends the full Content-Security-Policy. On in production; the Vite dev server needs it off. */
   contentSecurityPolicy: boolean
   anthropicKey?: string
@@ -202,6 +208,7 @@ export function loadConfig(env: Env = process.env, overrides: Partial<AppConfig>
       'paypalClientId' in overrides ? overrides.paypalClientId : setting(env, 'PAYPAL_CLIENT_ID'),
     ),
     paypalMcpClientId: setting(env, 'PAYPAL_MCP_CLIENT_ID'),
+    paypalTokenKey: setting(env, 'PAYPAL_TOKEN_KEY'),
     paypalBrandName: (setting(env, 'PAYPAL_BRAND_NAME') ?? SANDBOX_PAYEE).slice(0, 127),
     contentSecurityPolicy: production,
     anthropicKey: setting(env, 'ANTHROPIC_API_KEY'),
@@ -221,6 +228,10 @@ export function loadConfig(env: Env = process.env, overrides: Partial<AppConfig>
     ...overrides,
   }
   config.origin = publicOrigin(config.origin, config.production)
+  if (config.paypalTokenKey !== undefined && !tokenKey(config.paypalTokenKey))
+    throw new ConfigError(
+      "PAYPAL_TOKEN_KEY must be 32 random bytes, base64. Generate one with: node -e \"console.log(require('crypto').randomBytes(32).toString('base64'))\"",
+    )
   // Hand-offs are off until both are set (contract §1). A partial or invalid setting is refused in
   // production, where it can only be a mistake; both unset runs with the hand-off off.
   if (config.handoffSecret !== undefined && !secretBytes(config.handoffSecret))

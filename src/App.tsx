@@ -31,7 +31,13 @@ import type { GuideExpression } from './Guide'
 import { Home, HomeSkeleton } from './Home'
 import { ImportDialog } from './Import'
 import { ImportReview, type ChosenFile } from './Onboarding'
-import { ConnectProgress, returnToCheck } from './ConnectPayPal'
+import {
+  ConnectProgress,
+  returnToCheck,
+  setSyncHandlers,
+  syncDue,
+  syncFromPayPal,
+} from './ConnectPayPal'
 import { PlanPage, PlanWizard } from './Plan'
 import { ConfirmPlanDialog, RefundDialog } from './Reviews'
 import { migratePlanned, Saved, Settings } from './Saved'
@@ -166,6 +172,18 @@ export default function App() {
     },
     [clearConversation],
   )
+  // Connect PayPal keeps a connected plan up to date: a background read applies its result here.
+  useEffect(() => {
+    setSyncHandlers({ onState: replaceState, onToast: setToast })
+    return () => setSyncHandlers(undefined)
+  }, [replaceState])
+  /** At most one background PayPal read per page load, once the last read is 15 minutes old. */
+  const synced = useRef(false)
+  useEffect(() => {
+    if (!state || synced.current || !syncDue(state)) return
+    synced.current = true
+    void syncFromPayPal()
+  }, [state])
   /**
    * The state request in flight. Overlapping loads share it: on a first visit, two parallel
    * requests (React's development double mount, or a focus refresh) would each start a session,

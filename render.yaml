@@ -40,6 +40,10 @@ services:
       # Register https://<host>/api/paypal/webhook in the PayPal sandbox app, then paste its ID.
       - key: PAYPAL_WEBHOOK_ID
         sync: false
+      # Seals Connect PayPal's kept refresh token (AES-256-GCM, 32 random bytes, base64). Without it
+      # tokens are memory-only and visitors reconnect after each deploy. Changing it disconnects all.
+      - key: PAYPAL_TOKEN_KEY
+        sync: false
       # Off by default. Set it to 'true' deliberately, and only while recording or showing the
       # sandbox decline demo (capture with PayPal-Mock-Response: INSTRUMENT_DECLINED).
       - key: PAYPAL_NEGATIVE_TESTING

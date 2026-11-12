@@ -52,7 +52,9 @@ the model name and the Channel3 status).
 | `server/store.ts` | SQLite tables, atomic operations, uniqueness constraints, expiry and deletion. |
 | `server/chat.ts` | The Claude tool loop, tool schemas, the answer's trace, and the deterministic local fallback. |
 | `server/chartGuide.ts` | Chart questions: the facts from the engine in the chart's words, `show_on_chart`, its checks, and the rules used without Claude. |
-| `server/paypalConnect.ts` | Connect PayPal: OAuth with PKCE against PayPal's MCP server, the allow-listed `list_transactions` read, timeouts and the health gate. |
+| `server/paypalConnect.ts` | Connect PayPal: OAuth with PKCE against PayPal's MCP server, refresh-token reads one at a time, the allow-listed `list_transactions` read, the sync and disconnect routes, timeouts and the health gate. |
+| `server/paypalVault.ts` | The kept refresh token: AES-256-GCM sealing under `PAYPAL_TOKEN_KEY` with the session, or memory only. |
+| `server/paypalSync.ts` | The rules for applying a background read to a confirmed plan: additive only. |
 | `server/interpret.ts`, `server/money.ts`, `server/dates.ts` | Checks Claude's reading against the user's own words: amounts, currencies, timing phrases and which item a follow-up means. |
 | `server/narration.ts` | Every sentence the user reads: verdict templates, fact catalogs, the Pay in 4 wording and `checkSentence` for Claude's one sentence. |
 | `server/checkoutGuards.ts` | `checkoutGuards` for the saved-plan Buy button. Agents (Ask Worth and MCP) never prepare orders; they link to Worth's own comparison. |
@@ -67,7 +69,7 @@ the model name and the Channel3 status).
 | `src/Home.tsx`, `src/Hero.tsx` | Home: the "Safe to spend today" card and its Free / Needed by / Cushion bar (or "Short by …"), the Check a purchase and Connect PayPal rows, Coming up and Saved. |
 | `src/Ask.tsx`, `src/AskTrace.tsx`, `src/AgentLauncher.tsx` | The conversation, "How Ask Worth read this", and the guide's launcher, panel and per-screen nudge. |
 | `src/Tour.tsx` | The six-step first-visit tour of Home (`?tour=1` forces it, `?tour=0` suppresses it; "Take the tour" in the panel replays it). |
-| `src/ConnectPayPal.tsx` | Connect PayPal: the note before the redirect and the reading screen. |
+| `src/ConnectPayPal.tsx` | Connect PayPal: the note before the redirect, the reading screen, and the one-at-a-time background sync. |
 | `src/Decision.tsx`, `src/BalanceChart.tsx`, `src/chartModel.ts`, `src/chartLayout.ts`, `src/chartControl.ts` | The option comparison, the Pay in 4 panel, the SVG balance chart (model and layout), and the guide's view-only hold on the chart. |
 | `src/Checkout.tsx`, `src/paypal.tsx`, `src/paypalSdk.ts` | The checkout dialog and the SDK v6 loader, button, eligibility and Messages. |
 | `src/Saved.tsx`, `src/Alternatives.tsx`, `src/Activity.tsx`, `src/Reviews.tsx` | Saved items and wait plans, similar items, activity, and the "how did you pay" and refund reviews. |
@@ -111,8 +113,9 @@ The financial-picture editor separates Funds, Income, Bills & subscriptions, and
 
 `GET /api/paypal/connect` starts OAuth 2.1 (authorization code, PKCE S256, a single-use `state`
 bound to the session, 10 minutes) against PayPal's MCP server at `https://mcp.sandbox.paypal.com`,
-with a client Worth registers there (or `PAYPAL_MCP_CLIENT_ID`). The callback keeps the access
-token in server memory for one read, at most 10 minutes; it never reaches the browser.
+with a client Worth registers there with the `authorization_code` and `refresh_token` grants (or
+`PAYPAL_MCP_CLIENT_ID`). The callback keeps the access token in server memory and the refresh
+token in the session's link vault (below); neither reaches the browser.
 `POST /api/paypal/activity` opens an MCP session (25 s limit; about 12 s measured) and calls only
 `list_transactions`, over six 31-day windows side by side (about 186 days); every other tool is
 refused. The rows become the same CSV text a personal export holds, with `T1600` (buyer-credit
@@ -123,6 +126,45 @@ takes the first payment at checkout. Committing the review sets the server-owned
 and `importedAt`, which Home shows as "PayPal connected · updated today"; a profile save never
 changes them. Two session timeouts in a row hide Connect for everyone for a minute;
 `PAYPAL_CONNECT=off` turns it off.
+
+### Staying connected
+
+Connect once. When a visitor with a connected plan opens Worth and the last read is over 15
+minutes old, the browser asks `POST /api/paypal/sync` once; the hero's refresh button does the same
+on demand. The server reads with the held access token, or first exchanges the refresh token for a
+new one (`grant_type=refresh_token`), one at a time per session, and applies the read without the
+review step (`server/paypalSync.ts`), only in ways that cannot overwrite what the user confirmed:
+
+- new transactions are added to Activity;
+- a Pay in 4 plan is added only when its purchase is new in this read, so a plan left out at review
+  never comes back;
+- a known plan loses its earliest remaining payments when PayPal now shows them as made.
+
+Bills, paydays, the cushion, money available and everyday spending are never changed, and a read
+with rows the import can't use applies nothing. Not applied automatically (they wait for an
+explicit import): new recurring bills or paydays, payments of a plan whose purchase isn't in the
+history, and foreign-currency payments that need a USD cost. `importedAt` moves to the time of the
+read, which Home shows as "PayPal connected · updated <day>". PayPal's own transaction index can
+lag by up to about three hours, so a purchase can take that long to appear.
+
+**What is stored, and why it is safe enough.** Per session, only the newest refresh token and the
+MCP client it was issued to (`server/paypalVault.ts`). With `PAYPAL_TOKEN_KEY` set it is sealed
+with AES-256-GCM (a fresh 96-bit IV, the session ID as associated data, so a row copied to another
+session fails to open) in `paypal_links`, which references the session and is deleted with it
+(`secure_delete` is on). Without the key it lives in process memory only. Access tokens are
+memory-only and used for at most 55 minutes. No token is logged, put in a response, sent to the
+browser, included in the plan summary sent to Claude, or kept in the clear on disk.
+
+In principle the token could do whatever PayPal's MCP connector was granted on the consent screen,
+including creating and sending invoices, because PayPal ignores a narrower `scope`. Worth's server
+therefore calls one tool, `list_transactions`, through `callTool`, which refuses every other name
+before any request is made (tested, including with a refreshed token). The browser never holds a
+token, so nothing in the page can call PayPal directly. Refresh tokens rotate, and PayPal does not
+revoke the previous one, so Worth replaces the stored token with each new one and never keeps two.
+Disconnect PayPal (Settings), Delete my data, an expired session, or PayPal answering
+`invalid_grant`/`invalid_client` deletes the link; the plan is left as it is and the next Connect
+PayPal logs in again. A network failure keeps the link for a later visit. Logins in progress stay
+in memory, so the service runs as one instance.
 
 ## AI boundary
 
