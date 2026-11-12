@@ -302,7 +302,7 @@ describe('the collision, surfaced', () => {
   })
 })
 
-describe('the Home starter chip on a first visit', () => {
+describe('Home on a first visit', () => {
   it('starts one session even when React mounts twice in development', async () => {
     const state = { ...makeState(), sessionKey: 'aaaaaaaaaaaaaaaaaaaa' }
     let loads = 0
@@ -315,7 +315,9 @@ describe('the Home starter chip on a first visit', () => {
         <App />
       </StrictMode>,
     )
-    await screen.findByRole('heading', { name: 'Thinking about buying something?' })
+    await screen.findByRole('heading', { name: 'Safe to spend today' })
+    // The inline composer is gone: Ask Worth opens from the hero's "Check a purchase".
+    expect(screen.queryByRole('heading', { name: 'Thinking about buying something?' })).toBeNull()
     expect(loads).toBe(1)
   })
 })

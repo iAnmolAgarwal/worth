@@ -61,11 +61,11 @@ export async function loadSampleExport(today: string): Promise<ChosenFile> {
 }
 
 /** The plan's real calendar day: the demo clock pins only Maya's sample, never an import. */
-const realToday = (state: AppState) =>
+export const realToday = (state: AppState) =>
   state.demoClock ? todayInTimezone(state.profile.timezone) : state.today
 
 /** The three plain steps of PayPal's own Activity → Statements → Download. */
-function HowTo() {
+export function HowTo() {
   return (
     <ol className="howto">
       <li>
@@ -89,7 +89,7 @@ function HowTo() {
 }
 
 /** Reads a chosen or dropped CSV in the browser, within the import's 1 MB limit. */
-function useCsvFile(onFile: (file: ChosenFile) => void) {
+export function useCsvFile(onFile: (file: ChosenFile) => void) {
   const [error, setError] = useState('')
   const [reading, setReading] = useState(false)
   async function read(file: File | undefined) {
@@ -112,7 +112,7 @@ function useCsvFile(onFile: (file: ChosenFile) => void) {
 }
 
 /** Drag-and-drop on any element: a dropped file is read like a chosen one. */
-function useDrop(read: (file: File | undefined) => void, disabled?: boolean) {
+export function useDrop(read: (file: File | undefined) => void, disabled?: boolean) {
   const [over, setOver] = useState(false)
   return {
     over,
@@ -132,7 +132,7 @@ function useDrop(read: (file: File | undefined) => void, disabled?: boolean) {
 }
 
 /** "Choose your PayPal CSV": a button over the native file control, for keyboards and readers. */
-function ChooseFile({
+export function ChooseFile({
   read,
   disabled,
   children,
@@ -160,7 +160,7 @@ function ChooseFile({
   )
 }
 
-function FileError({ children }: { children: string }) {
+export function FileError({ children }: { children: string }) {
   return (
     <p className="field-error" role="alert">
       <CircleAlert size={16} aria-hidden="true" style={{ flex: 'none', marginTop: 2 }} />

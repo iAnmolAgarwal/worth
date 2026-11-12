@@ -1,0 +1,580 @@
+/* =====================================================================
+   Home hero: "Safe to spend today", the split of the balance, and the
+   things holding money back. Tokens come from index.css.
+   ===================================================================== */
+
+/* The band above Home's two columns: hero, then the sample strip. It paints the canvas over the
+   rail's white backdrop, so the rail starts where the columns do. */
+.home-band {
+  position: relative;
+  z-index: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  margin-bottom: var(--s-8);
+}
+.home-band::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: calc(-1 * var(--s-8)) -100vw calc(-1 * var(--s-4));
+  background: var(--c-canvas);
+}
+
+.hero {
+  --hero-free: #ffffff;
+  --hero-needed: #ffc94a;
+  --hero-cushion: rgba(255, 255, 255, 0.32);
+  position: relative;
+  overflow: hidden;
+  color: #fff;
+  border-radius: var(--r-xl);
+  padding: var(--s-8) var(--s-10) var(--s-10);
+  background:
+    radial-gradient(120% 140% at 100% 0%, rgba(96, 205, 255, 0.28) 0%, rgba(96, 205, 255, 0) 55%),
+    linear-gradient(135deg, var(--c-brand) 0%, #005ac8 55%, var(--c-nav) 100%);
+  box-shadow: var(--e-2);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'top top'
+    'amount cta'
+    'split split'
+    'chips chips'
+    'hold hold';
+  align-items: end;
+  column-gap: var(--s-8);
+}
+.hero-top {
+  grid-area: top;
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+.hero-k {
+  margin: 0;
+  font-size: 1.375rem;
+  line-height: 1.75rem;
+  font-weight: var(--fw-semibold);
+  color: #fff;
+}
+.hero-tag {
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  font-weight: var(--fw-semibold);
+  padding: 4px 10px;
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.16);
+}
+
+/* The figure: whole dollars, the cents small. */
+.hero-v {
+  grid-area: amount;
+  margin: var(--s-2) 0 0;
+  font-size: clamp(4rem, 8vw, 7.5rem);
+  line-height: 1;
+  font-weight: var(--fw-semibold);
+  letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums;
+  animation: hero-rise calc(var(--d-enter) * 2) var(--ease-enter) both;
+}
+.hero-v small {
+  font-size: 0.36em;
+  font-weight: var(--fw-medium);
+  letter-spacing: 0;
+  vertical-align: 0.95em;
+  margin-left: 0.08em;
+  opacity: 0.85;
+}
+
+.hero-cta.btn {
+  grid-area: cta;
+  justify-self: end;
+  align-self: end;
+  height: 56px;
+  padding: 0 var(--s-8);
+  font-size: var(--fs-section);
+  font-weight: var(--fw-bold);
+  background: #fff;
+  color: var(--c-primary-active);
+  box-shadow: 0 6px 18px rgba(0, 20, 53, 0.22);
+  transition:
+    transform var(--d-hover) var(--ease-move),
+    box-shadow var(--d-hover) linear;
+}
+.hero-cta.btn:hover {
+  background: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(0, 20, 53, 0.28);
+}
+.hero-cta.btn:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 3px;
+}
+
+/* The split bar of the balance. */
+.hero-split {
+  grid-area: split;
+  margin-top: var(--s-6);
+}
+.hero-bar {
+  display: flex;
+  gap: 3px;
+  height: 20px;
+  border-radius: var(--r-pill);
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.12);
+  animation: hero-fill calc(var(--d-enter) * 3) var(--ease-enter) 120ms both;
+}
+.hero-bar i {
+  display: block;
+  flex: 0 0 auto;
+  min-width: 6px;
+}
+.hero-bar .free {
+  background: var(--hero-free);
+}
+.hero-bar .needed {
+  background: var(--hero-needed);
+}
+.hero-bar .cushion {
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 255, 255, 0.42) 0 6px,
+    rgba(255, 255, 255, 0.2) 6px 12px
+  );
+}
+.hero-legend {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-6);
+  margin-top: var(--s-3);
+}
+.hero-legend ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2) var(--s-6);
+}
+.hero-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: rgba(255, 255, 255, 0.88);
+  white-space: nowrap;
+}
+.hero-legend li:not(.short) b {
+  color: #fff;
+  font-weight: var(--fw-bold);
+}
+.hero-legend li > i {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex: none;
+}
+.hero-legend li.free > i {
+  background: var(--hero-free);
+}
+.hero-legend li.needed > i {
+  background: var(--hero-needed);
+}
+.hero-legend li.cushion > i {
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 255, 255, 0.7) 0 3px,
+    rgba(255, 255, 255, 0.3) 3px 6px
+  );
+}
+.hero-legend li.short {
+  color: var(--c-danger);
+  background: var(--c-danger-bg);
+  border-radius: var(--r-pill);
+  padding: 0 10px;
+}
+.hero-of {
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: rgba(255, 255, 255, 0.8);
+  white-space: nowrap;
+}
+.hero-of b {
+  color: #fff;
+}
+
+/* What holds the rest back. */
+.hero-chips {
+  grid-area: chips;
+  list-style: none;
+  margin: var(--s-6) 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2) var(--s-3);
+}
+.hero-chips li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: 40px;
+  padding: 4px 14px 4px 4px;
+  border-radius: var(--r-pill);
+  background: #fff;
+  color: var(--c-text-strong);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  font-weight: var(--fw-medium);
+}
+.hero-chips .ic {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  flex: none;
+  background: var(--c-warning-bg);
+  color: var(--c-warning);
+}
+.hero-chips .plan .ic {
+  background: var(--c-info);
+  color: var(--c-navy);
+}
+.hero-chips .payday .ic {
+  background: var(--c-success-bg);
+  color: var(--c-success);
+}
+.hero-chips .payday b {
+  color: var(--c-success);
+}
+.hero-chips b {
+  font-weight: var(--fw-bold);
+}
+.hero-chips .when {
+  color: var(--c-text-2);
+}
+
+.hero > .hold {
+  grid-area: hold;
+  color: #fff;
+  margin-top: var(--s-4);
+}
+.hero > .hold .link {
+  color: #fff;
+  text-decoration: underline;
+}
+
+/* Nothing free: the figure steps back and the bar carries the story. */
+.hero.zero .hero-v {
+  opacity: 0.9;
+}
+
+/* The info disclosure: cushion, confirmed balance and the arithmetic. */
+.hero-info {
+  position: relative;
+  margin-left: auto;
+}
+.hero-info > summary {
+  list-style: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);
+  transition: background-color var(--d-hover) linear;
+}
+.hero-info > summary::-webkit-details-marker {
+  display: none;
+}
+.hero-info > summary:hover,
+.hero-info[open] > summary {
+  background: rgba(255, 255, 255, 0.26);
+}
+.hero-info > summary:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 2px;
+}
+.hero-pop {
+  position: absolute;
+  z-index: 2;
+  top: calc(100% + var(--s-2));
+  right: 0;
+  width: min(360px, calc(100vw - 2 * var(--gutter) - 32px));
+  padding: var(--s-4) var(--s-5);
+  border-radius: var(--r-lg);
+  background: var(--c-surface);
+  color: var(--c-text);
+  box-shadow: var(--e-3);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  animation: hero-pop var(--d-enter) var(--ease-enter) both;
+}
+.hero-pop p {
+  margin: 0 0 var(--s-2);
+}
+.hero-sum {
+  margin: 0;
+  padding-top: var(--s-2);
+  border-top: 1px solid var(--c-divider);
+}
+.hero-sum div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s-4);
+  padding: 2px 0;
+}
+.hero-sum dt {
+  color: var(--c-text-2);
+}
+.hero-sum dd {
+  margin: 0;
+  font-weight: var(--fw-semibold);
+  color: var(--c-text-strong);
+}
+
+/* Loading. */
+.hero[aria-busy='true'] {
+  grid-template-areas: 'top top' 'amount amount';
+  min-height: 280px;
+  align-content: start;
+}
+.hero-sk {
+  grid-area: amount;
+  display: block;
+  width: 240px;
+  height: 96px;
+  margin-top: var(--s-4);
+  opacity: 0.35;
+}
+
+@keyframes hero-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+@keyframes hero-fill {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+@keyframes hero-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-v,
+  .hero-bar,
+  .hero-pop {
+    animation: none;
+  }
+}
+
+/* ---------- The sample strip under the hero ---------- */
+.start-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-3) var(--s-6);
+  padding: var(--s-3) var(--s-3) var(--s-3) var(--s-6);
+  border-radius: var(--r-lg);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+}
+.start-strip.over {
+  border-color: var(--c-brand);
+  box-shadow: inset 0 0 0 1px var(--c-brand);
+}
+.start-strip-text {
+  margin: 0;
+  flex: 1 1 280px;
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  font-weight: var(--fw-semibold);
+  color: var(--c-text-strong);
+}
+.start-strip-text .soft {
+  font-weight: var(--fw-regular);
+  color: var(--c-text-2);
+}
+.start-strip-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+}
+.start-strip-actions .btn {
+  height: 40px;
+  padding: 0 var(--s-4);
+  font-size: var(--fs-meta);
+}
+/* The CSV is a secondary way in here; a primary action can sit before it. */
+.start-strip-actions .file-btn.btn-primary:not(.is-primary) {
+  background: var(--c-surface);
+  color: var(--c-text-strong);
+  box-shadow: inset 0 0 0 2px var(--c-text-strong);
+}
+.start-strip-actions .file-btn.btn-primary:not(.is-primary):hover {
+  background: var(--c-surface-2);
+}
+.start-strip > .alert,
+.start-strip > .field-error {
+  flex-basis: 100%;
+}
+.start-more {
+  position: relative;
+}
+.start-more > summary {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 0 var(--s-2) 0 var(--s-3);
+}
+.start-pop {
+  position: absolute;
+  z-index: 3;
+  top: calc(100% + var(--s-2));
+  right: 0;
+  width: min(380px, calc(100vw - 2 * var(--gutter)));
+  padding: var(--s-4) var(--s-5);
+  border-radius: var(--r-lg);
+  background: var(--c-surface);
+  box-shadow: var(--e-3);
+}
+.start-pop .t {
+  margin: 0;
+  font-weight: var(--fw-bold);
+  color: var(--c-text-strong);
+}
+
+/* ---------- Rail: Connect an agent ---------- */
+.agent-entry {
+  width: 100%;
+  text-align: left;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--c-border);
+  padding: var(--s-3) var(--s-4);
+  background: var(--c-surface-2);
+  cursor: pointer;
+}
+.agent-entry:hover {
+  background: var(--c-fill);
+}
+.agent-entry > .ico {
+  color: var(--c-text-3);
+  flex: none;
+}
+
+/* ---------- Laptop and up: the hero and the sample strip fill the first screen ---------- */
+@media (min-width: 1024px) {
+  .hero {
+    /* 100vh less the top bar, the page's top padding, the strip, the gaps and a peek of what's next. */
+    min-height: clamp(440px, calc(100vh - var(--topbar-h) - 150px), 720px);
+    align-content: center;
+    padding: var(--s-10) var(--s-12) var(--s-12);
+  }
+  /* Without the strip, the next section peeks over the fold. */
+  .home-band.solo .hero {
+    min-height: clamp(440px, calc(100vh - var(--topbar-h) - 220px), 640px);
+  }
+  .hero-v {
+    margin-top: var(--s-4);
+    font-size: clamp(6rem, 11vw, 11rem);
+  }
+  .hero-cta.btn {
+    align-self: center;
+  }
+  .hero-split {
+    margin-top: var(--s-10);
+  }
+  .hero-bar {
+    height: 48px;
+    border-radius: var(--r-lg);
+  }
+  .hero-chips {
+    margin-top: var(--s-8);
+  }
+  .hero-legend li,
+  .hero-of {
+    font-size: var(--fs-section);
+    line-height: var(--lh-section);
+  }
+  .hero-legend li > i {
+    width: 14px;
+    height: 14px;
+  }
+  .hero-chips li {
+    min-height: 44px;
+    font-size: var(--fs-body);
+    line-height: var(--lh-body);
+    padding-right: 18px;
+  }
+  .hero-chips .ic {
+    width: 36px;
+    height: 36px;
+  }
+}
+
+/* ---------- Phone ---------- */
+@media (max-width: 767px) {
+  .home-band {
+    margin-bottom: var(--s-6);
+  }
+  .hero {
+    padding: var(--s-5) var(--s-5) var(--s-6);
+    border-radius: var(--r-lg);
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: 'top' 'amount' 'split' 'chips' 'hold' 'cta';
+  }
+  .hero-k {
+    font-size: var(--fs-section);
+    line-height: var(--lh-section);
+  }
+  .hero-v {
+    font-size: 3.5rem;
+  }
+  .hero-legend {
+    flex-direction: column;
+    gap: var(--s-2);
+  }
+  .hero-legend ul {
+    flex-direction: column;
+    gap: var(--s-1);
+  }
+  .hero-legend li {
+    font-size: var(--fs-meta);
+    white-space: normal;
+  }
+  .hero-chips {
+    margin-top: var(--s-4);
+  }
+  .hero-chips li {
+    max-width: 100%;
+  }
+  .hero-cta.btn {
+    justify-self: stretch;
+    margin-top: var(--s-5);
+    height: var(--tap);
+  }
+  .start-strip {
+    padding: var(--s-3) var(--s-4);
+  }
+  .start-pop {
+    right: auto;
+    left: 0;
+  }
+}

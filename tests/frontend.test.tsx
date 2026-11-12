@@ -1176,11 +1176,11 @@ describe('app shell', () => {
     expect(window.location.hash).toBe('#home')
   })
 
-  it('shows room to spend from the engine on Home with the cushion and window end', async () => {
+  it('shows room to spend from the engine on Home with the cushion behind the info', async () => {
     const state = makeState()
     routeApi((path, data) => (path === '/state' ? state : compare(state, data)))
     render(<App />)
-    const hero = await screen.findByRole('region', { name: 'Room to spend today' })
+    const hero = await screen.findByRole('region', { name: 'Safe to spend today' })
     const expected = compare(state, { amountCents: 0 })
     await waitFor(() =>
       expect(hero.textContent).toContain(
@@ -1189,7 +1189,10 @@ describe('app shell', () => {
         ),
       ),
     )
-    expect(hero.textContent).toContain('Keeps your $300.00 cushion through Wed, Dec 2')
+    const info = within(hero).getByLabelText('How Worth worked this out').closest('details')!
+    expect(info.open).toBe(false)
+    expect(info.textContent).toContain('Keeps your $300.00 cushion, if your plan holds.')
+    expect(info.textContent).toContain('you confirmed today')
   })
 })
 
@@ -1482,10 +1485,10 @@ describe('first screen: the sample and PayPal (third-party feedback)', () => {
   })
 
   it.each([
-    [0, 'with a paycheck and bills.'],
-    [1, 'with a paycheck, bills and one PayPal Pay in 4 plan.'],
-    [2, 'with a paycheck, bills and 2 PayPal Pay in 4 plans.'],
-  ])('counts %i running Pay in 4 plans in the sample intro', (count, text) => {
+    [0, 'None'],
+    [1, '1 running'],
+    [2, '2 running'],
+  ])('counts %i running Pay in 4 plans in the sample plan rail', (count, text) => {
     const state = makeState()
     const plan = state.profile.flows.filter((flow) => flow.kind === 'installment')
     const others = state.profile.flows.filter((flow) => flow.kind !== 'installment')
@@ -1511,7 +1514,8 @@ describe('first screen: the sample and PayPal (third-party feedback)', () => {
         onReviewRefund={vi.fn()}
       />,
     )
-    expect(screen.getByText(/You’re viewing Maya’s sample month/).textContent).toContain(text)
+    const rail = screen.getByRole('complementary', { name: 'Saved and your plan' })
+    expect(within(rail).getByText('Pay in 4 plans').nextElementSibling?.textContent).toBe(text)
   })
 
   it('names the PayPal sandbox in the chip when checkout runs there', async () => {
@@ -1542,21 +1546,21 @@ describe('first screen: the sample and PayPal (third-party feedback)', () => {
     expect(document.activeElement).toBe(chip)
   })
 
-  it('starts Home with the PayPal activity card above the hero, explaining the sample', async () => {
+  it('starts Home with the hero, then a slim strip naming the sample', async () => {
     const user = userEvent.setup()
     const state = makeState()
     routeApi((path, data) => (path === '/state' ? state : compare(state, data)))
     render(<App />)
-    const hero = await screen.findByRole('region', { name: 'Room to spend today' })
+    const hero = await screen.findByRole('region', { name: 'Safe to spend today' })
     const card = screen.getByRole('region', { name: 'Start with your PayPal activity' })
     expect(card.textContent).toContain(
-      'You’re viewing Maya’s sample month. Bring your PayPal activity to see your own.',
+      `This is ${state.profile.name}’s sample plan. Bring your own PayPal activity.`,
     )
     expect(card.textContent).toContain('Raw CSV files aren’t saved')
-    // It sits above the hero, so the PayPal start is the first thing on the page.
-    expect(card.compareDocumentPosition(hero) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    // Shown in the card on wide screens, and inside the disclosure on a phone.
-    await user.click(within(card).getAllByRole('button', { name: 'Enter your bills yourself' })[0]!)
+    // The hero comes first; the PayPal start sits under it.
+    expect(hero.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    await user.click(within(card).getByText('More'))
+    await user.click(within(card).getByRole('button', { name: 'Enter your bills yourself' }))
     await waitFor(() => expect(window.location.hash).toBe('#plan/edit'))
   })
 
@@ -1564,8 +1568,8 @@ describe('first screen: the sample and PayPal (third-party feedback)', () => {
     const state = makeState('import')
     routeApi((path, data) => (path === '/state' ? state : compare(state, data)))
     render(<App />)
-    await screen.findByRole('region', { name: 'Room to spend today' })
-    expect(screen.queryByText(/You’re viewing Maya’s sample month/)).toBeNull()
+    await screen.findByRole('region', { name: 'Safe to spend today' })
+    expect(screen.queryByText(/sample plan/)).toBeNull()
     expect(screen.queryByRole('button', { name: /Use your own PayPal activity/ })).toBeNull()
   })
 
@@ -1585,7 +1589,7 @@ describe('first screen: the sample and PayPal (third-party feedback)', () => {
         onReviewRefund={vi.fn()}
       />,
     )
-    expect(screen.getByText(/You’re viewing Maya’s sample month/)).toBeTruthy()
+    expect(screen.getByText(/sample plan\./)).toBeTruthy()
     expect(screen.queryByRole('button', { name: /Use your own PayPal activity/ })).toBeNull()
   })
 })
