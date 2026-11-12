@@ -4,7 +4,11 @@ import { createChatProvider } from '../server/chat.ts'
 import {
   chipAllowed,
   commitmentFacts,
+  directAnswer,
   leadInText,
+  namedSpending,
+  nextPayday,
+  overviewFacts,
   planFacts,
   purchaseFacts,
   spendingFacts30,
@@ -25,7 +29,12 @@ describe('verdict template', () => {
       'Camera at $1,199 would dip below your cushion if you buy it today. The earliest date that fits is Fri, Oct 23. The most you could spend today and keep your cushion is $440.01.',
     )
     expect(verdictFor(assess(34900, '2026-10-16'))).toBe(
-      'Camera at $349 fits your plan if you buy it on Fri, Oct 16.',
+      // Today fits too, so the later day is not a condition.
+      'Camera at $349 fits your plan today and on Fri, Oct 16.',
+    )
+    // Only the later day fits: it stays the condition.
+    expect(verdictFor(assess(119900, '2026-10-23'))).toBe(
+      'Camera at $1,199 fits your plan if you buy it on Fri, Oct 23.',
     )
   })
 })
@@ -147,5 +156,34 @@ describe('no free-text financial claims', () => {
     )
     expect(reply.points?.map((p) => p.id)).toEqual(['wait'])
     expect(JSON.stringify(reply)).not.toContain('comfortably afford')
+  })
+})
+
+describe('answering the question first (first-glance #6)', () => {
+  it('names a merchant or category from the activity, with its total, count and share', () => {
+    const text = namedSpending('Am I spending too much on coffee?', data)!
+    expect(text).toMatch(
+      /^Coffee: \$[\d,]+\.\d{2} over \d+ payments from \w{3} \d+ to \w{3} \d+, (?:\d+%|under 1%) of your recorded spending in that time\.$/,
+    )
+    // The numbers are the server's own sums of those rows.
+    const from = text.match(/from (\w{3} \d+)/)![1]
+    expect(from).toBeTruthy()
+    expect(text).not.toMatch(/too much|should/i)
+    expect(namedSpending('How much do I spend on yachts?', data)).toMatch(
+      /^I found no yachts payments in your activity from \w{3} \d+ to \w{3} \d+\.$/,
+    )
+    expect(namedSpending('How much did I spend this month?', data)).toBeUndefined()
+    expect(namedSpending('Can I afford a coffee machine?', data)).toBeUndefined()
+  })
+
+  it('answers "when do I get paid next?" with the next payday and amount', () => {
+    expect(nextPayday('When do I get paid next?', data)).toMatch(
+      /^Your next payday is \w{3}, \w{3} \d+: .+, \$[\d,]+(?:\.\d{2})?\.$/,
+    )
+    expect(directAnswer('What bills are coming up?', data)).toBeUndefined()
+  })
+
+  it('never says "base scenario"', () => {
+    expect(overviewFacts(data)).not.toMatch(/base scenario/)
   })
 })

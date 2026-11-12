@@ -175,10 +175,10 @@ describe('Ask Worth shows its work', () => {
     )
     expect(sentence.previousElementSibling?.className).toBe('verdict')
     // Claude's own words are marked where they appear (judge F5).
-    expect(sentence.textContent).toContain('Claude’s note · Worth’s numbers')
+    expect(sentence.textContent).toContain('Worth’s note')
     // No "How Ask Worth read this" expander (user review): only its caption stays.
     expect(screen.queryByRole('button', { name: 'How Ask Worth read this' })).toBeNull()
-    expect(screen.getByText('Claude read your question · every number is Worth’s')).toBeTruthy()
+    expect(screen.getByText('Numbers calculated by Worth, not guessed by AI')).toBeTruthy()
     // The server still records how it read the question.
     expect(answer.trace?.tools).toEqual([{ name: 'interpret_purchase', outcome: 'ran' }])
     expect(answer.trace?.sentence?.source).toBe('claude')
