@@ -7,7 +7,7 @@ you already have running and the cushion you want to keep. Then it tells you whe
 wait until a named day, or spend less. When that day comes, you pay with PayPal.
 
 **Live app:** https://worth.onrender.com (no sign-in; opens on a sample month)<br>
-**Demo video:** `TODO(YouTube link)`<br>
+**Demo video:** https://youtu.be/3RFpuFdSd7c<br>
 **Licence:** MIT
 
 ![Worth's Home on the sample month, Fri, Nov 13, 2026: Safe to spend today $872.26, with a bar that splits $2,540 into Free $872.26, Needed by Nov 30 $1,367.74 and a $300 cushion; Check a purchase and Connect PayPal beside it; below, a note that a Pay in 4 payment and a bill land a day apart](docs/img/home.png)
@@ -316,8 +316,8 @@ relay for local agents) and `npm run eval:live` (the live AI evaluation).
 4. Choose **Save for Tue, Dec 15**, then open https://worth.onrender.com/?replay=demo-dec15 to
    jump to that day. Saved says "Fresh check: this fits today"; **Buy with PayPal** opens PayPal's
    sandbox checkout.
-5. To try Connect PayPal or approve the checkout, sign in with the PayPal **sandbox** buyer:
-   `TODO(buyer login: see Devpost testing notes)`. Use sandbox accounts only. To return to Alex
+5. To try Connect PayPal or approve the checkout, sign in with a PayPal **sandbox** buyer account
+   (judges: the login is in the Devpost testing notes). Use sandbox accounts only. To return to Alex
    afterwards: **Settings → Delete my data now**.
 
 A sandbox account holds only what was done in the sandbox, so it has a short history with no
