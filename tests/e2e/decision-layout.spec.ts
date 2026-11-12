@@ -247,3 +247,25 @@ test('the Decision page leads with the answer too, with the item and its edit on
   await edit.click()
   await expect(page.locator('form.readas-edit').getByLabel('Item')).toBeFocused()
 })
+
+test('the banner stops at the main column, so the white rail starts clean', async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name === 'phone-390', 'the columns stack on a phone')
+  // A replay day shows the demo-clock banner above the page.
+  await analyse(page, 'chair', 'video')
+  const banner = page.locator('main > .wrap > .alert').first()
+  await expect(banner).toBeVisible()
+  await expect(page.locator('.decision-rail[aria-label]')).toBeVisible()
+  const edges = await page.evaluate(() => {
+    const box = (element: Element | null) => element!.getBoundingClientRect()
+    return {
+      banner: box(document.querySelector('main > .wrap > .alert')),
+      column: box(document.querySelector('.grid > :first-child')),
+      rail: box(document.querySelector('.decision-rail[aria-label]')),
+    }
+  })
+  expect(Math.round(edges.banner.left)).toBe(Math.round(edges.column.left))
+  expect(Math.round(edges.banner.right)).toBe(Math.round(edges.column.right))
+  expect(edges.banner.right).toBeLessThan(edges.rail.left)
+})

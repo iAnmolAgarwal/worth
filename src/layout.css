@@ -7,15 +7,19 @@
 main:has(> .page.activity) {
   background: var(--c-surface);
 }
-/* A page whose rail paints the white panel to the window's right edge (Decision): the band is
-   canvas over the main column and white over the rail, split where the rail's panel starts
-   (24 px left of the rail, as .rail::before draws it). */
+/* A page whose rail paints the white panel to the window's right edge (Decision, and /check,
+   which shows Decision): the band is canvas over the main column and white over the rail, split
+   where the rail's panel starts (24 px left of the rail, as .rail::before draws it). */
 @media (min-width: 1024px) {
-  main:has(> .page:not(.plain):not(.home-page) .grid > .rail) {
+  main:has(.decision-rail) {
     background: linear-gradient(
       90deg,
       var(--c-canvas) min(calc(50% + 176px), calc(100% - 416px)),
       var(--c-surface) 0
     );
+  }
+  /* The banners stop at the main column's right edge, so the white column starts clean. */
+  main:has(.decision-rail) > .wrap > .alert {
+    margin-right: calc(var(--rail) + var(--s-12));
   }
 }
