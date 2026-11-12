@@ -184,7 +184,11 @@ export function SavedRows({
               <Disc icon={Bookmark} kind="plan" />
             )}
             <div className="body">
-              <div className="t">{item.name}</div>
+              {/* The name and price share the first line; the sub-line spans the column below. */}
+              <div className="top">
+                <div className="t">{item.name}</div>
+                <div className="amt num">{money(item.amountCents)}</div>
+              </div>
               <div className="s">
                 <span className="soft">
                   {item.status === 'ready'
@@ -197,7 +201,6 @@ export function SavedRows({
                 </span>
               </div>
             </div>
-            <div className="amt num">{money(item.amountCents)}</div>
           </button>
         )
       })}

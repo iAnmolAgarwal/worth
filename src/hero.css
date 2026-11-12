@@ -573,7 +573,20 @@ button.hero-act-main::after,
   align-self: center;
   color: var(--c-text-3);
 }
-/* Saved's prices keep clear of the guide's launcher where the rail ends near the window edge. */
-.home-page .rail .row .amt {
-  padding-right: 2px;
+/* A Saved card: name and price on the first line, the sub-line across the whole text column. */
+.home-page .rail .rows .top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-3);
+  min-width: 0;
+}
+.home-page .rail .rows .top .t {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-page .rail .rows .top .amt {
+  flex: none;
 }
