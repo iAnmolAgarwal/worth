@@ -3,7 +3,7 @@ import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../src/api'
-import { Decision, optionWhy, smallMiss, StressLow } from '../src/Decision'
+import { Decision, optionWhy, smallMiss, type Explanation } from '../src/Decision'
 import { compareOptions } from '../shared/finance'
 import { createDemoState, PRODUCTS } from '../shared/seed'
 import type { AppState, OptionResult } from '../shared/types'
@@ -38,7 +38,7 @@ const compare = (amountCents: number, itemName: string) => {
     payIn4Eligible: true,
   })
 }
-function show(productId: string) {
+function show(productId: string, explanation?: Explanation) {
   const state = makeState()
   apiMock.mockImplementation(((_path: string, data?: unknown) =>
     Promise.resolve().then(() => {
@@ -59,6 +59,7 @@ function show(productId: string) {
       onViewActivity={vi.fn()}
       state={state}
       request={{ productId }}
+      explanation={explanation}
     />,
   )
 }
@@ -119,37 +120,9 @@ describe('option cards (feedback item 4)', () => {
     expect(within(cheaper).queryByText('See similar items')).toBeNull()
     expect(group.textContent).not.toContain('Spend less')
     expect(group.textContent).not.toContain('Lowest that day')
-    // The 20% warning lives in "What went into this", not on a card.
+    // No stress ("Tight") label on a card.
     expect(group.textContent).not.toContain('Tight')
     expect(group.querySelectorAll('.why')).toHaveLength(3)
-  })
-})
-
-describe('the stress row (feedback item 3)', () => {
-  it.each([
-    [62001, 'ok', 'stays above your cushion'],
-    [30000, 'warn', 'exactly your cushion'],
-    [18000, 'bad', 'below your cushion'],
-  ] as const)('colours %i by where it lands, with words too', (lowest, tone, words) => {
-    const { container } = render(<StressLow lowestCents={lowest} cushionCents={30000} />)
-    const pill = container.querySelector('.amt-pill')!
-    expect(pill.getAttribute('data-tone')).toBe(tone)
-    expect(pill.querySelector('svg')).toBeTruthy()
-    expect(container.textContent).toContain(`, ${words}`)
-    // One line: no separate status pill, no line break.
-    expect(container.querySelector('br, .pill')).toBeNull()
-  })
-  it('follows the selected option in the rail', async () => {
-    const user = userEvent.setup()
-    show('chair')
-    const group = await screen.findByRole('radiogroup', { name: 'Your options' })
-    const row = () =>
-      screen.getByText('If everyday spending runs 20% higher').parentElement!.querySelector('dd')!
-    // Waiting (recommended): $620.01 stays above. Something cheaper: $180.00 goes below.
-    expect(row().textContent).toBe('Lowest $620.01, stays above your cushion')
-    await user.click(within(group).getByRole('radio', { name: /Something cheaper/ }))
-    expect(row().textContent).toBe('Lowest $180.00, below your cushion')
-    expect(row().textContent).not.toMatch(/Stays above|Below cushion/)
   })
 })
 
@@ -182,5 +155,43 @@ describe('Compare with PayPal Pay in 4 (feedback item 6)', () => {
         /^\$[\d,]+\.\d\d · [A-Z][a-z]{2}, [A-Z][a-z]{2} \d{1,2}$/,
       )
     }
+  })
+})
+
+describe('Why this answer, under the verdict', () => {
+  it('reads Worth’s own sentence straight after the verdict, open, with nothing left in the rail', async () => {
+    show('chair')
+    const why = await screen.findByRole('region', { name: 'Why this answer' })
+    const verdict = document.querySelector('.verdict-block')!
+    expect(verdict.nextElementSibling).toBe(why)
+    expect(why.textContent).toContain('Worth projected your balance each day for the next 60 days')
+    expect(why.textContent).toContain('Worth’s own calculation · next 60 days')
+    expect(screen.queryByRole('button', { name: /What went into this|Why this answer/ })).toBeNull()
+    expect(document.querySelector('.decision-rail .fold, .decision-rail .kvlist')).toBeNull()
+  })
+
+  it('shows the assistant’s lead and points, at most three when they are long', async () => {
+    const long = (n: number) =>
+      `Point ${n} ${'is a long explanation that runs on '.repeat(3)}`.trim()
+    show('chair', {
+      mode: 'anthropic',
+      lead: 'Rent leaves before your paycheck lands.',
+      points: [long(1), long(2), long(3), long(4)],
+      toolCalls: [],
+    })
+    const why = await screen.findByRole('region', { name: 'Why this answer' })
+    expect(why.textContent).toContain('Rent leaves before your paycheck lands.')
+    expect(within(why).getAllByRole('listitem')).toHaveLength(3)
+    expect(why.textContent).toContain('Worth’s assistant picked these facts for your question')
+  })
+
+  it('shows every point when all of them are short', async () => {
+    show('chair', {
+      mode: 'anthropic',
+      points: ['One.', 'Two.', 'Three.', 'Four.'],
+      toolCalls: [],
+    })
+    const why = await screen.findByRole('region', { name: 'Why this answer' })
+    expect(within(why).getAllByRole('listitem')).toHaveLength(4)
   })
 })

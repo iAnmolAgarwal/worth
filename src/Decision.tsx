@@ -669,7 +669,6 @@ export function Decision({
     radios.current[keys.indexOf(next)]?.focus()
   }
   const p4 = c.payIn4.available ? c.payIn4 : undefined
-  const selectedOption = optionOf(c, selected) ?? c.buyToday
   const bought = product
     ? state.purchases.find(
         (p) => p.productId === product.id && p.status === 'completed' && !p.archived,
@@ -1007,6 +1006,8 @@ export function Decision({
                 <AnswerDetail c={c} />
               </p>
             </section>
+            {/* Why the answer is what it is, read straight after it, always open. */}
+            <WhyThisAnswer explanation={explanation} />
             {hold && (
               <ReservationNote
                 purchase={hold}
@@ -1098,43 +1099,6 @@ export function Decision({
               {railActions && <div className="rail-actions">{railActions}</div>}
             </div>
           )}
-          <WhyThisAnswer explanation={explanation} />
-          <Fold id="inputs" title="What went into this">
-            <dl className="kvlist">
-              <div>
-                <dt>Money available</dt>
-                <dd className="num">
-                  {money(state.profile.balanceCents)} ·{' '}
-                  {state.profile.snapshotDate === state.today
-                    ? 'today'
-                    : dayLabel(state.profile.snapshotDate)}
-                </dd>
-              </div>
-              <div>
-                <dt>Cushion</dt>
-                <dd className="num">{money(c.cushionCents)}</dd>
-              </div>
-              <div>
-                <dt>Everyday spending</dt>
-                <dd className="num">{money(state.profile.dailySpendCents)} a day</dd>
-              </div>
-              <div>
-                <dt>Window</dt>
-                <dd>
-                  {shortDate(c.window.start)} – {shortDate(c.window.end)}
-                </dd>
-              </div>
-              <div>
-                <dt>If everyday spending runs 20% higher</dt>
-                <dd className="num">
-                  <StressLow
-                    lowestCents={selectedOption.stressLowestCents}
-                    cushionCents={c.cushionCents}
-                  />
-                </dd>
-              </div>
-            </dl>
-          </Fold>
         </aside>
       </div>
       {confirmBuy && product && (
@@ -1181,35 +1145,6 @@ export function Decision({
         </Dialog>
       )}
     </Frame>
-  )
-}
-
-/**
- * "Lowest $620.01" on one line, the amount in a pill coloured by where it lands: above the cushion,
- * exactly at it, or below it. An icon and hidden words say the same, never colour alone.
- */
-export function StressLow({
-  lowestCents,
-  cushionCents,
-}: {
-  lowestCents: number
-  cushionCents: number
-}) {
-  const [tone, Icon, words]: [Tone, typeof CircleCheck, string] =
-    lowestCents > cushionCents
-      ? ['ok', CircleCheck, 'stays above your cushion']
-      : lowestCents === cushionCents
-        ? ['warn', CircleAlert, 'exactly your cushion']
-        : ['bad', TriangleAlert, 'below your cushion']
-  return (
-    <span className="stress-low">
-      Lowest{' '}
-      <span className={cx('amt-pill', tone)} data-tone={tone}>
-        <Icon className="ico" aria-hidden="true" />
-        {signed(lowestCents)}
-      </span>
-      <span className="sr">, {words}</span>
-    </span>
   )
 }
 
@@ -1312,46 +1247,34 @@ function Frame({ children, actions }: { children: ReactNode; actions?: ReactNode
   )
 }
 
-/** A rail section that opens on request, so the answer above stays the one thing to read. */
-function Fold({ id, title, children }: { id: string; title: string; children: ReactNode }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <section className="fold" data-open={open} aria-labelledby={`${id}-head`}>
-      <h2 className="h-section">
-        <button
-          type="button"
-          id={`${id}-head`}
-          className="fold-head"
-          aria-expanded={open}
-          aria-controls={`${id}-body`}
-          onClick={() => setOpen(!open)}
-        >
-          {title}
-          <ChevronDown className="ico chev" aria-hidden="true" />
-        </button>
-      </h2>
-      <div id={`${id}-body`} hidden={!open} className="fold-body">
-        {children}
-      </div>
-    </section>
-  )
-}
+/** Short enough that a fourth or later point still reads as a list, not a wall of text. */
+const SHORT_POINT = 90
 
+/**
+ * Why the answer is what it is, under the verdict: the assistant's checked lead and points when it
+ * wrote them, otherwise Worth's own rule-based sentence, with a line saying which. At most three
+ * points, unless every point is short; a point is never cut mid-sentence.
+ */
 function WhyThisAnswer({ explanation }: { explanation?: Explanation }) {
   const claude = explanation?.mode === 'anthropic' && explanation.points.length > 0
+  const points = explanation?.points ?? []
+  const shown =
+    points.length <= 3 || points.every((point) => point.length <= SHORT_POINT)
+      ? points
+      : points.slice(0, 3)
   return (
-    <Fold id="why" title="Why this answer">
+    <section className="why-block" aria-label="Why this answer">
       {claude ? (
         <>
-          {explanation!.lead && <p className="strong">{explanation!.lead}</p>}
-          <ul style={{ margin: '8px 0 12px', paddingLeft: 20, color: 'var(--c-text-strong)' }}>
-            {explanation!.points.map((point) => (
+          {explanation!.lead && <p>{explanation!.lead}</p>}
+          <ul>
+            {shown.map((point) => (
               <li key={point}>{point}</li>
             ))}
           </ul>
         </>
       ) : (
-        <p className="strong" style={{ marginBottom: 12 }}>
+        <p>
           Worth projected your balance each day for the next 60 days, once for each option, using
           your money, bills, income and everyday spending.
         </p>
@@ -1366,7 +1289,7 @@ function WhyThisAnswer({ explanation }: { explanation?: Explanation }) {
           ? 'Worth’s assistant picked these facts for your question · every number is Worth’s'
           : 'Worth’s own calculation · next 60 days'}
       </div>
-    </Fold>
+    </section>
   )
 }
 
