@@ -31,7 +31,7 @@ import {
 import type { Alternative, OptionResult, Product } from '../shared/types'
 import { offerVerdict, type AskOffer } from './AgentLauncher'
 import { AlternativesLoading, SimilarItems, useSimilarItems } from './Alternatives'
-import { BalanceChart, type CompareSeries } from './BalanceChart'
+import { BalanceChart, type ChartOption } from './BalanceChart'
 import type { AppState, Comparison, PayIn4, SavePlan, SaveTarget } from './contract'
 import { sourceTarget } from './contract'
 import { ASSESSMENT_ONLY } from './copy'
@@ -48,8 +48,7 @@ import {
   purchasePlans,
   useComparison,
 } from './engine'
-import { cushionGap } from './chartModel'
-import { boughtOn, cx, dayLabel, fromMoney, fullDate, money, shortDate, signed } from './format'
+import { boughtOn, cx, dayLabel, fromMoney, money, shortDate, signed } from './format'
 import { PayPalMessage } from './paypal'
 import type { PayPalSdkInstance } from './paypalSdk'
 import { Alert, Button, Dialog, Disc, Field, Pill, Ring, type Tone } from './ui'
@@ -301,16 +300,19 @@ export function ChartTile({
   const title = chartTitle(c, k)
   const fullName = fullPayName(c, option)
   const thesis = payIn4 ? payIn4Thesis(c, option, payIn4) : ''
-  // The other answers join the chart only when asked for; Pay in 4 starts on when it is open.
+  // The chart's pills are the ways to buy this item: the page's option starts pressed, and Pay
+  // in 4 joins it while its comparison is open.
   const p4 = scaleWith ?? payIn4
-  const compare: CompareSeries[] = [
-    ...(['buyToday', 'wait'] as const)
-      .filter((key) => key !== k && optionOf(c, key))
+  const purchase = (o: OptionResult) => ({ date: o.purchaseDate, fits: fits(o) })
+  const options: ChartOption[] = [
+    ...(['buyToday', 'wait', 'spendLess'] as const)
+      .filter((key) => (key === 'spendLess' ? k === key : optionOf(c, key)))
       .map((key) => ({
         key,
-        name: optionTitle(key, c),
+        name: key === 'spendLess' ? fullName : optionTitle(key, c),
         points: optionOf(c, key)!.points,
         tone: key === 'buyToday' ? ('amber' as const) : ('teal' as const),
+        purchase: purchase(optionOf(c, key)!),
       })),
     ...(p4
       ? [
@@ -321,6 +323,8 @@ export function ChartTile({
             tone: 'violet' as const,
             on: Boolean(payIn4),
             instalments: p4.instalments,
+            purchase: { date: p4.purchaseDate },
+            note: `Compared with PayPal Pay in 4. ${payIn4Thesis(c, option, p4)}`,
           },
         ]
       : []),
@@ -335,16 +339,10 @@ export function ChartTile({
       </div>
       {thesis && <p className="chart-thesis">{thesis}</p>}
       <BalanceChart
-        points={option.points}
+        options={options}
+        selected={options.some((o) => o.key === k) ? k : 'buyToday'}
         cushionCents={c.cushionCents}
-        name={k === 'spendLess' ? fullName : optionTitle(k, c)}
-        purchase={{
-          date: option.purchaseDate,
-          amountCents: option.amountCents,
-          fits: fits(option),
-        }}
-        compare={compare}
-        label={`Projected balance ${title.replace(/^If/, 'if')}${payIn4 ? `, compared with PayPal Pay in 4. ${thesis}` : '.'} Each day shows its low, with that day’s bills taken out before pay arrives. ${payIn4 ? `${fullName}: lowest point` : 'Lowest point'} ${signed(option.lowestBalanceCents)} on ${fullDate(option.lowestDate)}, ${cushionGap(option.lowestBalanceCents, c.cushionCents)}.`}
+        label={`Projected balance, ${shortDate(c.window.start)} to ${shortDate(c.window.end)}. Each day shows its low, with that day’s bills taken out before pay arrives.`}
       />
     </section>
   )

@@ -1247,12 +1247,19 @@ function Review({
             {shortDate(preview.points.at(-1)!.date)}.
           </p>
           <BalanceChart
-            points={preview.points.map((point) => ({
-              ...point,
-              minimumCents: point.baselineMinimumCents,
-            }))}
+            options={[
+              {
+                key: 'plan',
+                name: 'Balance',
+                points: preview.points.map((point) => ({
+                  ...point,
+                  minimumCents: point.baselineMinimumCents,
+                })),
+              },
+            ]}
+            selected="plan"
             cushionCents={preview.cushionCents}
-            label={`Projected balance before any purchase. Each day shows its low, with that day’s bills taken out before pay arrives. Lowest point ${signed(preview.baselineLowestCents)}.`}
+            label="Projected balance before any purchase. Each day shows its low, with that day’s bills taken out before pay arrives."
           />
         </section>
       )}

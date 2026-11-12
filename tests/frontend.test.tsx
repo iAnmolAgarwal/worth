@@ -1435,13 +1435,13 @@ describe('iteration 4 fixes', () => {
     expect(
       await screen.findByRole('heading', { level: 1, name: /^Wait until \w{3}, \w{3} \d+$/ }),
     ).toBeTruthy()
-    // The chart's toggles are plain buttons with a pressed state; its days are one slider.
-    const chips = within(screen.getByRole('group', { name: 'Show on the chart' })).getAllByRole(
+    // The chart's pills are the options, the page's one pressed; its days are one slider.
+    const chips = within(screen.getByRole('group', { name: 'Options on the chart' })).getAllByRole(
       'button',
     )
     expect(chips.map((chip) => chip.getAttribute('aria-pressed'))).toEqual([
       'false',
-      'false',
+      'true',
       'false',
     ])
     const days = screen.getAllByRole('slider', { name: /Balance by day/ })

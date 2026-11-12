@@ -5,15 +5,14 @@ import { compareOptions } from '../shared/finance.ts'
 import { ALEX_CAMERA_ID, ALEX_DEMO_DAY, createCameraScenario, PRODUCTS } from '../shared/seed.ts'
 import type { ForecastPoint } from '../shared/types.ts'
 import {
-  cushionGap,
   dateTicks,
   daySentence,
   dayState,
   domain,
   frame,
   incomeKind,
-  lineLabelSpot,
   lowestIndex,
+  moneyDays,
   positionText,
   rangeOptions,
   seriesSummary,
@@ -139,12 +138,6 @@ describe('the sentence for the day in focus', () => {
       'You are $726.74 below zero, $1,026.74 below your cushion.',
     )
   })
-
-  it('names the cushion in every gap, so it never reads as a second balance', () => {
-    expect(cushionGap(95_052, 30_000)).toBe('$650.52 more than your $300.00 cushion')
-    expect(cushionGap(30_000, 30_000)).toBe('exactly your $300.00 cushion')
-    expect(cushionGap(-45_899, 30_000)).toBe('$758.99 short of your $300.00 cushion')
-  })
 })
 
 describe('the range control', () => {
@@ -247,23 +240,50 @@ describe('the smooth line is honest', () => {
   })
 })
 
-describe('naming a compare line on the plot', () => {
-  const g = frame(662, 61, [...lows(wait), ...lows(buy)], CUSHION, 40)
-  const ys = (points: ForecastPoint[]) => lows(points).map((cents) => g.y(cents))
-
-  it('finds a spot clear of the other line, the cushion and zero', () => {
-    const levels = [g.y(CUSHION), g.y(0)]
-    const spot = lineLabelSpot(ys(buy), [ys(wait)], levels, g, 60)!
-    expect(spot).toBeTruthy()
-    const box = { top: spot.y - 10, bottom: spot.y + 2 }
-    const start = Math.round((spot.x - g.x(0)) / g.step)
-    for (const y of [...levels, ...ys(wait).slice(start, start + Math.ceil(60 / g.step) + 1)])
-      expect(y < box.top - 2 || y > box.bottom + 2).toBe(true)
-    expect(box.top).toBeGreaterThanOrEqual(g.plot.y)
-    expect(box.bottom).toBeLessThanOrEqual(g.plot.y + g.plot.h)
+describe('money in and money out', () => {
+  it('finds every day pay or other income lands and every day a bill or plan payment leaves', () => {
+    const days = moneyDays(wait)
+    const credits = days.filter((day) => day.kind === 'in')
+    expect(credits.map((day) => [day.date, day.cents])).toEqual([
+      ['2026-11-30', 390_000],
+      ['2026-12-14', 165_000],
+      ['2026-12-31', 390_000],
+    ])
+    const debits = days.filter((day) => day.kind === 'out')
+    expect(debits).toHaveLength(19)
+    expect(debits.find((day) => day.date === '2026-12-01')).toMatchObject({
+      index: on(wait, '2026-12-01'),
+      name: 'Rent',
+      cents: -175_000,
+    })
+    for (const day of debits) expect(day.cents).toBeLessThan(0)
+    // The purchase is the option's own marker, and everyday spending is not a bill.
+    expect(debits.map((day) => day.date)).not.toContain('2026-12-15')
   })
 
-  it('leaves the name out when the line sits on another all the way', () => {
-    expect(lineLabelSpot(ys(wait), [ys(wait)], [], g, 60)).toBeUndefined()
+  it('gives a day with both a credit and a debit one entry each', () => {
+    const point = wait[on(wait, '2026-12-01')]!
+    const mixed = {
+      ...point,
+      events: [
+        ...point.events,
+        { id: 'x', name: 'Refund', amountCents: 5_000, kind: 'income' as const },
+      ],
+    }
+    expect(moneyDays([mixed]).map((day) => day.kind)).toEqual(['in', 'out'])
+  })
+})
+
+describe('very large balances', () => {
+  it('still draws at most six gridlines and labels them in millions', () => {
+    const big = domain([1_000_000_000, 250_000_000], 30_000)
+    expect(big.ticks.length).toBeLessThanOrEqual(6)
+    expect(big.lo).toBe(0)
+    expect(big.hi).toBeGreaterThanOrEqual(1_000_000_000)
+    expect(tickLabel(100_000_000)).toBe('$1M')
+    expect(tickLabel(1_000_000_000)).toBe('$10M')
+    expect(tickLabel(-250_000_000)).toBe('−$2.5M')
+    expect(tickLabel(99_900_000)).toBe('$999k')
+    expect(domain([12_345_678_900], 0).ticks.length).toBeLessThanOrEqual(6)
   })
 })

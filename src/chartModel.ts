@@ -6,17 +6,6 @@
 import type { ForecastEvent, ForecastPoint } from '../shared/types'
 import { dayLabel, money, shortDate, signed } from './format'
 
-/**
- * Room between a balance and the cushion, naming the cushion so the gap never reads as a second
- * balance: "$650.52 more than your $300.00 cushion".
- */
-export function cushionGap(value: number, cushion: number) {
-  if (value === cushion) return `exactly your ${money(cushion)} cushion`
-  return value > cushion
-    ? `${money(value - cushion)} more than your ${money(cushion)} cushion`
-    : `${money(cushion - value)} short of your ${money(cushion)} cushion`
-}
-
 export type DayState = 'above' | 'below' | 'negative'
 /** At the cushion counts as above it, as the engine's "fits" does. */
 export const dayState = (cents: number, cushionCents: number): DayState =>
@@ -28,12 +17,35 @@ export const STATE_WORDS: Record<DayState, string> = {
   negative: 'Below zero',
 }
 
-/** Bills and plan payments at least this large are marked when Bills is on. */
+/** Money out at least this large may be named above the plot. */
 export const BIG_BILL_CENTS = 10_000
 export const isBill = (event: ForecastEvent) =>
   event.kind === 'bill' || event.kind === 'installment' || event.kind === 'subscription'
 export const isPayday = (point: ForecastPoint) =>
   point.events.some((event) => event.kind === 'income')
+/** A day money is credited (pay, other income) or debited (bills, subscriptions, plan payments). */
+export interface MoneyDay {
+  index: number
+  date: string
+  kind: 'in' | 'out'
+  /** The day's total in that direction, in cents (negative for money out). */
+  cents: number
+  /** The largest movement that day, for a label. */
+  name: string
+}
+export function moneyDays(points: ForecastPoint[]): MoneyDay[] {
+  return points.flatMap((point, index) =>
+    (['in', 'out'] as const).flatMap((kind) => {
+      const events = point.events
+        .filter((event) => (kind === 'in' ? event.kind === 'income' : isBill(event)))
+        .sort((a, b) => Math.abs(b.amountCents) - Math.abs(a.amountCents))
+      if (!events.length) return []
+      const cents = events.reduce((sum, event) => sum + event.amountCents, 0)
+      return [{ index, date: point.date, kind, cents, name: events[0]!.name }]
+    }),
+  )
+}
+
 /** Named events, income first, then the largest outflow; everyday spending is left out. */
 export const namedEvents = (point: ForecastPoint) =>
   point.events
@@ -41,8 +53,6 @@ export const namedEvents = (point: ForecastPoint) =>
     .sort((a, b) =>
       a.kind === 'income' ? -1 : b.kind === 'income' ? 1 : a.amountCents - b.amountCents,
     )
-export const bigBills = (point: ForecastPoint) =>
-  point.events.filter((event) => isBill(event) && -event.amountCents >= BIG_BILL_CENTS)
 
 /** One run of days below the cushion. */
 export interface Stretch {
@@ -160,14 +170,20 @@ export function rangeOptions(points: ForecastPoint[]): RangeOption[] {
   return [...options, all]
 }
 
-/** Whole-dollar steps that give at most five gridlines; zero is always in the domain. */
+/** Whole-dollar steps (1, 2 or 5 times a power of ten) that give at most five intervals. */
 export function domain(values: number[], cushionCents: number) {
   const low = Math.min(0, cushionCents, ...values)
   const high = Math.max(cushionCents, ...values)
-  const step =
-    [50_000, 100_000, 200_000, 500_000, 1_000_000, 2_000_000, 5_000_000].find(
-      (size) => Math.ceil(high / size) - Math.floor(low / size) <= 5,
-    ) ?? 10_000_000
+  let step = 50_000
+  for (let scale = 10_000; ; scale *= 10) {
+    const size = [5, 10, 20]
+      .map((m) => m * scale)
+      .find((s) => Math.ceil(high / s) - Math.floor(low / s) <= 5)
+    if (size) {
+      step = size
+      break
+    }
+  }
   const lo = Math.floor(low / step) * step
   const hi = Math.max(lo + step, Math.ceil(high / step) * step)
   const ticks: number[] = []
@@ -238,51 +254,6 @@ export function smoothPath(points: { x: number; y: number }[]) {
   return path
 }
 
-/**
- * Where a line's name fits on the plot: just above or below its own line, on the stretch with the
- * most clear space from every other line and level. Undefined when nowhere is clear.
- */
-export function lineLabelSpot(
-  own: (number | undefined)[],
-  others: (number | undefined)[][],
-  levels: number[],
-  f: Pick<Frame, 'plot' | 'step' | 'x'>,
-  width: number,
-) {
-  const span = Math.max(1, Math.ceil(width / f.step))
-  const top = f.plot.y + 2
-  const bottom = f.plot.y + f.plot.h - 2
-  let best: { x: number; y: number; clear: number } | undefined
-  for (let start = 0; start + span < own.length; start++) {
-    const ys = own.slice(start, start + span + 1)
-    if (ys.some((y) => y === undefined)) continue
-    // The name belongs where its line runs on its own, not where it sits on another.
-    const shared = others.some((line) =>
-      ys.some((y, index) => {
-        const other = line[start + index]
-        return other !== undefined && Math.abs(other - y!) < 6
-      }),
-    )
-    if (shared) continue
-    const high = Math.min(...(ys as number[]))
-    const low = Math.max(...(ys as number[]))
-    for (const base of [high - 7, low + 16]) {
-      const box = { top: base - 10, bottom: base + 2 }
-      if (box.top < top || box.bottom > bottom) continue
-      const apart = (y: number) => (y < box.top ? box.top - y : y > box.bottom ? y - box.bottom : 0)
-      const near = [
-        ...levels,
-        ...others.flatMap((line) =>
-          line.slice(start, start + span + 1).flatMap((y) => (y === undefined ? [] : [y])),
-        ),
-      ]
-      const clear = Math.min(...near.map(apart))
-      if (!best || clear > best.clear) best = { x: f.x(start), y: base, clear }
-    }
-  }
-  return best && best.clear >= 3 ? { x: best.x, y: best.y } : undefined
-}
-
 /** Sparse date ticks: the first day, then every one, two or four weeks. */
 export function dateTicks(days: number, plotWidth: number) {
   const room = Math.max(2, Math.floor(plotWidth / 84))
@@ -292,11 +263,16 @@ export function dateTicks(days: number, plotWidth: number) {
   return ticks
 }
 
-/** Chart ticks are the one place money drops its cents: "$1k", "−$500". */
+/** Chart ticks are the one place money drops its cents: "$1k", "−$500", "$1M". */
 export function tickLabel(cents: number) {
   if (cents === 0) return '$0'
   const dollars = Math.abs(cents) / 100
-  const text = dollars >= 1000 ? `${Number((dollars / 1000).toFixed(1))}k` : `${dollars}`
+  const text =
+    dollars >= 1_000_000
+      ? `${Number((dollars / 1_000_000).toFixed(1))}M`
+      : dollars >= 1000
+        ? `${Number((dollars / 1000).toFixed(1))}k`
+        : `${dollars}`
   return `${cents < 0 ? '−' : ''}$${text}`
 }
 

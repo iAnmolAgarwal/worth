@@ -1,6 +1,6 @@
 /* =====================================================================
-   The balance chart (src/BalanceChart.tsx): one bold line, the cushion,
-   a day-state track, and the day in focus in words. Tokens are index.css.
+   The balance chart (src/BalanceChart.tsx): a line per option, the cushion,
+   money in and out, and the day in focus in words. Tokens are index.css.
    ===================================================================== */
 .wchart {
   --w-line: var(--c-brand);
@@ -56,9 +56,6 @@
 .wchart-summary .words {
   flex: 1 1 280px;
 }
-.wchart-summary .name {
-  color: var(--tone-ink);
-}
 .wchart-summary .jumps {
   display: flex;
   flex-wrap: wrap;
@@ -104,9 +101,6 @@
 .wchart .tone-teal {
   --tone: #007a8a;
   --tone-ink: #005f6b;
-}
-.wchart .tone-bill {
-  --tone: var(--w-bill);
 }
 .wchart-swatch {
   flex: none;
@@ -229,14 +223,14 @@
 }
 .wchart-line {
   fill: none;
-  stroke: var(--w-line);
+  stroke: var(--tone);
   stroke-width: 2.75;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 .wchart-dot {
   fill: var(--c-surface);
-  stroke: var(--w-line);
+  stroke: var(--tone);
   stroke-width: 1.2;
 }
 .wchart-alt {
@@ -245,23 +239,15 @@
   stroke-width: 1.75;
   stroke-linecap: round;
 }
-.wchart-linelabel {
-  fill: var(--tone);
-  font-size: 11px;
-  font-weight: 600;
-  paint-order: stroke;
-  stroke: var(--c-surface);
-  stroke-width: 3px;
-  stroke-linejoin: round;
-}
 /* Below the cushion the shaded region is red, never blue; below zero it is a little stronger. */
 .wchart-dip rect,
 .wchart-dip path {
   fill: var(--w-bad);
   fill-opacity: 0.13;
 }
+/* (Each option colour measures at least 3.2:1 on the strongest of these tints.) */
 .wchart-dip .deep {
-  fill-opacity: 0.1;
+  fill-opacity: 0.07;
 }
 .wchart-dip .ground {
   fill: var(--c-surface);
@@ -286,6 +272,26 @@
 .wchart-level.zero text {
   fill: #a80001;
 }
+/* Money in is a green hairline and money out a red one, quiet and behind everything else. */
+.wchart-money {
+  stroke-width: 1;
+  stroke-opacity: 0.4;
+}
+.wchart-money.in {
+  stroke: var(--c-positive);
+}
+.wchart-money.out {
+  stroke: var(--w-bad);
+}
+.wchart-edge {
+  fill: var(--c-text-2);
+  font-size: 11px;
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: var(--c-surface);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
 /* Today, payday, income and the purchase: thin solid lines, each kind in its own quiet colour. */
 .wchart-mark {
   --mark: var(--w-today);
@@ -295,6 +301,9 @@
 }
 .wchart-mark.income {
   --mark: var(--w-income);
+}
+.wchart-mark.bill {
+  --mark: var(--w-bill);
 }
 .wchart-mark.buy {
   --mark: var(--c-navy);
@@ -322,7 +331,7 @@
 }
 .wchart-low {
   fill: var(--c-surface);
-  stroke: var(--w-line);
+  stroke: var(--tone);
   stroke-width: 2;
 }
 .wchart-buy {
@@ -334,40 +343,6 @@
   fill: var(--c-positive);
 }
 
-/* The day-state track: one pill a day. */
-.wchart-track rect.above {
-  fill: var(--w-sky);
-  fill-opacity: 0.6;
-}
-.wchart-track rect.below {
-  fill: #f4a4a8;
-}
-.wchart-track rect.negative {
-  fill: var(--w-bad);
-}
-.wchart-track .pay {
-  fill: var(--w-payday);
-}
-.wchart-track .mark {
-  fill: #fff;
-}
-.wchart-track text {
-  fill: var(--tone);
-  font-size: 10px;
-  font-weight: 600;
-}
-.wchart-bill line {
-  stroke: var(--w-bill);
-  stroke-opacity: 0.6;
-}
-.wchart-bill circle {
-  fill: var(--w-bill);
-}
-.wchart-bill text {
-  fill: var(--w-bill);
-  font-size: 10px;
-  font-weight: 500;
-}
 .wchart-focus line {
   stroke: var(--w-ink);
   stroke-opacity: 0.35;
@@ -531,24 +506,28 @@
   align-items: center;
   gap: 6px;
 }
+.wchart-swatch.in,
+.wchart-swatch.out {
+  width: 2px;
+  height: 12px;
+  border-radius: 0;
+  background: var(--c-positive);
+}
+.wchart-swatch.out {
+  background: var(--w-bad);
+}
 .wchart-swatch.cushion {
   height: 0;
   background: none;
   border-top: 3px dotted var(--w-cushion);
   border-radius: 0;
 }
-.wchart-pill {
+.wchart-pill.below {
   display: inline-block;
   width: 12px;
   height: 8px;
   border-radius: 3px;
-  background: rgba(128, 204, 255, 0.6);
-}
-.wchart-pill.below {
-  background: #f4a4a8;
-}
-.wchart-pill.negative {
-  background: var(--c-danger);
+  background: color-mix(in srgb, var(--w-bad) 22%, var(--c-surface));
 }
 
 /* The same days as a table. */

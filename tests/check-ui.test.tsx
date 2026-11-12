@@ -201,9 +201,11 @@ describe('a verified quote on /check', () => {
     ).toBeTruthy()
     expect(screen.getAllByText(/offers PayPal Pay in 4 for this amount/)).toHaveLength(1)
     // No Buy button in Worth: the way to pay is back at the store.
-    // (The chart's "Buy today" chip only shows that option's line.)
+    // (The chart's "Buy today" pill is a toggle that shows that option's line, not a way to buy.)
     expect(
-      screen.queryAllByRole('button', { name: /buy/i }).filter((b) => !b.closest('.wchart')),
+      screen
+        .queryAllByRole('button', { name: /buy/i })
+        .filter((b) => !(b.closest('.wchart') && b.hasAttribute('aria-pressed'))),
     ).toHaveLength(0)
     const back = screen.getAllByRole('link', { name: 'Back to Larkspur Supply' })
     expect(back.length).toBeGreaterThan(0)
