@@ -231,6 +231,6 @@ Abridged from the sample persona on the video day (`/?replay=video`).
 
 ## Limits
 
-- PayPal **sandbox** only, and the six listed sample items. `check_affordability` works for any item at any store; `purchase_check_link` works only for those six.
+- PayPal **sandbox** only, and the seven listed sample items. `check_affordability` works for any item at any store; `purchase_check_link` works only for those seven.
 - No OAuth. Remote clients that require OAuth for custom connectors (rather than a header) need the `mcp-remote` bridge above.
 - When a token is revoked mid-session, mcp-remote reacts to the `401` by trying OAuth discovery, and shows "Dynamic Client Registration rejected (HTTP 404)". The stdio relay shows Worth's own `UNAUTHORIZED` message instead.

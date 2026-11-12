@@ -302,7 +302,7 @@ plan and rate-limited. Setup, the tool contract and the security model are in
 
 ## Limits and degradation
 
-- **Sandbox only.** No real money moves and no goods ship. Worth's checkout covers six listed
+- **Sandbox only.** No real money moves and no goods ship. Worth's checkout covers seven listed
   sample items; `open_purchase_check` and `purchase_check_link` link only to those.
 - **USD only.** No public API gives third-party apps a consumer's PayPal activity; Worth reads it
   through PayPal's MCP server after you log in (sandbox), or from a CSV export. A sandbox account
