@@ -3,12 +3,13 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
+import { decisionRequestFrom } from '../src/contract'
 import { Decision } from '../src/Decision'
 import { Saved, Settings } from '../src/Saved'
 import { api } from '../src/api'
-import { belowWords, fitStatus, lowerName, lowestSentence } from '../src/engine'
+import { belowWords, fitStatus, lowerName, lowestSentence, withChosenDay } from '../src/engine'
 import { nameInSentence } from '../shared/text'
-import { payIn4Lines } from '../src/payIn4Text'
+import { fullPayName, payIn4Lines, payIn4Thesis } from '../src/payIn4Text'
 import { compareOptions } from '../shared/finance'
 import { ALEX_DEMO_DAY, ALEX_RETURN_DAY, createCameraScenario, PRODUCTS } from '../shared/seed'
 import type { AppState, DemoPreset, Purchase } from '../shared/types'
@@ -333,5 +334,141 @@ describe('the answer page after saving', () => {
     )
     expect((await screen.findAllByRole('button', { name: 'Saved' })).length).toBeGreaterThan(0)
     expect(screen.queryByRole('button', { name: 'Save for Tue, Dec 15' })).toBeNull()
+  })
+})
+
+describe('the on= link parameter', () => {
+  const read = (query: string) =>
+    decisionRequestFrom(new URLSearchParams(query), undefined, '2026-11-13')
+  it('keeps a later day inside the wait window', () => {
+    expect(read('product=halden-x5&on=2026-11-15')).toEqual({
+      productId: 'halden-x5',
+      onDate: '2026-11-15',
+    })
+    expect(read('amount=60000&item=TV&on=2026-12-18')).toMatchObject({ onDate: '2026-12-18' })
+  })
+  it('ignores today, the past, a day past the window, nonsense, and a link read without a today', () => {
+    for (const on of ['2026-11-13', '2026-11-12', '2026-12-19', '2026-02-30', 'Sunday', ''])
+      expect(read(`product=halden-x5&on=${on}`)).toEqual({ productId: 'halden-x5' })
+    expect(decisionRequestFrom(new URLSearchParams('product=halden-x5&on=2026-11-15'))).toEqual({
+      productId: 'halden-x5',
+    })
+  })
+})
+
+describe('a day agreed in Ask, on the comparison page', () => {
+  const show = (productId: string, onDate: string) => {
+    const state = alexState()
+    routeApi((_path, data) => {
+      const input = data as { productId?: string; onDate?: string }
+      const product = PRODUCTS.find((p) => p.id === input.productId)!
+      return compareOptions(state.profile, [], {
+        amountCents: product.priceCents,
+        itemName: product.name,
+        today: state.today,
+        payIn4Eligible: true,
+        ...(input.onDate ? { onDate: input.onDate } : {}),
+      })
+    })
+    render(
+      <Decision
+        backLabel="Back"
+        onBack={vi.fn()}
+        onBuy={vi.fn()}
+        onSave={vi.fn()}
+        onViewActivity={vi.fn()}
+        state={state}
+        request={{ productId, onDate }}
+      />,
+    )
+  }
+
+  it('renames the first card to that day, leads with it when it fits, and saves for it', async () => {
+    show('headphones', '2026-11-15')
+    const group = await screen.findByRole('radiogroup', { name: 'Your options' })
+    const radios = within(group).getAllByRole('radio')
+    expect(radios).toHaveLength(1)
+    expect(radios[0]!.textContent).toContain('Buy Sun, Nov 15')
+    expect(radios[0]!.getAttribute('aria-checked')).toBe('true')
+    expect(group.textContent).not.toContain('Buy today')
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Buy Sun, Nov 15')
+    expect(screen.getAllByRole('button', { name: 'Save for Sun, Nov 15' }).length).toBeGreaterThan(
+      0,
+    )
+    expect(screen.queryByRole('button', { name: 'Buy now' })).toBeNull()
+  })
+
+  it('says the Pay in 4 sentence for paying in full on that day, not today', () => {
+    const { profile } = createCameraScenario(ALEX_DEMO_DAY)
+    const raw = compareOptions(profile, [], {
+      amountCents: 189900,
+      itemName: 'Halden X5',
+      today: ALEX_DEMO_DAY,
+      payIn4Eligible: true,
+      onDate: '2026-12-15',
+    })
+    const c = withChosenDay(raw)
+    if (!c.payIn4.available) throw new Error('Pay in 4 is in range for $1,899')
+    expect(fullPayName(c, c.buyToday)).toBe('Pay in full on Dec 15')
+    const thesis = payIn4Thesis(c, c.buyToday, c.payIn4)
+    expect(thesis).toContain('paying in full on Tue, Dec 15, it’s Thu, Dec 31 at $458.78')
+    expect(thesis).not.toContain('paying in full today')
+    // Without a chosen day the same sentence is about today.
+    expect(payIn4Thesis(raw, raw.buyToday, c.payIn4)).toContain('paying in full today')
+  })
+
+  it('keeps the Ask chip about today', async () => {
+    const onOffer = vi.fn()
+    const state = alexState()
+    routeApi((_path, data) => {
+      const input = data as { productId?: string; onDate?: string }
+      return compareOptions(state.profile, [], {
+        amountCents: 189900,
+        itemName: 'Halden X5',
+        today: state.today,
+        payIn4Eligible: true,
+        ...(input.onDate ? { onDate: input.onDate } : {}),
+      })
+    })
+    render(
+      <Decision
+        backLabel="Back"
+        onBack={vi.fn()}
+        onBuy={vi.fn()}
+        onSave={vi.fn()}
+        onViewActivity={vi.fn()}
+        onOffer={onOffer}
+        state={state}
+        request={{ productId: 'halden-x5', onDate: '2026-12-15' }}
+      />,
+    )
+    await screen.findByRole('radiogroup', { name: 'Your options' })
+    await waitFor(() =>
+      expect(onOffer).toHaveBeenCalledWith(
+        expect.objectContaining({ verdict: 'Not today · fits Tue, Dec 15' }),
+      ),
+    )
+  })
+
+  it('shows one card when the day is the wait date', async () => {
+    show('halden-x5', '2026-12-15')
+    const group = await screen.findByRole('radiogroup', { name: 'Your options' })
+    const radios = within(group).getAllByRole('radio')
+    expect(radios).toHaveLength(1)
+    expect(radios[0]!.textContent).toContain('Buy Tue, Dec 15')
+    expect(group.textContent).not.toMatch(/Wait until/)
+  })
+
+  it('keeps waiting the answer when that day does not fit, with the day as the first card', async () => {
+    show('halden-x5', '2026-11-20')
+    const group = await screen.findByRole('radiogroup', { name: 'Your options' })
+    const radios = within(group).getAllByRole('radio')
+    expect(radios[0]!.textContent).toContain('Buy Fri, Nov 20')
+    expect(radios[1]!.textContent).toContain('Wait until Tue, Dec 15')
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Wait until Tue, Dec 15')
+    // "Buying today …" still describes today, not the agreed day.
+    expect(document.querySelector('.verdict-block .lead')!.textContent).toContain(
+      'Buying today puts you below it from Thu, Nov 19',
+    )
   })
 })

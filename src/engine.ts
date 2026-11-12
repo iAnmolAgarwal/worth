@@ -182,12 +182,29 @@ export function useComparison(
 
 export const optionTitle = (key: 'buyToday' | 'wait' | 'spendLess', c: Comparison) =>
   key === 'buyToday'
-    ? 'Buy today'
+    ? c.chosen && c.buyToday.purchaseDate === c.chosen.date
+      ? `Buy ${dayLabel(c.chosen.date)}`
+      : 'Buy today'
     : key === 'spendLess'
       ? 'Something cheaper'
       : c.wait.date
         ? `Wait until ${dayLabel(c.wait.date)}`
         : 'Wait'
+
+/**
+ * The comparison as the page shows it for a day agreed in Ask Worth (`on=`): buying on that day
+ * takes the first card's place ("Buy Sun, Nov 15"), and leads when it fits. Waiting, spending
+ * less and Pay in 4 still count from today. Without a chosen day it is the comparison unchanged.
+ */
+export function withChosenDay(c: Comparison): Comparison {
+  if (!c.chosen) return c
+  const { date: _date, ...chosen } = c.chosen
+  return {
+    ...c,
+    buyToday: chosen,
+    recommendation: c.recommendation === null ? null : fits(chosen) ? 'buyToday' : c.recommendation,
+  }
+}
 
 /**
  * Pay in 4 plans confirmed for Worth purchases: the payments still to come, read from the

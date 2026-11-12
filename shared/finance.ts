@@ -39,7 +39,7 @@ export const REFUND_GUIDANCE =
 const DAY_MS = 86_400_000
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
-function validDate(value: string): boolean {
+export function validDate(value: string): boolean {
   if (!DATE_RE.test(value)) return false
   const parsed = new Date(`${value}T12:00:00.000Z`)
   return Number.isFinite(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === value
@@ -990,10 +990,21 @@ export function compareOptions(
     payIn4Eligible?: boolean
     /** A budget the person stated: Spend less never goes above it. */
     budgetCents?: number
+    /**
+     * A day the person chose for buying in full, today through WAIT_SEARCH_DAYS ahead. A later
+     * day adds `chosen`; today (or none) leaves the comparison exactly as it was.
+     */
+    onDate?: string
   },
 ): Comparison {
   const today = options.today ?? todayInTimezone(profile.timezone)
   if (!validDate(today)) throw new Error('Use a valid calendar date.')
+  const onDate = options.onDate
+  if (
+    onDate !== undefined &&
+    (!validDate(onDate) || onDate < today || onDate > addDays(today, WAIT_SEARCH_DAYS))
+  )
+    throw new Error(`Choose a purchase date within the next ${WAIT_SEARCH_DAYS} days.`)
   const { amountCents } = options
   if (!Number.isSafeInteger(amountCents) || amountCents < 0)
     throw new Error('Enter a non-negative total purchase price in cents.')
@@ -1032,6 +1043,21 @@ export function compareOptions(
     missingFields,
     buyToday,
     ...(capped ? { budgetCents: budget } : {}),
+    ...(onDate !== undefined && onDate > today
+      ? {
+          chosen: {
+            date: onDate,
+            ...evaluate(
+              profile,
+              purchases,
+              today,
+              missing,
+              fullPurchase(onDate, amountCents, itemName),
+              onDate,
+            ),
+          },
+        }
+      : {}),
     wait: waitDate
       ? {
           date: waitDate,

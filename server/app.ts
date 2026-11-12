@@ -146,8 +146,10 @@ const identifier = z.string().min(1).max(100)
 const date = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/)
+  // The regex runs first, but a refine still sees a value it rejected, so check the shape again.
   .refine(
     (value) =>
+      /^\d{4}-\d{2}-\d{2}$/.test(value) &&
       !Number.isNaN(Date.parse(value)) &&
       new Date(value + 'T12:00:00Z').toISOString().slice(0, 10) === value,
     'Use a valid calendar date',
@@ -236,6 +238,8 @@ const compareSchema = z
      * never raise it above what keeps the cushion.
      */
     budgetCents: cents.min(1).optional(),
+    /** A day the person agreed in Ask Worth: today through the wait window; checked below. */
+    onDate: date.optional(),
   })
   .strict()
   .refine(
@@ -1514,6 +1518,17 @@ export function createApp(options: AppOptions = {}) {
     if (product && input.amountCents !== undefined && input.amountCents !== product.priceCents)
       throw new HttpError(400, 'Use the catalog price for this product.', 'PRICE_MISMATCH')
     const amountCents = product?.priceCents ?? input.amountCents!
+    // A chosen day is checked before anything is asked of PayPal: today through the wait window.
+    const planDay = sessionToday(dataFor(res))
+    if (
+      input.onDate !== undefined &&
+      (input.onDate < planDay || input.onDate > addDays(planDay, WAIT_SEARCH_DAYS))
+    )
+      throw new HttpError(
+        400,
+        `Choose a purchase date from today through ${WAIT_SEARCH_DAYS} days ahead.`,
+        'INVALID_DATE',
+      )
     // A store's item uses the store's own Pay in 4 answer; Worth asks PayPal only for its own.
     const quote = input.qid ? sessionQuote(res, input.qid) : undefined
     // PayPal's eligibility check runs first; the session is read afterwards so it is current. It
@@ -1545,6 +1560,7 @@ export function createApp(options: AppOptions = {}) {
         today: current.today,
         payIn4Eligible: eligibility !== 'unavailable',
         ...(input.budgetCents !== undefined ? { budgetCents: input.budgetCents } : {}),
+        ...(input.onDate !== undefined ? { onDate: input.onDate } : {}),
       },
     )
     // The store is named from the link itself, never from text the browser sends.

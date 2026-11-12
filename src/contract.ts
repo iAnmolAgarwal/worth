@@ -2,6 +2,7 @@
  * The Phase 3 / Phase 4 contract (specs/contract-phase3-4.md), now part of the shared types:
  * purchase lifecycle fields and Pay in 4 eligibility.
  */
+import { addDays, validDate, WAIT_SEARCH_DAYS } from '../shared/finance'
 import { checkProductLink } from '../shared/link'
 import { plainText } from '../shared/text'
 import type {
@@ -100,7 +101,15 @@ const MAX_BUDGET_CENTS = 100_000_000
 export function decisionRequestFrom(
   params: URLSearchParams,
   confirmed?: DecisionRequest,
+  today?: string,
 ): DecisionRequest | undefined {
+  // A day agreed in Ask (`on=`), kept only when it is a real day after today in the wait window;
+  // anything else is dropped, so the page falls back to today.
+  const on = params.get('on') ?? ''
+  const day =
+    today && validDate(on) && on > today && on <= addDays(today, WAIT_SEARCH_DAYS)
+      ? { onDate: on }
+      : {}
   // A budget the person stated in Ask; the server only lets it lower Spend less.
   const budgetCents = Number(params.get('budget') ?? NaN)
   // The server takes at most $1,000,000; a larger one is dropped rather than shown as an error.
@@ -109,7 +118,7 @@ export function decisionRequestFrom(
       ? { budgetCents }
       : {}
   const product = params.get('product')
-  if (product) return { productId: product, ...budget }
+  if (product) return { productId: product, ...budget, ...day }
   const amount = Number(params.get('amount'))
   if (!Number.isSafeInteger(amount) || amount <= 0) return undefined
   const saved = params.get('saved')
@@ -120,11 +129,17 @@ export function decisionRequestFrom(
     ...(saved && /^[A-Za-z0-9_-]{1,100}$/.test(saved) ? { savedId: saved } : {}),
   }
   const link = checkProductLink(params.get('link') ?? '')
-  if (!link.ok) return { ...item, ...budget }
+  if (!link.ok) return { ...item, ...budget, ...day }
   const read =
     confirmed?.priceSource === 'channel3' &&
     confirmed.sourceUrl === link.url &&
     confirmed.amountCents === item.amountCents &&
     confirmed.itemName === item.itemName
-  return { ...item, sourceUrl: link.url, priceSource: read ? 'channel3' : 'user', ...budget }
+  return {
+    ...item,
+    sourceUrl: link.url,
+    priceSource: read ? 'channel3' : 'user',
+    ...budget,
+    ...day,
+  }
 }

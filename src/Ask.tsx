@@ -261,9 +261,11 @@ function requestFor(reply: ChatReply, state: AppState): DecisionRequest {
   const product = matchProduct(state.products, name, amountCents)
   // The budget the person stated caps Something cheaper on the comparison too (judge B8 #7).
   const budget = reply.budgetCents !== undefined ? { budgetCents: reply.budgetCents } : {}
+  // A later day agreed here travels to the comparison, which then judges buying on it too.
+  const day = assessment.purchaseDate !== state.today ? { onDate: assessment.purchaseDate } : {}
   return product
-    ? { productId: product.id, ...budget }
-    : { amountCents, itemName: name.slice(0, 150), ...budget }
+    ? { productId: product.id, ...budget, ...day }
+    : { amountCents, itemName: name.slice(0, 150), ...budget, ...day }
 }
 
 /** The verdict's first sentence as the headline, and the rest. "$1,199.00" never splits. */

@@ -201,3 +201,40 @@ describe('Alex on Tue Dec 15 2026, the return visit', () => {
     expect(() => createCameraScenario('2026-11-12')).toThrow()
   })
 })
+
+describe('a chosen day (onDate)', () => {
+  const base = { amountCents: 60000, itemName: 'TV', today: ALEX_DEMO_DAY, payIn4Eligible: true }
+  it('leaves the comparison exactly as it was for no day or today', () => {
+    const plain = compareOptions(nov13.profile, [], base)
+    expect(
+      JSON.stringify(compareOptions(nov13.profile, [], { ...base, onDate: ALEX_DEMO_DAY })),
+    ).toBe(JSON.stringify(plain))
+    expect(plain.chosen).toBeUndefined()
+  })
+  it('adds buying in full on that day, judged over the same window', () => {
+    const c = compareOptions(nov13.profile, [], { ...base, onDate: '2026-11-15' })
+    expect(c.chosen).toMatchObject({
+      date: '2026-11-15',
+      purchaseDate: '2026-11-15',
+      outcome: 'fits',
+    })
+    // Everything else is unchanged by the chosen day.
+    const plain = compareOptions(nov13.profile, [], base)
+    expect({ ...c, chosen: undefined }).toEqual({ ...plain, chosen: undefined })
+    // The camera on its wait day matches the wait option to the cent.
+    const cam = compareOptions(nov13.profile, [], {
+      ...base,
+      amountCents: 189900,
+      onDate: '2026-12-15',
+    })
+    if (!cam.wait.date) throw new Error('the camera waits until Dec 15')
+    expect(cam.chosen!.lowestBalanceCents).toBe(cam.wait.lowestBalanceCents)
+  })
+  it('refuses a day before today or past the 35-day window', () => {
+    expect(() => compareOptions(nov13.profile, [], { ...base, onDate: '2026-11-12' })).toThrow()
+    expect(() =>
+      compareOptions(nov13.profile, [], { ...base, onDate: addDays(ALEX_DEMO_DAY, 36) }),
+    ).toThrow()
+    expect(() => compareOptions(nov13.profile, [], { ...base, onDate: '2026-02-30' })).toThrow()
+  })
+})

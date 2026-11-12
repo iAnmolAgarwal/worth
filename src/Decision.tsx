@@ -1,6 +1,7 @@
 import {
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -48,6 +49,7 @@ import {
   lowerName,
   missingFix,
   optionTitle,
+  withChosenDay,
   purchasePlans,
   useComparison,
 } from './engine'
@@ -70,6 +72,8 @@ export type DecisionRequest = {
   savedId?: string
   /** The budget the person stated in Ask; Something cheaper stays within it. */
   budgetCents?: number
+  /** A later day agreed in Ask Worth (`on=`): the comparison also judges buying then. */
+  onDate?: string
 }
 /**
  * A store's item from a signed hand-off (/check). The store sells it, so the way back to the
@@ -154,7 +158,7 @@ export function optionWhy(c: Comparison, k: OptionKey, option: OptionResult) {
 /** The verdict as a headline: what to do, before anything else. */
 export function verdictTitle(c: Comparison) {
   if (c.recommendation === null) return 'Your plan needs a detail first'
-  if (c.recommendation === 'buyToday') return 'Buy today'
+  if (c.recommendation === 'buyToday') return optionTitle('buyToday', c)
   if (c.recommendation === 'wait' && c.wait.date) return `Wait until ${dayLabel(c.wait.date)}`
   return c.spendLess.maxPriceCents > 0
     ? `Spend up to ${money(c.spendLess.maxPriceCents)} today`
@@ -162,9 +166,10 @@ export function verdictTitle(c: Comparison) {
 }
 
 /** The sentence under the headline: the margin it leaves and what buying today would do. */
-export function AnswerDetail({ c }: { c: Comparison }) {
+export function AnswerDetail({ c, now = c }: { c: Comparison; now?: Comparison }) {
   const cushion = money(c.cushionCents)
-  const breach = firstBelow(c.buyToday.points, c.cushionCents)
+  // "Buying today …" is about today, even when the first card is a day agreed in Ask.
+  const breach = firstBelow(now.buyToday.points, c.cushionCents)
   const bill = billOn(breach)
   const today = breach && (
     <>
@@ -605,7 +610,9 @@ export function Decision({
 }) {
   const [override, setOverride] = useState<DecisionRequest>()
   const active = override ?? request
-  const { comparison: c, error, loading } = useComparison(active, state.profile.version)
+  const { comparison: raw, error, loading } = useComparison(active, state.profile.version)
+  // A day agreed in Ask (`on=`) takes the first card's place; `raw` stays today's comparison.
+  const c = useMemo(() => raw && withChosenDay(raw), [raw])
   const [picked, setPicked] = useState<OptionKey>()
   const [p4Open, setP4Open] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -633,15 +640,16 @@ export function Decision({
   // A store is named only when the person came from it (a verified hand-off) or pasted its link.
   const store = handoff?.merchant ?? c?.source?.merchantName
   useEffect(() => {
-    if (!onOffer || !c) return
+    if (!onOffer || !c || !raw) return
     onOffer({
       itemName: product?.name ?? c.itemName,
       amountCents: c.amountCents,
       store,
-      verdict: offerVerdict(c),
+      // The Ask chip describes today, as it does without a chosen day.
+      verdict: offerVerdict(raw),
     })
     return () => onOffer(undefined)
-  }, [onOffer, c, product?.name, store])
+  }, [onOffer, c, raw, product?.name, store])
   if (error)
     return (
       <Frame>
@@ -685,6 +693,14 @@ export function Decision({
       )
     : undefined
   // Saved already, with the plan this answer suggests: the button says so instead of saving again.
+  // The day this answer would save the item for: the agreed day when buying then fits, else the
+  // wait date.
+  const chosenFits = Boolean(c.chosen) && c.recommendation === 'buyToday'
+  const saveDay = chosenFits
+    ? c.chosen!.date
+    : c.recommendation === 'wait' && c.wait.date
+      ? c.wait.date
+      : undefined
   const savedNow = (state.saved ?? []).some(
     (item) =>
       item.status !== 'removed' &&
@@ -694,7 +710,7 @@ export function Decision({
         : item.kind === 'custom' &&
           item.name === c.itemName &&
           item.amountCents === c.amountCents) &&
-      (c.recommendation === 'wait' && c.wait.date ? item.waitDate === c.wait.date : true),
+      (saveDay ? item.waitDate === saveDay : true),
   )
   const saved = {
     label: 'Saved',
@@ -710,7 +726,7 @@ export function Decision({
           note: 'Your order is waiting. Nothing is charged until you confirm.',
           run: () => onBuy(product, false),
         }
-      : c.recommendation === 'buyToday'
+      : c.recommendation === 'buyToday' && !chosenFits
         ? {
             label: 'Buy now',
             note: 'You’ll approve in PayPal, then confirm here. Nothing is charged until you do.',
@@ -718,12 +734,12 @@ export function Decision({
           }
         : savedNow
           ? saved
-          : c.recommendation === 'wait' && c.wait.date
+          : saveDay
             ? {
-                label: `Save for ${dayLabel(c.wait.date)}`,
+                label: `Save for ${dayLabel(saveDay)}`,
                 note: 'Keeps it in Saved with this date. Nothing is bought.',
                 run: () =>
-                  onSave({ kind: 'catalog', productId: product.id }, { waitDate: c.wait.date! }),
+                  onSave({ kind: 'catalog', productId: product.id }, { waitDate: saveDay }),
               }
             : {
                 label: 'Save for later',
@@ -743,11 +759,7 @@ export function Decision({
   // An item the store doesn't sell can still be saved, as an assessment only (A3).
   const custom = !product && {
     done: savedNow,
-    label: savedNow
-      ? 'Saved'
-      : c.recommendation === 'wait' && c.wait.date
-        ? `Save for ${dayLabel(c.wait.date)}`
-        : 'Save for later',
+    label: savedNow ? 'Saved' : saveDay ? `Save for ${dayLabel(saveDay)}` : 'Save for later',
     run: () =>
       onSave(
         {
@@ -757,11 +769,7 @@ export function Decision({
           // A pasted link keeps its store page, so Saved can link back on the ready day (C6).
           ...sourceTarget(c.source),
         },
-        c.recommendation === 'wait' && c.wait.date
-          ? { waitDate: c.wait.date }
-          : c.recommendation
-            ? { option: c.recommendation }
-            : {},
+        saveDay ? { waitDate: saveDay } : c.recommendation ? { option: c.recommendation } : {},
       ),
   }
   const customActions = (notes: boolean) =>
@@ -783,8 +791,11 @@ export function Decision({
         )}
       </>
     )
-  const anyway = product && !pending && c.recommendation !== 'buyToday' && c.recommendation !== null
-  const breach = firstBelow(c.buyToday.points, c.cushionCents)
+  // "Buy today anyway" is about today, so it reads today's comparison even on a chosen day.
+  const today = raw!
+  const anyway =
+    product && !pending && today.recommendation !== 'buyToday' && today.recommendation !== null
+  const breach = firstBelow(today.buyToday.points, today.cushionCents)
   const actions = (notes: boolean) => (
     <>
       {primary &&
@@ -1041,7 +1052,7 @@ export function Decision({
                 {verdictTitle(c)}
               </h1>
               <p className="lead">
-                <AnswerDetail c={c} />
+                <AnswerDetail c={c} now={raw} />
               </p>
             </section>
             {/* Why the answer is what it is, read straight after it, always open. */}
@@ -1145,7 +1156,7 @@ export function Decision({
           onClose={() => setConfirmBuy(false)}
           footer={
             // Below the cushion, keeping the plan is the safe choice, so it is the filled button.
-            c.buyToday.outcome !== 'fits' ? (
+            today.buyToday.outcome !== 'fits' ? (
               <>
                 <Button block onClick={() => setConfirmBuy(false)}>
                   Keep my plan
@@ -1188,7 +1199,7 @@ export function Decision({
                   {billOn(breach) ? `, when ${lower(billOn(breach)!)} is due` : ''}.
                 </b>
                 <br />
-                {lowestSentence(c.buyToday.lowestBalanceCents, c.buyToday.lowestDate)}.
+                {lowestSentence(today.buyToday.lowestBalanceCents, today.buyToday.lowestDate)}.
               </>
             ) : (
               <b>Buying today takes you below your cushion.</b>
