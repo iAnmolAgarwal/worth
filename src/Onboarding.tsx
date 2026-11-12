@@ -30,7 +30,7 @@ import type {
   ScheduledFlow,
 } from '../shared/types'
 import { api } from './api'
-import { connectAvailable, ConnectedSource, ConnectPayPalButton } from './ConnectPayPal'
+import { ConnectedSource } from './ConnectPayPal'
 import type { ConnectedSummary } from './ConnectPayPal'
 import type { AppState } from './contract'
 import { isActive } from './contract'
@@ -144,23 +144,14 @@ export function useDrop(read: (file: File | undefined) => void, disabled?: boole
 export function ChooseFile({
   read,
   disabled,
-  secondary,
   children,
 }: {
   read: (file: File | undefined) => void
   disabled?: boolean
-  /** Beside Connect PayPal, choosing a file is the secondary action. */
-  secondary?: boolean
   children: ReactNode
 }) {
   return (
-    <label
-      className={cx(
-        'btn file-btn',
-        secondary ? 'btn-secondary' : 'btn-primary',
-        disabled && 'is-disabled',
-      )}
-    >
+    <label className={cx('btn btn-primary file-btn', disabled && 'is-disabled')}>
       <FileUp className="ico" aria-hidden="true" />
       {children}
       <input
@@ -233,7 +224,6 @@ export function StartCard({
   const busy = state.purchases.some(isActive)
   const { read, error, setError, reading } = useCsvFile(onFile)
   const { over, handlers } = useDrop((file) => void read(file), busy)
-  const connect = connectAvailable(state)
   async function sample() {
     setError('')
     setLoading(true)
@@ -265,8 +255,7 @@ export function StartCard({
         </Alert>
       )}
       <div className="start-actions">
-        {connect && <ConnectPayPalButton disabled={busy} />}
-        <ChooseFile read={(file) => void read(file)} disabled={busy || reading} secondary={connect}>
+        <ChooseFile read={(file) => void read(file)} disabled={busy || reading}>
           <span className="hide-m">Choose your PayPal CSV</span>
           <span className="show-m">Choose CSV</span>
         </ChooseFile>

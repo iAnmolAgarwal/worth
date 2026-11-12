@@ -50,6 +50,19 @@ describe('Connect PayPal button', () => {
     expect(screen.getByRole('button', { name: 'Connect PayPal' })).toBeTruthy()
   })
 
+  it('in the start strip, opens the same line under the button and keeps the button', async () => {
+    render(<ConnectPayPalButton pop />)
+    const button = screen.getByRole('button', { name: 'Connect PayPal' })
+    expect(button.getAttribute('aria-expanded')).toBe('false')
+    await userEvent.click(button)
+    expect(button.getAttribute('aria-expanded')).toBe('true')
+    const group = screen.getByRole('group', { name: 'Connect PayPal' })
+    expect(group.className).toContain('connect-pop')
+    expect(group.textContent).toContain('“Default Application”')
+    await userEvent.click(button)
+    expect(screen.queryByRole('group', { name: 'Connect PayPal' })).toBeNull()
+  })
+
   it('shows only when the server has it on and this visit hasn’t gated it off', () => {
     expect(connectAvailable(withConnect('on'))).toBe(true)
     expect(connectAvailable(withConnect('off'))).toBe(false)

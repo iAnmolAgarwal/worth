@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { CircleAlert, FileUp, LoaderCircle, LogIn } from 'lucide-react'
 import { api, ApiError } from './api'
 import type { AppState } from './contract'
-import { shortDate } from './format'
+import { cx, shortDate } from './format'
 import type { ChosenFile } from './Onboarding'
 import { Alert, Button } from './ui'
 
@@ -71,32 +71,46 @@ export function historyDays(summary: ConnectedSummary) {
 }
 
 /**
- * The card's primary action. The first click shows what PayPal's screen will say, honestly, before
- * leaving Worth; "Continue to PayPal" starts the login on the server.
+ * The primary way in. The first click shows what PayPal's screen will say, honestly, before leaving
+ * Worth; "Continue to PayPal" starts the login on the server. In the slim start strip (`pop`) that
+ * line opens under the button, so the strip stays one row.
  */
 export function ConnectPayPalButton({
   disabled,
   returnTo,
+  pop,
 }: {
   disabled?: boolean
   /** Come back to the store's item on /check after the import. */
   returnTo?: 'check'
+  /** Show the line before PayPal as a popover under the button. */
+  pop?: boolean
 }) {
   const [asking, setAsking] = useState(false)
   const [leaving, setLeaving] = useState(false)
-  if (!asking)
-    return (
-      <Button
-        icon={LogIn}
-        className="connect-btn"
-        disabled={disabled}
-        onClick={() => setAsking(true)}
-      >
-        Connect PayPal
-      </Button>
-    )
-  return (
-    <div className="connect-ask" role="group" aria-label="Connect PayPal">
+  const popover = useRef<HTMLDivElement>(null)
+  // A strip near the fold would hide the popover's lower half; bring all of it into view.
+  useEffect(() => {
+    if (pop && asking) popover.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+  }, [pop, asking])
+  const button = (
+    <Button
+      icon={LogIn}
+      className="connect-btn"
+      disabled={disabled}
+      aria-expanded={pop ? asking : undefined}
+      onClick={() => setAsking(pop ? !asking : true)}
+    >
+      Connect PayPal
+    </Button>
+  )
+  const ask = (
+    <div
+      ref={popover}
+      className={cx('connect-ask', pop && 'connect-pop')}
+      role="group"
+      aria-label="Connect PayPal"
+    >
       <p className="caption">
         PayPal’s screen will name <b>“Default Application”</b> (PayPal’s MCP connector) and ask to
         access your transaction data. Worth reads your activity once, then forgets the access. It
@@ -126,6 +140,14 @@ export function ConnectPayPalButton({
       </div>
     </div>
   )
+  if (pop)
+    return (
+      <span className="connect-pop-wrap">
+        {button}
+        {asking && ask}
+      </span>
+    )
+  return asking ? ask : button
 }
 
 /**
