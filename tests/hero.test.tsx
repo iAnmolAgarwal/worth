@@ -82,20 +82,46 @@ describe('heroSplit', () => {
     expect(split.lowDate).toBe(comparison.buyToday.lowestDate)
   })
 
-  it('keeps the arithmetic whole when nothing is free and the plan dips below the cushion', () => {
+  it('counts the cushion the plan eats as needed when it dips into the cushion', () => {
     const state = makeState(80000)
     const comparison = room(state)
     const split = heroSplit(80000, comparison)
-    expect(split.freeCents).toBe(0)
-    expect(split.neededCents).toBe(80000 - comparison.cushionCents)
+    const low = split.lowCents!
+    expect(low).toBeGreaterThan(0)
+    expect(low).toBeLessThan(comparison.cushionCents)
+    // Only what is left at the low point is cushion; the rest is needed.
+    expect(split).toMatchObject({ freeCents: 0, cushionCents: low, neededCents: 80000 - low })
     expect(split.belowCushion).toBe(true)
+    expect(split.shortCents).toBe(comparison.cushionCents - low)
+  })
+
+  it('shows the whole balance as needed when the plan goes below zero', () => {
+    const state = makeState(10000)
+    const comparison = room(state)
+    const split = heroSplit(10000, comparison)
+    expect(split.lowCents!).toBeLessThan(0)
+    expect(split).toMatchObject({ freeCents: 0, cushionCents: 0, neededCents: 10000 })
     expect(split.shortCents).toBe(comparison.cushionCents - split.lowCents!)
   })
 
-  it('never draws a negative part when the balance is under the cushion', () => {
-    const state = makeState(10000)
-    const split = heroSplit(10000, room(state))
-    expect(split).toMatchObject({ freeCents: 0, neededCents: 0, cushionCents: 10000 })
+  it('shows the whole balance as needed for a plan with no pay coming in', () => {
+    const state = makeState()
+    state.profile = {
+      ...state.profile,
+      flows: state.profile.flows.filter((flow) => flow.kind !== 'income'),
+    }
+    const comparison = room(state)
+    const split = heroSplit(state.profile.balanceCents, comparison)
+    expect(split.parts!.incomeCents).toBe(0)
+    expect(split.lowCents!).toBeLessThan(0)
+    expect(split).toMatchObject({
+      freeCents: 0,
+      cushionCents: 0,
+      neededCents: state.profile.balanceCents,
+    })
+    expect(split.freeCents + split.neededCents + split.cushionCents).toBe(
+      state.profile.balanceCents,
+    )
   })
 })
 
@@ -160,14 +186,52 @@ describe('the Home hero', () => {
     expect(onAsk).toHaveBeenCalledWith()
   })
 
-  it('says nothing is free, and by how much the plan is short, when the room is zero', async () => {
-    const state = makeState(80000)
+  it.each([
+    [80000, 'dips into the cushion'],
+    [10000, 'goes below zero'],
+  ])('says the plan is short, never that $0 is needed, at %i cents (%s)', async (cents) => {
+    const state = makeState(cents)
+    const split = heroSplit(cents, room(state))
     renderHome(state)
     const hero = await screen.findByRole('region', { name: 'Safe to spend today' })
     await waitFor(() => expect(hero.querySelector('.hero-v .sr')?.textContent).toBe('$0.00'))
-    expect(hero.textContent).toMatch(/Nothing free through \w+ \d+/)
-    expect(hero.textContent).toMatch(/Short by \$[\d.,]+ on/)
+    const legend = within(hero).getByRole('list', { name: /^Your \$/ })
+    expect(legend.textContent).toContain('Nothing free')
+    expect(legend.textContent).not.toMatch(/Nothing free through/)
+    expect(legend.textContent).toContain(`Needed through`)
+    expect(legend.textContent).toContain(compactMoney(split.neededCents))
+    expect(legend.textContent).not.toMatch(/\$0(?![\d.,])/)
+    expect(legend.textContent).toContain(`Short by ${compactMoney(split.shortCents)} on`)
+    if (split.cushionCents) expect(legend.textContent).toContain('Cushion left')
+    else expect(legend.textContent).not.toContain('Cushion')
     expect(hero.textContent).toContain('already dips below your $300.00 cushion')
+    // The bar draws each part by its amount, so none is clipped.
+    const bar = hero.querySelector('.hero-bar')!
+    expect([...bar.children].map((part) => (part as HTMLElement).style.flexGrow)).toEqual(
+      [split.neededCents, split.cushionCents].filter(Boolean).map(String),
+    )
+  })
+
+  it('closes the info on Escape and on a click outside, focus back on its summary', async () => {
+    const user = userEvent.setup()
+    renderHome(makeState())
+    const hero = await screen.findByRole('region', { name: 'Safe to spend today' })
+    const summary = await within(hero).findByLabelText('How Worth worked this out')
+    const details = summary.closest('details')!
+    await user.click(summary)
+    expect(details.open).toBe(true)
+    await user.keyboard('{Escape}')
+    expect(details.open).toBe(false)
+    expect(document.activeElement).toBe(summary)
+    await user.click(summary)
+    expect(details.open).toBe(true)
+    await user.click(within(hero).getByText('Safe to spend today'))
+    expect(details.open).toBe(false)
+    await waitFor(() => expect(document.activeElement).toBe(summary))
+    // A click inside the popover keeps it open.
+    await user.click(summary)
+    await user.click(details.querySelector('.hero-pop p')!)
+    expect(details.open).toBe(true)
   })
 
   it('has no inline composer, and the rail opens Connect an agent', async () => {

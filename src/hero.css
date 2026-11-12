@@ -128,7 +128,8 @@
 }
 .hero-bar i {
   display: block;
-  flex: 0 0 auto;
+  /* Grows by its amount (set inline); a tiny part keeps a sliver so it never disappears. */
+  flex: 1 1 0;
   min-width: 6px;
 }
 .hero-bar .free {
@@ -165,7 +166,7 @@
   gap: var(--s-2);
   font-size: var(--fs-body);
   line-height: var(--lh-body);
-  color: rgba(255, 255, 255, 0.88);
+  color: #fff;
   white-space: nowrap;
 }
 .hero-legend li:not(.short) b {
@@ -201,7 +202,7 @@
   margin: 0;
   font-size: var(--fs-body);
   line-height: var(--lh-body);
-  color: rgba(255, 255, 255, 0.8);
+  color: #fff;
   white-space: nowrap;
 }
 .hero-of b {
@@ -483,13 +484,10 @@
 @media (min-width: 1024px) {
   .hero {
     /* 100vh less the top bar, the page's top padding, the strip, the gaps and a peek of what's next. */
-    min-height: clamp(440px, calc(100vh - var(--topbar-h) - 150px), 720px);
+    /* Content-sized on a laptop, so the next section shows above the fold. */
+    min-height: clamp(440px, calc(100vh - var(--topbar-h) - 300px), 560px);
     align-content: center;
-    padding: var(--s-10) var(--s-12) var(--s-12);
-  }
-  /* Without the strip, the next section peeks over the fold. */
-  .home-band.solo .hero {
-    min-height: clamp(440px, calc(100vh - var(--topbar-h) - 220px), 640px);
+    padding: var(--s-8) var(--s-12) var(--s-10);
   }
   .hero-v {
     margin-top: var(--s-4);

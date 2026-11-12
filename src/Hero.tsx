@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import { ArrowRight, CalendarClock, CircleAlert, Info, type LucideIcon } from 'lucide-react'
 import { getUpcomingFlows } from '../shared/finance'
 import type { Comparison, ScheduledFlow } from '../shared/types'
@@ -59,7 +60,7 @@ export interface HeroSplit {
   balanceCents: number
   freeCents: number
   neededCents: number
-  /** The part of the cushion the balance covers. */
+  /** The part of the cushion still there at the plan's lowest point. */
   cushionCents: number
   /** The day of the plan's lowest point in the window. */
   lowDate?: string
@@ -74,23 +75,26 @@ export interface HeroSplit {
 
 export function heroSplit(balanceCents: number, room: Comparison): HeroSplit {
   const balance = Math.max(0, balanceCents)
-  const cushion = Math.min(Math.max(0, room.cushionCents), balance)
-  const free = Math.min(Math.max(0, room.spendLess.maxPriceCents), balance - cushion)
-  const split: HeroSplit = {
-    balanceCents: balance,
-    freeCents: free,
-    neededCents: Math.max(0, balance - cushion - free),
-    cushionCents: cushion,
-    belowCushion: false,
-    shortCents: 0,
-  }
   const points = room.buyToday.points
-  if (!points.length) return split
   let low = 0
   points.forEach((point, index) => {
     if (point.baselineMinimumCents < points[low]!.baselineMinimumCents) low = index
   })
-  const lowCents = points[low]!.baselineMinimumCents
+  const lowCents = points.length ? points[low]!.baselineMinimumCents : undefined
+  // What is still in the account at the lowest point. The cushion is drawn from that, so a plan
+  // that dips into it (or below zero) shows everything above as needed, never as cushion.
+  const kept = Math.min(Math.max(lowCents ?? balance, 0), balance)
+  const cushion = Math.min(Math.max(0, room.cushionCents), kept)
+  const free = Math.max(0, Math.min(room.spendLess.maxPriceCents, balance - cushion))
+  const split: HeroSplit = {
+    balanceCents: balance,
+    freeCents: free,
+    neededCents: balance - free - cushion,
+    cushionCents: cushion,
+    belowCushion: false,
+    shortCents: 0,
+  }
+  if (lowCents === undefined) return split
   split.lowDate = points[low]!.date
   split.lowCents = lowCents
   split.belowCushion = lowCents < room.cushionCents
@@ -191,16 +195,11 @@ function Amount({ cents }: { cents: number }) {
 
 function SplitBar({ split }: { split: HeroSplit }) {
   const { balanceCents: total, freeCents, neededCents, cushionCents } = split
-  const width = (cents: number) => `${total ? (cents / total) * 100 : 0}%`
   const segments = [
     {
       key: 'free',
-      label:
-        freeCents > 0
-          ? 'Free'
-          : split.lowDate
-            ? `Nothing free through ${shortDate(split.lowDate)}`
-            : 'Nothing free right now',
+      // The short line below already names the date when nothing is free.
+      label: freeCents > 0 ? 'Free' : 'Nothing free',
       cents: freeCents,
     },
     {
@@ -210,7 +209,11 @@ function SplitBar({ split }: { split: HeroSplit }) {
         : 'Needed for what’s coming',
       cents: neededCents,
     },
-    { key: 'cushion', label: 'Cushion', cents: cushionCents },
+    {
+      key: 'cushion',
+      label: split.belowCushion ? 'Cushion left' : 'Cushion',
+      cents: cushionCents,
+    },
   ]
   return (
     <div className="hero-split">
@@ -218,25 +221,22 @@ function SplitBar({ split }: { split: HeroSplit }) {
         {segments.map(
           (segment) =>
             segment.cents > 0 && (
-              <i
-                key={segment.key}
-                className={segment.key}
-                style={{ flexBasis: width(segment.cents) }}
-              />
+              <i key={segment.key} className={segment.key} style={{ flexGrow: segment.cents }} />
             ),
         )}
       </div>
       <div className="hero-legend">
         <ul aria-label={`Your ${money(total)}`}>
-          {segments.map((segment) => (
-            <li key={segment.key} className={segment.key}>
-              {segment.cents > 0 && <i aria-hidden="true" />}
-              <span>{segment.label}</span>
-              {(segment.cents > 0 || segment.key !== 'free') && (
-                <b className="num">{compactMoney(segment.cents)}</b>
-              )}
-            </li>
-          ))}
+          {segments
+            // "Nothing free" always shows; a needed or cushion part of $0 does not.
+            .filter((segment) => segment.cents > 0 || segment.key === 'free')
+            .map((segment) => (
+              <li key={segment.key} className={segment.key}>
+                {segment.cents > 0 && <i aria-hidden="true" />}
+                <span>{segment.label}</span>
+                {segment.cents > 0 && <b className="num">{compactMoney(segment.cents)}</b>}
+              </li>
+            ))}
           {split.shortCents > 0 && split.lowDate && (
             <li className="short">
               <CircleAlert size={16} aria-hidden="true" />
@@ -278,8 +278,47 @@ function HowWorkedOut({
       ] as const)
     : []
   const sum = Boolean(lowDate) && rows.some(([, cents]) => cents !== 0)
+  const ref = useRef<HTMLDetailsElement>(null)
+  const [open, setOpen] = useState(false)
+  // A popover, not a page section: Escape or a click outside closes it.
+  useEffect(() => {
+    const details = ref.current
+    if (!open || !details) return
+    const close = (focus: boolean) => {
+      details.open = false
+      setOpen(false)
+      if (focus) details.querySelector('summary')?.focus()
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      close(true)
+    }
+    const onDown = (event: PointerEvent) => {
+      if (details.contains(event.target as Node)) return
+      const hadFocus = details.contains(document.activeElement)
+      close(false)
+      // Focus goes back to the summary only when it was inside and the click landed on nothing
+      // focusable; a click on another control keeps its focus.
+      if (hadFocus)
+        setTimeout(() => {
+          if (!document.activeElement || document.activeElement === document.body)
+            details.querySelector('summary')?.focus()
+        })
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('pointerdown', onDown)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('pointerdown', onDown)
+    }
+  }, [open])
   return (
-    <details className="hero-info">
+    <details
+      className="hero-info"
+      ref={ref}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
       <summary aria-label="How Worth worked this out">
         <Info size={20} aria-hidden="true" />
       </summary>

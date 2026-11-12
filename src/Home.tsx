@@ -283,7 +283,7 @@ export function Home({
     <div className="page">
       <div className="wrap">
         <h1 className="sr">Home</h1>
-        <div className={state.profile.source === 'demo' ? 'home-band' : 'home-band solo'}>
+        <div className="home-band">
           <Hero
             state={state}
             room={room}
