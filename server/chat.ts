@@ -82,6 +82,7 @@ import {
   purchasePlaceholders,
   afterRefusal,
   refusalFor,
+  directAnswer,
   refusalSentence,
   spending,
   SPENDING_FACTS,
@@ -169,6 +170,8 @@ export function fallbackCategories(
     message,
   }
 }
+
+const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
 
 const DEFAULT_SUGGESTIONS = [
   'Can I afford a $900 camera?',
@@ -478,6 +481,16 @@ function compose(answer: Answer, scoped: ChatData, asked = ''): ChatReply {
     answer.payIn4Asked && assessment && !points?.some((p) => p.id.startsWith('pay_in_4'))
       ? payIn4Text(assessment, data)
       : undefined
+  // A question that is not about a purchase opens with its own answer, when Worth has one.
+  const direct =
+    !assessment && answer.intent !== 'off_topic' && answer.intent !== 'clarify'
+      ? directAnswer(asked, data)
+      : undefined
+  // A date question offers its days as buttons, not unrelated follow-ups.
+  const choices =
+    answer.intent === 'clarify' && answer.clarify?.choices?.length
+      ? answer.clarify.choices.map((date) => capitalize(dateLabel(date, data.today)))
+      : undefined
   const sentence = answer.sentence
   const explanation = sentence ? fill(sentence.raw, placeholdersFor(answer, data)) : undefined
   const found = answer.alternatives?.result
@@ -488,6 +501,7 @@ function compose(answer: Answer, scoped: ChatData, asked = ''): ChatReply {
   return {
     message: [
       refusal,
+      direct,
       verdict,
       explanation,
       chosen,
@@ -512,8 +526,13 @@ function compose(answer: Answer, scoped: ChatData, asked = ''): ChatReply {
     ...(points ? { points, ...(lead ? { lead } : {}) } : {}),
     ...(answer.clarify?.pending ? { pending: answer.clarify.pending } : {}),
     suggestions:
+      choices ??
       categoryChips(answer.alternatives) ??
-      (answer.suggestions?.length ? answer.suggestions : DEFAULT_SUGGESTIONS),
+      (answer.intent === 'clarify'
+        ? []
+        : answer.suggestions?.length
+          ? answer.suggestions
+          : DEFAULT_SUGGESTIONS),
     toolCalls: answer.toolCalls ?? [],
     ...(answer.checkLink ? { checkLink: answer.checkLink } : {}),
     ...(shown ? { alternatives: shown } : {}),

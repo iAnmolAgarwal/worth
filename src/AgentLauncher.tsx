@@ -397,7 +397,7 @@ export function AgentLauncher({
           <div className="agent-title">
             <h2 id={titleId}>Ask Worth</h2>
             <p className="caption">
-              Every number is Worth’s ·{' '}
+              Numbers calculated by Worth, not guessed by AI ·{' '}
               <button
                 type="button"
                 className="link inline"

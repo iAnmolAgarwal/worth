@@ -442,3 +442,32 @@ describe('the launcher and panel in the app', () => {
     expect(screen.queryByText(nudgeLine(state))).toBeNull()
   })
 })
+
+describe('a question back in the panel (first-glance #6)', () => {
+  it('offers its days as buttons and no "Needs an answer" tag', async () => {
+    const user = userEvent.setup()
+    const requests: Request[] = []
+    apiMock.mockImplementation(((_path: string, data: unknown) => {
+      requests.push(data as Request)
+      return Promise.resolve(
+        requests.length === 1
+          ? reply('Which day do you mean: tomorrow or Sun, Nov 15?', {
+              intent: 'clarify',
+              suggestions: ['Tomorrow', 'Sun, Nov 15'],
+            })
+          : reply('Checked.'),
+      )
+    }) as never)
+    render(<Ask {...askProps} state={makeState()} layout="panel" />)
+    await user.type(
+      screen.getByRole('textbox', { name: 'Message Worth' }),
+      'A $600 TV this weekend?',
+    )
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    await screen.findByText('Which day do you mean: tomorrow or Sun, Nov 15?')
+    expect(screen.queryByText('Needs an answer')).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Sun, Nov 15' }))
+    await screen.findByText('Checked.')
+    expect(requests[1]!.message).toBe('Sun, Nov 15')
+  })
+})

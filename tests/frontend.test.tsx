@@ -235,7 +235,7 @@ describe('conversation isolation across sessions', () => {
     await screen.findByText('A fresh sample answer.')
     expect(requests[2]!.history).toEqual([])
     expect(requests[2]!.context).toBeUndefined()
-    expect(screen.getByText('Claude read your question · every number is Worth’s')).toBeTruthy()
+    expect(screen.getByText('Numbers calculated by Worth, not guessed by AI')).toBeTruthy()
   })
 
   it('replaces the sample conversation on import before the plan review and a new chat', async () => {
@@ -488,7 +488,7 @@ describe('Ask answers', () => {
     expect(picked.textContent).toContain('Picked for your question')
     expect(within(picked).getByText(/Apartment rent/)).toBeTruthy()
     expect(screen.queryByText('full text')).toBeNull()
-    expect(screen.getByText('Claude read your question · every number is Worth’s')).toBeTruthy()
+    expect(screen.getByText('Numbers calculated by Worth, not guessed by AI')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: /See the comparison/ }))
     expect(onOpenDecision).toHaveBeenCalledWith(
       { productId: 'camera' },
