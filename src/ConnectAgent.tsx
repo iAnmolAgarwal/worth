@@ -134,8 +134,7 @@ export function ConnectAgent({
   return (
     <>
       <p className="meta" style={{ marginBottom: 12 }}>
-        Let a shopping agent you use, such as Claude Desktop, check with Worth before it pays. Your
-        own AI subscription writes the reply; every figure in it comes from Worth.
+        Your own AI subscription writes the reply; every figure in it comes from Worth.
       </p>
       <dl className="kvlist">
         <div>
@@ -256,7 +255,7 @@ export function ConnectAgent({
       )}
       <p className="caption" style={{ marginTop: 8 }}>
         A token ends after 30 days, when you revoke it, or when this plan is deleted
-        {keep30 ? '' : ' (within 24 hours unless you keep your plan for 30 days, under Data)'}.
+        {keep30 ? '' : ' (within 24 hours unless you keep your plan for 30 days, under Privacy)'}.
         {endpoint && (
           <>
             {' '}

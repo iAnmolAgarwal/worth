@@ -7,13 +7,18 @@ import {
   CalendarClock,
   CircleAlert,
   Clock,
-  Database,
+  Compass,
+  CreditCard,
   ExternalLink,
+  Eye,
+  FileUp,
+  Globe,
   Info,
   ShoppingBag,
   Sparkles,
   Store,
   Trash2,
+  Wallet,
 } from 'lucide-react'
 import { addDays, compareOptions, WAIT_SEARCH_DAYS, withoutOwnHold } from '../shared/finance'
 import { DEMO_PRESET_DAYS } from '../shared/seed'
@@ -29,9 +34,13 @@ import {
   CLAUDE_SHARED_DATA,
   claudeUses,
   MAY_FIT_NOW,
+  paypalModeLine,
   pinnedSample,
   replayToast,
+  SAMPLE_WHO,
 } from './copy'
+import { SettingsAction, SettingsGroup, SettingsMore, SettingsRow } from './SettingsList'
+import { startTour } from './Tour'
 import type { DecisionRequest } from './Decision'
 import { claudeOn, fits, useComparison } from './engine'
 import type { AppState, Purchase } from './contract'
@@ -783,11 +792,23 @@ function RetentionSwitch({
     }
   }
   return (
-    <div style={{ marginTop: 12 }}>
-      <div className="switch-row">
-        <span className="strong" style={{ fontWeight: 700 }} aria-hidden="true">
-          Keep my plan on this device for 30 days
+    <SettingsRow
+      icon={Clock}
+      label="Keep my plan for 30 days"
+      sub={
+        <span id="keep-note">
+          {keep
+            ? `Kept until ${when}${real}. Only this browser can open it: no account, no recovery.`
+            : `Otherwise deleted ${when ? `on ${when}${real}` : 'after 24 hours'}.`}
+          {error && (
+            <span className="co-error" role="alert">
+              {' '}
+              {error}
+            </span>
+          )}
         </span>
+      }
+      control={
         <Toggle
           checked={keep}
           busy={busy}
@@ -795,19 +816,8 @@ function RetentionSwitch({
           describedBy="keep-note"
           onChange={(next) => void change(next)}
         />
-      </div>
-      <p className="caption" id="keep-note" style={{ marginTop: 4 }}>
-        {keep
-          ? `On: kept until ${when}${real}, so a saved plan is here when you come back. Only this browser can open it: no account and no recovery.`
-          : `Off: your plan and saved items are deleted ${when ? `on ${when}${real}` : 'after 24 hours'}.`}{' '}
-        You can delete it any time below.
-      </p>
-      {error && (
-        <p className="co-error" role="alert">
-          {error}
-        </p>
-      )}
-    </div>
+      }
+    />
   )
 }
 
@@ -981,171 +991,195 @@ export function Settings({
       return undefined
     }
   })()
+  const demo = state.profile.source === 'demo'
+  const claude = state.config.ai === 'anthropic'
   return (
-    <div className="page plain">
+    <div className="page plain settings-page">
       <div className="wrap narrow">
         <h1 className="title" style={{ marginBottom: 'var(--s-6)' }}>
           Settings and privacy
         </h1>
-        <div className="stack">
-          <section className="tile" aria-labelledby="set-claude">
-            <div className="sec-head">
-              <h2 className="h-section" id="set-claude">
-                <Sparkles
-                  size={18}
-                  aria-hidden="true"
-                  style={{ verticalAlign: -3, marginRight: 8 }}
-                />
-                Ask Worth assistant
-              </h2>
-            </div>
-            <ClaudeSwitch state={state} onUpdate={onUpdate} />
-            <h3 className="meta strong" style={{ margin: '16px 0 4px', fontWeight: 700 }}>
-              What goes to Anthropic (Claude)
-            </h3>
-            <dl className="kvlist">
-              {claudeUses(claudeOn(state)).map(([label, value]) => (
-                <div key={label}>
-                  <dt>{label}</dt>
-                  <dd>{value}</dd>
-                </div>
-              ))}
-            </dl>
-            <details className="quiet-details">
-              <summary>Everything sent to Anthropic (Claude)</summary>
+        <div className="set-groups">
+          <SettingsGroup title="Assistant">
+            <SettingsRow
+              icon={Sparkles}
+              label="Ask Worth assistant"
+              sub={
+                !claude
+                  ? 'Not connected here: answers use Worth’s own calculation'
+                  : claudeOn(state)
+                    ? 'On · powered by Claude · every number is Worth’s'
+                    : 'Off · answers use Worth’s own calculation'
+              }
+              control={<ClaudeSwitch state={state} onUpdate={onUpdate} bare />}
+            />
+            <SettingsMore
+              icon={Eye}
+              label="What Claude sees"
+              sub="Plan totals and short labels, never your login"
+            >
+              <dl className="kvlist">
+                {claudeUses(claudeOn(state)).map(([label, value]) => (
+                  <div key={label}>
+                    <dt>{label}</dt>
+                    <dd>{value}</dd>
+                  </div>
+                ))}
+              </dl>
               <p className="caption">
                 When the assistant is on, these go to Anthropic (Claude): {CLAUDE_SHARED_DATA}.
               </p>
-            </details>
-          </section>
-          <section className="tile" aria-labelledby="set-agent">
-            <div className="sec-head">
-              <h2 className="h-section" id="set-agent">
-                <Bot size={18} aria-hidden="true" style={{ verticalAlign: -3, marginRight: 8 }} />
-                Connect an agent
-              </h2>
-            </div>
-            <ConnectAgent state={state} onToast={onToast} />
-          </section>
-          <section className="tile" aria-labelledby="set-channel3">
-            <div className="sec-head">
-              <h2 className="h-section" id="set-channel3">
-                <Store size={18} aria-hidden="true" style={{ verticalAlign: -3, marginRight: 8 }} />
-                Similar items and pasted links (Channel3)
-              </h2>
-            </div>
-            <dl className="kvlist">
-              <div>
-                <dt>Sent to Channel3</dt>
-                <dd>{CHANNEL3_SHARED_DATA}</dd>
-              </div>
-              <div>
-                <dt>A product link you paste</dt>
-                <dd>{CHANNEL3_LINK_DATA}</dd>
-              </div>
-              <div>
-                <dt>Your name, plan or other words</dt>
-                <dd>Never</dd>
-              </div>
-            </dl>
-          </section>
-          <section className="tile" aria-labelledby="set-data">
-            <div className="sec-head">
-              <h2 className="h-section" id="set-data">
-                <Database
-                  size={18}
-                  aria-hidden="true"
-                  style={{ verticalAlign: -3, marginRight: 8 }}
+            </SettingsMore>
+          </SettingsGroup>
+
+          <SettingsGroup title="PayPal">
+            <SettingsRow
+              icon={Wallet}
+              label="Your PayPal activity"
+              sub={
+                demo ? 'Showing the sample month' : `Imported · ${state.profile.coverageDays} days`
+              }
+            />
+            {/* Disconnect PayPal goes here, for a plan read through Connect PayPal. */}
+            <SettingsAction
+              icon={FileUp}
+              label={demo ? 'Use your own PayPal activity' : 'Import PayPal activity'}
+              sub="Connect PayPal or choose a CSV export"
+              onClick={onImport}
+            />
+            <SettingsRow
+              icon={CreditCard}
+              label="PayPal checkout"
+              control={
+                <span className="set-value">
+                  {state.config.paypal === 'sandbox' ? 'Sandbox' : 'Simulated'}
+                </span>
+              }
+            />
+          </SettingsGroup>
+
+          <SettingsGroup title="AI agents">
+            <SettingsMore
+              icon={Bot}
+              label="Connect an agent"
+              sub="Let an agent like Claude Desktop ask Worth before it pays"
+            >
+              <ConnectAgent state={state} onToast={onToast} />
+            </SettingsMore>
+          </SettingsGroup>
+
+          <SettingsGroup title="Sample and demo">
+            <SettingsAction
+              icon={Compass}
+              label="Take the tour"
+              sub="Six steps around Home"
+              onClick={() => {
+                startTour()
+                window.location.hash = 'home'
+              }}
+            />
+            {/* The clock's controls show only while a sample day is pinned: always for Alex, and
+                for the test fixture persona only after a ?replay= link. */}
+            {state.demoClock && (
+              <SettingsMore
+                icon={CalendarClock}
+                label="Demo clock"
+                sub={demo ? `${state.profile.name}’s day: ${fullDate(state.today)}` : undefined}
+              >
+                <DemoClock
+                  state={state}
+                  onUpdate={onUpdate}
+                  onToast={onToast ?? (() => undefined)}
                 />
-                Data
-              </h2>
-            </div>
-            <dl className="kvlist">
-              <div>
-                <dt>Your data</dt>
-                <dd>
-                  {state.profile.source === 'demo'
-                    ? 'Sample data'
-                    : `Imported · ${state.profile.coverageDays} days`}
-                </dd>
-              </div>
-              <div>
-                <dt>Time zone</dt>
-                <dd>
-                  {state.profile.timezone}{' '}
-                  <button
-                    type="button"
-                    className="link"
-                    style={{ minHeight: 0, marginLeft: 8 }}
-                    onClick={() => onEditPlan(0)}
-                  >
+              </SettingsMore>
+            )}
+            <SettingsMore
+              icon={Info}
+              label="About this demo"
+              sub={
+                demo
+                  ? 'A sample month for a made-up shopper · no real money moves'
+                  : 'A hackathon app, not a PayPal product'
+              }
+            >
+              {demo && (
+                <p>
+                  This is {SAMPLE_WHO}. No real money moves, and{' '}
+                  {paypalModeLine(state.config.paypal)}.
+                </p>
+              )}
+              <p>
+                <JudgeBadge state={state} />
+              </p>
+              <p className="meta">
+                Worth is an independent hackathon app, not a PayPal product.{' '}
+                <a
+                  href="https://github.com/iAnmolAgarwal/worth#readme"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Read the README
+                </a>
+              </p>
+            </SettingsMore>
+          </SettingsGroup>
+
+          <SettingsGroup title="Privacy">
+            <SettingsMore
+              icon={Store}
+              label="Similar items and pasted links"
+              sub="Channel3 gets a kind of item and a price limit, never your name"
+              region="Similar items and pasted links (Channel3)"
+            >
+              <dl className="kvlist">
+                <div>
+                  <dt>Sent to Channel3</dt>
+                  <dd>{CHANNEL3_SHARED_DATA}</dd>
+                </div>
+                <div>
+                  <dt>A product link you paste</dt>
+                  <dd>{CHANNEL3_LINK_DATA}</dd>
+                </div>
+                <div>
+                  <dt>Your name, plan or other words</dt>
+                  <dd>Never</dd>
+                </div>
+              </dl>
+            </SettingsMore>
+            <SettingsRow
+              icon={Globe}
+              label="Time zone"
+              sub={
+                browserZone && browserZone !== state.profile.timezone
+                  ? `This browser: ${browserZone}`
+                  : undefined
+              }
+              control={
+                <>
+                  <span className="set-value">{state.profile.timezone}</span>
+                  <button type="button" className="link" onClick={() => onEditPlan(0)}>
                     Change
                   </button>
-                  {browserZone && browserZone !== state.profile.timezone && (
-                    <span className="caption">This browser: {browserZone}</span>
-                  )}
-                </dd>
-              </div>
-            </dl>
+                </>
+              }
+            />
             <RetentionSwitch state={state} onUpdate={onUpdate} />
-            <div className="actions" style={{ marginTop: 12 }}>
-              <Button variant="secondary" onClick={onImport}>
-                Import PayPal activity
-              </Button>
-              <Button
-                variant="danger"
-                icon={Trash2}
-                disabled={active}
-                onClick={() => setConfirm(true)}
-              >
-                Delete my data now
-              </Button>
-            </div>
-            {active && (
-              <p className="caption" style={{ marginTop: 8 }}>
-                Finish or cancel your checkout before deleting your data.
-              </p>
-            )}
-          </section>
-          {/* The clock's controls show only while a sample day is pinned: always for Alex, and for
-              the test fixture persona only after a ?replay= link. */}
-          {state.demoClock && (
-            <section className="tile" aria-labelledby="set-clock">
-              <div className="sec-head">
-                <h2 className="h-section" id="set-clock">
-                  <CalendarClock
-                    size={18}
-                    aria-hidden="true"
-                    style={{ verticalAlign: -3, marginRight: 8 }}
-                  />
-                  Demo clock
-                </h2>
-              </div>
-              <DemoClock state={state} onUpdate={onUpdate} onToast={onToast ?? (() => undefined)} />
-            </section>
-          )}
-          <section className="tile" aria-labelledby="set-about">
-            <div className="sec-head">
-              <h2 className="h-section" id="set-about">
-                <Info size={18} aria-hidden="true" style={{ verticalAlign: -3, marginRight: 8 }} />
-                About this demo
-              </h2>
-            </div>
-            <p style={{ marginBottom: 12 }}>
-              <JudgeBadge state={state} />
-            </p>
-            <p className="meta">
-              Worth is an independent hackathon app, not a PayPal product. Checkout runs in the
-              PayPal sandbox, so no real money moves.{' '}
-              <a
-                href="https://github.com/iAnmolAgarwal/worth#readme"
-                target="_blank"
-                rel="noreferrer"
-              >
-                Read the README
-              </a>
-            </p>
-          </section>
+          </SettingsGroup>
+
+          <SettingsGroup title="Your data" danger>
+            <SettingsAction
+              icon={Trash2}
+              label="Delete my data now"
+              sub={
+                active
+                  ? 'Finish or cancel your checkout before deleting your data.'
+                  : 'Your plan, history and saved items. Worth starts again with the sample.'
+              }
+              onClick={() => setConfirm(true)}
+              disabled={active}
+              danger
+            />
+          </SettingsGroup>
         </div>
       </div>
       {confirm && (

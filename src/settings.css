@@ -1,0 +1,165 @@
+/* =====================================================================
+   Settings and privacy: grouped lists of rows, as on phone and account
+   settings. Each row is an icon, a label, one grey line and a control.
+   ===================================================================== */
+.settings-page .wrap {
+  max-width: calc(720px + 2 * var(--gutter));
+}
+.set-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-8);
+}
+.set-group-title {
+  margin: 0 0 var(--s-2) var(--s-1);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  font-weight: var(--fw-semibold);
+  color: var(--c-text-2);
+}
+.set-list {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+.set-list.danger {
+  border-color: rgba(213, 1, 2, 0.35);
+}
+.set-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  width: 100%;
+  min-height: 64px;
+  padding: var(--s-3) var(--s-5);
+  border: 0;
+  border-top: 1px solid var(--c-divider);
+  background: none;
+  color: var(--c-text-strong);
+  font: inherit;
+  text-align: left;
+}
+.set-list > .set-row:first-child {
+  border-top: 0;
+}
+.set-ic {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: var(--c-fill);
+  color: var(--c-navy);
+}
+.set-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.set-label {
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  font-weight: var(--fw-semibold);
+}
+.set-sub {
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  color: var(--c-text-2);
+}
+.set-ctl {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--fs-meta);
+  font-weight: var(--fw-semibold);
+  text-align: right;
+}
+.set-chev {
+  flex: none;
+  color: var(--c-text-3);
+  transition: transform var(--d-action) var(--ease-move);
+}
+button.set-action {
+  cursor: pointer;
+}
+button.set-action:hover,
+.set-more > summary:hover {
+  background: var(--c-surface-2);
+}
+button.set-action:disabled {
+  cursor: not-allowed;
+  color: var(--c-text-3);
+}
+button.set-action:focus-visible,
+.set-more > summary:focus-visible {
+  outline: 3px solid var(--c-focus);
+  outline-offset: -3px;
+}
+.set-action.danger {
+  color: var(--c-danger);
+}
+.set-action.danger .set-ic {
+  background: var(--c-danger-bg);
+  color: var(--c-danger);
+}
+.set-action.danger:disabled .set-ic {
+  background: var(--c-fill);
+  color: var(--c-text-3);
+}
+/* A row that opens: the summary is the row; the details sit under it. */
+.set-more {
+  display: block;
+  padding: 0;
+  min-height: 0;
+}
+.set-more > summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  min-height: 64px;
+  padding: var(--s-3) var(--s-5);
+  cursor: pointer;
+}
+.set-more > summary::-webkit-details-marker {
+  display: none;
+}
+.set-more[open] > summary .set-chev {
+  transform: rotate(90deg);
+}
+.set-body {
+  padding: 0 var(--s-5) var(--s-5) calc(var(--s-5) + 36px + var(--s-4));
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+}
+.set-body > * + * {
+  margin-top: var(--s-3);
+}
+.set-body .actions {
+  flex-wrap: wrap;
+}
+.set-value {
+  color: var(--c-text-2);
+  font-weight: var(--fw-medium);
+}
+.set-note {
+  margin: var(--s-2) var(--s-1) 0;
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  color: var(--c-text-2);
+}
+@media (max-width: 767px) {
+  .set-row:not(.set-more),
+  .set-more > summary {
+    padding: var(--s-3) var(--s-4);
+    gap: var(--s-3);
+  }
+  .set-body {
+    padding: 0 var(--s-4) var(--s-4);
+  }
+}
