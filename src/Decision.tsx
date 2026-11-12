@@ -640,15 +640,16 @@ export function Decision({
   // A store is named only when the person came from it (a verified hand-off) or pasted its link.
   const store = handoff?.merchant ?? c?.source?.merchantName
   useEffect(() => {
-    if (!onOffer || !c) return
+    if (!onOffer || !c || !raw) return
     onOffer({
       itemName: product?.name ?? c.itemName,
       amountCents: c.amountCents,
       store,
-      verdict: offerVerdict(c),
+      // The Ask chip describes today, as it does without a chosen day.
+      verdict: offerVerdict(raw),
     })
     return () => onOffer(undefined)
-  }, [onOffer, c, product?.name, store])
+  }, [onOffer, c, raw, product?.name, store])
   if (error)
     return (
       <Frame>

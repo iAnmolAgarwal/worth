@@ -6,9 +6,17 @@ import { dayLabel, money, shortDate, signed } from './format'
 /** The Pay in 4 comparison's words, kept apart from the components that show them. */
 type P4 = Extract<PayIn4, { available: true }>
 
+/** The day agreed in Ask when the first card is buying on it (`withChosenDay`), else undefined. */
+const chosenDay = (c: Comparison) =>
+  c.chosen && c.buyToday.purchaseDate === c.chosen.date ? c.chosen.date : undefined
+
 /** What the plain line means with Pay in 4 open, so "Pay in full" always says when you'd pay. */
 export function fullPayName(c: Comparison, option: OptionResult) {
-  if (option === c.buyToday) return 'Pay in full today'
+  // On a day agreed in Ask the first card is buying on that day, not today.
+  if (option === c.buyToday) {
+    const day = chosenDay(c)
+    return day ? `Pay in full on ${shortDate(day)}` : 'Pay in full today'
+  }
   if (option === c.wait && c.wait.date) return `Pay in full on ${shortDate(c.wait.date)}`
   return `Spend ${money(c.spendLess.maxPriceCents)} today`
 }
@@ -22,7 +30,9 @@ export function payIn4Thesis(c: Comparison, option: OptionResult, p4: P4) {
   const from = start === c.today ? `from today, ${shortDate(start)}` : `from ${dayLabel(start)}`
   const how =
     option === c.buyToday
-      ? 'paying in full today'
+      ? chosenDay(c)
+        ? `paying in full on ${dayLabel(chosenDay(c)!)}`
+        : 'paying in full today'
       : option === c.wait && c.wait.date
         ? `paying in full on ${dayLabel(c.wait.date)}`
         : `spending ${money(c.spendLess.maxPriceCents)} today instead`

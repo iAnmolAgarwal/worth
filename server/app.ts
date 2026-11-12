@@ -146,8 +146,10 @@ const identifier = z.string().min(1).max(100)
 const date = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/)
+  // The regex runs first, but a refine still sees a value it rejected, so check the shape again.
   .refine(
     (value) =>
+      /^\d{4}-\d{2}-\d{2}$/.test(value) &&
       !Number.isNaN(Date.parse(value)) &&
       new Date(value + 'T12:00:00Z').toISOString().slice(0, 10) === value,
     'Use a valid calendar date',

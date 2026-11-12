@@ -7,9 +7,9 @@ import { decisionRequestFrom } from '../src/contract'
 import { Decision } from '../src/Decision'
 import { Saved, Settings } from '../src/Saved'
 import { api } from '../src/api'
-import { belowWords, fitStatus, lowerName, lowestSentence } from '../src/engine'
+import { belowWords, fitStatus, lowerName, lowestSentence, withChosenDay } from '../src/engine'
 import { nameInSentence } from '../shared/text'
-import { payIn4Lines } from '../src/payIn4Text'
+import { fullPayName, payIn4Lines, payIn4Thesis } from '../src/payIn4Text'
 import { compareOptions } from '../shared/finance'
 import { ALEX_DEMO_DAY, ALEX_RETURN_DAY, createCameraScenario, PRODUCTS } from '../shared/seed'
 import type { AppState, DemoPreset, Purchase } from '../shared/types'
@@ -396,6 +396,58 @@ describe('a day agreed in Ask, on the comparison page', () => {
       0,
     )
     expect(screen.queryByRole('button', { name: 'Buy now' })).toBeNull()
+  })
+
+  it('says the Pay in 4 sentence for paying in full on that day, not today', () => {
+    const { profile } = createCameraScenario(ALEX_DEMO_DAY)
+    const raw = compareOptions(profile, [], {
+      amountCents: 189900,
+      itemName: 'Halden X5',
+      today: ALEX_DEMO_DAY,
+      payIn4Eligible: true,
+      onDate: '2026-12-15',
+    })
+    const c = withChosenDay(raw)
+    if (!c.payIn4.available) throw new Error('Pay in 4 is in range for $1,899')
+    expect(fullPayName(c, c.buyToday)).toBe('Pay in full on Dec 15')
+    const thesis = payIn4Thesis(c, c.buyToday, c.payIn4)
+    expect(thesis).toContain('paying in full on Tue, Dec 15, it’s Thu, Dec 31 at $458.78')
+    expect(thesis).not.toContain('paying in full today')
+    // Without a chosen day the same sentence is about today.
+    expect(payIn4Thesis(raw, raw.buyToday, c.payIn4)).toContain('paying in full today')
+  })
+
+  it('keeps the Ask chip about today', async () => {
+    const onOffer = vi.fn()
+    const state = alexState()
+    routeApi((_path, data) => {
+      const input = data as { productId?: string; onDate?: string }
+      return compareOptions(state.profile, [], {
+        amountCents: 189900,
+        itemName: 'Halden X5',
+        today: state.today,
+        payIn4Eligible: true,
+        ...(input.onDate ? { onDate: input.onDate } : {}),
+      })
+    })
+    render(
+      <Decision
+        backLabel="Back"
+        onBack={vi.fn()}
+        onBuy={vi.fn()}
+        onSave={vi.fn()}
+        onViewActivity={vi.fn()}
+        onOffer={onOffer}
+        state={state}
+        request={{ productId: 'halden-x5', onDate: '2026-12-15' }}
+      />,
+    )
+    await screen.findByRole('radiogroup', { name: 'Your options' })
+    await waitFor(() =>
+      expect(onOffer).toHaveBeenCalledWith(
+        expect.objectContaining({ verdict: 'Not today · fits Tue, Dec 15' }),
+      ),
+    )
   })
 
   it('shows one card when the day is the wait date', async () => {

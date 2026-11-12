@@ -226,7 +226,14 @@ describe('/api/compare with a chosen day', () => {
     expect(ok.body.chosen).toMatchObject({ date: '2026-11-15', outcome: 'fits' })
     const plain = await post(agent, '/api/compare', { amountCents: 60000, itemName: 'TV' })
     expect(plain.body.chosen).toBeUndefined()
-    for (const onDate of ['2026-11-12', '2026-12-19', '2026-02-30', 'Sunday'])
+    for (const onDate of [
+      '2026-11-12',
+      '2026-12-19',
+      '2026-02-30',
+      'Sunday',
+      '2026-11-15T00:00',
+      ' 2026-11-15',
+    ])
       expect(
         (await post(agent, '/api/compare', { amountCents: 60000, itemName: 'TV', onDate })).status,
       ).toBe(400)

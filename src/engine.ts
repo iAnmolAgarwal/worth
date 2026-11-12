@@ -182,7 +182,7 @@ export function useComparison(
 
 export const optionTitle = (key: 'buyToday' | 'wait' | 'spendLess', c: Comparison) =>
   key === 'buyToday'
-    ? c.chosen
+    ? c.chosen && c.buyToday.purchaseDate === c.chosen.date
       ? `Buy ${dayLabel(c.chosen.date)}`
       : 'Buy today'
     : key === 'spendLess'
