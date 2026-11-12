@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ImportDialog } from '../src/Import'
@@ -59,9 +59,9 @@ function preview(overrides: Partial<ImportPreview> = {}): ImportPreview {
 }
 
 async function pasteAndPreview(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByText('Or paste the CSV contents'))
+  await user.click(screen.getByRole('button', { name: 'Paste CSV text instead' }))
   await user.type(screen.getByRole('textbox', { name: 'PayPal CSV contents' }), CSV)
-  await user.click(screen.getByRole('button', { name: /Preview my history/ }))
+  await user.click(screen.getByRole('button', { name: 'Use this text' }))
 }
 
 beforeEach(() => {
@@ -231,5 +231,55 @@ describe('a payment a store reported (C4)', () => {
     expect(note.closest('details')).toBeNull()
     // Said once: the same warning isn't repeated under "Needs attention".
     expect(screen.queryByText(warning)).toBeNull()
+  })
+})
+
+describe('one way in', () => {
+  it('previews a chosen file at once, with one action and the short promises', async () => {
+    const user = userEvent.setup()
+    apiMock.mockResolvedValue(preview({ dateOrder: 'MM/DD', transactions: [shop] }))
+    render(
+      <ImportDialog state={makeState()} onClose={vi.fn()} onUpdate={vi.fn()} onReview={vi.fn()} />,
+    )
+    const dialog = screen.getByRole('dialog', { name: 'Import PayPal activity' })
+    // No separate preview step, and no Connect PayPal while the server has it off.
+    expect(within(dialog).queryByRole('button', { name: /Preview/ })).toBeNull()
+    expect(within(dialog).queryByRole('button', { name: /Connect PayPal/ })).toBeNull()
+    expect(dialog.textContent).toContain('PayPal activity CSV, in USD, up to 1 MB')
+    expect(dialog.textContent).toContain('Your history replaces the sample.')
+    expect(within(dialog).getByRole('link', { name: 'Privacy' }).getAttribute('href')).toBe(
+      '#settings',
+    )
+    await user.upload(
+      within(dialog).getByLabelText('Choose your PayPal activity CSV'),
+      new File([CSV], 'Download.CSV', { type: 'text/csv' }),
+    )
+    await screen.findByRole('checkbox', { name: /I reviewed this preview/ })
+    expect(apiMock).toHaveBeenCalledWith('/import/preview', { csv: CSV })
+    expect(screen.getByText('Download.CSV')).toBeTruthy()
+  })
+
+  it('says why a file over 1 MB is refused, before reading it', async () => {
+    const user = userEvent.setup()
+    render(
+      <ImportDialog state={makeState()} onClose={vi.fn()} onUpdate={vi.fn()} onReview={vi.fn()} />,
+    )
+    await user.upload(
+      screen.getByLabelText('Choose your PayPal activity CSV'),
+      new File(['x'.repeat(1_100_000)], 'big.csv', { type: 'text/csv' }),
+    )
+    expect(screen.getByRole('alert').textContent).toContain('smaller than 1 MB')
+    expect(apiMock).not.toHaveBeenCalled()
+  })
+
+  it('offers Connect PayPal first when the server has it on', () => {
+    const state = makeState()
+    state.config = { ...state.config, paypalConnect: 'on' }
+    render(<ImportDialog state={state} onClose={vi.fn()} onUpdate={vi.fn()} onReview={vi.fn()} />)
+    const connect = screen.getByRole('button', { name: /Connect PayPal/ })
+    const choose = screen.getByLabelText('Choose your PayPal activity CSV')
+    expect(connect.compareDocumentPosition(choose) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Try a sample export' })).toBeTruthy()
+    expect(screen.getByText('How to get this file from PayPal').closest('details')).toBeTruthy()
   })
 })
