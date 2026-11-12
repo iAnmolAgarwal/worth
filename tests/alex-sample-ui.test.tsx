@@ -355,3 +355,64 @@ describe('the on= link parameter', () => {
     })
   })
 })
+
+describe('a day agreed in Ask, on the comparison page', () => {
+  const show = (productId: string, onDate: string) => {
+    const state = alexState()
+    routeApi((_path, data) => {
+      const input = data as { productId?: string; onDate?: string }
+      const product = PRODUCTS.find((p) => p.id === input.productId)!
+      return compareOptions(state.profile, [], {
+        amountCents: product.priceCents,
+        itemName: product.name,
+        today: state.today,
+        payIn4Eligible: true,
+        ...(input.onDate ? { onDate: input.onDate } : {}),
+      })
+    })
+    render(
+      <Decision
+        backLabel="Back"
+        onBack={vi.fn()}
+        onBuy={vi.fn()}
+        onSave={vi.fn()}
+        onViewActivity={vi.fn()}
+        state={state}
+        request={{ productId, onDate }}
+      />,
+    )
+  }
+
+  it('renames the first card to that day, leads with it when it fits, and saves for it', async () => {
+    show('headphones', '2026-11-15')
+    const group = await screen.findByRole('radiogroup', { name: 'Your options' })
+    const radios = within(group).getAllByRole('radio')
+    expect(radios).toHaveLength(1)
+    expect(radios[0]!.textContent).toContain('Buy Sun, Nov 15')
+    expect(radios[0]!.getAttribute('aria-checked')).toBe('true')
+    expect(group.textContent).not.toContain('Buy today')
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Buy Sun, Nov 15')
+    expect(screen.getAllByRole('button', { name: 'Save for Sun, Nov 15' }).length).toBeGreaterThan(
+      0,
+    )
+    expect(screen.queryByRole('button', { name: 'Buy now' })).toBeNull()
+  })
+
+  it('shows one card when the day is the wait date', async () => {
+    show('halden-x5', '2026-12-15')
+    const group = await screen.findByRole('radiogroup', { name: 'Your options' })
+    const radios = within(group).getAllByRole('radio')
+    expect(radios).toHaveLength(1)
+    expect(radios[0]!.textContent).toContain('Buy Tue, Dec 15')
+    expect(group.textContent).not.toMatch(/Wait until/)
+  })
+
+  it('keeps waiting the answer when that day does not fit, with the day as the first card', async () => {
+    show('halden-x5', '2026-11-20')
+    const group = await screen.findByRole('radiogroup', { name: 'Your options' })
+    const radios = within(group).getAllByRole('radio')
+    expect(radios[0]!.textContent).toContain('Buy Fri, Nov 20')
+    expect(radios[1]!.textContent).toContain('Wait until Tue, Dec 15')
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Wait until Tue, Dec 15')
+  })
+})
