@@ -12,6 +12,7 @@ import {
   normalizeTimezone,
   payIn4InRange,
   purchaseReviews,
+  WAIT_SEARCH_DAYS,
   withoutOwnHold,
 } from '../shared/finance.ts'
 import {
@@ -1162,11 +1163,12 @@ export function createApp(options: AppOptions = {}) {
     const current = state(sessionId(res))
     if (
       input.purchaseDate &&
-      (input.purchaseDate < current.today || input.purchaseDate > addDays(current.today, 30))
+      (input.purchaseDate < current.today ||
+        input.purchaseDate > addDays(current.today, WAIT_SEARCH_DAYS))
     )
       throw new HttpError(
         400,
-        'Choose a purchase date from today through 30 days ahead.',
+        `Choose a purchase date from today through ${WAIT_SEARCH_DAYS} days ahead.`,
         'INVALID_DATE',
       )
     res.json(

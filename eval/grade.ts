@@ -163,7 +163,7 @@ function checkFacts(reply: ChatReply, data: GradeData, a: Assessment | undefined
     const wait = sentence.match(/^Waiting until (.+?) would keep your cushion/)
     if (wait && (!a?.earliestDate || wait[1] !== label(a.earliestDate) || a.outcome !== 'tight'))
       found.push(`"${sentence}" disagrees with the earliest fitting date`)
-    if (/^No day in the next 30 days keeps your cushion/.test(sentence) && a?.earliestDate)
+    if (/^No day in the next 35 days keeps your cushion/.test(sentence) && a?.earliestDate)
       found.push(`"${sentence}" but the engine found ${a.earliestDate}`)
     const upTo = sentence.match(/^Up to (\$[\d,.]+) (today )?would keep your/)
     if (upTo) {

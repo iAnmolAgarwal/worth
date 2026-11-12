@@ -88,7 +88,7 @@ The cushion is a comparison threshold, not another debit. Historical rows inform
 
 `forecast()` emits daily closing balances and intraday minima for baseline, purchase, and stress paths. On a date with unknown timing, bills, everyday spending, and purchases occur before income. `assessPurchase()` classifies using the lowest path value, retaining earlier baseline shortfalls. It returns the dates, inputs, drivers, assumptions, and profile version with the result.
 
-Purchase dates range from today through 30 days ahead. Each candidate is assessed from today through 30 days after the purchase, for up to a 60-day span. Recurring entries repeat by their confirmed cadence; month-end recurrence remains anchored to the original calendar day. Stress spending is `ceil(dailySpendCents × 1.2)` per day, a stated assumption rather than a calibrated confidence bound.
+Purchase dates range from today through 35 days ahead. Each candidate is judged over the same window, today through today + 60, whatever its purchase date. Recurring entries repeat by their confirmed cadence; month-end recurrence remains anchored to the original calendar day. Stress spending is `ceil(dailySpendCents × 1.2)` per day, a stated assumption rather than a calibrated confidence bound.
 
 Missing confirmation, a funds snapshot that is not for today, unconfirmed active flows, invalid amounts, or unresolved profile fields force `incomplete`. The forecast remains inspectable, but it cannot support a positive result.
 
@@ -115,7 +115,7 @@ Tools, all read-only:
 
 | Tool | What Claude reports | What the server does |
 | --- | --- | --- |
-| `interpret_purchase` | Items in the user's words, stated price in cents, ISO currency, quantity, whether it continues the previous item, the timing phrase copied verbatim and its date, and the option (check, earliest date, most to spend) | Checks every amount and date against the message (`server/money.ts`, `server/dates.ts`); asks instead of guessing when the price is missing, not USD, ambiguous, or the date is vague, past or beyond 30 days; then runs `assessPurchase` and, when asked, the Pay in 4 scenario |
+| `interpret_purchase` | Items in the user's words, stated price in cents, ISO currency, quantity, whether it continues the previous item, the timing phrase copied verbatim and its date, and the option (check, earliest date, most to spend) | Checks every amount and date against the message (`server/money.ts`, `server/dates.ts`); asks instead of guessing when the price is missing, not USD, ambiguous, or the date is vague, past or beyond 35 days; then runs `assessPurchase` and, when asked, the Pay in 4 scenario |
 | `list_commitments` | Subscriptions, bills or both | Lists confirmed obligations due in the next 30 days |
 | `spending_summary` | — | Totals completed USD spending by category for 30 days |
 | `get_plan_summary` | — | Room to spend today, the baseline low point and its cause |

@@ -292,7 +292,7 @@ describe('Pay in 4 comparison (acceptance 16)', () => {
       cushionCents: 0,
       flows: [
         flow({ id: 'pay-1', kind: 'income', amountCents: 30000, nextDate: addDays(TODAY, 20) }),
-        flow({ id: 'pay-2', kind: 'income', amountCents: 30000, nextDate: addDays(TODAY, 34) }),
+        flow({ id: 'pay-2', kind: 'income', amountCents: 30000, nextDate: addDays(TODAY, 36) }),
       ],
     })
     const result = compare(p, 119900)

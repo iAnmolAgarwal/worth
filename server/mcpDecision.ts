@@ -23,7 +23,7 @@ export interface Decision {
   action: RecommendedAction
   /** The most that keeps the cushion when paid on requestDate, capped at the requested amount. */
   safeCents: number
-  /** The day the full amount keeps the cushion as one payment; null when none in 30 days. */
+  /** The day the full amount keeps the cushion as one payment; null when none in 35 days. */
   earliest: string | null
   /** The payments of the action, in date order; empty when no payment of this item is advised. */
   plan: { date: string; amountCents: number }[]
@@ -38,7 +38,7 @@ export type DecisionOutcome =
 
 /**
  * Worth's assessment as a decision. Fits on the requested date: affordable now, pay in full. A
- * later day in the 30-day search fits: affordable later, wait. No day fits: not affordable, and
+ * later day in the 35-day search fits: affordable later, wait. No day fits: not affordable, and
  * spending less is the option while any amount keeps the cushion. Pay in 4 never enters here.
  */
 export function decide(a: Assessment): DecisionOutcome {
@@ -107,7 +107,7 @@ export function checkDecision(d: Decision, horizonEnd: string, explanation: stri
   if (d.plan.length && d.plan.reduce((sum, p) => sum + p.amountCents, 0) !== d.requestedCents)
     add('plan', 'payments must add up to the requested amount')
   if (d.earliest !== null && (d.earliest < d.requestDate || d.earliest > horizonEnd))
-    add('earliest', 'earliest date is outside the requested date and the 30-day search')
+    add('earliest', 'earliest date is outside the requested date and the 35-day search')
   const onlyPayment = (date: string | null) =>
     d.plan.length === 1 && d.plan[0]!.date === date && d.plan[0]!.amountCents === d.requestedCents
   switch (d.status) {

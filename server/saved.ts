@@ -258,7 +258,7 @@ function checkDate(waitDate: string | undefined, today: string) {
   if (waitDate && (waitDate < today || waitDate > addDays(today, WAIT_SEARCH_DAYS)))
     throw new SavedError(
       400,
-      'Choose a plan date from today through 30 days ahead.',
+      `Choose a plan date from today through ${WAIT_SEARCH_DAYS} days ahead.`,
       'INVALID_DATE',
     )
 }

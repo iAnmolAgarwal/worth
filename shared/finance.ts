@@ -19,7 +19,7 @@ import type {
 /** Every option is judged from today through this many days ahead, fixed before any search. */
 export const COMPARISON_WINDOW_DAYS = 60
 /** Wait candidates run from today through this many days ahead. */
-export const WAIT_SEARCH_DAYS = 30
+export const WAIT_SEARCH_DAYS = 35
 /**
  * PayPal's US Pay in 4 range, $10.00 to $2,000.00 inclusive
  * (https://developer.paypal.com/pay-later/overview.md). Eligibility also needs PayPal's own check;
@@ -557,7 +557,7 @@ export function assessPurchase(
     purchaseDate < today ||
     purchaseDate > addDays(today, WAIT_SEARCH_DAYS)
   )
-    throw new Error('Choose a purchase date within the next 30 days.')
+    throw new Error(`Choose a purchase date within the next ${WAIT_SEARCH_DAYS} days.`)
   if (!Number.isSafeInteger(options.amountCents) || options.amountCents < 0)
     throw new Error('Enter a non-negative total purchase price in cents.')
   // One window for every purchase date, so a later date is never judged over a longer horizon.

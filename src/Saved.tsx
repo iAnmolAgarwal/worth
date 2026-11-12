@@ -15,7 +15,7 @@ import {
   Store,
   Trash2,
 } from 'lucide-react'
-import { addDays } from '../shared/finance'
+import { addDays, WAIT_SEARCH_DAYS } from '../shared/finance'
 import type { Product, SavedItem, SavedPriceCheck } from '../shared/types'
 import { api, ApiError } from './api'
 import { usePriceDrop } from './Alternatives'
@@ -575,7 +575,7 @@ function ReadyPlan({
                 ? `Checked just now: buying today keeps your ${money(c.cushionCents)} cushion. Lowest ${signed(c.buyToday.lowestBalanceCents)} on ${dayLabel(c.buyToday.lowestDate)}.`
                 : c.wait.date
                   ? `Checked just now: not yet. Your plan now suggests ${dayLabel(c.wait.date)}.`
-                  : 'Checked just now: it doesn’t fit in the next 30 days.'}
+                  : `Checked just now: it doesn’t fit in the next ${WAIT_SEARCH_DAYS} days.`}
             </p>
           )}
           {fresh && c && fitsNow && item.kind === 'custom' && !item.sourceUrl && (

@@ -329,7 +329,7 @@ describe('dates are resolved by Claude and checked by the server (C-12)', () => 
   it.each([
     ['after the weekend', '2026-10-16'],
     ['sometime next month', '2026-11-01'],
-    ['in 31 days', '2026-11-03'],
+    ['in 36 days', '2026-11-08'],
     ['on 2026-02-31', '2026-10-16'],
     ['on 2026-10-10 or tomorrow', '2026-10-10'],
     ['yesterday', TODAY],

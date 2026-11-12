@@ -186,7 +186,7 @@ Claude is the interface and the narrator; the engine is the decision-maker.
 - **Read the question.** `interpret_purchase` reports the item, the price the user wrote, its
   currency, quantity, the user's own timing words and the date they resolve to. The server checks
   each against the user's words: an amount that is not in the message, a non-USD price or a date
-  outside the next 30 days stops the answer with a question instead. Catalog prices are read only
+  outside the next 35 days stops the answer with a question instead. Catalog prices are read only
   when the message names a catalog item as a whole phrase.
 - **Choose what to show.** Every tool (`interpret_purchase`, `list_commitments`,
   `spending_summary`, `get_plan_summary`, `find_alternatives`) also asks Claude for up to three
@@ -257,8 +257,8 @@ The [evaluation](#evaluation) runs these paths live against the real model.
 - **The engine** (`shared/finance.ts`, `shared/collision.ts`) is pure: data in, data out. It
   starts from today's confirmed funds, adds dated income, subtracts bills, subscriptions,
   everyday spending, running instalments and reserved purchases, and keeps the intraday low.
-  Bills come before income on the same day. Waiting is searched over the next 30 days and each
-  candidate is projected 30 days past its purchase.
+  Bills come before income on the same day. Waiting is searched over the next 35 days, and each
+  candidate is judged over the same window, today through today + 60.
 - **The server** (`server/`) owns the catalog, the session, every guard and every PayPal call.
   A checkout is reserved in SQLite before the remote call, at most one is active per session,
   and a per-purchase lock serialises capture, webhook and cancel.

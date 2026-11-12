@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { addDays, getUpcomingFlows, money } from '../shared/finance.ts'
+import { addDays, getUpcomingFlows, money, WAIT_SEARCH_DAYS } from '../shared/finance.ts'
 import { PRODUCTS } from '../shared/seed.ts'
 import { plainText } from '../shared/text.ts'
 import type {
@@ -600,7 +600,7 @@ function readDate(
 ):
   | { date: string; source: Interpretation['dateSource']; phrase?: string }
   | Exclude<InterpretResult, { ok: true }> {
-  const end = addDays(data.today, 30)
+  const end = addDays(data.today, WAIT_SEARCH_DAYS)
   const window = `from today through ${dateLabel(end, data.today)}`
   const ask = (
     reason: ClarifyReason,
@@ -1019,7 +1019,7 @@ export function clarificationText(
   result: Exclude<InterpretResult, { ok: true }>,
   data: ChatData,
 ): string {
-  const end = dateLabel(addDays(data.today, 30), data.today)
+  const end = dateLabel(addDays(data.today, WAIT_SEARCH_DAYS), data.today)
   const item =
     result.pending?.itemName && !isGeneric(result.pending.itemName)
       ? `the ${result.pending.itemName}`

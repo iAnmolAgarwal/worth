@@ -6,6 +6,7 @@ import {
   money,
   payIn4InRange,
   payIn4Scenario,
+  WAIT_SEARCH_DAYS,
   withoutOwnHold,
 } from '../shared/finance.ts'
 import type { Assessment, Interpretation, PayIn4Chat, PayIn4Comparison } from '../shared/types.ts'
@@ -37,7 +38,7 @@ export function verdictFor(a: Assessment, interpretation?: Interpretation, budge
       ? `${subject} fits your plan if you buy it ${day}.`
       : later
         ? `${subject} would dip below your cushion if you buy it ${day}. The earliest date that fits is ${dateLabel(a.earliestDate!, a.today)}.`
-        : `${subject} would dip below your cushion if you buy it ${day}, and no date in the next 30 days fits this plan.`
+        : `${subject} would dip below your cushion if you buy it ${day}, and no date in the next ${WAIT_SEARCH_DAYS} days fits this plan.`
   const max =
     interpretation?.option === 'max_price' || (a.outcome === 'tight' && a.maxAffordableCents > 0)
       ? ` The most you could spend ${day} and keep your cushion is ${money(a.maxAffordableCents)}.`
@@ -244,7 +245,7 @@ export function purchaseFacts(a: Assessment, data: ChatData): FactCatalog {
     facts.wait =
       a.earliestDate && a.earliestDate > a.purchaseDate
         ? `Waiting until ${day(a.earliestDate, a.today)} would keep your cushion for the full ${money(a.amountCents)}.`
-        : `No day in the next 30 days keeps your cushion at ${money(a.amountCents)}.`
+        : `No day in the next ${WAIT_SEARCH_DAYS} days keeps your cushion at ${money(a.amountCents)}.`
   const budget = data.budgetCents
   facts.spend_less =
     a.maxAffordableCents <= 0
