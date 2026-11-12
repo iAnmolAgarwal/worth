@@ -155,6 +155,9 @@ describe('Ask Worth shows its work', () => {
     expect(strip.textContent).not.toMatch(/Recommended|recommend it\b(?!\.)/)
     // The neutral row is for answers that didn't ask; this one shows the schedule instead.
     expect(screen.queryByText(/^PayPal Pay in 4:/)).toBeNull()
+    // One link to the comparison: the verdict's, never a second one in the strip (audit B11).
+    expect(within(strip).queryByRole('button', { name: /Compare/ })).toBeNull()
+    expect(screen.getAllByRole('button', { name: /See the comparison/ })).toHaveLength(1)
   })
 
   it('puts Claude’s checked sentence under the verdict and opens the trace on request', async () => {

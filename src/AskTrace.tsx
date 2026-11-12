@@ -1,12 +1,5 @@
 import { useId, useState } from 'react'
-import {
-  ArrowRight,
-  ChevronDown,
-  CircleAlert,
-  CircleCheck,
-  CircleX,
-  ListChecks,
-} from 'lucide-react'
+import { ChevronDown, CircleAlert, CircleCheck, CircleX, ListChecks } from 'lucide-react'
 import {
   collisionLine,
   mainCollision,
@@ -28,15 +21,7 @@ function payments(p4: PayIn4Chat) {
  * The illustrative Pay in 4 schedule inside an answer that asked about it, in the comparison's
  * ring style. Every date after the first is "about": PayPal sets the exact ones.
  */
-export function PayIn4Strip({
-  p4,
-  today,
-  onCompare,
-}: {
-  p4: PayIn4Chat
-  today: string
-  onCompare?: () => void
-}) {
+export function PayIn4Strip({ p4, today }: { p4: PayIn4Chat; today: string }) {
   if (!p4.payments.length)
     return (
       <p className="meta">
@@ -100,11 +85,6 @@ export function PayIn4Strip({
         Worth never recommends it.
         {p4.eligibility === 'range-only' ? ' PayPal decides availability at checkout.' : ''}
       </p>
-      {onCompare && (
-        <button type="button" className="link" onClick={onCompare} style={{ marginTop: 4 }}>
-          Compare all options <ArrowRight size={16} aria-hidden="true" />
-        </button>
-      )}
     </section>
   )
 }
