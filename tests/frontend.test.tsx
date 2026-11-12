@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
 import { Activity } from '../src/Activity'
-import { Ask } from '../src/Ask'
+import { Ask, ClaudeSwitch } from '../src/Ask'
 import { Checkout, checkoutView } from '../src/Checkout'
 import { Decision } from '../src/Decision'
 import { EnvDetails } from '../src/EnvDetails'
@@ -118,10 +118,6 @@ async function openAsk(user: User) {
   const button = within(nav).getByRole('button', { name: 'Ask Worth' })
   if (button.getAttribute('aria-expanded') !== 'true') await user.click(button)
   await screen.findByRole('dialog', { name: 'Ask Worth' })
-}
-/** The privacy table and the assistant switch sit behind one disclosure under the composer. */
-async function openWhatItSees(user: User) {
-  await user.click(screen.getByRole('button', { name: /what (?:the assistant|it would) see/i }))
 }
 function purchase(state: AppState, patch: Partial<Purchase> = {}): Purchase {
   const product = state.products.find((p) => p.id === 'headphones')!
@@ -357,7 +353,7 @@ describe('queued prompts', () => {
   })
 })
 
-describe('Claude consent in chat', () => {
+describe('Claude consent', () => {
   const shared =
     'your messages, recent chat history (including figures), the item, price and date you ask about, the items and prices you asked about earlier in the same conversation, a forecast summary, 30-day spending totals by category, income and bill names with amounts and dates, minimized merchant labels, whether PayPal offers Pay in 4 for the price and, when you ask about Pay in 4, its illustrative payment dates and the bills they land near, whether Worth prepared a checkout for a catalog item and how it went, and, when you ask for something cheaper, the kind of item to look for and whether similar items were found (never their names, stores or prices)'
   it('lets the untouched sample profile turn Claude off, keeping focus on the switch while it saves', async () => {
@@ -366,8 +362,8 @@ describe('Claude consent in chat', () => {
     const saved = deferred<AppState>()
     routeApi(() => saved.promise)
     const onUpdate = vi.fn()
-    render(<Ask {...askProps} state={state} onUpdate={onUpdate} />)
-    await openWhatItSees(user)
+    // The switch lives in Settings → Assistant now; the chat panel has none (user review).
+    render(<ClaudeSwitch state={state} onUpdate={onUpdate} />)
     const toggle = screen.getAllByRole('switch', {
       name: 'Use the assistant (powered by Claude)',
     })[0]!
@@ -417,8 +413,8 @@ describe('Claude consent in chat', () => {
       return updated
     })
     const onUpdate = vi.fn()
-    render(<Ask {...askProps} state={state} onUpdate={onUpdate} />)
-    await openWhatItSees(user)
+    // The switch lives in Settings → Assistant now; the chat panel has none (user review).
+    render(<ClaudeSwitch state={state} onUpdate={onUpdate} />)
     const toggle = screen.getAllByRole('switch', {
       name: 'Use the assistant (powered by Claude)',
     })[0]!
@@ -1402,16 +1398,13 @@ describe('iteration 2 fixes', () => {
     expect(within(rail).queryByText('Studio headphones')).toBeNull()
   })
 
-  it('shows nothing as sent to Anthropic while the assistant is off', async () => {
-    const user = userEvent.setup()
-    const state = makeState('import')
-    render(<Ask {...askProps} state={state} />)
-    const toggle = screen.getByRole('button', { name: 'Assistant off · what it would see' })
-    expect(toggle.getAttribute('aria-expanded')).toBe('false')
-    await user.click(toggle)
-    const details = document.getElementById(toggle.getAttribute('aria-controls')!)!
-    expect(within(details).getAllByText('Not sent').length).toBe(3)
-    expect(within(details).getByText('Never')).toBeTruthy()
+  it('keeps the chat panel free of the assistant switch and what-it-sees table', () => {
+    render(<Ask {...askProps} state={makeState('import')} layout="panel" />)
+    expect(
+      screen.queryByRole('button', { name: /what (?:the assistant|it would) see/i }),
+    ).toBeNull()
+    expect(screen.queryByRole('switch')).toBeNull()
+    expect(screen.getByRole('textbox', { name: 'Message Worth' })).toBeTruthy()
   })
 })
 

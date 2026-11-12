@@ -850,7 +850,6 @@ export default function App() {
           visible={panelOpen}
           offer={screen === 'decision' || screen === 'check' ? offer : undefined}
           onMood={setMood}
-          onUpdate={replaceState}
           onSessionChange={() => void load()}
           onOpenDecision={(request, explanation) => {
             setPanelOpen(false)

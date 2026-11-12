@@ -29,7 +29,7 @@ import { alternativeTarget, decisionRequestFrom } from './contract'
 import type { AppState, ChatReply, Comparison, SavePlan, SaveTarget } from './contract'
 import { SimilarItems } from './Alternatives'
 import { PayIn4Row, PayIn4Strip } from './AskTrace'
-import { ASSESSMENT_ONLY, claudeUses } from './copy'
+import { ASSESSMENT_ONLY } from './copy'
 import { optionStatus, type DecisionRequest, type Explanation } from './Decision'
 import { claudeOn, envLabel, fits, missingFix, useComparison } from './engine'
 import { capitalize, cx, dayLabel, fromMoney, money, signed } from './format'
@@ -725,7 +725,6 @@ export function Ask({
   state,
   initialPrompt,
   visible,
-  onUpdate,
   onSessionChange,
   onOpenDecision,
   onOpenCheckout,
@@ -744,7 +743,6 @@ export function Ask({
   offer?: AskOffer
   /** Called when the guide's face should change. */
   onMood?: (mood: GuideExpression) => void
-  onUpdate?: (state: AppState) => void
   onSessionChange?: () => void
   onOpenDecision: (request: DecisionRequest, explanation?: Explanation) => void
   onOpenCheckout: (purchaseId: string) => void
@@ -1114,7 +1112,6 @@ export function Ask({
             <ArrowUp className="ico" strokeWidth={2} aria-hidden="true" />
           </button>
         </form>
-        <WhatItSees state={state} onUpdate={onUpdate} />
       </div>
     </>
   )
@@ -1165,49 +1162,6 @@ export function Ask({
             )}
           </aside>
         </div>
-      </div>
-    </div>
-  )
-}
-
-/**
- * What the assistant sees, behind one disclosure under the composer: the table of what Claude
- * receives and the switch. It no longer takes a rail on desktop or a permanent dock row on phones.
- */
-function WhatItSees({
-  state,
-  onUpdate,
-}: {
-  state: AppState
-  onUpdate?: (state: AppState) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const id = useId()
-  return (
-    <div className="dock-line sees" data-open={open}>
-      <button
-        type="button"
-        className="link sees-toggle"
-        aria-expanded={open}
-        aria-controls={id}
-        onClick={() => setOpen(!open)}
-      >
-        {claudeOn(state) ? 'What the assistant sees' : 'Assistant off · what it would see'}
-        <ChevronDown className="ico chev" aria-hidden="true" />
-      </button>
-      <div className="sees-body" id={id} hidden={!open}>
-        <dl className="kvlist">
-          {claudeUses(claudeOn(state)).map(([label, value]) => (
-            <div key={label}>
-              <dt>{label}</dt>
-              <dd>{value}</dd>
-            </div>
-          ))}
-        </dl>
-        <ClaudeSwitch state={state} onUpdate={onUpdate} />
-        <a href="#settings" style={{ fontSize: 'var(--fs-meta)' }}>
-          Everything sent to Anthropic (Claude)
-        </a>
       </div>
     </div>
   )
