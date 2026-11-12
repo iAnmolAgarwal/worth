@@ -206,6 +206,22 @@ describe('Ask Worth shows its work', () => {
     expect(answer.trace?.reader).toBe('local')
   })
 
+  it('carries a later day agreed in Ask to the comparison', async () => {
+    const state = makeState()
+    const onOpenDecision = vi.fn()
+    const answer = fallbackReply(
+      { message: 'Can I afford a $1,199 camera tomorrow?', history: [] },
+      data(state),
+    )
+    expect(answer.assessment?.purchaseDate).toBe('2026-10-04')
+    const user = await ask(state, answer, { onOpenDecision })
+    await user.click(await screen.findByRole('button', { name: /See the comparison/ }))
+    expect(onOpenDecision).toHaveBeenCalledWith(
+      { productId: 'camera', onDate: '2026-10-04' },
+      expect.anything(),
+    )
+  })
+
   it('says what the assistant does, without claiming it explains every answer', () => {
     // The switch and its note live in Settings → Assistant now, not under the chat input.
     render(<ClaudeSwitch state={makeState()} />)

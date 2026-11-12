@@ -357,6 +357,7 @@ export default function App() {
         if (request.savedId) params.set('saved', request.savedId)
       }
       if (request.budgetCents !== undefined) params.set('budget', String(request.budgetCents))
+      if (request.onDate) params.set('on', request.onDate)
       params.set('from', from)
       // Channel3's price counts as read only in this tab's memory, never from the URL (C5).
       setConfirmedLink(request.priceSource === 'channel3' ? request : undefined)
@@ -420,8 +421,8 @@ export default function App() {
   const { screen, params } = route
   const decisionRequest = useMemo<DecisionRequest | undefined>(() => {
     if (screen !== 'decision') return undefined
-    return decisionRequestFrom(params, confirmedLink)
-  }, [screen, params, confirmedLink])
+    return decisionRequestFrom(params, confirmedLink, state?.today)
+  }, [screen, params, confirmedLink, state?.today])
 
   if (!state)
     return (

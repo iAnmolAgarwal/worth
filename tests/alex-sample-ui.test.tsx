@@ -3,6 +3,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
+import { decisionRequestFrom } from '../src/contract'
 import { Decision } from '../src/Decision'
 import { Saved, Settings } from '../src/Saved'
 import { api } from '../src/api'
@@ -333,5 +334,24 @@ describe('the answer page after saving', () => {
     )
     expect((await screen.findAllByRole('button', { name: 'Saved' })).length).toBeGreaterThan(0)
     expect(screen.queryByRole('button', { name: 'Save for Tue, Dec 15' })).toBeNull()
+  })
+})
+
+describe('the on= link parameter', () => {
+  const read = (query: string) =>
+    decisionRequestFrom(new URLSearchParams(query), undefined, '2026-11-13')
+  it('keeps a later day inside the wait window', () => {
+    expect(read('product=halden-x5&on=2026-11-15')).toEqual({
+      productId: 'halden-x5',
+      onDate: '2026-11-15',
+    })
+    expect(read('amount=60000&item=TV&on=2026-12-18')).toMatchObject({ onDate: '2026-12-18' })
+  })
+  it('ignores today, the past, a day past the window, nonsense, and a link read without a today', () => {
+    for (const on of ['2026-11-13', '2026-11-12', '2026-12-19', '2026-02-30', 'Sunday', ''])
+      expect(read(`product=halden-x5&on=${on}`)).toEqual({ productId: 'halden-x5' })
+    expect(decisionRequestFrom(new URLSearchParams('product=halden-x5&on=2026-11-15'))).toEqual({
+      productId: 'halden-x5',
+    })
   })
 })

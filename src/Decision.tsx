@@ -70,6 +70,8 @@ export type DecisionRequest = {
   savedId?: string
   /** The budget the person stated in Ask; Something cheaper stays within it. */
   budgetCents?: number
+  /** A later day agreed in Ask Worth (`on=`): the comparison also judges buying then. */
+  onDate?: string
 }
 /**
  * A store's item from a signed hand-off (/check). The store sells it, so the way back to the

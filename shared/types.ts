@@ -486,6 +486,11 @@ export interface Comparison {
   budgetCents?: number
   wait: WaitOption
   spendLess: SpendLessOption
+  /**
+   * Buying in full on a later day the person chose (in Ask Worth), judged over the same window as
+   * every option. Absent unless a day after today was asked for.
+   */
+  chosen?: OptionResult & { date: string }
   /** A comparison the user opens deliberately. It is never recommended or ranked. */
   payIn4: PayIn4Comparison
   /** Null while information is missing. Pay in 4 is never a recommendation. */
