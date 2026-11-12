@@ -3,7 +3,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
-import { Settings } from '../src/Saved'
+import { fitStatus, Saved, Settings } from '../src/Saved'
 import { api } from '../src/api'
 import { lowerName } from '../src/engine'
 import { payIn4Lines } from '../src/payIn4Text'
@@ -154,5 +154,51 @@ describe('the Pay in 4 card on Alex’s camera', () => {
       lead: 'With Pay in 4, your balance would first go below your cushion on Sun, Nov 29',
       low: 'Lowest point $222.76 on Mon, Nov 30, before payday. Payment 2 ($474.75) lands Fri, Nov 27.',
     })
+  })
+})
+
+describe('Saved says whether each item fits', () => {
+  it('reads Fits today, Fits <wait day> or Over by $X from the engine', () => {
+    const state = alexState()
+    expect(fitStatus(state, 34900)).toEqual({ tone: 'ok', text: 'Fits today' })
+    expect(fitStatus(state, 189900)).toEqual({ tone: 'sug', text: 'Fits Tue, Dec 15' })
+    const over = fitStatus(state, 900000)!
+    expect(over.tone).toBe('bad')
+    expect(over.text).toBe('Over by $8,127.74')
+  })
+
+  it('shows it on each saved card as the main status', () => {
+    const state = alexState()
+    state.saved = [
+      {
+        id: 'cam',
+        kind: 'catalog',
+        productId: 'halden-x5',
+        name: 'Halden X5',
+        amountCents: 189900,
+        createdAt: '2026-11-13T12:00:00Z',
+        status: 'active',
+      },
+      {
+        id: 'hp',
+        kind: 'catalog',
+        productId: 'headphones',
+        name: 'Studio headphones',
+        amountCents: 34900,
+        createdAt: '2026-11-13T11:00:00Z',
+        status: 'active',
+      },
+    ]
+    render(
+      <Saved
+        state={state}
+        onOpenDecision={vi.fn()}
+        onOpenCheckout={vi.fn()}
+        onUpdate={vi.fn()}
+        onToast={vi.fn()}
+      />,
+    )
+    expect(screen.getByText('Fits Tue, Dec 15')).toBeTruthy()
+    expect(screen.getByText('Fits today')).toBeTruthy()
   })
 })
