@@ -130,7 +130,6 @@ export function AgentLauncher({
   // Opening moves focus into the composer; the page behind keeps its own focus order.
   useEffect(() => {
     if (!open) return
-    setBubble(false)
     const frame = requestAnimationFrame(() =>
       panel.current?.querySelector<HTMLElement>('#ask-q')?.focus(),
     )
@@ -171,7 +170,10 @@ export function AgentLauncher({
           aria-label="Ask Worth"
           aria-expanded={open}
           aria-controls={panelId}
-          onClick={() => onOpenChange(true)}
+          onClick={() => {
+            setBubble(false)
+            onOpenChange(true)
+          }}
         >
           <Guide
             size={46}
