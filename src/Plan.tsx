@@ -15,7 +15,7 @@ import type { AppState } from './contract'
 import { isActive } from './contract'
 import { DEMO_CLOCK_EDIT, pinnedSample } from './copy'
 import { allPlans, cadenceLabel, flowIcon, kindLabel, runningPlans } from './engine'
-import { cx, dayLabel, money, shortDate, signed, displayName } from './format'
+import { cx, dayLabel, money, signed, displayName } from './format'
 import { Alert, Button, DateStepper, Disc, Field, Pill, Ring, Toggle } from './ui'
 
 type FlowDraft = Omit<ScheduledFlow, 'amountCents'> & { amount: string }
@@ -1242,10 +1242,6 @@ function Review({
           <h2 className="h-section" id="preview-title">
             Your balance, next {preview.points.length - 1} days
           </h2>
-          <p className="meta">
-            Each day’s lowest balance before any purchase, {shortDate(preview.points[0]!.date)} to{' '}
-            {shortDate(preview.points.at(-1)!.date)}.
-          </p>
           <BalanceChart
             options={[
               {

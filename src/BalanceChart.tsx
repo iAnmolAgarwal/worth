@@ -35,6 +35,8 @@ export interface ChartOption {
   key: string
   /** The pill, summary and legend name: "Buy today". */
   name: string
+  /** A shorter name for a table column header: "Wait · Dec 15". */
+  short?: string
   points: ForecastPoint[]
   /** Its colour when it is not the option the page is showing; red and green keep their meanings. */
   tone?: Tone
@@ -174,6 +176,7 @@ export function BalanceChart({
       return {
         key: option.key,
         name: option.name,
+        short: option.short ?? option.name,
         style: toneOf(option),
         instalments: option.instalments,
         all,
@@ -730,7 +733,7 @@ export function BalanceChart({
         cushionCents={cushionCents}
         columns={series.map((s) => ({
           key: s.key,
-          name: s.name,
+          name: s.short,
           low: s.low,
           cents: s.all.map((point) => point?.minimumCents),
           instalments: s.instalments,

@@ -95,8 +95,8 @@
 }
 /* The balance with nothing bought: neutral, never an option's colour. */
 .wchart .tone-none {
-  --tone: #44546f;
-  --tone-ink: #44546f;
+  --tone: #000;
+  --tone-ink: #000;
 }
 .wchart .tone-amber {
   --tone: #b85c00;

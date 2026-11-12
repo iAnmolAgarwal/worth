@@ -314,6 +314,7 @@ export function ChartTile({
       .map((key) => ({
         key,
         name: key === 'spendLess' ? fullName : optionTitle(key, c),
+        short: key === 'wait' && c.wait.date ? `Wait · ${shortDate(c.wait.date)}` : undefined,
         points: optionOf(c, key)!.points,
         tone: key === 'buyToday' ? ('amber' as const) : ('teal' as const),
         purchase: purchase(optionOf(c, key)!),

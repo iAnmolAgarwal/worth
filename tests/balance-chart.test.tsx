@@ -12,6 +12,7 @@ import { assessPurchase, compareOptions } from '../shared/finance'
 import {
   ALEX_CAMERA_ID,
   ALEX_DEMO_DAY,
+  ALEX_RETURN_DAY,
   createCameraScenario,
   createDemoState,
   PRODUCTS,
@@ -152,7 +153,11 @@ describe('the default view', () => {
     expect(within(table).getAllByRole('row')).toHaveLength(DAYS + 1)
     // Day, what happens, then one balance column per pressed option, amounts to the right.
     const headers = within(table).getAllByRole('columnheader')
-    expect(headers.map((header) => header.textContent)).toEqual(['Day', 'What happens', WAIT])
+    expect(headers.map((header) => header.textContent)).toEqual([
+      'Day',
+      'What happens',
+      'Wait · Dec 15',
+    ])
     expect(headers.map((header) => header.className)).toEqual(['', '', 'num'])
     const row = (day: string) =>
       [...within(table).getByRole('rowheader', { name: day }).closest('tr')!.cells].map(
@@ -184,6 +189,55 @@ describe('the default view', () => {
     render(tile())
     expect(svg().querySelector('[stroke-dasharray]')).toBeNull()
     expect(document.querySelector('.wchart-legend .wchart-swatch.cushion')).toBeTruthy()
+  })
+})
+
+describe('the pill pressed on load is Worth’s recommendation', () => {
+  const compare = (productId: string, day: string) => {
+    const product = PRODUCTS.find((p) => p.id === productId)!
+    return compareOptions(createCameraScenario(day).profile, [], {
+      amountCents: product.priceCents,
+      itemName: product.name,
+      today: day,
+      payIn4Eligible: true,
+    })
+  }
+  /** The chart as the page first draws it: on the engine's recommendation. */
+  const pressedOnLoad = (c: Comparison) => {
+    const p4 = c.payIn4.available ? c.payIn4 : undefined
+    render(<ChartTile c={c} k={c.recommendation ?? 'buyToday'} scaleWith={p4} />)
+    return pills()
+      .filter((button) => button.getAttribute('aria-pressed') === 'true')
+      .map((button) => button.textContent)
+  }
+
+  it('is "Wait until Tue, Dec 15" for Alex’s Halden X5 on Nov 13', () => {
+    const c = compare(ALEX_CAMERA_ID, ALEX_DEMO_DAY)
+    expect(c.recommendation).toBe('wait')
+    expect(pressedOnLoad(c)).toEqual([WAIT])
+  })
+
+  it('is "Buy today" for an item that fits today, with no Wait pill to press', () => {
+    const c = compare('airpods-4', ALEX_DEMO_DAY)
+    expect(c.recommendation).toBe('buyToday')
+    expect(pressedOnLoad(c)).toEqual(['Buy today'])
+    expect(pills().map((button) => button.textContent)).not.toContain(WAIT)
+  })
+
+  it('is "Buy today" for the Halden X5 on the Dec 15 return visit, when it fits', () => {
+    const c = compare(ALEX_CAMERA_ID, ALEX_RETURN_DAY)
+    expect(c.recommendation).toBe('buyToday')
+    expect(pressedOnLoad(c)).toEqual(['Buy today'])
+  })
+
+  it('is the cheaper option for an item that never fits in the window', () => {
+    const c = compare('macbook-pro-14', ALEX_DEMO_DAY)
+    expect(c.wait.date).toBeNull()
+    expect(c.recommendation).toBe('spendLess')
+    expect(pressedOnLoad(c)).toEqual([expect.stringMatching(/^Spend \$[\d,.]+ today$/)])
+    // Exactly one pill is pressed, and the line drawn is that option's.
+    expect(svg().querySelectorAll('.wchart-line')).toHaveLength(1)
+    expect(svg().querySelectorAll('.wchart-alt')).toHaveLength(0)
   })
 })
 
@@ -616,7 +670,7 @@ describe('the table with Pay in 4 open', () => {
       within(table)
         .getAllByRole('columnheader')
         .map((header) => header.textContent),
-    ).toEqual(['Day', 'What happens', WAIT, 'Buy today', 'Pay in 4'])
+    ).toEqual(['Day', 'What happens', 'Wait · Dec 15', 'Buy today', 'Pay in 4'])
     expect(table.textContent).toContain('payment 2 of 4')
     const row = (day: string) =>
       [...within(table).getByRole('rowheader', { name: day }).closest('tr')!.cells].map(
