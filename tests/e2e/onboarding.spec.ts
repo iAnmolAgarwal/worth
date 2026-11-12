@@ -75,3 +75,38 @@ test('the Connect PayPal popover sits above the Saved column, so its buttons tak
   await page.getByRole('button', { name: 'Not now' }).click()
   await expect(page.getByRole('button', { name: 'Continue to PayPal' })).toHaveCount(0)
 })
+
+test('on a wide screen the review’s Back and Continue never cover a card', async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name === 'phone-390', 'phones keep the sticky bar within thumb reach')
+  await page.goto(`${origins.worth}/`)
+  await page.getByRole('button', { name: 'Import a file' }).click()
+  await page.getByRole('button', { name: /Try with a sample PayPal export/ }).click()
+  await expect(page.getByRole('heading', { name: 'Check what Worth found' })).toBeVisible()
+  for (const [width, height] of [
+    [1440, 900],
+    [1280, 720],
+    [1024, 768],
+  ]) {
+    await page.setViewportSize({ width, height })
+    // At every scroll position, nothing in the review sits under the bar.
+    const covered = await page.evaluate(async () => {
+      const foot = document.querySelector('.import-review .wizard-foot')!
+      const hits: string[] = []
+      for (let y = 0; y <= document.documentElement.scrollHeight; y += 120) {
+        window.scrollTo(0, y)
+        await new Promise((done) => requestAnimationFrame(() => done(null)))
+        const bar = foot.getBoundingClientRect()
+        for (const el of document.querySelectorAll('.import-review form *')) {
+          if (foot.contains(el) || el.children.length) continue
+          const box = el.getBoundingClientRect()
+          if (box.height && box.bottom > bar.top + 1 && box.top < bar.bottom - 1)
+            hits.push(`${y}: ${el.textContent?.slice(0, 30)}`)
+        }
+      }
+      return hits
+    })
+    expect(covered, `${width}×${height}`).toEqual([])
+  }
+})
