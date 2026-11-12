@@ -42,8 +42,16 @@ export function slugName(url: string): string | undefined {
   } catch {
     return undefined
   }
+  // A stray "%" ("50%-off") is not an escape: keep the segment as written rather than throw.
+  const decode = (segment: string) => {
+    try {
+      return decodeURIComponent(segment)
+    } catch {
+      return segment
+    }
+  }
   const words = (segment: string) =>
-    decodeURIComponent(segment)
+    decode(segment)
       .replace(/\.[a-z0-9]{1,5}$/i, '')
       .split(/[-_+\s]+/)
       .filter((word) => /\p{L}/u.test(word))
@@ -53,8 +61,9 @@ export function slugName(url: string): string | undefined {
     .filter((list) => list.length >= 2)
     .sort((a, b) => b.length - a.length)[0]
   if (!best) return undefined
-  const text = best.join(' ').slice(0, LINK_TITLE_MAX).trim()
-  return text.charAt(0).toUpperCase() + text.slice(1)
+  // Cleaned like a page title: no control or bidi characters, at most the title's length.
+  const text = productTitle(best.join(' '))
+  return text && text.charAt(0).toUpperCase() + text.slice(1)
 }
 
 /** Reads a pasted link once: the confirm card when there is a USD price, the manual card otherwise. */

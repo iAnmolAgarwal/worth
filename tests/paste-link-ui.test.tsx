@@ -371,4 +371,24 @@ describe('slugName', () => {
     expect(slugName('https://shop.example/')).toBeUndefined()
     expect(slugName('not a url')).toBeUndefined()
   })
+
+  it('never throws on a stray % and drops control and bidi characters', () => {
+    expect(slugName('https://shop.example.com/50%-off-hiking-boots')).toBe('Off hiking boots')
+    expect(() =>
+      slugName('https://shop.example.com/trailhead-daypack%E0%A4%A-moss-green'),
+    ).not.toThrow()
+    expect(slugName('https://shop.example.com/trailhead-daypack%E0%A4%A-moss-green')).toMatch(
+      /^Trailhead daypack/,
+    )
+    expect(slugName('https://shop.example.com/evil-%E2%80%AEname-camera')).toBe('Evil name camera')
+  })
+
+  it('pasting such a link still shows the manual card instead of breaking the page', async () => {
+    answer(new ApiError('x', 502, 'LOOKUP_FAILED'))
+    await paste('https://shop.example.com/50%-off-hiking-boots')
+    await screen.findByRole('heading', { name: 'We couldn’t read that page. What’s the price?' })
+    expect((screen.getByRole('textbox', { name: 'Item' }) as HTMLInputElement).value).toMatch(
+      /hiking boots/,
+    )
+  })
 })
