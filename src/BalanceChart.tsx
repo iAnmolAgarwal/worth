@@ -289,7 +289,24 @@ export function BalanceChart({
       style: s.style,
       cents: s.days.map((p) => p?.minimumCents),
     })),
-  ]
+  ].map((s) => {
+    // The days a line is below the cushion, and below zero, as the engine's numbers have them:
+    // its red line and red region start and end on those days, never where the curve crosses.
+    const cents = s.cents.map((value) => value ?? cushionCents)
+    return { ...s, dips: stretches(cents, cushionCents), deep: stretches(cents, 0) }
+  })
+  /** The columns of a run of days, as a clip rectangle. */
+  const columns = (run: { from: number; to: number }) => ({
+    x: g.x(run.from) - g.step / 2,
+    y: plot.y,
+    width: (run.to - run.from + 1) * g.step,
+    height: plot.h + 4,
+  })
+  // The blue fill covers only the days at or above the cushion.
+  const clear = stretches(
+    values.map((value) => (value < cushionCents ? 0 : -1)),
+    0,
+  )
 
   // Each compare line is named on the plot where it sits furthest from the main line, so the
   // lines read without their colours.
@@ -336,9 +353,10 @@ export function BalanceChart({
       <ul className="wchart-summary">
         {summaries.map((summary, index) => (
           <li key={summary.key} className={cx(summary.runs.length > 0 && 'dips')}>
-            <span className={cx('wchart-swatch', summary.style)} aria-hidden />
             <span className="words">
-              {(others.length > 0 || index > 0) && <b>{summary.name}: </b>}
+              {(others.length > 0 || index > 0) && (
+                <b className={cx('name', summary.style)}>{summary.name}: </b>
+              )}
               {amounts(summary.text)}
             </span>
             <span className="jumps">
@@ -426,7 +444,8 @@ export function BalanceChart({
                 <stop offset="0" className="wchart-area-top" />
                 <stop offset="1" className="wchart-area-end" />
               </linearGradient>
-              {/* Below the cushion a line is redrawn in red, so a dip reads without a label. */}
+              {/* Below the cushion the region turns red, on the line's below days; the line itself
+                  keeps its option's colour for its whole length. */}
               <clipPath id={`${id}-under`}>
                 <rect
                   x={0}
@@ -435,6 +454,37 @@ export function BalanceChart({
                   height={Math.max(0, floor - cushionY + 4)}
                 />
               </clipPath>
+              <clipPath id={`${id}-zero`}>
+                <rect x={0} y={g.y(0)} width={g.width} height={Math.max(0, floor - g.y(0) + 4)} />
+              </clipPath>
+              <clipPath id={`${id}-clear`}>
+                {clear.map((run) => (
+                  <rect key={run.from} {...columns(run)} />
+                ))}
+              </clipPath>
+              {series.map((s) => (
+                <Fragment key={s.key}>
+                  <clipPath
+                    id={`${id}-dips-${s.key}`}
+                    className="wchart-dipdays"
+                    data-series={s.key}
+                  >
+                    {s.dips.map((run) => (
+                      <rect
+                        key={run.from}
+                        {...columns(run)}
+                        data-from={visible[run.from]!.date}
+                        data-to={visible[run.to]!.date}
+                      />
+                    ))}
+                  </clipPath>
+                  <clipPath id={`${id}-deep-${s.key}`}>
+                    {s.deep.map((run) => (
+                      <rect key={run.from} {...columns(run)} />
+                    ))}
+                  </clipPath>
+                </Fragment>
+              ))}
             </defs>
 
             {g.ticks.map((cents) => (
@@ -452,29 +502,6 @@ export function BalanceChart({
               </g>
             ))}
 
-            {runs.map((run) => {
-              const x = g.x(run.from) - g.step / 2
-              const w = (run.to - run.from + 1) * g.step
-              const text = `Below cushion ${stretchDates(run, visible)}`
-              const short = stretchDates(run, visible)
-              const fit = [text, short].find((words) => textWidth(words, 11, 600) + 10 <= w)
-              return (
-                <g key={run.from}>
-                  <rect className="wchart-band" x={x} y={plot.y} width={w} height={plot.h} />
-                  {fit && (
-                    <text
-                      className="wchart-bandlabel"
-                      x={x + w / 2}
-                      y={plot.y + 14}
-                      textAnchor="middle"
-                    >
-                      {fit}
-                    </text>
-                  )}
-                </g>
-              )
-            })}
-
             {lane.map((mark) => (
               <g key={`${mark.kind}${mark.index}`} className={cx('wchart-mark', mark.kind)}>
                 <line x1={g.x(mark.index)} x2={g.x(mark.index)} y1={plot.y} y2={floor} />
@@ -486,7 +513,49 @@ export function BalanceChart({
               </g>
             ))}
 
-            <path d={areaPath} fill={`url(#${id}-area)`} />
+            <path
+              className="wchart-area"
+              d={areaPath}
+              fill={`url(#${id}-area)`}
+              clipPath={`url(#${id}-clear)`}
+            />
+            {/* The viewed option below its cushion: red from the cushion down, on those days. */}
+            {runs.length > 0 && (
+              <g className="wchart-dip main">
+                <rect
+                  x={plot.x}
+                  y={cushionY}
+                  width={plot.w}
+                  height={floor - cushionY}
+                  clipPath={`url(#${id}-dips-main)`}
+                />
+                <rect
+                  className="deep"
+                  x={plot.x}
+                  y={g.y(0)}
+                  width={plot.w}
+                  height={Math.max(0, floor - g.y(0))}
+                  clipPath={`url(#${id}-deep-main)`}
+                />
+              </g>
+            )}
+            {/* A compare line below the cushion: the gap between the cushion and the line, laid
+                over a plain ground so the blue fill never shows through the red. */}
+            {series.slice(1).map((s) => {
+              if (!s.dips.length) return null
+              const gap = `${smoothPath(linePoints(s.cents))}L${g.x(visible.length - 1)},${cushionY}L${g.x(0)},${cushionY}Z`
+              return (
+                <g key={s.key} className="wchart-dip">
+                  <g clipPath={`url(#${id}-dips-${s.key})`}>
+                    <path className="ground" d={gap} clipPath={`url(#${id}-under)`} />
+                    <path d={gap} clipPath={`url(#${id}-under)`} />
+                  </g>
+                  <g clipPath={`url(#${id}-deep-${s.key})`}>
+                    <path className="deep" d={gap} clipPath={`url(#${id}-zero)`} />
+                  </g>
+                </g>
+              )
+            })}
 
             {anyNegative && (
               <g className="wchart-level zero">
@@ -506,15 +575,9 @@ export function BalanceChart({
             {series.slice(1).map((s) => (
               <g key={s.key}>
                 <path className={cx('wchart-alt', s.style)} d={smoothPath(linePoints(s.cents))} />
-                <path
-                  className={cx('wchart-alt under', s.style)}
-                  d={smoothPath(linePoints(s.cents))}
-                  clipPath={`url(#${id}-under)`}
-                />
               </g>
             ))}
             <path className="wchart-line" d={mainPath} />
-            <path className="wchart-line under" d={mainPath} clipPath={`url(#${id}-under)`} />
             {g.step >= 7 &&
               main.map((point, index) => (
                 <circle key={index} className="wchart-dot" cx={point.x} cy={point.y} r={1.6} />

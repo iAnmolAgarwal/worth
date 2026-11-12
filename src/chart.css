@@ -56,6 +56,9 @@
 .wchart-summary .words {
   flex: 1 1 280px;
 }
+.wchart-summary .name {
+  color: var(--tone-ink);
+}
 .wchart-summary .jumps {
   display: flex;
   flex-wrap: wrap;
@@ -85,17 +88,22 @@
 
 /* Every line has one solid colour of its own, shared by its chip, its labels and its legend
    entry. Red and green are never a line's colour: they mean below the cushion and "fits". */
+/* --tone-ink is the darker shade for an option's name in running text. */
 .wchart .tone-main {
   --tone: var(--w-line);
+  --tone-ink: var(--c-primary);
 }
 .wchart .tone-amber {
   --tone: #b85c00;
+  --tone-ink: #8a4500;
 }
 .wchart .tone-violet {
   --tone: #7a3ff2;
+  --tone-ink: #5b2bc4;
 }
 .wchart .tone-teal {
   --tone: #007a8a;
+  --tone-ink: #005f6b;
 }
 .wchart .tone-bill {
   --tone: var(--w-bill);
@@ -246,19 +254,18 @@
   stroke-width: 3px;
   stroke-linejoin: round;
 }
-.wchart-line.under,
-.wchart-alt.under {
-  stroke: var(--w-bad);
-  stroke-opacity: 1;
-}
-.wchart-band {
+/* Below the cushion the shaded region is red, never blue; below zero it is a little stronger. */
+.wchart-dip rect,
+.wchart-dip path {
   fill: var(--w-bad);
-  fill-opacity: 0.07;
+  fill-opacity: 0.13;
 }
-.wchart-bandlabel {
-  fill: #a80001;
-  font-size: 11px;
-  font-weight: 600;
+.wchart-dip .deep {
+  fill-opacity: 0.1;
+}
+.wchart-dip .ground {
+  fill: var(--c-surface);
+  fill-opacity: 1;
 }
 /* The cushion is the chart's one dotted line: round dots, evenly spaced. */
 .wchart-level.cushion line {
@@ -315,7 +322,7 @@
 }
 .wchart-low {
   fill: var(--c-surface);
-  stroke: var(--w-ink);
+  stroke: var(--w-line);
   stroke-width: 2;
 }
 .wchart-buy {

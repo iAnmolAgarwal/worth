@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it } from 'vitest'
 import { BalanceChart } from '../src/BalanceChart'
+import { stretches } from '../src/chartModel'
 import { ChartTile } from '../src/Decision'
 import { fullPayName, payIn4Lines, payIn4Thesis } from '../src/payIn4Text'
 import { compareOptions } from '../shared/finance'
@@ -45,6 +46,18 @@ const svg = () => screen.getByRole('img', { name: /^Projected balance/ })
 const focus = () => screen.getByRole('complementary', { name: 'Day in focus' })
 const slider = () => screen.getByRole('slider', { name: /Balance by day/ })
 const summaryRows = () => [...document.querySelectorAll('.wchart-summary li')]
+/** The day ranges a line's red region and red line are clipped to. */
+const dipDays = (series: string) =>
+  [...svg().querySelectorAll(`.wchart-dipdays[data-series="${series}"] rect`)].map((rect) => [
+    rect.getAttribute('data-from'),
+    rect.getAttribute('data-to'),
+  ])
+/** The engine's below-cushion stretches for an option, as first and last dates. */
+const engineDips = (points: OptionResult['points']) =>
+  stretches(
+    points.map((point) => point.minimumCents),
+    alex.cushionCents,
+  ).map((run) => [points[run.from]!.date, points[run.to]!.date])
 
 describe('the default view', () => {
   it('draws one line, the cushion, today, the paydays and the day it fits, and nothing else', () => {
@@ -52,13 +65,15 @@ describe('the default view', () => {
     expect(container.querySelector('.meta')!.textContent).toBe(
       'Each day’s lowest balance, Nov 13 to Jan 12.',
     )
-    expect(svg().querySelectorAll('.wchart-line:not(.under)')).toHaveLength(1)
+    expect(svg().querySelectorAll('.wchart-line')).toHaveLength(1)
     expect(svg().querySelectorAll('.wchart-alt')).toHaveLength(0)
     expect(svg().querySelector('.wchart-level.cushion text')!.textContent).toBe('Cushion $300')
     // The zero line is drawn only when something goes below zero.
     expect(svg().querySelector('.wchart-level.zero')).toBeNull()
-    // Waiting never dips, so no band is shaded.
-    expect(svg().querySelectorAll('.wchart-band')).toHaveLength(0)
+    // Waiting never dips: the fill under the line is blue on every day and nothing is red.
+    expect(svg().querySelectorAll('.wchart-area')).toHaveLength(1)
+    expect(svg().querySelectorAll('.wchart-dip')).toHaveLength(0)
+    expect(svg().querySelectorAll('.wchart-dipdays rect')).toHaveLength(0)
     const labels = [...svg().querySelectorAll('.wchart-mark text')].map((text) => text.textContent)
     expect(labels).toEqual(['Fits Dec 15', 'Today', 'Payday', 'Payday'])
     expect(svg().querySelector('.wchart-mark.fits')).toBeTruthy()
@@ -172,14 +187,33 @@ describe('the toggles', () => {
     render(tile())
     await user.click(chip('Buy today'))
     expect(chip('Buy today').getAttribute('aria-pressed')).toBe('true')
-    expect(svg().querySelectorAll('.wchart-alt.tone-amber:not(.under)')).toHaveLength(1)
-    // Its stretch under the cushion is redrawn in red.
-    expect(svg().querySelectorAll('.wchart-alt.under')).toHaveLength(1)
+    // One amber line for its whole length: a line never turns red, the region under it does.
+    expect(svg().querySelectorAll('.wchart-alt')).toHaveLength(1)
+    expect(svg().querySelectorAll('.wchart-alt.tone-amber')).toHaveLength(1)
+    expect(svg().querySelector('.under')).toBeNull()
     expect(svg().querySelector('.wchart-level.zero text')!.textContent).toBe('Zero $0')
     expect(summaryRows().map((row) => row.querySelector('.words')!.textContent)).toEqual([
       'Wait until Tue, Dec 15: Stays above your $300.00 cushion. Lowest $458.78 on Thu, Dec 31.',
       'Buy today: Below your $300.00 cushion from Thu, Nov 19 and below zero from Fri, Nov 20. Lowest −$726.74 on Mon, Nov 30.',
     ])
+    // A row has no line marker: its option is named in bold, in the option's colour.
+    expect(document.querySelector('.wchart-summary .wchart-swatch')).toBeNull()
+    expect(summaryRows().map((row) => row.querySelector('b')!.className)).toEqual([
+      'name tone-main',
+      'name tone-amber',
+    ])
+    // The dip is a red region between the cushion and Buy today's line, on the engine's
+    // below-cushion days; the viewed option's fill stays blue.
+    expect(dipDays('buyToday')).toEqual(engineDips(alex.buyToday.points))
+    expect(dipDays('buyToday')).toEqual([
+      ['2026-11-19', '2026-11-30'],
+      ['2026-12-10', '2026-12-14'],
+    ])
+    expect(dipDays('main')).toEqual([])
+    expect(svg().querySelectorAll('.wchart-dip')).toHaveLength(1)
+    expect(svg().querySelector('.wchart-dip.main')).toBeNull()
+    // A plain ground sits under the red, so the blue fill never shows through it.
+    expect(svg().querySelectorAll('.wchart-dip path.ground')).toHaveLength(1)
     // An amount never breaks after its minus sign.
     expect(
       [...summaryRows()[1]!.querySelectorAll('.nowrap')].map((amount) => amount.textContent),
@@ -266,10 +300,12 @@ describe('the toggles', () => {
   it('starts Pay in 4 on when the page has its comparison open', () => {
     const { rerender } = render(tile('wait', true))
     expect(chip('Pay in 4').getAttribute('aria-pressed')).toBe('true')
-    expect(svg().querySelectorAll('.wchart-alt.tone-violet:not(.under)')).toHaveLength(1)
+    expect(svg().querySelectorAll('.wchart-alt.tone-violet')).toHaveLength(1)
     expect(summaryRows()[1]!.querySelector('.words')!.textContent).toBe(
       'Pay in 4: Below your $300.00 cushion from Sun, Nov 29. Lowest $222.76 on Mon, Nov 30. Back above on Tue, Dec 1.',
     )
+    expect(dipDays('payIn4')).toEqual(engineDips(alexP4.points))
+    expect(dipDays('payIn4')).toEqual([['2026-11-29', '2026-11-30']])
     rerender(tile('wait', false))
     expect(chip('Pay in 4').getAttribute('aria-pressed')).toBe('false')
   })
@@ -331,10 +367,23 @@ describe('the day in focus', () => {
 })
 
 describe('an option that goes below the cushion', () => {
-  it('shades each stretch, draws the line red under the cushion and says it in red words', () => {
+  it('shades each stretch red, keeps the line its own colour and says it in red words', () => {
     render(tile('buyToday'))
-    expect(svg().querySelectorAll('.wchart-band')).toHaveLength(2)
-    expect(svg().querySelector('.wchart-line.under')!.getAttribute('clip-path')).toMatch(/under/)
+    // Red from the cushion down on the below-cushion days, a little stronger below zero; the
+    // blue fill is clipped to the other days.
+    expect(dipDays('main')).toEqual(engineDips(alex.buyToday.points))
+    expect(dipDays('main')).toEqual([
+      ['2026-11-19', '2026-11-30'],
+      ['2026-12-10', '2026-12-14'],
+    ])
+    expect(svg().querySelectorAll('.wchart-dip.main rect')).toHaveLength(2)
+    expect(svg().querySelector('.wchart-dip.main rect.deep')!.getAttribute('clip-path')).toMatch(
+      /deep-main/,
+    )
+    expect(svg().querySelector('.wchart-area')!.getAttribute('clip-path')).toMatch(/clear/)
+    // The line keeps the viewed option's colour all the way down.
+    expect(svg().querySelectorAll('.wchart-line')).toHaveLength(1)
+    expect(svg().querySelector('.under')).toBeNull()
     expect(svg().querySelector('.wchart-level.zero text')!.textContent).toBe('Zero $0')
     // Buying today does not fit: its day is marked, never in green.
     expect(svg().querySelector('.wchart-mark.buy text')!.textContent).toBe('Buy Nov 13')
