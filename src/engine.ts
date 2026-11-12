@@ -19,12 +19,12 @@ import {
   Zap,
   type LucideIcon,
 } from 'lucide-react'
-import { confirmedSchedule } from '../shared/finance'
+import { compareOptions, confirmedSchedule, withoutOwnHold } from '../shared/finance'
 import { nameInSentence } from '../shared/text'
 import type { ForecastPoint, OptionResult, ScheduledFlow } from '../shared/types'
 import { api } from './api'
 import type { AppState, Comparison } from './contract'
-import { dayLabel } from './format'
+import { dayLabel, money } from './format'
 
 /** The first day the balance goes below the cushion, if it does. */
 export const firstBelow = (points: ForecastPoint[], cushionCents: number) =>
@@ -49,6 +49,18 @@ export const lowestPoint = (option: OptionResult) =>
   option.points.find((point) => point.date === option.lowestDate)
 
 export const fits = (option: OptionResult) => option.outcome === 'fits'
+
+/**
+ * A low point in words: under $0 is "Overdrawn", between $0 and the cushion "Below cushion". The
+ * engine's own classification (fits or tight) is unchanged; this only names how far it goes.
+ */
+export const belowWords = (lowestCents: number) => (lowestCents < 0 ? 'Overdrawn' : 'Below cushion')
+
+/** "Overdrawn by $726.74 on Mon, Nov 30", or "Lowest $458.78 on Thu, Dec 31" above $0. */
+export const lowestSentence = (lowestCents: number, date: string) =>
+  lowestCents < 0
+    ? `Overdrawn by ${money(-lowestCents)} on ${dayLabel(date)}`
+    : `Lowest ${money(lowestCents)} on ${dayLabel(date)}`
 
 /** Readable label for a bill name inside a sentence: "rent" from "Apartment rent" stays as is. */
 export const lower = (name: string) => name.charAt(0).toLowerCase() + name.slice(1)
@@ -261,3 +273,32 @@ export const boughtProductIds = (state: AppState) =>
       .filter((purchase) => purchase.status === 'completed' && !purchase.archived)
       .map((purchase) => purchase.productId),
   )
+
+/**
+ * Whether a saved item fits, from the engine on this plan today: "Fits today", "Fits <day>" (the
+ * wait date) or "Over by $X" (past the most that fits today, with no day in the search). Undefined
+ * while the plan can't give an answer, so the older plan pills show instead. The item's own open
+ * checkout is left out: its hold already reduces the plan, and the item is what it is paying for.
+ */
+export function fitStatus(
+  state: AppState,
+  amountCents: number,
+  item: { productId?: string; itemName?: string } = {},
+) {
+  let c
+  try {
+    c = compareOptions(state.profile, withoutOwnHold(state.purchases, { ...item, amountCents }), {
+      amountCents,
+      today: state.today,
+    })
+  } catch {
+    return undefined
+  }
+  if (c.recommendation === null) return undefined
+  if (c.buyToday.outcome === 'fits') return { tone: 'ok' as const, text: 'Fits today' }
+  if (c.wait.date) return { tone: 'sug' as const, text: `Fits ${dayLabel(c.wait.date)}` }
+  return {
+    tone: 'bad' as const,
+    text: `Over by ${money(amountCents - Math.max(0, c.spendLess.maxPriceCents))}`,
+  }
+}

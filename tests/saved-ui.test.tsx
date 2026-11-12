@@ -254,7 +254,9 @@ describe('a saved wait plan on return', () => {
     })
     const view = render(<Saved {...savedProps} state={state} />)
     expect(screen.getAllByText('Road bike').length).toBeGreaterThan(0)
-    expect(screen.getAllByText(/Assessment only — no checkout in Worth/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/Check only: Worth can’t pay for this item/).length).toBeGreaterThan(
+      0,
+    )
     await user.click(screen.getByRole('button', { name: 'Confirm today’s funds' }))
     await user.click(await screen.findByRole('button', { name: 'Confirm and check again' }))
     view.rerender(<Saved {...savedProps} state={state} />)
@@ -364,7 +366,7 @@ describe('Save for later in Ask Worth', () => {
       { waitDate: '2026-10-23' },
     )
     await screen.findByText(/Saved for Fri, Oct 23/)
-    expect(screen.getByText('Assessment only — no checkout in Worth.')).toBeTruthy()
+    expect(screen.getByText('Check only: Worth can’t pay for this item.')).toBeTruthy()
   })
 
   it('labels a store price and remembers earlier items', async () => {
@@ -453,7 +455,8 @@ describe('who is who: Worth is the shopper’s side, Larkspur Supply is the demo
 
   it('keeps the demo store out of Saved: items read as what they are, not where they are sold', () => {
     render(<Saved {...savedProps} state={makeState()} />)
-    expect(screen.getByRole('heading', { name: 'More to check' })).toBeTruthy()
+    // No shop-like list of other items inside Worth.
+    expect(screen.queryByRole('heading', { name: 'More to check' })).toBeNull()
     expect(document.body.textContent).not.toMatch(/Larkspur|Demo store/)
   })
 })

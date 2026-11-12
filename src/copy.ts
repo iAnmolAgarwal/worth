@@ -30,7 +30,7 @@ export const CHANNEL3_LINK_DATA =
 export const demoStoreRole = (payee: string) =>
   `Worth sells nothing and never holds your money. Checkout here is a PayPal sandbox demo: ${payee} stands in for any shop that takes PayPal, and PayPal pays it directly.`
 /** A saved item outside Worth's listed items (amendment A3): Worth assesses it, never checks it out. */
-export const ASSESSMENT_ONLY = 'Assessment only — no checkout in Worth'
+export const ASSESSMENT_ONLY = 'Check only: Worth can’t pay for this item'
 /** A saved wait plan whose day has come (C-17). */
 export const MAY_FIT_NOW = 'Your plan suggests this may fit now — confirm today’s funds'
 /** The plan editor while the demo clock runs (the server refuses the edit too). */

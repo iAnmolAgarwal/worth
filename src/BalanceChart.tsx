@@ -803,10 +803,15 @@ export function BalanceChart({
           <i className="wchart-swatch cushion" />
           Cushion
         </span>
-        <span>
-          <i className="wchart-pill below" />
-          Below cushion
-        </span>
+        {/* Only when a drawn line actually goes below the cushion in the days shown. */}
+        {series.some((s) =>
+          s.all.slice(0, days).some((point) => point && point.minimumCents < cushionCents),
+        ) && (
+          <span>
+            <i className="wchart-pill below" />
+            Below cushion
+          </span>
+        )}
       </div>
       <div className="wchart-live" aria-live="polite">
         {spoken}

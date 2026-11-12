@@ -21,7 +21,7 @@ import {
   Unplug,
   Wallet,
 } from 'lucide-react'
-import { addDays, compareOptions, WAIT_SEARCH_DAYS, withoutOwnHold } from '../shared/finance'
+import { addDays, WAIT_SEARCH_DAYS } from '../shared/finance'
 import { DEMO_PRESET_DAYS } from '../shared/seed'
 import type { Product, SavedItem, SavedPriceCheck } from '../shared/types'
 import { api, ApiError } from './api'
@@ -43,10 +43,10 @@ import {
 import { SettingsAction, SettingsGroup, SettingsMore, SettingsRow } from './SettingsList'
 import { startTour } from './Tour'
 import type { DecisionRequest } from './Decision'
-import { claudeOn, fits, useComparison } from './engine'
+import { claudeOn, fits, fitStatus, lowestSentence, useComparison } from './engine'
 import type { AppState, Purchase } from './contract'
 import { isActive, savedSource, saveRequest } from './contract'
-import { dayLabel, fromMoney, fullDate, money, sampleDate, shortDate, signed } from './format'
+import { dayLabel, fromMoney, fullDate, money, sampleDate, shortDate } from './format'
 import { Alert, Button, DateStepper, Dialog, Disc, Field, Pill, Toggle } from './ui'
 
 /** The browser's old per-device wait dates, from before plans moved to the server (G5-6). */
@@ -103,8 +103,6 @@ const priceNote = (item: SavedItem) =>
 
 const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
 
-/** How many unsaved listed items "More to check" shows. */
-const MORE_TO_CHECK = 3
 /** A catalog item's second line: what it is, never the demo store's name (owner decision). */
 const productLine = (product: Product) => product.subtitle ?? product.category
 
@@ -175,35 +173,6 @@ function Picture({
   )
 }
 
-/**
- * Whether a saved item fits, from the engine on this plan today: "Fits today", "Fits <day>" (the
- * wait date) or "Over by $X" (past the most that fits today, with no day in the search). Undefined
- * while the plan can't give an answer, so the older plan pills show instead. The item's own open
- * checkout is left out: its hold already reduces the plan, and the item is what it is paying for.
- */
-export function fitStatus(
-  state: AppState,
-  amountCents: number,
-  item: { productId?: string; itemName?: string } = {},
-) {
-  let c
-  try {
-    c = compareOptions(state.profile, withoutOwnHold(state.purchases, { ...item, amountCents }), {
-      amountCents,
-      today: state.today,
-    })
-  } catch {
-    return undefined
-  }
-  if (c.recommendation === null) return undefined
-  if (c.buyToday.outcome === 'fits') return { tone: 'ok' as const, text: 'Fits today' }
-  if (c.wait.date) return { tone: 'sug' as const, text: `Fits ${dayLabel(c.wait.date)}` }
-  return {
-    tone: 'bad' as const,
-    text: `Over by ${money(amountCents - Math.max(0, c.spendLess.maxPriceCents))}`,
-  }
-}
-
 function statusPill(item: SavedItem, fit?: ReturnType<typeof fitStatus>) {
   if (fit) return <Pill tone={fit.tone}>{fit.text}</Pill>
   if (item.status === 'ready') return <Pill tone="ok">May fit now</Pill>
@@ -254,16 +223,15 @@ function SavedCard({
         <div className="t">{item.name}</div>
         <div className="meta">
           {(product && productLine(product)) ??
-            (item.sourceUrl ? storeName(item) : (item.retailer ?? 'Your assessment'))}
+            (item.sourceUrl ? storeName(item) : (item.retailer ?? ASSESSMENT_ONLY))}
         </div>
         <div className="num strong" style={{ fontWeight: 700, marginTop: 4 }}>
           {money(item.amountCents)}
         </div>
       </div>
-      {item.kind === 'custom' && (
-        <p className="caption hide-m">
-          {item.sourceUrl ? sentence(priceNote(item)) : ASSESSMENT_ONLY}
-        </p>
+      {/* A typed item reads like a listed one: name, one line, price, then whether it fits. */}
+      {item.kind === 'custom' && item.sourceUrl && (
+        <p className="caption hide-m">{sentence(priceNote(item))}</p>
       )}
       {item.status === 'bought' && <span className="corner-pill">Bought</span>}
       {item.status !== 'bought' && statusPill(item, fit) && <div>{statusPill(item, fit)}</div>}
@@ -568,7 +536,7 @@ function ReadyPlan({
           {fresh && c && (
             <p className="meta" style={{ marginTop: 4 }} role="status">
               {fitsNow
-                ? `Checked just now: buying today keeps your ${money(c.cushionCents)} cushion. Lowest ${signed(c.buyToday.lowestBalanceCents)} on ${dayLabel(c.buyToday.lowestDate)}.`
+                ? `Checked just now: buying today keeps your ${money(c.cushionCents)} cushion. ${lowestSentence(c.buyToday.lowestBalanceCents, c.buyToday.lowestDate)}.`
                 : c.wait.date
                   ? `Checked just now: not yet. Your plan now suggests ${dayLabel(c.wait.date)}.`
                   : `Checked just now: it doesn’t fit in the next ${WAIT_SEARCH_DAYS} days.`}
@@ -654,9 +622,6 @@ export function Saved({
       ),
     [state],
   )
-  const more = state.products.filter(
-    (p) => !saved.some((item) => item.kind === 'catalog' && item.productId === p.id),
-  )
   const fundsToday = state.profile.confirmed && state.profile.snapshotDate === state.today
   const asked = checkId && ready.some((item) => item.id === checkId) ? checkId : undefined
   // Arriving for a plan: confirm today's funds first, unless they were just confirmed today.
@@ -712,36 +677,6 @@ export function Saved({
               />
             ))}
           </div>
-        )}
-        {more.length > 0 && (
-          // A short plain list of a few more things to check, never a store (final-day plan §0).
-          <section aria-labelledby="more-title" style={{ marginTop: 'var(--s-6)' }}>
-            <div className="sec-head">
-              <h2 className="h-section" id="more-title">
-                More to check
-              </h2>
-            </div>
-            <div className="tile rows" style={{ maxWidth: 560 }}>
-              {more.slice(0, MORE_TO_CHECK).map((product) => (
-                <button
-                  type="button"
-                  className="row plain small"
-                  key={product.id}
-                  aria-label={`Check ${product.name}`}
-                  onClick={() => onOpenDecision({ productId: product.id })}
-                >
-                  <img className="thumb" src={product.image} alt="" />
-                  <div className="body">
-                    <div className="t">{product.name}</div>
-                    <div className="s">
-                      <span className="soft">{productLine(product)}</span>
-                    </div>
-                  </div>
-                  <div className="amt num">{money(product.priceCents)}</div>
-                </button>
-              ))}
-            </div>
-          </section>
         )}
       </div>
       {confirming && (

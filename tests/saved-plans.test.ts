@@ -166,7 +166,7 @@ describe('saved items on the server', () => {
     const prepared = await post(agent, `/api/saved/${custom.body.item.id}/prepare`)
     expect(prepared.status).toBe(409)
     expect(prepared.body).toMatchObject({ code: 'NOT_IN_STORE' })
-    expect(prepared.body.error).toContain('Assessment only — no checkout in Worth')
+    expect(prepared.body.error).toContain('Check only: Worth can’t pay for this item')
     expect(paypal!.create).not.toHaveBeenCalled()
     expect((await state(agent)).purchases).toEqual([])
   })

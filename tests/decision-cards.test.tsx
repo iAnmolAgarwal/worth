@@ -78,7 +78,11 @@ describe('option cards (feedback item 4)', () => {
     expect(optionWhy(c, 'buyToday', c.buyToday)).toBe(
       'Just $8.99 under your cushion on Thu, Oct 22',
     )
-    expect(optionWhy(c, 'wait', c.wait as OptionResult)).toBe('Thu, Oct 22, $440.01 above cushion')
+    // Wait is the recommendation: the verdict states its margin, so the card names only the day.
+    expect(optionWhy(c, 'wait', c.wait as OptionResult)).toBe('on Thu, Oct 22')
+    expect(optionWhy({ ...c, recommendation: 'spendLess' }, 'wait', c.wait as OptionResult)).toBe(
+      'Thu, Oct 22, $440.01 above cushion',
+    )
     expect(optionWhy(c, 'spendLess', c.spendLess)).toBe('fits today if you skip the desk chair')
   })
   it('counts a miss of exactly a tenth of the price as small, and anything more as not', () => {

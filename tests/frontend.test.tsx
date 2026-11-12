@@ -755,6 +755,13 @@ describe('decision view', () => {
     render(<Decision {...props} onBuy={onBuy} state={state} request={{ productId: 'camera' }} />)
     await user.click((await screen.findAllByRole('button', { name: 'Buy today anyway' }))[0]!)
     const dialog = screen.getByRole('dialog', { name: 'Buy today anyway?' })
+    // Below the cushion, keeping the plan is the filled button; continuing is the secondary one.
+    expect(within(dialog).getByRole('button', { name: 'Keep my plan' }).className).toContain(
+      'btn-primary',
+    )
+    expect(
+      within(dialog).getByRole('button', { name: 'Continue to checkout' }).className,
+    ).toContain('btn-secondary')
     expect(dialog.textContent).toContain('below your $300.00 cushion')
     await user.click(within(dialog).getByRole('button', { name: 'Continue to checkout' }))
     expect(onBuy).toHaveBeenCalledWith(expect.objectContaining({ id: 'camera' }), true)
@@ -1270,12 +1277,17 @@ describe('blocking fixes', () => {
     expect(onViewActivity).toHaveBeenCalledOnce()
   })
 
-  it('marks Wait as not needed when buying today fits', async () => {
+  it('shows only Buy today when it fits: no empty Wait card, and the margin said once', async () => {
     const state = makeState()
     routeApi((_path, data) => compare(state, data))
     render(<Decision {...decisionProps} state={state} request={{ productId: 'backpack' }} />)
     const group = await screen.findByRole('radiogroup', { name: 'Your options' })
-    expect(within(group).getByText('Not needed')).toBeTruthy()
+    expect(within(group).getAllByRole('radio')).toHaveLength(1)
+    expect(within(group).queryByText('Not needed')).toBeNull()
+    // The verdict states the margin; the card does not repeat it.
+    const margin = /above your \$300\.00 cushion|above cushion/
+    expect(document.querySelector('.verdict-block')!.textContent).toMatch(margin)
+    expect(group.textContent).not.toMatch(margin)
     expect(screen.queryByText(/Wait until/)).toBeNull()
     expect(screen.getAllByRole('button', { name: 'Buy now' }).length).toBeGreaterThan(0)
   })
@@ -1392,7 +1404,9 @@ describe('iteration 2 fixes', () => {
       />,
     )
     const group = await screen.findByRole('radiogroup', { name: 'Your options' })
-    expect(within(group).getByText('Below cushion')).toBeTruthy()
+    // Buying today goes under $0 here, so it reads "Overdrawn", not "Below cushion".
+    expect(within(group).getByText('Overdrawn')).toBeTruthy()
+    expect(within(group).queryByText('Below cushion')).toBeNull()
     expect(within(group).getByText('Above cushion')).toBeTruthy()
     // Something cheaper is the alternative, not a competing verdict: up to its limit fits today.
     expect(within(group).getByText('Fits today')).toBeTruthy()

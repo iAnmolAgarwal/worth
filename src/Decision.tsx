@@ -10,6 +10,7 @@ import {
 import {
   ArrowLeft,
   Bookmark,
+  BookmarkCheck,
   CalendarCheck,
   CalendarDays,
   ArrowRight,
@@ -41,7 +42,9 @@ import {
   billOn,
   firstBelow,
   fits,
+  belowWords,
   lower,
+  lowestSentence,
   lowerName,
   missingFix,
   optionTitle,
@@ -100,7 +103,8 @@ export interface Explanation {
 /** One state set everywhere: above the cushion, exactly at it, or below it. Words, never colour alone. */
 export function optionStatus(option: OptionResult): { tone: Tone; text: string } {
   if (option.outcome === 'incomplete') return { tone: 'info', text: 'More info needed' }
-  if (option.outcome === 'tight') return { tone: 'bad', text: 'Below cushion' }
+  if (option.outcome === 'tight')
+    return { tone: 'bad', text: belowWords(option.lowestBalanceCents) }
   return option.headroomCents === 0
     ? { tone: 'warn', text: 'At your limit' }
     : { tone: 'ok', text: 'Above cushion' }
@@ -137,8 +141,11 @@ export function optionWhy(c: Comparison, k: OptionKey, option: OptionResult) {
       : `fits today if you skip the ${lowerName(c.itemName)}`
   if (option.headroomCents === 0)
     return `Leaves exactly your cushion on ${dayLabel(option.lowestDate)}`
+  // The verdict states the recommended option's margin, so its card names only the day.
   if (option.lowestBalanceCents >= c.cushionCents)
-    return `${dayLabel(option.lowestDate)}, ${money(option.headroomCents)} above cushion`
+    return c.recommendation === k
+      ? `on ${dayLabel(option.lowestDate)}`
+      : `${dayLabel(option.lowestDate)}, ${money(option.headroomCents)} above cushion`
   return smallMiss(option, c.amountCents)
     ? `Just ${money(-option.headroomCents)} under your cushion on ${dayLabel(option.lowestDate)}`
     : breachLine(option, c.cushionCents)
@@ -649,10 +656,8 @@ export function Decision({
         <Skeleton />
       </Frame>
     )
-  // When the item fits, spending less isn't an option worth showing.
-  const keys: OptionKey[] = fits(c.buyToday)
-    ? ['buyToday', 'wait']
-    : ['buyToday', 'wait', 'spendLess']
+  // When the item fits, neither waiting nor spending less applies, so only buying today shows.
+  const keys: OptionKey[] = fits(c.buyToday) ? ['buyToday'] : ['buyToday', 'wait', 'spendLess']
   const selected: OptionKey = picked ?? c.recommendation ?? 'buyToday'
   const enabled = keys.filter((key) => optionOf(c, key))
   const move = (event: KeyboardEvent, key: OptionKey) => {
@@ -679,6 +684,24 @@ export function Decision({
         (p) => p.productId === product.id && ['created', 'pending', 'unknown'].includes(p.status),
       )
     : undefined
+  // Saved already, with the plan this answer suggests: the button says so instead of saving again.
+  const savedNow = (state.saved ?? []).some(
+    (item) =>
+      item.status !== 'removed' &&
+      item.status !== 'bought' &&
+      (product
+        ? item.productId === product.id
+        : item.kind === 'custom' &&
+          item.name === c.itemName &&
+          item.amountCents === c.amountCents) &&
+      (c.recommendation === 'wait' && c.wait.date ? item.waitDate === c.wait.date : true),
+  )
+  const saved = {
+    label: 'Saved',
+    note: 'It’s in Saved. Nothing is bought.',
+    run: () => undefined,
+    done: true,
+  }
   const primary =
     product &&
     (pending
@@ -693,22 +716,24 @@ export function Decision({
             note: 'You’ll approve in PayPal, then confirm here. Nothing is charged until you do.',
             run: () => onBuy(product, false),
           }
-        : c.recommendation === 'wait' && c.wait.date
-          ? {
-              label: `Save for ${dayLabel(c.wait.date)}`,
-              note: 'Keeps it in Saved with this date. Nothing is bought.',
-              run: () =>
-                onSave({ kind: 'catalog', productId: product.id }, { waitDate: c.wait.date! }),
-            }
-          : {
-              label: 'Save for later',
-              note: 'Keeps it in Saved. Nothing is bought.',
-              run: () =>
-                onSave(
-                  { kind: 'catalog', productId: product.id },
-                  c.recommendation ? { option: c.recommendation } : {},
-                ),
-            })
+        : savedNow
+          ? saved
+          : c.recommendation === 'wait' && c.wait.date
+            ? {
+                label: `Save for ${dayLabel(c.wait.date)}`,
+                note: 'Keeps it in Saved with this date. Nothing is bought.',
+                run: () =>
+                  onSave({ kind: 'catalog', productId: product.id }, { waitDate: c.wait.date! }),
+              }
+            : {
+                label: 'Save for later',
+                note: 'Keeps it in Saved. Nothing is bought.',
+                run: () =>
+                  onSave(
+                    { kind: 'catalog', productId: product.id },
+                    c.recommendation ? { option: c.recommendation } : {},
+                  ),
+              })
   // An open checkout for another item is already in these numbers; say so (fix #9).
   const hold = countedHold(state, {
     productId: product?.id,
@@ -717,8 +742,10 @@ export function Decision({
   })
   // An item the store doesn't sell can still be saved, as an assessment only (A3).
   const custom = !product && {
-    label:
-      c.recommendation === 'wait' && c.wait.date
+    done: savedNow,
+    label: savedNow
+      ? 'Saved'
+      : c.recommendation === 'wait' && c.wait.date
         ? `Save for ${dayLabel(c.wait.date)}`
         : 'Save for later',
     run: () =>
@@ -740,12 +767,18 @@ export function Decision({
   const customActions = (notes: boolean) =>
     custom && (
       <>
-        <Button block variant="secondary" icon={Bookmark} onClick={custom.run}>
+        <Button
+          block
+          variant="secondary"
+          icon={custom.done ? BookmarkCheck : Bookmark}
+          onClick={custom.done ? undefined : custom.run}
+          aria-disabled={custom.done || undefined}
+        >
           {custom.label}
         </Button>
         {notes && (
           <p className="caption" style={{ textAlign: 'center' }}>
-            {ASSESSMENT_ONLY}. Nothing is bought.
+            {ASSESSMENT_ONLY}.
           </p>
         )}
       </>
@@ -754,11 +787,16 @@ export function Decision({
   const breach = firstBelow(c.buyToday.points, c.cushionCents)
   const actions = (notes: boolean) => (
     <>
-      {primary && (
-        <Button block onClick={primary.run}>
-          {primary.label}
-        </Button>
-      )}
+      {primary &&
+        ('done' in primary ? (
+          <Button block variant="secondary" icon={BookmarkCheck} aria-disabled>
+            {primary.label}
+          </Button>
+        ) : (
+          <Button block onClick={primary.run}>
+            {primary.label}
+          </Button>
+        ))}
       {notes && primary && (
         <p className="caption" style={{ textAlign: 'center' }}>
           {primary.note}
@@ -1106,20 +1144,39 @@ export function Decision({
           title="Buy today anyway?"
           onClose={() => setConfirmBuy(false)}
           footer={
-            <>
-              <Button
-                block
-                onClick={() => {
-                  setConfirmBuy(false)
-                  onBuy(product, true)
-                }}
-              >
-                Continue to checkout
-              </Button>
-              <Button variant="text" onClick={() => setConfirmBuy(false)}>
-                Keep my plan
-              </Button>
-            </>
+            // Below the cushion, keeping the plan is the safe choice, so it is the filled button.
+            c.buyToday.outcome !== 'fits' ? (
+              <>
+                <Button block onClick={() => setConfirmBuy(false)}>
+                  Keep my plan
+                </Button>
+                <Button
+                  block
+                  variant="secondary"
+                  onClick={() => {
+                    setConfirmBuy(false)
+                    onBuy(product, true)
+                  }}
+                >
+                  Continue to checkout
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button
+                  block
+                  onClick={() => {
+                    setConfirmBuy(false)
+                    onBuy(product, true)
+                  }}
+                >
+                  Continue to checkout
+                </Button>
+                <Button variant="text" onClick={() => setConfirmBuy(false)}>
+                  Keep my plan
+                </Button>
+              </>
+            )
           }
         >
           <Alert tone="bad" icon={TriangleAlert}>
@@ -1131,8 +1188,7 @@ export function Decision({
                   {billOn(breach) ? `, when ${lower(billOn(breach)!)} is due` : ''}.
                 </b>
                 <br />
-                Your lowest balance would be {signed(c.buyToday.lowestBalanceCents)} on{' '}
-                {dayLabel(c.buyToday.lowestDate)}.
+                {lowestSentence(c.buyToday.lowestBalanceCents, c.buyToday.lowestDate)}.
               </>
             ) : (
               <b>Buying today takes you below your cushion.</b>

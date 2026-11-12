@@ -163,7 +163,7 @@ describe('the ready day for an item from another store', () => {
     expect(back.getAttribute('rel')).toBe('noopener noreferrer')
     await screen.findByText(/Checked just now/)
     expect(screen.queryByRole('button', { name: 'Buy with PayPal' })).toBeNull()
-    expect(screen.queryByText(/Assessment only/)).toBeNull()
+    expect(screen.queryByText(/Check only/)).toBeNull()
     // The shopper's own price is never read again.
     expect(recheckCalls()).toHaveLength(0)
   })
