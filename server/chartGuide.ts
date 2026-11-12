@@ -25,7 +25,8 @@ import {
   stretchDates,
   stretches,
 } from '../src/chartModel.ts'
-import { dayLabel, money } from '../src/format.ts'
+import { dayLabel, money, shortDate } from '../src/format.ts'
+import { categoryOf, wantsAlternatives } from './alternatives.ts'
 
 export const CHART_OPTIONS = ['buyToday', 'wait', 'spendLess', 'payIn4'] as const
 export const CHART_RANGES = ['payday', '30', '60'] as const
@@ -64,6 +65,8 @@ export interface ChartFacts {
   cushionCents: number
   /** The options this item's chart offers, with their lines. */
   lines: { key: ChartOptionKey; name: string; points: ForecastPoint[]; option?: OptionResult }[]
+  /** The balance with nothing bought, as the chart's "No purchase" line. */
+  baseline: ForecastPoint[]
   facts: ChartFact[]
   window: string[]
   waitDate: string | null
@@ -71,16 +74,41 @@ export interface ChartFacts {
   lowest: Partial<Record<ChartOptionKey, string>>
 }
 
+/**
+ * Words that are about the chart itself. Colours, "lowest" and "payday" count only in the forms
+ * the chart draws them; on their own they are ordinary questions ("a red jacket", "the lowest
+ * price", "when is payday?") and the normal chat answers them.
+ */
 const CHART_CUE =
-  /\b(?:graph|chart|line|lines|dotted|shad(?:e|ed|ing)|red|green|purple|colou?rs?|zoom|area|dip|show me|lowest|low point|payday|walk me through|explain this)\b/i
+  /\b(?:graph|chart|zoom(?:s|ed)?(?: in| out| to)?|walk me through|red shading|shaded|shading|the red (?:area|part|bit|zone|region)|red area|green lines?|red lines?|thin (?:green|red) lines?|dotted line|lowest (?:day|point)|low point|what happens if i buy(?: it)? today|if i buy (?:it )?today)\b/i
+/** A question about another thing to buy, or a search: these go to the normal chat. */
+const ELSEWHERE =
+  /\$\s?\d|\bcan i afford\b|\bafford (?:a|an|the|some)\b|\b(?:buy|get|order|purchase)\s+(?:a|an|another|some|cheaper|me a|me an)\b/i
 const DATE_CUE =
   /\b(?:on|the)\s+(\d{1,2})(?:st|nd|rd|th)\b|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})\b/i
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
 
-/** A question about the chart on screen, rather than a new purchase or the plan. */
-export function asksAboutChart(message: string) {
+/**
+ * A question about the chart on screen, rather than a new purchase, a search or the plan. When
+ * in doubt the normal chat wins: an amount, a buying phrase aimed at something else, a search
+ * for something cheaper, or another catalog item or kind of product all leave the chart path.
+ */
+export function asksAboutChart(message: string, itemName = '') {
+  if (ELSEWHERE.test(message) || wantsAlternatives(message)) return false
+  const kind = categoryOf(message)
+  if (kind && kind !== categoryOf(itemName)) return false
+  const words = message.toLowerCase()
+  const other = PRODUCTS.find(
+    (product) =>
+      product.name !== itemName &&
+      [product.name, ...(product.aliases ?? [])].some((name) => words.includes(name.toLowerCase())),
+  )
+  if (other) return false
   return (
-    CHART_CUE.test(message) || /\bwhy\b.*\b(?:dec|nov|jan|\d{1,2}(?:st|nd|rd|th))\b/i.test(message)
+    CHART_CUE.test(message) ||
+    /\b(?:why|what happens)\b.*\b(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}|(?:the|on)\s+\d{1,2}(?:st|nd|rd|th))\b/i.test(
+      message,
+    )
   )
 }
 
@@ -144,10 +172,16 @@ export function chartFacts(
       : []),
   ]
   const window = c.buyToday.points.map((point) => point.date)
+  // The "No purchase" line, as the chart draws it: each day's low without the item.
+  const baseline = c.buyToday.points.map((point) => ({
+    ...point,
+    minimumCents: point.baselineMinimumCents,
+    events: point.events.filter((event) => event.kind !== 'purchase'),
+  }))
   const facts: ChartFact[] = [
     {
       id: 'legend',
-      text: `The dotted line is your ${money(cushion)} cushion and red shading means a line is below it; green lines are days money comes in, red lines days it goes out.`,
+      text: `The dotted line is your ${money(cushion)} cushion and red shading means a line is below it; thin green lines mark days money comes in and thin red lines days money goes out.`,
     },
   ]
   const lowest: ChartFacts['lowest'] = {}
@@ -168,29 +202,33 @@ export function chartFacts(
     lowest[line.key] = line.points[low]!.date
   }
   if (waits) {
-    const before = c.buyToday.points.find(
-      (point) =>
-        point.date < c.wait.date! &&
-        point.date >= window[Math.max(0, window.indexOf(c.wait.date!) - 3)]! &&
-        point.events.some((event) => event.kind === 'income'),
-    )
-    const income = before?.events.find((event) => event.kind === 'income')
+    // The engine's wait date is the earliest that fits, so buying the day before does not. The
+    // sentence names a cause only when the day before holds exactly one payment in, the last
+    // income before the date; anything else is timing, and the sentence says only that.
+    const at = window.indexOf(c.wait.date!)
+    const before = at > 0 ? c.buyToday.points[at - 1] : undefined
+    const incomes = before?.events.filter((event) => event.kind === 'income') ?? []
+    const income = incomes.length === 1 && at - 1 > 0 ? incomes[0] : undefined
     facts.push({
       id: 'fit_date',
-      text: `${dayLabel(c.wait.date!)} is the first day buying it keeps your cushion for the whole window${income ? `, after ${income.name} ${money(income.amountCents)} lands on ${dayLabel(before!.date)}` : ''}.`,
+      text: `${dayLabel(c.wait.date!)} is the first day buying it keeps your cushion for the whole window (the green "Fits ${shortDate(c.wait.date!)}" marker)${income ? `, after ${income.name} ${money(income.amountCents)} lands on ${dayLabel(before!.date)}` : ''}.`,
     })
   }
   const paydays = c.buyToday.points.filter((point) => incomeKind(point, c.buyToday.points))
   if (paydays.length) {
+    const listed = paydays
+      .slice(0, 3)
+      .map((point) => {
+        const event = point.events.find((e) => e.kind === 'income')!
+        return `${dayLabel(point.date)} (${event.name} ${money(event.amountCents)})`
+      })
+      .join(', ')
     facts.push({
       id: 'paydays',
-      text: `Money comes in on ${paydays
-        .slice(0, 3)
-        .map((point) => {
-          const event = point.events.find((e) => e.kind === 'income')!
-          return `${dayLabel(point.date)} (${event.name} ${money(event.amountCents)})`
-        })
-        .join(', ')}.`,
+      text:
+        paydays.length > 3
+          ? `Money comes in on ${paydays.length} days in this window; the next three are ${listed}.`
+          : `Money comes in on ${listed}.`,
     })
   }
   const bills = c.buyToday.points
@@ -208,6 +246,7 @@ export function chartFacts(
     item: { name: itemName, amountCents, ...(product ? { productId: product.id } : {}) },
     cushionCents: cushion,
     lines,
+    baseline,
     facts,
     window,
     waitDate: waits ? c.wait.date : null,
@@ -220,9 +259,12 @@ export function chartFacts(
 export function dayFact(
   facts: ChartFacts,
   date: string,
-  key: ChartOptionKey,
+  key: ChartOptionKey | 'none',
 ): ChartFact | undefined {
-  const line = facts.lines.find((l) => l.key === key) ?? facts.lines[0]!
+  const line =
+    key === 'none'
+      ? { name: 'No purchase', points: facts.baseline }
+      : (facts.lines.find((l) => l.key === key) ?? facts.lines[0]!)
   const point = line.points.find((p) => p.date === date)
   if (!point) return undefined
   return {
@@ -359,7 +401,9 @@ export function chartReply(
       ? { ...checked, focusDay: facts.firstPayday }
       : checked
   const focus = directive?.focusDay ?? choice.day
-  const lineKey = directive?.options?.[0] ?? view.options?.[0] ?? facts.lines[0]!.key
+  // The line the day is read from is one on screen: "No purchase" when no option is pressed.
+  const shownOptions = directive?.options ?? view.options
+  const lineKey = shownOptions ? (shownOptions[0] ?? 'none') : facts.lines[0]!.key
   const day = focus ? dayFact(facts, focus, lineKey) : undefined
   const chosen = composeFacts(choice.ids, facts, day ? [day] : [])
   const shown = chosen.length ? chosen : composeFacts(['legend'], facts)

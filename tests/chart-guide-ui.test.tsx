@@ -232,12 +232,15 @@ describe('Ask on the chart', () => {
 describe('the nudge for each screen', () => {
   it('offers a walk-through on the chart and a line for Home, Plan and Saved', () => {
     const s = { ...createDemoState(ALEX_DEMO_DAY), today: ALEX_DEMO_DAY } as unknown as AppState
-    expect(screenNudge('decision', s)).toEqual({
+    // Before the chart is on screen (an empty /check, a comparison loading) there is none.
+    expect(screenNudge('decision', s)).toBeUndefined()
+    expect(screenNudge('check', s)).toBeUndefined()
+    expect(screenNudge('decision', s, true)).toEqual({
       id: 'chart',
       text: 'Want me to walk you through this chart?',
       ask: 'Walk me through this chart',
     })
-    expect(screenNudge('check', s)!.id).toBe('chart')
+    expect(screenNudge('check', s, true)!.id).toBe('chart')
     expect(screenNudge('home', s)!.text).toMatch(/Ask me before you buy\.$|Ask me first\.$/)
     expect(screenNudge('plan', s)!.ask).toBe('What bills are coming up?')
     expect(screenNudge('saved', s)!.ask).toBeUndefined()

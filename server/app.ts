@@ -2169,7 +2169,10 @@ export function createApp(options: AppOptions = {}) {
     // A question about the chart on screen is answered from the chart's own facts. Claude, when
     // allowed, only chooses the facts and the view (show_on_chart); everything is checked here.
     const { view, ...asked } = input
-    if (view && asksAboutChart(asked.message)) {
+    const onScreen = view?.productId
+      ? PRODUCTS.find((p) => p.id === view.productId)?.name
+      : view?.itemName
+    if (view && asksAboutChart(asked.message, onScreen)) {
       const amount = view.productId
         ? PRODUCTS.find((p) => p.id === view.productId)?.priceCents
         : view.amountCents

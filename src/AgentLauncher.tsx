@@ -64,13 +64,21 @@ export interface Nudge {
  * The line for the screen on show, at most once per screen per session. The chart's offers a
  * walk-through; Home names the largest payment due; Plan and Saved point at what they hold.
  */
-export function screenNudge(screen: string, state: AppState): Nudge | undefined {
+export function screenNudge(
+  screen: string,
+  state: AppState,
+  chartShown = false,
+): Nudge | undefined {
+  // The walk-through is offered only once the chart is on screen (not while /check waits for an
+  // item or the comparison loads), so its question always goes with the chart's view.
   if (screen === 'decision' || screen === 'check')
-    return {
-      id: 'chart',
-      text: 'Want me to walk you through this chart?',
-      ask: 'Walk me through this chart',
-    }
+    return chartShown
+      ? {
+          id: 'chart',
+          text: 'Want me to walk you through this chart?',
+          ask: 'Walk me through this chart',
+        }
+      : undefined
   if (screen === 'home') return { id: 'home', text: nudgeLine(state) }
   if (screen === 'plan')
     return {

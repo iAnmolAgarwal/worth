@@ -38,8 +38,16 @@ describe('the chart’s facts', () => {
     expect(text('line_payIn4')).toBe(
       'Pay in 4: Below your $300.00 cushion from Sun, Nov 29. Lowest $222.76 on Mon, Nov 30. Back above on Tue, Dec 1.',
     )
-    expect(text('fit_date')).toMatch(/^Tue, Dec 15 is the first day/)
-    expect(text('legend')).toContain('dotted line is your $300.00 cushion')
+    expect(text('fit_date')).toBe(
+      'Tue, Dec 15 is the first day buying it keeps your cushion for the whole window (the green "Fits Dec 15" marker), after Photo shoot invoice · PayPal $1,650.00 lands on Mon, Dec 14.',
+    )
+    // True of the chart as drawn: the fit marker is green too, so the lines are "thin" ones.
+    expect(text('legend')).toBe(
+      'The dotted line is your $300.00 cushion and red shading means a line is below it; thin green lines mark days money comes in and thin red lines days money goes out.',
+    )
+    expect(text('paydays')).toBe(
+      'Money comes in on Mon, Nov 30 (Salary $3,900.00), Mon, Dec 14 (Photo shoot invoice · PayPal $1,650.00), Thu, Dec 31 (Salary $3,900.00).',
+    )
     // Pay in 4 is described, never recommended.
     expect(facts.facts.map((fact) => fact.text).join(' ')).not.toMatch(/recommend|makes it fit/i)
   })
@@ -52,12 +60,100 @@ describe('the chart’s facts', () => {
   })
 })
 
+describe('which day explains the fit date', () => {
+  const flow = (patch: object) => ({
+    id: String(Math.random()),
+    name: 'Salary',
+    amountCents: 200_000,
+    nextDate: '2026-11-23',
+    cadence: 'once' as const,
+    kind: 'income' as const,
+    category: 'Income',
+    confirmed: true,
+    active: true,
+    ...patch,
+  })
+  const factsFor = (flows: object[]) =>
+    chartFacts(
+      { screen: 'decision', amountCents: 150_000, itemName: 'Desk' },
+      {
+        profile: {
+          ...alex.profile,
+          balanceCents: 100_000,
+          cushionCents: 30_000,
+          dailySpendCents: 0,
+          flows: flows as never,
+        },
+        purchases: [],
+        today: ALEX_DEMO_DAY,
+      },
+      false,
+    )!
+  const fit = (f: NonNullable<ReturnType<typeof factsFor>>) =>
+    f.facts.find((fact) => fact.id === 'fit_date')!.text
+
+  it('names the payday the day before the wait date when it is that day’s only money in', () => {
+    const f = factsFor([flow({})])
+    expect(f.waitDate).toBe('2026-11-24')
+    expect(fit(f)).toBe(
+      'Tue, Nov 24 is the first day buying it keeps your cushion for the whole window (the green "Fits Nov 24" marker), after Salary $2,000.00 lands on Mon, Nov 23.',
+    )
+  })
+
+  it('says how many paydays there are when it lists only the next three', () => {
+    const f = factsFor(
+      ['2026-11-16', '2026-11-23', '2026-11-30', '2026-12-07'].map((nextDate) =>
+        flow({ nextDate }),
+      ),
+    )
+    expect(f.facts.find((fact) => fact.id === 'paydays')!.text).toBe(
+      'Money comes in on 4 days in this window; the next three are Mon, Nov 16 (Salary $2,000.00), Mon, Nov 23 (Salary $2,000.00), Mon, Nov 30 (Salary $2,000.00).',
+    )
+  })
+
+  it('names no cause when no single payment explains it', () => {
+    const f = factsFor([
+      flow({ amountCents: 100_000 }),
+      flow({ name: 'Refund', amountCents: 100_000, category: 'Other' }),
+    ])
+    expect(f.waitDate).toBe('2026-11-24')
+    expect(fit(f)).toBe(
+      'Tue, Nov 24 is the first day buying it keeps your cushion for the whole window (the green "Fits Nov 24" marker).',
+    )
+  })
+})
+
 describe('reading a chart question', () => {
-  it('knows a chart question and the day it names', () => {
-    expect(asksAboutChart('Explain this graph')).toBe(true)
-    expect(asksAboutChart('What’s the red area?')).toBe(true)
-    expect(asksAboutChart('Why Dec 15?')).toBe(true)
-    expect(asksAboutChart('Can I afford a $40 lamp?')).toBe(false)
+  it('takes only questions about the chart on screen', () => {
+    // The five live questions, and the nudge's own.
+    for (const question of [
+      'Walk me through this chart',
+      'What’s the red area?',
+      'Show me what happens if I buy today',
+      'Why Dec 15?',
+      'Zoom to payday',
+      'Explain this graph',
+      'What happens on the 30th?',
+      'Show me the lowest day',
+    ])
+      expect(asksAboutChart(question, 'Halden X5'), question).toBe(true)
+    // Ordinary questions on the same page go to the normal chat.
+    for (const question of [
+      'Can I afford a red jacket for $60?',
+      'Show me cheaper headphones',
+      'Show me something cheaper under $300',
+      'Show me Pay in 4',
+      'Is the lowest price on PayPal?',
+      'Can I afford a $40 lamp?',
+      'When is payday?',
+      'Buy it for me',
+      'Should I just use Pay in 4?',
+      'How does the MacBook Pro chart look?',
+    ])
+      expect(asksAboutChart(question, 'Halden X5'), question).toBe(false)
+  })
+
+  it('knows the day a question names', () => {
     expect(namedDay('What happens on the 30th?', facts.window)).toBe('2026-11-30')
     expect(namedDay('and Dec 15', facts.window)).toBe('2026-12-15')
   })
@@ -99,6 +195,17 @@ describe('the show_on_chart tool', () => {
     expect(props.range.enum).toEqual(['keep', 'payday', '30', '60'])
     expect(props.focus_day.enum[0]).toBe('none')
     expect(props.focus_day.enum).toContain('2026-12-15')
+  })
+
+  it('reads a day on "No purchase" from the line with nothing bought', () => {
+    const reply = chartReply(
+      facts,
+      { ids: ['day'], directive: { options: [], focusDay: '2026-11-30' } },
+      view,
+      'demo',
+    )
+    expect(reply.message).toMatch(/^On Mon, Nov 30 with No purchase: /)
+    expect(reply.message).not.toContain('Wait until')
   })
 
   it('drops anything outside the item, the ranges and the window', () => {

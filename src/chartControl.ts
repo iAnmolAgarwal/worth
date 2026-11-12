@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useSyncExternalStore } from 'react'
 
 /**
  * The guide's hold on the balance chart: Ask Worth sends a command, the mounted chart applies it
@@ -45,8 +45,23 @@ export function sendChartCommand(command: ChartCommand) {
   return true
 }
 
+const watchers = new Set<() => void>()
+const changed = () => watchers.forEach((watch) => watch())
+
 /** What the mounted chart shows, or null. */
 export const chartSnapshot = () => snapshot
+
+/** True while a chart with an item is on screen, re-rendering when that changes. */
+export function useChartMounted() {
+  return useSyncExternalStore(
+    (watch) => {
+      watchers.add(watch)
+      return () => watchers.delete(watch)
+    },
+    () => snapshot !== null,
+    () => false,
+  )
+}
 
 /** For the chart: receive commands while mounted. The latest handler always runs. */
 export function useChartCommands(handler: Receiver) {
@@ -68,8 +83,10 @@ export function usePublishChart(next: ChartSnapshot | null) {
   const key = JSON.stringify(next)
   useEffect(() => {
     snapshot = key === 'null' ? null : (JSON.parse(key) as ChartSnapshot)
+    changed()
     return () => {
       snapshot = null
+      changed()
     }
   }, [key])
 }
