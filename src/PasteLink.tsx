@@ -30,6 +30,33 @@ const MANUAL_NOTE: Record<Extract<Read, { step: 'manual' }>['why'], string> = {
   limit: 'Worth has read a lot of links lately. Enter the price from the store page.',
 }
 
+/**
+ * A starting name from the link's own words when the page couldn't be read:
+ * ".../sony-alpha-a6400-mirrorless-camera/6535578.p" gives "Sony alpha a6400 mirrorless camera".
+ * The shopper confirms or edits it; undefined when the path has no worded slug.
+ */
+export function slugName(url: string): string | undefined {
+  let path: string
+  try {
+    path = new URL(url).pathname
+  } catch {
+    return undefined
+  }
+  const words = (segment: string) =>
+    decodeURIComponent(segment)
+      .replace(/\.[a-z0-9]{1,5}$/i, '')
+      .split(/[-_+\s]+/)
+      .filter((word) => /\p{L}/u.test(word))
+  const best = path
+    .split('/')
+    .map(words)
+    .filter((list) => list.length >= 2)
+    .sort((a, b) => b.length - a.length)[0]
+  if (!best) return undefined
+  const text = best.join(' ').slice(0, LINK_TITLE_MAX).trim()
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
 /** Reads a pasted link once: the confirm card when there is a USD price, the manual card otherwise. */
 function useLinkRead(url: string): Read {
   const valid = checkProductLink(url).ok
@@ -161,7 +188,7 @@ export function LinkCheck({
       {!product && store && <p className="meta">At {store}</p>}
       <ConfirmForm
         key={read.step}
-        name={product?.name ?? ''}
+        name={product?.name ?? slugName(url) ?? ''}
         priceCents={read.step === 'confirm' ? read.product.priceCents : undefined}
         submitLabel={read.step === 'confirm' ? 'Yes, check it' : 'Check it'}
         onCancel={onCancel}
