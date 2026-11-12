@@ -121,6 +121,7 @@ Tools, all read-only:
 | `get_plan_summary` | — | Room to spend today, the baseline low point and its cause |
 | `find_alternatives` | A generic kind of item and a ceiling the user wrote | Refuses for "cheaper" about timing, payment method or services; otherwise searches Channel3 within the room today; only the outcome returns to Claude, never product names or prices |
 | `open_purchase_check` | A catalog item ID, when the person asks to buy it | Assesses the item at its catalog price today and links to Worth's own comparison, `#decision?product=<id>`. Worth prepares no order; Claude receives only whether a link was shown |
+| `show_on_chart` | Offered only when the request carries a chart view and the question is about the chart: one to three fact ids, and the pills, range (`payday`, `30`, `60`) and focus day the chart should show, all from enums built for this item | Rebuilds the item's comparison, writes each fact in the chart's own words (`src/chartModel.ts`), drops any option, range or day outside this item and window, and returns the view change as `chart` in the reply. View state only: it cannot navigate, save, buy or edit the plan. Without Claude the same facts and view come from Worth's own rules (`server/chartGuide.ts`) |
 
 Every read tool also takes **presentation fields**: up to three facts from a fixed catalog for
 that tool, a reason for each from a fixed set (`answers_question`, `explains_result`,
@@ -200,6 +201,12 @@ click, tap or Enter, and arrow keys move between lines. A day scrubber works wit
 and keyboard and announces through an `aria-live` region, and "View as table" lists the same
 values. With Pay in 4 open, the instalment path is drawn dotted with numbered payments. Every
 value is read from engine output; the chart computes no money of its own.
+
+Ask Worth's guide can read and steer the chart through `src/chartControl.ts`: the chart publishes
+what it shows (options offered and pressed, range, pinned day, the item) and applies a
+`ChartCommand` through its own state setters, announcing the change in its live region. Ask sends
+that view with a question (the server re-validates it), and applies a reply's `chart` change only
+while the chart for the same item is on screen; otherwise the answer links to the comparison.
 
 ## Agents over MCP
 

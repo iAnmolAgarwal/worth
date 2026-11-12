@@ -378,7 +378,7 @@ describe('the guide’s nudge and the tour', () => {
         onOpenChange: () => {},
         mood: 'neutral' as const,
         launcher: createRef<HTMLButtonElement>(),
-        nudge: 'Rent is due in 18 days. Ask me before you buy.',
+        nudge: { id: 'home', text: 'Rent is due in 18 days. Ask me before you buy.' },
       }
       const { rerender } = render(
         <AgentLauncher {...props} touring>
@@ -387,7 +387,7 @@ describe('the guide’s nudge and the tour', () => {
       )
       act(() => vi.advanceTimersByTime(15_000))
       expect(document.querySelector('.agent-nudge')).toBeNull()
-      expect(sessionStorage.getItem('worth.guide.nudged')).toBeNull()
+      expect(sessionStorage.getItem('worth.guide.nudged.home')).toBeNull()
       rerender(
         <AgentLauncher {...props} touring={false}>
           <p>Conversation</p>
@@ -395,7 +395,7 @@ describe('the guide’s nudge and the tour', () => {
       )
       act(() => vi.advanceTimersByTime(1600))
       expect(document.querySelector('.agent-nudge')?.textContent).toContain('Rent is due')
-      expect(sessionStorage.getItem('worth.guide.nudged')).toBe('1')
+      expect(sessionStorage.getItem('worth.guide.nudged.home')).toBe('1')
     } finally {
       vi.useRealTimers()
     }

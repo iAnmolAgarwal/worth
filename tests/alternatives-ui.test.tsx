@@ -366,7 +366,14 @@ describe('where the similar items appear', () => {
     await user.click(screen.getByRole('button', { name: 'Send' }))
     const panel = await screen.findByRole('region', { name: 'Similar items that fit today' })
     expect(within(panel).getAllByRole('link')).toHaveLength(2)
-    expect(screen.getByText('Up to $440.01 fits today and keeps your $300 cushion.')).toBeTruthy()
+    // Amounts sit in their own no-wrap spans, so the sentence is matched as a whole paragraph.
+    expect(
+      screen.getByText(
+        (_text, element) =>
+          element?.tagName === 'P' &&
+          element.textContent === 'Up to $440.01 fits today and keeps your $300 cushion.',
+      ),
+    ).toBeTruthy()
   })
 
   it('lists rows Channel3 could not re-check without a price or a link', async () => {

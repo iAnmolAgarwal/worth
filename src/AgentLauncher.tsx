@@ -54,6 +54,43 @@ export function nudgeLine(state: AppState) {
   return `${capitalize(displayName(due.flow.name))} is due ${when}. Ask me before you buy.`
 }
 
+/** A screen's line by the launcher, and the question its click asks, if any. */
+export interface Nudge {
+  id: string
+  text: string
+  ask?: string
+}
+/**
+ * The line for the screen on show, at most once per screen per session. The chart's offers a
+ * walk-through; Home names the largest payment due; Plan and Saved point at what they hold.
+ */
+export function screenNudge(
+  screen: string,
+  state: AppState,
+  chartShown = false,
+): Nudge | undefined {
+  // The walk-through is offered only once the chart is on screen (not while /check waits for an
+  // item or the comparison loads), so its question always goes with the chart's view.
+  if (screen === 'decision' || screen === 'check')
+    return chartShown
+      ? {
+          id: 'chart',
+          text: 'Want me to walk you through this chart?',
+          ask: 'Walk me through this chart',
+        }
+      : undefined
+  if (screen === 'home') return { id: 'home', text: nudgeLine(state) }
+  if (screen === 'plan')
+    return {
+      id: 'plan',
+      text: 'Want to see what’s due before payday? Ask me.',
+      ask: 'What bills are coming up?',
+    }
+  if (screen === 'saved')
+    return { id: 'saved', text: 'Saved something? Ask me whether it fits yet.' }
+  return undefined
+}
+
 /** Where the nudge may sit, in order: above the launcher, narrower above it, or to its left. */
 const SPOTS = [
   { place: 'above', width: 260 },
@@ -81,16 +118,16 @@ export function clearSpot(box: DOMRect, dock: Element) {
   })
 }
 
-function nudgedThisSession() {
+function nudgedThisSession(id: string) {
   try {
-    return sessionStorage.getItem(NUDGE_KEY) === '1'
+    return sessionStorage.getItem(`${NUDGE_KEY}.${id}`) === '1'
   } catch {
     return false
   }
 }
-function rememberNudge() {
+function rememberNudge(id: string) {
   try {
-    sessionStorage.setItem(NUDGE_KEY, '1')
+    sessionStorage.setItem(`${NUDGE_KEY}.${id}`, '1')
   } catch {
     // Storage can be refused in private windows; the nudge then shows once per page load.
   }
@@ -106,6 +143,7 @@ export function AgentLauncher({
   onOpenChange,
   mood,
   nudge,
+  onNudge,
   hidden,
   touring,
   lifted,
@@ -115,8 +153,10 @@ export function AgentLauncher({
   open: boolean
   onOpenChange: (open: boolean) => void
   mood: GuideExpression
-  /** The once-a-session line; none while a dialog or wizard has the screen. */
-  nudge?: string
+  /** The screen's line, once per screen per session; none while a dialog or wizard has the screen. */
+  nudge?: Nudge
+  /** The nudge was clicked: opens the panel, asking its question when it has one. */
+  onNudge?: (ask?: string) => void
   /** Wizards and dialogs own the screen: the launcher steps aside. */
   hidden?: boolean
   /** The first-visit tour is about to start or running: the nudge waits for it to end. */
@@ -137,16 +177,20 @@ export function AgentLauncher({
   const dock = useRef<HTMLDivElement>(null)
   const nudgeBox = useRef<HTMLDivElement>(null)
 
-  // The nudge appears once per session, a moment after the first screen settles.
+  // Each screen's nudge appears once per session, a moment after the screen settles; moving to
+  // another screen takes the last one away, so two never stack.
+  const nudgeId = nudge?.id
   useEffect(() => {
-    if (!nudge || hidden || touring || open || nudgedThisSession()) return
+    // oxlint-disable-next-line react/set-state-in-effect
+    setBubbleState(false)
+    if (!nudgeId || hidden || touring || open || nudgedThisSession(nudgeId)) return
     const show = setTimeout(() => {
-      rememberNudge()
+      rememberNudge(nudgeId)
       setSpot(0)
       setBubbleState('finding')
     }, NUDGE_DELAY)
     return () => clearTimeout(show)
-  }, [nudge, hidden, touring, open])
+  }, [nudgeId, hidden, touring, open])
   // A tour starting (a replay from the panel) takes the nudge away with it.
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect
@@ -244,11 +288,12 @@ export function AgentLauncher({
               className="agent-nudge-text"
               onClick={() => {
                 setBubbleState(false)
-                onOpenChange(true)
+                if (onNudge) onNudge(nudge.ask)
+                else onOpenChange(true)
               }}
             >
               <span className="agent-nudge-who">Worth</span>
-              {nudge}
+              {nudge.text}
             </button>
             <IconButton label="Dismiss" icon={X} quiet onClick={() => setBubbleState(false)} />
           </div>

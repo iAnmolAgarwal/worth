@@ -16,8 +16,9 @@ import {
 } from 'lucide-react'
 import type { InstalmentPlanProposal, Product, SavedItem } from '../shared/types'
 import { Activity } from './Activity'
-import { AgentLauncher, nudgeLine, type AskOffer } from './AgentLauncher'
+import { AgentLauncher, screenNudge, type AskOffer } from './AgentLauncher'
 import { api } from './api'
+import { useChartMounted } from './chartControl'
 import { Ask } from './Ask'
 import { Check, handoffToken, reloadForNewToken } from './Check'
 import { Checkout } from './Checkout'
@@ -112,6 +113,7 @@ export default function App() {
   /** The item Decision or /check offers the panel while it is on screen. */
   const [offer, setOffer] = useState<AskOffer>()
   const launcher = useRef<HTMLButtonElement>(null)
+  const chartShown = useChartMounted()
   /** The address of the screen behind the panel, restored when `#ask` opens it. */
   const behind = useRef(isAskRoute() ? '' : window.location.hash)
   const [menu, setMenu] = useState(false)
@@ -907,7 +909,8 @@ export default function App() {
         onOpenChange={setPanelOpen}
         mood={mood}
         launcher={launcher}
-        nudge={nudgeLine(state)}
+        nudge={screenNudge(screen, state, chartShown)}
+        onNudge={(question) => ask(question)}
         touring={touring}
         // Wizards and dialogs own the screen; the conversation stays mounted underneath.
         hidden={
