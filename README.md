@@ -23,7 +23,7 @@ session with a sample plan (Alex, on the demo day Fri, Nov 13, 2026), kept for 2
 
 - **Hosted app:** https://worth.onrender.com opens on Alex's sample plan on the demo day,
   Fri, Nov 13, 2026: the same person and numbers as the video; nothing to install. He has
-  $2,540 available, but the $1,899 Halden X5 camera does not fit that day (room to spend today
+  $2,540 available, but the $1,899 Halden X5 camera does not fit that day (Safe to spend today
   is $872.26); Worth says wait until Tue, Dec 15, the day after a PayPal invoice pays him.
   https://worth.onrender.com/?replay=demo-dec15 opens his return visit, with the camera saved
   and ready.
@@ -92,8 +92,8 @@ and 47% of BNPL users say they paid late in the past year
   Each pressed option gets one summary box. The cushion is a dotted line, any stretch below it is
   shaded red, thin green lines mark days money comes in and thin red lines days money goes out.
   A range control switches between To payday, 30 days and 60 days, a day-in-focus panel explains
-  the day you point at (or pin with the arrow keys), and **View as table** carries the same
-  numbers.
+  the day you point at (or pin with the arrow keys), and **View as table** lists each day's
+  lowest balance.
 - **The guide explains the chart.** Ask Worth on that page about the chart ("What does the red
   shading mean if I buy it today?") and the guide answers from the chart's own facts and changes
   the view to match: which pills are pressed, the range and the day in focus. A short nudge per
@@ -107,8 +107,9 @@ and 47% of BNPL users say they paid late in the past year
   PayPal; Worth captures only when you confirm in Worth, and the payment shows up in Activity
   once.
 - **Save it for the day it fits.** "Save for Tue, Dec 15" keeps the item with its date. When the
-  day comes, Saved says the plan suggests it may fit, you confirm today's funds, Worth checks
-  again, and only then does Buy with PayPal open.
+  day comes, Saved runs a fresh check against today's funds (asking you to confirm them first if
+  they aren't confirmed for today) and shows "Fresh check: this fits today"; only then does
+  **Buy with PayPal** open.
 - **Something cheaper, from real stores.** Under Spend less, and when you ask for something
   cheaper, Worth lists up to four similar products from other stores priced within what keeps the
   cushion today, found through Channel3. They link out; Worth does not sell them.
@@ -160,24 +161,29 @@ Open https://worth.onrender.com. No sign-in; each browser gets its own anonymous
 2. On Home, choose **Connect PayPal**, read the note, then **Continue to PayPal**.
 3. Log in with the sandbox buyer
    (`TODO(owner): sandbox buyer login — see the Devpost testing notes`). PayPal's screen names
-   "Default Application" (PayPal's MCP connector) and asks for transaction data. Choose **Agree
-   and Connect**. If you cancel at PayPal, use your browser's Back button to return.
+   "Default Application" (PayPal's MCP connector) and asks for transaction data. It also lists
+   other permissions (such as invoicing, checkout and disputes), because the connector asks for
+   them; Worth only ever calls `list_transactions` and refuses every other tool before any request
+   is made (`ALLOWED_TOOLS` in `server/paypalConnect.ts`). Choose **Agree and Connect**. If you
+   cancel at PayPal, use your browser's Back button to return.
 4. Wait about 30–40 seconds while Worth reads the activity with PayPal's read-only
    `list_transactions` tool. Then check what it found: this account's $1,299 Laptop bought with
-   Pay in 4 appears as a plan. A purchase PayPal funded with Pay Later, with no payment rows yet,
-   starts as "1 of 4 paid", because PayPal takes the first payment at checkout. **Cancel** or
+   Pay in 4 appears as a plan. A purchase funded by PayPal Pay Later with no payment rows starts
+   as "1 of 4 paid", with three payments left about 14, 28 and 42 days after the purchase
+   (PayPal's US Pay Later takes the first payment at the time of the transaction). **Cancel** or
    **Back** on this screen returns to Home.
-5. Enter money available, a cushion and everyday spending, then **Continue**. Home shows
-   "PayPal connected · updated today".
+5. Enter money available, a cushion and everyday spending (add a payday too, if you can), then
+   **Continue**. Home shows "PayPal connected · updated today".
 6. To return to Alex: **Settings → Delete my data now → Delete and start over**.
 
 A sandbox account holds only what was done in that sandbox, so it has no payday or bills, and
-Worth does not invent any. Home can then read "Short by … on <date>": with no payday in the plan,
-everyday spending and the remaining Pay in 4 payments draw the projected balance below your
-cushion, and the figure is how far below. Add your payday and bills under Plan. Worth keeps
+Worth does not invent any. Until money available and a payday are added (in the review, or later
+under Plan), Home can read "$0 · Short by … on <date>": with no income, everyday spending and the
+remaining Pay in 4 payments draw the projected balance below your cushion, and the figure is how
+far below. Worth keeps
 PayPal's access for one read only, and cannot pay, invoice or move money with it.
 
-![Connect PayPal's review step for a sandbox account: 3 transactions read through PayPal's MCP server, no repeating pay or bills found, and the $1,299 Laptop Pay in 4 plan from PayPal](docs/img/connect-review.png)
+![Connect PayPal's review step for a sandbox account: 3 transactions read through PayPal's MCP server, Worth has already forgotten PayPal's access, too little history for repeating bills, no repeating pay found, an Add a bill PayPal doesn't see button, and the heading for the one Pay in 4 plan in progress](docs/img/connect-review.png)
 
 Pay in 4 itself is chosen inside PayPal's checkout. A sandbox buyer can pick it there; Worth
 cannot see which funding the buyer chose (PayPal's order and capture do not say), so after a
@@ -238,15 +244,19 @@ credentials and the browser receives only the public client ID.
   `file`) and when (`importedAt`); Home's "PayPal connected · updated today" reads those two
   fields, never anything the browser claims.
 
-Verified against the sandbox: SDK v6 popup approval followed by exactly one capture; a US sandbox
-buyer paying $1,199 (an earlier catalog item) with Pay in 4 inside PayPal's checkout (4 × $299.75); and, on the hosted
-app, a capture followed by a $50 refund whose webhook arrived, passed verification and produced
-the review item.
+Checked by hand in the sandbox in October, before the Alex sample: SDK v6 popup approval followed
+by exactly one capture, and a US sandbox buyer paying $1,199 (an earlier catalog item) with Pay
+in 4 inside PayPal's checkout (4 × $299.75). The webhook path (signature verification, refund to
+review item) is covered by the test suite.
 
 ## How AI is used
 
 Claude is the interface and the narrator; the engine is the decision-maker.
 
+- **The guide.** Ask Worth is fronted by a small drawn character, also called Worth
+  (`src/Guide.tsx`), in a launcher on every screen (`src/AgentLauncher.tsx`). Its expression
+  follows the answer (thinking, fits, warning); the panel offers starter questions about the item
+  on screen and a **Take the tour** link.
 - **Model.** `claude-sonnet-5-5` through `@anthropic-ai/sdk`, with a frozen, prompt-cached system
   prompt and strict tool schemas. The loop allows four model rounds and six tool calls, with no
   SDK retries.
@@ -278,6 +288,14 @@ Claude is the interface and the narrator; the engine is the decision-maker.
   comparison for it, built by the server from the catalog. Worth prepares no order: on the
   comparison you choose Buy today anyway, Save for the day it fits, or nothing, and Worth's
   PayPal sandbox checkout opens only behind its guards.
+- **What Claude is not allowed to do.** It has no tool that pays, captures, creates an order,
+  saves, edits the plan or moves money (the tool list is in `server/chat.ts`; the chart tool in
+  `server/chartGuide.ts` changes the view only). It never writes a number or date the user sees:
+  verdicts, facts and chart sentences come from the engine through `server/narration.ts` and
+  `server/chartGuide.ts`, and its one free sentence passes `checkSentence` or is replaced. It
+  never recommends Pay in 4. Its reading of an amount or a date is checked against the user's own
+  words (`server/interpret.ts`), and page or item text it receives is quoted as data, not
+  instructions.
 - **Consent and limits.** The untouched sample plan can use Claude without opt-in; an edited or
   imported plan needs the AI-sharing switch. Requests are capped per IP per hour and per server
   per day; past a cap, or without a key, answers are labelled local calculations.
@@ -350,8 +368,10 @@ boundary, the payment state machine, Channel3, saved plans, sessions and privacy
 
 ## Worth guardrail MCP
 
-Worth runs its own Model Context Protocol server, Worth guardrail MCP, at `/mcp` (Streamable
-HTTP, stateless) with a stdio relay for local clients. Create a revocable agent token in **Settings → Connect an agent**, paste
+Shopping agents are starting to buy for people. Worth's guardrail MCP is the check such an agent
+calls before it pays: it answers from the person's own plan whether the purchase fits, and when,
+and it has no tool that pays or creates an order. Worth runs it as its own Model Context Protocol
+server at `/mcp` (Streamable HTTP, stateless) with a stdio relay for local clients. Create a revocable agent token in **Settings → Connect an agent**, paste
 the generated config into Claude Desktop or any MCP client, and ask "Can I afford the $1,899
 Halden X5?" in your own assistant.
 
@@ -501,7 +521,8 @@ Two layers, both on the AI path; the engine has its own unit and property tests.
   bill-skipping or credit advice; an alternative that does not fit) and has Claude Opus 5.5 judge
   each answer for contradictions and risky advice.
 
-On 2026-10-04, three consecutive live runs over 63 probes (45 train, 18 held out; 73 replies a
+Measured on 2026-10-04, before the Alex sample and the chart guide (so these runs cover neither
+the Halden X5 story nor `show_on_chart`): three consecutive live runs over 63 probes (45 train, 18 held out; 73 replies a
 run) had **0 unsafe outcomes** in every run, 0 programmatic contradictions, and Claude's
 sentence written and accepted for 85–88% of answers. A follow-up single run over 65 probes had 0
 unsafe outcomes and 86% accepted sentences. Exact counts, the judge findings and what was changed

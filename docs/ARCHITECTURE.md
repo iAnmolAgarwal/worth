@@ -140,7 +140,7 @@ Tools, all read-only:
 | `interpret_purchase` | Items in the user's words, stated price in cents, ISO currency, quantity, whether it continues the previous item, the timing phrase copied verbatim and its date, and the option (check, earliest date, most to spend) | Checks every amount and date against the message (`server/money.ts`, `server/dates.ts`); asks instead of guessing when the price is missing, not USD, ambiguous, or the date is vague, past or beyond 35 days; then runs `assessPurchase` and, when asked, the Pay in 4 scenario |
 | `list_commitments` | Subscriptions, bills or both | Lists confirmed obligations due in the next 30 days |
 | `spending_summary` | — | Totals completed USD spending by category for 30 days |
-| `get_plan_summary` | — | Room to spend today, the baseline low point and its cause |
+| `get_plan_summary` | — | Safe to spend today, the baseline low point and its cause |
 | `find_alternatives` | A generic kind of item and a ceiling the user wrote | Refuses for "cheaper" about timing, payment method or services; otherwise searches Channel3 within the room today; only the outcome returns to Claude, never product names or prices |
 | `open_purchase_check` | A catalog item ID, when the person asks to buy it | Assesses the item at its catalog price today and links to Worth's own comparison, `#decision?product=<id>`. Worth prepares no order; Claude receives only whether a link was shown |
 | `show_on_chart` | Offered only when the request carries a chart view and the question is about the chart: one to three fact ids, and the pills, range (`payday`, `30`, `60`) and focus day the chart should show, all from enums built for this item | Rebuilds the item's comparison, writes each fact in the chart's own words (`src/chartModel.ts`), drops any option, range or day outside this item and window, and returns the view change as `chart` in the reply. View state only: it cannot navigate, save, buy or edit the plan. Without Claude the same facts and view come from Worth's own rules (`server/chartGuide.ts`) |
@@ -169,7 +169,7 @@ client shows it under "How Ask Worth read this".
 
 **Buying a listed item.** Ask Worth never prepares an order (decision 0.2 of the checkout
 pivot). When the person asks to buy a catalog item, `open_purchase_check` shows the engine's
-assessment of buying it today and an "Open Worth's comparison" link to the Decision view for that
+assessment of buying it today and an "Open Worth's comparison" link to the purchase answer page for that
 item. The link, name and price come from the server's catalog, never from Claude. On the
 comparison the person presses "Buy today anyway" or "Save for <date>" themselves, and Worth's own
 PayPal sandbox checkout opens only behind `checkoutGuards`. The Worth app never names or links to
@@ -362,8 +362,7 @@ responses on every run, and run live against the real model on demand; see
 Provider behaviour verified against the real sandbox, outside the suite: SDK v6 popup approval
 with exactly one capture and one activity row; cancellation and recovery; a US sandbox buyer
 completing Pay in 4 for $1,199 inside PayPal's checkout; PayPal Messages rendering on the US
-sandbox merchant; and, on the hosted app, a capture followed by a $50 refund whose webhook was
-delivered, verified and turned into a review item.
+sandbox merchant; these were checked by hand in October, before the Alex sample.
 
 Not covered: production payments, automatic access to personal PayPal history, goods
 fulfilment, more than one server instance, and encryption at rest.
