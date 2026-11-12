@@ -19,7 +19,7 @@ import {
   Zap,
   type LucideIcon,
 } from 'lucide-react'
-import { confirmedSchedule } from '../shared/finance'
+import { compareOptions, confirmedSchedule, withoutOwnHold } from '../shared/finance'
 import { nameInSentence } from '../shared/text'
 import type { ForecastPoint, OptionResult, ScheduledFlow } from '../shared/types'
 import { api } from './api'
@@ -273,3 +273,32 @@ export const boughtProductIds = (state: AppState) =>
       .filter((purchase) => purchase.status === 'completed' && !purchase.archived)
       .map((purchase) => purchase.productId),
   )
+
+/**
+ * Whether a saved item fits, from the engine on this plan today: "Fits today", "Fits <day>" (the
+ * wait date) or "Over by $X" (past the most that fits today, with no day in the search). Undefined
+ * while the plan can't give an answer, so the older plan pills show instead. The item's own open
+ * checkout is left out: its hold already reduces the plan, and the item is what it is paying for.
+ */
+export function fitStatus(
+  state: AppState,
+  amountCents: number,
+  item: { productId?: string; itemName?: string } = {},
+) {
+  let c
+  try {
+    c = compareOptions(state.profile, withoutOwnHold(state.purchases, { ...item, amountCents }), {
+      amountCents,
+      today: state.today,
+    })
+  } catch {
+    return undefined
+  }
+  if (c.recommendation === null) return undefined
+  if (c.buyToday.outcome === 'fits') return { tone: 'ok' as const, text: 'Fits today' }
+  if (c.wait.date) return { tone: 'sug' as const, text: `Fits ${dayLabel(c.wait.date)}` }
+  return {
+    tone: 'bad' as const,
+    text: `Over by ${money(amountCents - Math.max(0, c.spendLess.maxPriceCents))}`,
+  }
+}

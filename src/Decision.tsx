@@ -10,6 +10,7 @@ import {
 import {
   ArrowLeft,
   Bookmark,
+  BookmarkCheck,
   CalendarCheck,
   CalendarDays,
   ArrowRight,
@@ -683,6 +684,24 @@ export function Decision({
         (p) => p.productId === product.id && ['created', 'pending', 'unknown'].includes(p.status),
       )
     : undefined
+  // Saved already, with the plan this answer suggests: the button says so instead of saving again.
+  const savedNow = (state.saved ?? []).some(
+    (item) =>
+      item.status !== 'removed' &&
+      item.status !== 'bought' &&
+      (product
+        ? item.productId === product.id
+        : item.kind === 'custom' &&
+          item.name === c.itemName &&
+          item.amountCents === c.amountCents) &&
+      (c.recommendation === 'wait' && c.wait.date ? item.waitDate === c.wait.date : true),
+  )
+  const saved = {
+    label: 'Saved',
+    note: 'It’s in Saved. Nothing is bought.',
+    run: () => undefined,
+    done: true,
+  }
   const primary =
     product &&
     (pending
@@ -697,22 +716,24 @@ export function Decision({
             note: 'You’ll approve in PayPal, then confirm here. Nothing is charged until you do.',
             run: () => onBuy(product, false),
           }
-        : c.recommendation === 'wait' && c.wait.date
-          ? {
-              label: `Save for ${dayLabel(c.wait.date)}`,
-              note: 'Keeps it in Saved with this date. Nothing is bought.',
-              run: () =>
-                onSave({ kind: 'catalog', productId: product.id }, { waitDate: c.wait.date! }),
-            }
-          : {
-              label: 'Save for later',
-              note: 'Keeps it in Saved. Nothing is bought.',
-              run: () =>
-                onSave(
-                  { kind: 'catalog', productId: product.id },
-                  c.recommendation ? { option: c.recommendation } : {},
-                ),
-            })
+        : savedNow
+          ? saved
+          : c.recommendation === 'wait' && c.wait.date
+            ? {
+                label: `Save for ${dayLabel(c.wait.date)}`,
+                note: 'Keeps it in Saved with this date. Nothing is bought.',
+                run: () =>
+                  onSave({ kind: 'catalog', productId: product.id }, { waitDate: c.wait.date! }),
+              }
+            : {
+                label: 'Save for later',
+                note: 'Keeps it in Saved. Nothing is bought.',
+                run: () =>
+                  onSave(
+                    { kind: 'catalog', productId: product.id },
+                    c.recommendation ? { option: c.recommendation } : {},
+                  ),
+              })
   // An open checkout for another item is already in these numbers; say so (fix #9).
   const hold = countedHold(state, {
     productId: product?.id,
@@ -721,8 +742,10 @@ export function Decision({
   })
   // An item the store doesn't sell can still be saved, as an assessment only (A3).
   const custom = !product && {
-    label:
-      c.recommendation === 'wait' && c.wait.date
+    done: savedNow,
+    label: savedNow
+      ? 'Saved'
+      : c.recommendation === 'wait' && c.wait.date
         ? `Save for ${dayLabel(c.wait.date)}`
         : 'Save for later',
     run: () =>
@@ -744,7 +767,13 @@ export function Decision({
   const customActions = (notes: boolean) =>
     custom && (
       <>
-        <Button block variant="secondary" icon={Bookmark} onClick={custom.run}>
+        <Button
+          block
+          variant="secondary"
+          icon={custom.done ? BookmarkCheck : Bookmark}
+          onClick={custom.done ? undefined : custom.run}
+          aria-disabled={custom.done || undefined}
+        >
           {custom.label}
         </Button>
         {notes && (
@@ -758,11 +787,16 @@ export function Decision({
   const breach = firstBelow(c.buyToday.points, c.cushionCents)
   const actions = (notes: boolean) => (
     <>
-      {primary && (
-        <Button block onClick={primary.run}>
-          {primary.label}
-        </Button>
-      )}
+      {primary &&
+        ('done' in primary ? (
+          <Button block variant="secondary" icon={BookmarkCheck} aria-disabled>
+            {primary.label}
+          </Button>
+        ) : (
+          <Button block onClick={primary.run}>
+            {primary.label}
+          </Button>
+        ))}
       {notes && primary && (
         <p className="caption" style={{ textAlign: 'center' }}>
           {primary.note}
