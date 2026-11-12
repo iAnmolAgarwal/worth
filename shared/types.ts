@@ -762,6 +762,8 @@ export interface InstalmentPlanProposal {
   /** Payment rows found in the file, pending or completed. PayPal sets the real schedule. */
   payments: { date: string; amountCents: number; status: Transaction['status'] }[]
   transactionIds: string[]
+  /** The purchase was paid for by PayPal's Pay Later funding (a credit of its full price). */
+  funded?: true
 }
 /** The order of day and month in a CSV's slash dates. */
 export type DateOrder = 'MM/DD' | 'DD/MM'

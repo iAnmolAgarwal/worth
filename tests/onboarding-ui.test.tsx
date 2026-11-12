@@ -481,6 +481,68 @@ describe('Start with your PayPal activity', () => {
   })
 })
 
+describe('Back from PayPal: the review of a Connect PayPal read', () => {
+  const summary = {
+    transactions: 3,
+    first: '2026-10-08',
+    last: '2026-10-09',
+    searchedDays: 186,
+    skipped: 0,
+    truncated: false,
+  }
+  /** The app as PayPal's login returns to it, with the read stubbed and counted. */
+  function returnFromPayPal() {
+    const state = demoState()
+    const reads: unknown[] = []
+    apiMock.mockImplementation(((path: string, data: unknown) => {
+      if (path === '/paypal/activity') {
+        reads.push(data)
+        return reads.length === 1
+          ? Promise.resolve({ csv: CSV, summary })
+          : Promise.reject(new Error('Worth no longer has access to your PayPal activity.'))
+      }
+      return Promise.resolve(
+        path === '/state' ? state : path === '/import/preview' ? preview : compare(state),
+      )
+    }) as typeof api)
+    window.history.replaceState(null, '', '/#import?connect=paypal')
+    render(<App />)
+    return reads
+  }
+
+  it.each(['Cancel', 'Back'])(
+    '%s leaves the review for Home, with one read for the login',
+    async (label) => {
+      const user = userEvent.setup()
+      const reads = returnFromPayPal()
+      expect(await screen.findByRole('heading', { name: 'Check what Worth found' })).toBeTruthy()
+      expect(window.location.hash).toBe('#import')
+      await user.click(screen.getByRole('button', { name: label }))
+      await waitFor(() => expect(window.location.hash).toBe('#home'))
+      expect(await screen.findByRole('region', { name: 'Safe to spend today' })).toBeTruthy()
+      expect(screen.queryByRole('heading', { name: 'Bring your PayPal activity' })).toBeNull()
+      // The sample is untouched: nothing was imported.
+      expect(apiMock).not.toHaveBeenCalledWith('/import/commit', expect.anything())
+      // Let any stray remount run before counting.
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(reads).toHaveLength(1)
+    },
+  )
+
+  it('makes one activity request per login, however the screens change', async () => {
+    const user = userEvent.setup()
+    const reads = returnFromPayPal()
+    await screen.findByRole('heading', { name: 'Check what Worth found' })
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(window.location.hash).toBe('#home'))
+    // Opening the import step again offers a file; it never reads PayPal again.
+    window.location.hash = '#import'
+    expect(await screen.findByRole('heading', { name: 'Bring your PayPal activity' })).toBeTruthy()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(reads).toHaveLength(1)
+  })
+})
+
 describe('the month-led Home for imported PayPal activity', () => {
   it('groups days by calendar week, as PayPal Activity does', () => {
     const days = [
