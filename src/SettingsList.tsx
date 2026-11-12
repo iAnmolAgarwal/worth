@@ -1,4 +1,4 @@
-import { useId } from 'react'
+import { useEffect, useId, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { ChevronRight, type LucideIcon } from 'lucide-react'
 import { cx } from './format'
@@ -120,6 +120,7 @@ export function SettingsMore({
   label,
   sub,
   region,
+  opened,
   children,
 }: {
   icon: LucideIcon
@@ -127,11 +128,17 @@ export function SettingsMore({
   sub?: ReactNode
   /** The opened detail's name for assistive technology, when it differs from the label. */
   region?: string
+  /** Open on arrival and scrolled into view, such as Home's "Connect an agent". */
+  opened?: boolean
   children: ReactNode
 }) {
   const id = useId()
+  const ref = useRef<HTMLDetailsElement>(null)
+  useEffect(() => {
+    if (opened) ref.current?.scrollIntoView?.({ block: 'start' })
+  }, [opened])
   return (
-    <details className="set-row set-more">
+    <details className="set-row set-more" ref={ref} open={opened || undefined}>
       <summary>
         <span className="set-ic" aria-hidden="true">
           <Icon size={18} strokeWidth={2} />

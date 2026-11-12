@@ -24,7 +24,7 @@ export const TOUR_STEPS: TourStep[] = [
     anchor: 'safe',
     tight: true,
     title: 'Safe to spend today',
-    text: 'What you can spend today and still pay every bill and keep your cushion.',
+    text: 'Spend this and still pay every bill. Cushion: the least you want to keep.',
     prefer: ['right', 'bottom'],
   },
   {
@@ -41,7 +41,7 @@ export const TOUR_STEPS: TourStep[] = [
   },
   {
     anchor: 'guide',
-    title: 'Ask your guide',
+    title: 'Ask Worth',
     text: 'Ask Worth about any purchase or bill, from any screen.',
     prefer: ['left', 'top'],
   },

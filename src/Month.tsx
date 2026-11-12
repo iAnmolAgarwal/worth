@@ -115,7 +115,11 @@ export function NextThirtyDays({ state, onShowAll }: { state: AppState; onShowAl
           ]
         : [
             dayLabel(date),
-            flow.kind === 'income' ? 'Payday' : kindLabel(flow.kind),
+            flow.kind === 'income'
+              ? flow.cadence === 'once'
+                ? 'Income'
+                : 'Paycheck'
+              : kindLabel(flow.kind),
             cadenceLabel({ cadence: flow.cadence, nextDate: date })
               .replace(/^E/, 'e')
               .replace(/^M/, 'm'),

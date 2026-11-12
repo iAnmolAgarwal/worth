@@ -80,7 +80,7 @@ export const kindLabel = (kind: ScheduledFlow['kind']) =>
     : kind === 'subscription'
       ? 'Subscription'
       : kind === 'installment'
-        ? 'Instalment plan'
+        ? 'Payment plan'
         : 'Bill'
 
 const WEEKDAY = (date: string) =>

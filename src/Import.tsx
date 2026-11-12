@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Banknote, CircleAlert, FileUp, Store } from 'lucide-react'
+import { Banknote, CircleAlert, Download, Store } from 'lucide-react'
 import type { DateOrder, ImportPreview, InstalmentPlanProposal } from '../shared/types'
 import { CSV_IMPORT_LIMITS, CSV_SIZE_MESSAGE, utf8Bytes } from '../shared/limits'
 import { api } from './api'
@@ -16,7 +16,7 @@ const TYPE_LABEL: Record<ImportPreview['transactions'][number]['kind'], string> 
   transfer: 'Transfer',
   refund: 'Refund',
   adjustment: 'Balance correction',
-  installment: 'Instalment',
+  installment: 'Plan payment',
   unknown: 'Needs review',
 }
 const count = (n: number, noun: string) =>
@@ -187,7 +187,7 @@ export function ImportDialog({
       )}
       {preview ? (
         <div className="row plain picked-file">
-          <Disc icon={FileUp} kind="plan" />
+          <Disc icon={Download} kind="plan" />
           <div className="body">
             <div className="t" style={{ fontSize: 'var(--fs-body)' }}>
               {filename || 'Pasted CSV'}

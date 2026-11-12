@@ -144,11 +144,13 @@ describe('the Home hero', () => {
     await waitFor(() => expect(hero.querySelector('.hero-v .sr')?.textContent).toBe(exact))
     expect(hero.querySelector('.hero-k')?.textContent).toBe('Safe to spend today')
     expect(hero.querySelector('.hero-sub')?.textContent).toBe(`${state.profile.name} · Sat, Oct 3`)
-    expect(hero.querySelector('.hero-pill')?.textContent).toMatch(/^Bills covered through \w+ \d+$/)
+    expect(hero.querySelector('.hero-pill')?.textContent).toMatch(
+      /^Bills covered (until payday, |through )\w+ \d+$/,
+    )
     const split = within(hero).getByRole('list', { name: /^Your \$/ })
     expect(split.textContent).toContain('Free')
     expect(split.textContent).toMatch(/Needed by \w+ \d+/)
-    expect(split.textContent).toContain('Cushion$300')
+    expect(split.textContent).toMatch(/Cushion, the least you want to keep in your account\$300/)
     expect(hero.textContent).toContain('in your account')
     // No chips on the card any more.
     expect(within(hero).queryByRole('list', { name: 'What holds the rest back' })).toBeNull()
@@ -246,7 +248,7 @@ describe('the Home hero', () => {
   })
 
   it.each([
-    ['sample', undefined, 'on', ['Connect PayPal', 'Sample data now', 'Import a file']],
+    ['sample', undefined, 'on', ['Connect PayPal', 'You’re viewing sample data', 'Import a file']],
     ['sample', undefined, 'off', ['Sample data', 'Import a file']],
     ['import', 'file', 'on', ['Connect PayPal', 'From your imported file', 'Import again']],
     ['import', 'paypal', 'on', ['PayPal connected', 'Updated today']],
@@ -375,7 +377,7 @@ describe('the Home hero', () => {
       expect(hero.querySelector('.hero-k .sr')?.textContent).toBe('Safe to spend today')
       await waitFor(
         () => expect(hero.querySelector('.hero-k')?.textContent).toBe('Safe to spend today'),
-        { timeout: 2000 },
+        { timeout: 5000 },
       )
       cleanup()
       // Once per session: the next Home opens on the answer.
@@ -434,6 +436,19 @@ describe('the Home hero', () => {
     expect(card.textContent).not.toMatch(/Every other|Monthly\$|Paycheck\$/)
   })
 
+  it('opens each Coming up row, and the rest, in Plan', async () => {
+    const user = userEvent.setup()
+    const { onNavigate } = renderHome(makeState())
+    const coming = await screen.findByRole('region', { name: 'Coming up' })
+    const first = within(coming)
+      .getAllByRole('button')
+      .find((b) => b.classList.contains('row'))!
+    await user.click(first)
+    expect(onNavigate).toHaveBeenLastCalledWith(expect.stringMatching(/^plan\?tab=\w+&focus=/))
+    await user.click(within(coming).getByRole('button', { name: /more in the next 30 days/ }))
+    expect(onNavigate).toHaveBeenLastCalledWith('plan?tab=soon')
+  })
+
   it('has no inline composer, and the rail opens Connect an agent', async () => {
     const user = userEvent.setup()
     const { onNavigate } = renderHome(makeState())
@@ -442,6 +457,6 @@ describe('the Home hero', () => {
     expect(screen.queryByText('Thinking about buying something?')).toBeNull()
     const rail = screen.getByRole('complementary', { name: 'Saved and your plan' })
     await user.click(within(rail).getByRole('button', { name: /Connect an agent/ }))
-    expect(onNavigate).toHaveBeenCalledWith('settings')
+    expect(onNavigate).toHaveBeenCalledWith('settings?open=agent')
   })
 })

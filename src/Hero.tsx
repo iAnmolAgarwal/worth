@@ -191,8 +191,10 @@ function HowWorkedOut({
           {split.belowCushion && lowDate
             ? `Your plan already dips below your ${money(room.cushionCents)} cushion on ${dayLabel(lowDate)}.`
             : `Keeps your ${money(room.cushionCents)} cushion, if your plan holds.`}{' '}
-          Based on {money(profile.balanceCents)} you confirmed{' '}
-          {profile.snapshotDate === state.today ? 'today' : `on ${dayLabel(profile.snapshotDate)}`}.
+          {/* The sample's balance was never confirmed by the visitor, so it says only when it holds. */}
+          {profile.source === 'demo'
+            ? `Based on ${money(profile.balanceCents)} available on ${dayLabel(profile.snapshotDate)}.`
+            : `Based on ${money(profile.balanceCents)} you confirmed ${profile.snapshotDate === state.today ? 'today' : `on ${dayLabel(profile.snapshotDate)}`}.`}
         </p>
         {lowDate && lowCents !== undefined && (
           <p>
@@ -297,7 +299,10 @@ function Amount({ cents, exact }: { cents: number; exact: number }) {
 }
 
 /** The reference's status pill: bills covered through the low point, or how short the plan is. */
-function StatusPill({ split }: { split: HeroSplit }) {
+/** The plan's own definition of the cushion, from Plan › Edit your plan. */
+const CUSHION_MEANS = 'the least you want to keep in your account'
+
+function StatusPill({ split, paydays }: { split: HeroSplit; paydays: string[] }) {
   if (!split.lowDate) return null
   if (split.shortCents > 0)
     return (
@@ -312,7 +317,11 @@ function StatusPill({ split }: { split: HeroSplit }) {
   return (
     <p className="hero-pill ok">
       <CircleCheck size={16} strokeWidth={2.25} aria-hidden="true" />
-      <span>Bills covered through {shortDate(split.lowDate)}</span>
+      <span>
+        {paydays.includes(split.lowDate)
+          ? `Bills covered until payday, ${shortDate(split.lowDate)}`
+          : `Bills covered through ${shortDate(split.lowDate)}`}
+      </span>
     </p>
   )
 }
@@ -354,15 +363,24 @@ function SplitBar({ split, phase }: { split: HeroSplit; phase: Phase }) {
             // "Nothing free" always shows; a needed or cushion part of $0 does not.
             .filter((segment) => segment.cents > 0 || segment.key === 'free')
             .map((segment) => (
-              <li key={segment.key} className={segment.key}>
+              <li
+                key={segment.key}
+                className={segment.key}
+                title={
+                  segment.key === 'cushion'
+                    ? 'The least you want to keep in your account.'
+                    : undefined
+                }
+              >
                 {segment.cents > 0 && <i aria-hidden="true" />}
                 <span>{segment.label}</span>
+                {segment.key === 'cushion' && <span className="sr">, {CUSHION_MEANS}</span>}
                 {segment.cents > 0 && <b className="num">{compactMoney(segment.cents)}</b>}
               </li>
             ))}
         </ul>
-        <p className="hero-of" title="The money available you confirmed">
-          of <b className="num">{compactMoney(total)}</b> in your account
+        <p className="hero-of">
+          of <b className="num">{compactMoney(total)}</b> money available
         </p>
       </div>
     </div>
@@ -482,7 +500,7 @@ export function HeroActions({
                   <span className="hero-act-s">
                     {why ??
                       (source === 'sample'
-                        ? 'Sample data now'
+                        ? 'You’re viewing sample data'
                         : state.profile.importedFrom === 'paypal'
                           ? (Updated ?? 'From PayPal')
                           : 'From your imported file')}
@@ -663,7 +681,7 @@ function HeroCard({
           <HowWorkedOut state={state} room={room} split={split} paydays={paydays} />
         </div>
         <Amount cents={shown} exact={split.freeCents} />
-        <StatusPill split={split} />
+        <StatusPill split={split} paydays={paydays} />
         <SplitBar split={split} phase={phase} />
         {hold && <ReservationNote purchase={hold} onReview={onOpenCheckout} />}
       </div>

@@ -8,9 +8,9 @@ import {
   ReceiptText,
   RefreshCw,
 } from 'lucide-react'
-import { mainCollision, nearPhrase, planLabel } from '../shared/collision'
+import { mainCollision, planLabel } from '../shared/collision'
 import { planCollisions } from '../shared/finance'
-import type { Product, SavedItem, ScheduledFlow } from '../shared/types'
+import type { Comparison, Product, SavedItem, ScheduledFlow } from '../shared/types'
 import type { AppState, Purchase } from './contract'
 import { isActive } from './contract'
 import { ASSESSMENT_ONLY, MAY_FIT_NOW } from './copy'
@@ -24,7 +24,7 @@ import {
   useComparison,
 } from './engine'
 import { dayLabel, daysFrom, money, signed, displayName } from './format'
-import { Hero, upcomingWithPlans } from './Hero'
+import { Hero, heroSplit, upcomingWithPlans } from './Hero'
 import { MonthBuilt, NextThirtyDays, PlanCards, PlanSummaryLine } from './Month'
 import { Button, Disc, SkeletonRow } from './ui'
 
@@ -32,7 +32,16 @@ import { Button, Disc, SkeletonRow } from './ui'
  * The engine's collision on Home: a payment of a plan already running that lands next to a bill,
  * such as the laptop's Pay in 4 payment the day before rent (judge #7). It names, never advises.
  */
-function CollisionInsight({ state, onShowPlan }: { state: AppState; onShowPlan: () => void }) {
+function CollisionInsight({
+  state,
+  room,
+  onShowPlan,
+}: {
+  state: AppState
+  room?: Comparison
+  /** Opens Plan with this plan's payment in view. */
+  onShowPlan: (planId: string) => void
+}) {
   if (!state.profile.confirmed) return null
   const found = planCollisions(state.profile, state.purchases, state.today).map((c, number) => ({
     ...c,
@@ -44,6 +53,13 @@ function CollisionInsight({ state, onShowPlan }: { state: AppState; onShowPlan: 
   const { payment, bill } = main
   // Pay in 4 is PayPal's product, so a Pay in 4 plan gets its full name; any other plan stays generic.
   const payIn4 = /\bpay\s+in\s+4\b/i.test(payment.name)
+  const days = Math.abs(bill.daysFromInstalment)
+  const apart =
+    days === 0 ? 'land on the same day' : `land ${days === 1 ? 'a day' : `${days} days`} apart`
+  const what = `your ${planLabel(payment.name)} ${payIn4 ? 'Pay in 4' : 'plan'} payment (${money(payment.amountCents)}, ${dayLabel(payment.date)}) and ${displayName(bill.name).toLowerCase()} (${money(bill.amountCents)}, ${dayLabel(bill.date)})`
+  // The verdict is the engine's: the plan keeps its cushion through both, or it says how short.
+  const split = room?.recommendation ? heroSplit(state.profile.balanceCents, room) : undefined
+  const short = split?.belowCushion && split.lowDate ? split : undefined
   return (
     <section
       className="tile notice"
@@ -53,19 +69,14 @@ function CollisionInsight({ state, onShowPlan }: { state: AppState; onShowPlan: 
         <Disc icon={CalendarClock} kind="plan" />
         <div className="body">
           <div className="t">
-            Your {planLabel(payment.name)} {payIn4 ? 'PayPal Pay in 4' : 'plan'} payment lands{' '}
-            {nearPhrase(bill.daysFromInstalment, displayName(bill.name), bill.kind)}
-          </div>
-          <div className="s">
-            <span className="soft">
-              {money(payment.amountCents)} on {dayLabel(payment.date)} · {displayName(bill.name)}{' '}
-              {money(bill.amountCents)} on {dayLabel(bill.date)}
-            </span>
+            {short
+              ? `Heads-up: ${what} ${apart}, and your plan falls ${money(short.shortCents)} below your cushion on ${dayLabel(short.lowDate!)}.`
+              : `Heads-up, nothing to do: ${what} ${apart}, and both are covered.`}
           </div>
         </div>
       </div>
       <div className="actions">
-        <Button variant="secondary" onClick={onShowPlan}>
+        <Button variant="secondary" onClick={() => onShowPlan(payment.planId)}>
           See your plan
         </Button>
       </div>
@@ -73,7 +84,16 @@ function CollisionInsight({ state, onShowPlan }: { state: AppState; onShowPlan: 
   )
 }
 
-function ComingUp({ state, onShowAll }: { state: AppState; onShowAll: () => void }) {
+function ComingUp({
+  state,
+  onShowAll,
+  onOpen,
+}: {
+  state: AppState
+  onShowAll: () => void
+  /** Opens the row's bill, subscription, pay or Pay in 4 plan in Plan. */
+  onOpen: (tab: string, focus: string) => void
+}) {
   const plans = allPlans(state)
   const upcoming = upcomingWithPlans(state)
   // Everything in the next two weeks shows, so a big bill like rent is never hidden; later
@@ -90,8 +110,18 @@ function ComingUp({ state, onShowAll }: { state: AppState; onShowAll: () => void
         : undefined
     const index = plan ? plan.dates.indexOf(date) : -1
     const paymentNumber = plan?.total ? plan.total - plan.left + index + 1 : undefined
+    // Each row opens its own bill, pay or Pay in 4 plan in Plan.
+    const tab =
+      flow.kind === 'installment' ? 'plans' : flow.kind === 'income' ? 'income' : flow.kind
     return (
-      <div className="row" key={`${flow.id}-${date}`}>
+      <button
+        type="button"
+        className="row"
+        key={`${flow.id}-${date}`}
+        onClick={() =>
+          onOpen(tab, flow.kind === 'installment' ? (flow.planId ?? flow.id) : flow.id)
+        }
+      >
         <Disc
           icon={flowIcon(flow)}
           kind={
@@ -107,7 +137,9 @@ function ComingUp({ state, onShowAll }: { state: AppState; onShowAll: () => void
               {paymentNumber
                 ? `Payment ${paymentNumber} of ${plan!.total}`
                 : flow.kind === 'income'
-                  ? `Income, ${cadenceLabel({ cadence: flow.cadence, nextDate: date }).replace(/^E/, 'e')}`
+                  ? flow.cadence === 'once'
+                    ? 'Income'
+                    : `Paycheck, ${cadenceLabel({ cadence: flow.cadence, nextDate: date }).replace(/^E/, 'e')}`
                   : kindLabel(flow.kind)}
             </span>
           </div>
@@ -124,7 +156,7 @@ function ComingUp({ state, onShowAll }: { state: AppState; onShowAll: () => void
         <div className={`amt num${flow.kind === 'income' ? ' pos' : ''}`}>
           {flow.kind === 'income' ? signed(flow.amountCents, true) : signed(-flow.amountCents)}
         </div>
-      </div>
+      </button>
     )
   }
   return (
@@ -291,7 +323,7 @@ export function Home({
     { amountCents: 0, itemName: 'Room to spend' },
     state.profile.version,
   )
-  const nextDays = <NextThirtyDays state={state} onShowAll={() => onNavigate('plan')} />
+  const nextDays = <NextThirtyDays state={state} onShowAll={() => onNavigate('plan?tab=soon')} />
   return (
     <div className="page home-page">
       <div className="wrap">
@@ -309,7 +341,13 @@ export function Home({
             fundsElsewhere={Boolean(ready) && !fundsToday}
           />
           {/* Full width under the hero, so "Coming up" and Saved start on one line below. */}
-          <CollisionInsight state={state} onShowPlan={() => onNavigate('plan')} />
+          <CollisionInsight
+            state={state}
+            room={room}
+            onShowPlan={(planId) =>
+              onNavigate(`plan?tab=plans&focus=${encodeURIComponent(planId)}`)
+            }
+          />
         </div>
         <div className="grid">
           <div className="stack">
@@ -397,7 +435,17 @@ export function Home({
                 </div>
               </section>
             ))}
-            {month ? nextDays : <ComingUp state={state} onShowAll={() => onNavigate('plan')} />}
+            {month ? (
+              nextDays
+            ) : (
+              <ComingUp
+                state={state}
+                onShowAll={() => onNavigate('plan?tab=soon')}
+                onOpen={(tab, focus) =>
+                  onNavigate(`plan?tab=${tab}&focus=${encodeURIComponent(focus)}`)
+                }
+              />
+            )}
           </div>
           <aside
             className={month ? 'rail' : 'rail rail-fit'}
@@ -424,7 +472,7 @@ export function Home({
                 <p className="meta">Nothing saved yet.</p>
               )}
             </section>
-            <AgentEntry onOpen={() => onNavigate('settings')} />
+            <AgentEntry onOpen={() => onNavigate('settings?open=agent')} />
             {!month && (
               <section className="rail-card" aria-labelledby="plan-title">
                 <div className="sec-head">

@@ -23,3 +23,19 @@ main:has(> .page.activity) {
     margin-right: calc(var(--rail) + var(--s-12));
   }
 }
+
+/* The top bar highlights only the page the visitor is on: the Ask Worth panel is an overlay, so
+   its nav button is not a second current page, and Settings shows on its gear. */
+.nav .nav-ask[aria-expanded='true']:not(:hover) {
+  background: transparent;
+  color: var(--c-nav-text);
+}
+.topbar .icon-btn[aria-current='page'] {
+  background: var(--c-nav-active);
+  color: #fff;
+}
+
+/* Activity's page title, spaced like the other pages' titles above their first row. */
+.activity-title {
+  margin: 0 0 var(--s-5);
+}

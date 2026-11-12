@@ -181,7 +181,7 @@ describe('plan setup wizard', () => {
     wizard(state, onSaved)
     await continueStep(user)
     await continueStep(user)
-    await user.click(screen.getByRole('button', { name: 'Add an instalment plan' }))
+    await user.click(screen.getByRole('button', { name: 'Add a payment plan' }))
     await user.type(screen.getByRole('textbox', { name: 'Plan name' }), 'Shoes · Pay in 4')
     await user.type(screen.getByRole('spinbutton', { name: 'Amount per payment' }), '37.50')
     await user.clear(screen.getByRole('spinbutton', { name: 'Payments left' }))
@@ -390,6 +390,28 @@ describe('plan setup wizard', () => {
 })
 
 describe('plan commitments', () => {
+  it('opens on the next 30 days, from Home', () => {
+    const state = createDemoState(TODAY)
+    render(
+      <PlanPage
+        state={{
+          ...state,
+          reviews: [],
+          products: PRODUCTS,
+          today: TODAY,
+          config: { ai: 'demo', paypal: 'demo' },
+        }}
+        onEdit={vi.fn()}
+        onImport={vi.fn()}
+        initialTab="soon"
+      />,
+    )
+    expect(screen.getByRole('tab', { name: 'Next 30 days' }).getAttribute('aria-selected')).toBe(
+      'true',
+    )
+    expect(screen.getByRole('tabpanel').querySelectorAll('.row').length).toBeGreaterThan(0)
+  })
+
   it('puts the head on the page grid and the summary in a card', () => {
     const state = createDemoState(TODAY)
     render(
@@ -435,7 +457,7 @@ describe('plan commitments', () => {
     )
     expect(screen.getByRole('tab', { name: 'Bills' }).getAttribute('aria-selected')).toBe('true')
     expect(screen.getByText('Apartment rent')).toBeTruthy()
-    await user.click(screen.getByRole('tab', { name: 'Plans' }))
+    await user.click(screen.getByRole('tab', { name: 'Pay in 4' }))
     expect(screen.getByText('Laptop · Pay in 4')).toBeTruthy()
     expect(screen.getByRole('img', { name: '1 of 4 paid' })).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Edit Laptop · Pay in 4' }))
