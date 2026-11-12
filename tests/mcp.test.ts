@@ -742,6 +742,16 @@ describe('purchase_check_link', () => {
     expect(((await agent.get('/api/state')).body as AppState).purchases).toEqual([])
   })
 
+  it('keeps a proper name’s case in its summary: the Halden X5, the everyday camera', async () => {
+    const { app } = setup(handoff)
+    const { token } = await connected(app)
+    const halden = await tool(app, token, 'purchase_check_link', { catalog_item_id: 'halden-x5' })
+    expect(halden.body.summary).toContain('The person can compare buying the Halden X5 today,')
+    expect(halden.text).not.toMatch(/halden x5/)
+    const camera = await tool(app, token, 'purchase_check_link', { catalog_item_id: 'camera' })
+    expect(camera.body.summary).toContain('compare buying the everyday camera today,')
+  })
+
   it('below the cushion, still only links, with the date that fits', async () => {
     const { app, gateway } = setup(handoff)
     const { agent, token } = await connected(app, LATER)
