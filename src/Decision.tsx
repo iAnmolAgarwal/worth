@@ -31,7 +31,7 @@ import {
 import type { Alternative, OptionResult, Product } from '../shared/types'
 import { offerVerdict, type AskOffer } from './AgentLauncher'
 import { AlternativesLoading, SimilarItems, useSimilarItems } from './Alternatives'
-import { BalanceChart } from './BalanceChart'
+import { BalanceChart, type CompareSeries } from './BalanceChart'
 import type { AppState, Comparison, PayIn4, SavePlan, SaveTarget } from './contract'
 import { sourceTarget } from './contract'
 import { ASSESSMENT_ONLY } from './copy'
@@ -45,7 +45,6 @@ import {
   lowerName,
   missingFix,
   optionTitle,
-  paydayOn,
   purchasePlans,
   useComparison,
 } from './engine'
@@ -299,11 +298,17 @@ export function ChartTile({
   scaleWith?: P4
 }) {
   const option = optionOf(c, k) ?? c.buyToday
-  const cause = option.lowPointCause
-  const payday = paydayOn(option.points, option.lowestDate)
   const title = chartTitle(c, k)
   const fullName = fullPayName(c, option)
   const thesis = payIn4 ? payIn4Thesis(c, option, payIn4) : ''
+  // The other answers join the chart only when asked for; Pay in 4 starts on when it is open.
+  const p4 = scaleWith ?? payIn4
+  const compare: CompareSeries[] = [
+    ...(['buyToday', 'wait'] as const)
+      .filter((key) => key !== k && optionOf(c, key))
+      .map((key) => ({ key, name: optionTitle(key, c), points: optionOf(c, key)!.points })),
+    ...(p4 ? [{ key: 'payIn4', name: 'Pay in 4', points: p4.points, on: Boolean(payIn4) }] : []),
+  ]
   return (
     <section className="tile" aria-labelledby="chart-title">
       <h2 className="h-section" id="chart-title">
@@ -317,35 +322,15 @@ export function ChartTile({
       <BalanceChart
         points={option.points}
         cushionCents={c.cushionCents}
-        purchase={{ date: option.purchaseDate, amountCents: option.amountCents }}
-        payIn4={payIn4}
-        scaleWith={scaleWith?.points}
-        fullName={fullName}
-        highlight={{
-          billDate:
-            cause && cause.kind !== 'spending' && cause.kind !== 'purchase'
-              ? cause.date
-              : undefined,
-          paydayDate: option.points.find(
-            (point) =>
-              point.date >= option.lowestDate &&
-              point.events.some((event) => event.kind === 'income'),
-          )?.date,
+        name={k === 'spendLess' ? fullName : optionTitle(k, c)}
+        purchase={{
+          date: option.purchaseDate,
+          amountCents: option.amountCents,
+          fits: fits(option),
         }}
+        compare={compare}
         label={`Projected balance ${title.replace(/^If/, 'if')}${payIn4 ? `, compared with PayPal Pay in 4. ${thesis}` : '.'} Each day shows its low, with that day’s bills taken out before pay arrives. ${payIn4 ? `${fullName}: lowest point` : 'Lowest point'} ${signed(option.lowestBalanceCents)} on ${fullDate(option.lowestDate)}, ${cushionGap(option.lowestBalanceCents, c.cushionCents)}.`}
       />
-      {/* With Pay in 4 open, the chart's own two-row comparison already states both lows. */}
-      {!payIn4 && (
-        <p className="meta" style={{ marginTop: 12, color: 'var(--c-text-strong)' }}>
-          Lowest point: <b className="num">{signed(option.lowestBalanceCents)}</b> on{' '}
-          {dayLabel(option.lowestDate)} ({cushionGap(option.lowestBalanceCents, c.cushionCents)})
-          {cause && cause.date === option.lowestDate && payday
-            ? `: ${lowerName(cause.name)} leaves before your paycheck lands that day.`
-            : cause
-              ? `, after ${lowerName(cause.name)} on ${dayLabel(cause.date)}.`
-              : '.'}
-        </p>
-      )}
     </section>
   )
 }
