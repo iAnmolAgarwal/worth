@@ -198,6 +198,26 @@ describe('PayPal activity as an export', () => {
     expect(csv).not.toMatch(/@/)
   })
 
+  it('names Pay Later rows by their event, so a repayment never becomes a plan of its own', () => {
+    const repayment: TransactionInfo = {
+      transaction_id: 'TX900000000000001',
+      transaction_event_code: 'T1800',
+      transaction_initiation_date: '2026-10-17T13:55:09Z',
+      transaction_amount: { currency_code: 'USD', value: '-299.75' },
+      transaction_status: 'S',
+      transaction_subject: 'Spike S1 camera',
+    }
+    const { csv } = activityCsv([...ROWS, repayment], 'America/New_York')
+    expect(csv).toContain('"PayPal Pay Later","Pay Later Payment"')
+    const plans = parsePayPalCsv(csv, [], { today: '2026-11-12' }).instalmentPlans
+    // One plan, the camera, with the repayment as its first payment.
+    expect(plans).toHaveLength(1)
+    expect(plans[0]).toMatchObject({ name: 'Spike S1 camera', purchaseCents: 119900 })
+    expect(plans[0]!.payments).toEqual([
+      { date: '2026-10-17', amountCents: 29975, status: 'completed' },
+    ])
+  })
+
   it('writes the personal export’s headers, ISO dates and the plan’s local time', () => {
     const { csv } = activityCsv(
       [
@@ -407,6 +427,20 @@ describe('Connect PayPal login', () => {
     expect(fake.fetch).not.toHaveBeenCalled()
   })
 
+  it('counts a login once, so a shared network gets 60 an hour', async () => {
+    const { app, fake } = setup()
+    for (let visitor = 0; visitor < 6; visitor++) {
+      const agent = request.agent(app)
+      for (let index = 0; index < 10; index++) {
+        const { url, state } = await startLogin(agent, fake)
+        expect(url.origin).toBe(MCP_ORIGIN)
+        await agent.get(`/api/paypal/connect/callback?error=access_denied&state=${state}`)
+      }
+    }
+    const late = request.agent(app)
+    expect((await late.get('/api/paypal/connect')).headers.location).toBe('/#import?connect=failed')
+  })
+
   it('limits logins per session', async () => {
     const { agent, fake } = setup()
     for (let index = 0; index < 10; index++) await startLogin(agent, fake)
@@ -429,14 +463,20 @@ describe('Connect PayPal login', () => {
     expect((await post(agent, '/api/paypal/activity')).status).toBe(502)
   })
 
-  it('gates Connect off for a while when the MCP session doesn’t open in time', async () => {
+  it('gates only the visitor after one slow session start, and everyone briefly after two', async () => {
     const fake = fakeMcp({ hang: true })
-    const { agent } = setup(fake, { sessionTimeoutMs: 30 })
+    const { app, agent } = setup(fake, { sessionTimeoutMs: 30 })
     const { state } = await startLogin(agent, fake)
     await agent.get(`/api/paypal/connect/callback?code=${CODE}&state=${state}`)
     const read = await post(agent, '/api/paypal/activity')
     expect(read.status).toBe(503)
     expect(read.body.code).toBe('MCP_TIMEOUT')
+    // The visitor's browser hides Connect; everyone else still sees it.
+    expect((await agent.get('/api/health')).body.paypalConnect).toBe('on')
+    const other = request.agent(app)
+    const second = await startLogin(other, fake)
+    await other.get(`/api/paypal/connect/callback?code=${CODE}&state=${second.state}`)
+    expect((await post(other, '/api/paypal/activity')).body.code).toBe('MCP_TIMEOUT')
     expect((await agent.get('/api/health')).body.paypalConnect).toBe('unavailable')
     expect((await agent.get('/api/state')).body.config.paypalConnect).toBe('unavailable')
   })

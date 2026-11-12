@@ -58,6 +58,8 @@ export const PRIVACY_LINE =
 /** The review's privacy line for activity read through Connect PayPal instead of a file. */
 export const CONNECTED_PRIVACY_LINE =
   'Worth read this through PayPal’s MCP server with one read-only tool and kept no PayPal access afterwards.'
+/** Connected activity shorter than this doesn't pre-fill everyday spending. */
+export const SHORT_COVERAGE_DAYS = 14
 const ESTIMATE_NOTE =
   'Pay in 4 dates are Worth’s estimate from your PayPal activity, about every 2 weeks. PayPal sets the actual schedule.'
 
@@ -775,7 +777,11 @@ export function ImportReview({
         )
         const flows = draftFlows(result, existing)
         setPlans(drafted)
-        setDaily(asInput(result.suggestedDailySpendCents))
+        // A few days of connected activity (often sandbox test purchases) is no basis for a daily
+        // figure: the field starts empty and the user enters one; PayPal's figure is a reference.
+        const short = Boolean(file.connected) && result.coverageDays < SHORT_COVERAGE_DAYS
+        setDaily(short ? '' : asInput(result.suggestedDailySpendCents))
+        setEditDaily(short)
         if (file.sample) {
           // The sample lands on a believable month without guessing: its funds, and a made-up rent
           // the day before the largest plan's next payment, which is what PayPal can't see.
@@ -856,6 +862,9 @@ export function ImportReview({
   }
   const notes = collisionNotes(draft, plans, today)
   const dailyFromPayPal = !preview || readCents(daily) === preview.suggestedDailySpendCents
+  const shortConnected = Boolean(
+    file?.connected && preview && preview.coverageDays < SHORT_COVERAGE_DAYS,
+  )
   const paydays = flows.filter((flow) => flow.kind === 'income')
   const bills = flows.filter((flow) => flow.kind !== 'income')
   const fromPayPal = (items: { origin?: string }[]) =>
@@ -1137,9 +1146,11 @@ export function ImportReview({
                     )}
                     <div className="s">
                       <span className="soft">
-                        {dailyFromPayPal
-                          ? `Your average over ${preview.coverageDays} days, leaving out the bills and plans above`
-                          : `Set by you. PayPal’s average was ${money(preview.suggestedDailySpendCents)} a day.`}
+                        {shortConnected && !dailyFromPayPal
+                          ? `PayPal shows about ${money(preview.suggestedDailySpendCents)} a day over ${preview.coverageDays} ${preview.coverageDays === 1 ? 'day' : 'days'}; too short to rely on. Enter what you usually spend.`
+                          : dailyFromPayPal
+                            ? `Your average over ${preview.coverageDays} days, leaving out the bills and plans above`
+                            : `Set by you. PayPal’s average was ${money(preview.suggestedDailySpendCents)} a day.`}
                       </span>
                     </div>
                   </div>

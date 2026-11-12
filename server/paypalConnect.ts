@@ -13,7 +13,7 @@ import { WindowLimiter } from './limits.ts'
  *
  * The token stays in this process's memory, keyed by the Worth session that started the login. It
  * never reaches a cookie, a response body, a URL or a log. It is dropped after one successful read,
- * or after TOKEN_TTL_MS unused, whichever is first.
+ * or TOKEN_TTL_MS after the login, whichever is first.
  */
 export const MCP_ORIGIN = 'https://mcp.sandbox.paypal.com'
 export const CALLBACK_PATH = '/api/paypal/connect/callback'
@@ -26,12 +26,17 @@ export const ALLOWED_TOOLS: ReadonlySet<string> = new Set(['list_transactions'])
 
 /** A login must come back within this; the state and PKCE verifier are single-use. */
 const STATE_TTL_MS = 10 * 60_000
-/** An unused token is forgotten after this, however long PayPal would honour it. */
+/** A token is forgotten this long after the login if no read used it first, whatever PayPal allows. */
 const TOKEN_TTL_MS = 10 * 60_000
-/** The health gate: an MCP session that hasn't opened in this long counts as PayPal being down. */
-const SESSION_TIMEOUT_MS = 15_000
-/** After a session failed to open, Connect is reported unavailable for this long. */
-const UNAVAILABLE_MS = 5 * 60_000
+/**
+ * The health gate: an MCP session that hasn't opened in this long counts as PayPal being down for
+ * that visitor, whose browser then hides Connect for the visit. Measured starts are 11–12 s.
+ */
+const SESSION_TIMEOUT_MS = 25_000
+/** Consecutive timed-out sessions, across visitors, after which Connect is reported unavailable. */
+const TIMEOUTS_TO_GATE = 2
+/** How long Connect is then reported unavailable to everyone. */
+const UNAVAILABLE_MS = 60_000
 const CALL_TIMEOUT_MS = 30_000
 const OAUTH_TIMEOUT_MS = 10_000
 /** Transaction search allows at most 31 days per request; a minute less keeps clear of the edge. */
@@ -276,7 +281,12 @@ export function activityCsv(rows: TransactionInfo[], timezone: string): Activity
     const net = !feeCurrency || feeCurrency.toUpperCase() === currency ? amount + fee : amount
     const { type, label } = eventType(plain(row.transaction_event_code, 5))
     const status = STATUS_TEXT[plain(row.transaction_status, 2)] ?? 'Unknown'
-    const name = plain(row.transaction_subject) || plain(row.transaction_note) || label
+    // A Pay Later funding or repayment row is named by its event, never its subject: named after the
+    // product, a repayment would read as a new purchase and propose a plan that doesn't exist.
+    const payLater = /^T1[68]\d\d$/.test(plain(row.transaction_event_code, 5))
+    const name = payLater
+      ? label
+      : plain(row.transaction_subject) || plain(row.transaction_note) || label
     const balance = cents(row.ending_balance?.value)
     lines.push({
       date: `${when.date} ${when.time}`,
@@ -380,6 +390,7 @@ export function createPayPalConnect(options: PayPalConnectOptions): PayPalConnec
     ? Promise.resolve(options.clientId)
     : undefined
   let unavailableUntil = 0
+  let timeouts = 0
   let rpcId = 0
 
   function prune(time: number) {
@@ -632,10 +643,18 @@ export function createPayPalConnect(options: PayPalConnectOptions): PayPalConnec
           },
           { timeout: sessionTimeout, failure: 'MCP_TIMEOUT' },
         ).catch((error: unknown) => {
-          if (error instanceof ConnectError && error.code === 'MCP_TIMEOUT')
-            unavailableUntil = now() + UNAVAILABLE_MS
+          // One slow start gates only the visitor who hit it (their browser hides Connect); only
+          // repeated ones mean PayPal is down for everyone, and then only briefly.
+          if (error instanceof ConnectError && error.code === 'MCP_TIMEOUT') {
+            timeouts++
+            if (timeouts >= TIMEOUTS_TO_GATE) {
+              unavailableUntil = now() + UNAVAILABLE_MS
+              timeouts = 0
+            }
+          }
           throw error
         })
+        timeouts = 0
         mcpSession = opened.session ?? undefined
         log({ event: 'paypal_connect_session_open', ms: now() - started })
         await rpc(held.token, mcpSession, 'notifications/initialized', {}, { notify: true })
@@ -710,9 +729,13 @@ export interface ConnectRoutes {
   now: () => number
 }
 
-/** Logins started per session and per IP per hour; each one registers state and calls PayPal. */
+/**
+ * Logins started per session and per IP per hour; each one registers state and calls PayPal. A
+ * login is counted once, when it starts: its callback can only finish a state started here. Judges
+ * may share one office network, so the per-IP allowance is generous.
+ */
 const STARTS_PER_SESSION = 10
-const STARTS_PER_IP = 30
+const STARTS_PER_IP = 60
 /** Activity reads per session and per IP per hour; each one is up to seven PayPal MCP calls. */
 const READS_PER_SESSION = 6
 const READS_PER_IP = 20
@@ -753,7 +776,6 @@ export function mountPayPalConnect(
 
   app.get(CALLBACK_PATH, async (req: Request, res: Response) => {
     if (connect.status() === 'off') return back(res, 'off')
-    if (!startsPerIp.take(req.ip ?? 'local', now())) return back(res, 'limited')
     back(res, await connect.finish(sessionId(res), req.query as Record<string, unknown>))
   })
 

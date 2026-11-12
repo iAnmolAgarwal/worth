@@ -164,12 +164,12 @@ credentials and the browser receives only the public client ID.
   turns the rows into the same CSV text a personal export holds, and the browser reviews it in the
   usual import step. Event codes become export types: `T1600` (buyer-credit funding) becomes a Pay
   Later funding row, so the existing Pay in 4 detection finds the plan. The rows carry no merchant
-  name, so the order description names each one. The access token stays in server memory for one
-  read (or 10 minutes unused) and is never sent to the browser. The same token could create and
+  name, so the order description names each one. The access token stays in server memory until one
+  read, or at most 10 minutes after the login, and is never sent to the browser. The same token could create and
   send invoices, so the server allow-lists `list_transactions` and refuses every other tool.
   Opening a session takes PayPal about 12 s and each window about 11 s, so a read takes about
-  25 s; if a session doesn't open in 15 s, Connect is hidden for that visit and the CSV path
-  remains. `PAYPAL_CONNECT=off` turns it off.
+  25 s; if a session doesn't open in 25 s, Connect is hidden for that visitor's visit (and
+  for everyone for a minute after two such timeouts in a row), and the CSV path remains. `PAYPAL_CONNECT=off` turns it off.
 
 Verified against the sandbox: SDK v6 popup approval followed by exactly one capture; a US sandbox
 buyer paying $1,199 with Pay in 4 inside PayPal's checkout (4 × $299.75); and, on the hosted

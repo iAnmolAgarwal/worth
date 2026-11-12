@@ -34,8 +34,8 @@ sessions beyond what is needed to show the problem.
   `state` and verifier are single-use, expire in 10 minutes and are bound to the Worth session
   that started the login; a callback from any other session is refused. The callback always
   redirects to a fixed path, so no request chooses where the browser goes. PayPal's access token
-  is held only in server memory for that session, for one read or 10 minutes unused, whichever
-  is first; it is never written to disk, a cookie, a response, a URL or a log, and any refresh
+  is held only in server memory for that session, until one read or until 10 minutes after the
+  login, whichever is first; it is never written to disk, a cookie, a response, a URL or a log, and any refresh
   token is discarded. PayPal's MCP server ignores narrower scopes, so the same token could create
   and send invoices: the server calls only `list_transactions` (a hard allow-list, tested) and
   refuses every other tool before any request is made. Logins and reads are rate-limited per
