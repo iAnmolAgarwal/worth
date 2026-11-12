@@ -185,15 +185,18 @@ describe('store pages', () => {
     const html = res.text
     expect(html).toContain('<h1 class="lk-product__name">Everyday camera</h1>')
     expect(html).toContain('<p class="lk-product__price">$1,199.00</p>')
-    expect(html).toContain('<paypal-button class="lk-buy__button" type="pay" hidden>')
+    // PayPal's own button, wrapped by the real <worth-check> in swipe mode, which docks Worth's tab
+    // beside it; a plain same-tab link inside stays for no-JavaScript visits.
+    expect(html).toMatch(
+      /<worth-check mode="swipe" href="https:\/\/worth\.example\/check#q=[^"]+" merchant="Larkspur Supply" amount="1199\.00" refresh-url="\/api\/worth-quote\?productId=camera"><paypal-button class="lk-buy__button" type="pay" hidden><\/paypal-button><a class="worth-check" slot="fallback" href="https:\/\/worth\.example\/check#q=[^"]+">Analyse with Worth<\/a><\/worth-check>/,
+    )
+    // One Worth control: the separate outline link under PayPal is gone.
+    expect(html.match(/<worth-check /g)).toHaveLength(1)
+    expect(html).not.toContain('lk-buy__worth"')
     expect(html).toContain(
       '<paypal-message auto-bootstrap="true" amount="1199.00" currency-code="USD"',
     )
     expect(html).toContain('data-client-id="public-client-id"')
-    // The real <worth-check> element, with a plain same-tab link inside for no-JavaScript visits.
-    expect(html).toMatch(
-      /<worth-check href="https:\/\/worth\.example\/check#q=[^"]+" merchant="Larkspur Supply" amount="1199\.00" refresh-url="\/api\/worth-quote\?productId=camera"><a class="worth-check" href="https:\/\/worth\.example\/check#q=[^"]+">Analyse with Worth<\/a><\/worth-check>/,
-    )
     expect(html).toContain('<script type="module" src="/assets/worth-check.js"></script>')
     expect((await request(app).get('/')).text).not.toContain('worth-check.js')
     expect(html).not.toContain('lk-buy__worth-result')

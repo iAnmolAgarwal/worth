@@ -112,9 +112,14 @@ describe('store checkout client', () => {
     expect(again.querySelector('.lk-buy__status')!.textContent).toContain('couldn’t load')
   })
 
-  it('renders the real <worth-check> with its link, amount and refresh URL', () => {
+  it('renders the real <worth-check> in swipe mode around PayPal’s button', () => {
     const root = render()
     const element = root.querySelector('worth-check')!
+    expect(element.getAttribute('mode')).toBe('swipe')
+    expect(element.closest('.lk-buy__paypal')).not.toBeNull()
+    expect(element.querySelector<HTMLElement>('paypal-button')!.hidden).toBe(true)
+    expect(root.querySelectorAll('worth-check')).toHaveLength(1)
+    expect(root.querySelector('.lk-buy__worth')).toBeNull()
     expect(element.getAttribute('href')).toBe('https://worth.example/check#q=TOKEN')
     expect(element.getAttribute('merchant')).toBe('Larkspur Supply')
     expect(element.getAttribute('amount')).toBe('1199.00')
@@ -123,6 +128,16 @@ describe('store checkout client', () => {
     const fallback = element.querySelector('a')!
     expect(fallback.getAttribute('href')).toBe('https://worth.example/check#q=TOKEN')
     expect(fallback.getAttribute('target')).toBeNull()
+  })
+
+  it('keeps the outline link on its own when the store has no PayPal', () => {
+    const root = render({ clientId: '' })
+    const element = root.querySelector('.lk-buy__worth worth-check')!
+    expect(element.hasAttribute('mode')).toBe(false)
+    expect(root.querySelector('paypal-button')).toBeNull()
+    const fallback = element.querySelector('a')!
+    expect(fallback.getAttribute('href')).toBe('https://worth.example/check#q=TOKEN')
+    expect(fallback.hasAttribute('slot')).toBe(false)
   })
 
   it('hands the store’s own SDK instance to <worth-check>', async () => {

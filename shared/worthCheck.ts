@@ -1,4 +1,5 @@
 import { payIn4Offer, type PayLaterAnswer } from './payLater.ts'
+import { SWIPE_STYLE, SwipeControl } from './worthSwipe.ts'
 
 /**
  * `<worth-check>`: the store's "Analyse with Worth" link, next to its PayPal button
@@ -9,7 +10,9 @@ import { payIn4Offer, type PayLaterAnswer } from './payLater.ts'
  * - `href`: the signed Worth link the store's server minted, `{WORTH_ORIGIN}/check#q={token}`;
  * - `merchant`: the store's name, for the link's description;
  * - `amount`: the price in US dollars as PayPal writes it, such as `1199.00`;
- * - `refresh-url` (optional): the store's own endpoint for a fresh link, answering `{ href }`.
+ * - `refresh-url` (optional): the store's own endpoint for a fresh link, answering `{ href }`;
+ * - `mode` (optional): `swipe` wraps the store's PayPal button, slotted as the element's child, and
+ *   docks Worth's W tab on its right edge (shared/worthSwipe.ts). Without it, the outline link.
  *
  * The page's PayPal SDK v6 instance (or a promise of one) goes in the `paypal` property. With it,
  * the element asks the store's own SDK whether Pay in 4 is offered for the amount, and refreshes
@@ -125,14 +128,15 @@ export async function payIn4Offered(source: EligibilitySource, amount: string) {
 }
 
 export class WorthCheck extends HTMLElement {
-  static observedAttributes = ['href', 'merchant', 'amount']
+  static observedAttributes = ['href', 'merchant', 'amount', 'mode']
   /** Leaves for Worth in the same tab; a seam so tests can watch it. */
   static go = (url: string) => window.location.assign(url)
   /** Seconds since the epoch; a seam for tests. */
   static now = () => Math.floor(Date.now() / 1000)
 
-  private link: HTMLAnchorElement
+  private link!: HTMLAnchorElement
   private description: HTMLSpanElement
+  private swipe?: SwipeControl
   private source?: EligibilitySource | Promise<EligibilitySource>
   /** The store's SDK answer for the current amount: undefined until known, or when unclear. */
   private offered?: boolean
@@ -140,18 +144,30 @@ export class WorthCheck extends HTMLElement {
 
   constructor() {
     super()
-    const root = this.attachShadow({ mode: 'open' })
-    const style = document.createElement('style')
-    style.textContent = STYLE
-    this.link = document.createElement('a')
-    this.link.setAttribute('part', 'link')
-    this.link.textContent = 'Analyse with Worth'
+    this.attachShadow({ mode: 'open' })
     this.description = document.createElement('span')
     this.description.className = 'sr'
     this.description.id = 'worth-check-description'
+    this.build()
+  }
+
+  /** Draws the outline link, or the swipe row around the store's PayPal button. */
+  private build() {
+    this.swipe?.disconnect()
+    this.swipe =
+      this.getAttribute('mode') === 'swipe' ? new SwipeControl(this, this.follow) : undefined
+    const style = document.createElement('style')
+    style.textContent = this.swipe ? SWIPE_STYLE : STYLE
+    if (this.swipe) this.link = this.swipe.tab
+    else {
+      this.link = document.createElement('a')
+      this.link.setAttribute('part', 'link')
+      this.link.textContent = 'Analyse with Worth'
+    }
     this.link.setAttribute('aria-describedby', this.description.id)
     this.link.addEventListener('click', (event) => this.onClick(event))
-    root.append(style, this.link, this.description)
+    this.shadowRoot!.replaceChildren(style, this.swipe?.box ?? this.link, this.description)
+    if (this.swipe && this.isConnected) this.swipe.connect()
   }
 
   /** The page's PayPal SDK v6 instance, or a promise of one. */
@@ -170,13 +186,16 @@ export class WorthCheck extends HTMLElement {
       delete (this as { paypal?: unknown }).paypal
       this.paypal = value
     }
+    this.swipe?.connect()
     this.render()
     document.addEventListener('visibilitychange', this.onVisible)
   }
   disconnectedCallback() {
+    this.swipe?.disconnect()
     document.removeEventListener('visibilitychange', this.onVisible)
   }
   attributeChangedCallback(name: string, previous: string | null, next: string | null) {
+    if (name === 'mode' && (previous === 'swipe') !== (next === 'swipe')) this.build()
     this.render()
     if (name === 'amount' && previous !== next) {
       this.offered = undefined
@@ -186,8 +205,10 @@ export class WorthCheck extends HTMLElement {
 
   private render() {
     const href = safeHref(this.getAttribute('href'))
-    // Without a usable link there is nothing to offer; the store's own checkout is unaffected.
-    this.hidden = !href
+    // Without a usable link there is nothing to offer; the store's own checkout is unaffected. In
+    // swipe mode the element holds PayPal's button, so only the tab goes.
+    if (this.swipe) this.swipe.sync(Boolean(href))
+    else this.hidden = !href
     if (href) this.link.href = href
     else this.link.removeAttribute('href')
     const merchant = this.getAttribute('merchant')?.trim()
@@ -216,7 +237,12 @@ export class WorthCheck extends HTMLElement {
     )
       return
     event.preventDefault()
-    await this.refresh()
+    await this.follow()
+  }
+
+  /** Goes to Worth in the same tab, renewing a link close to expiry first. */
+  private follow = async () => {
+    if (this.stale()) await this.refresh()
     const href = safeHref(this.getAttribute('href'))
     if (href) WorthCheck.go(href)
   }
