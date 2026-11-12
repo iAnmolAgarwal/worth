@@ -48,13 +48,36 @@ describe('Connect PayPal button', () => {
     const group = screen.getByRole('group', { name: 'Connect PayPal' })
     // Three short lines, each readable on its own.
     expect([...group.querySelectorAll('p')].map((line) => line.textContent)).toEqual([
-      'Sign in on PayPal and choose Agree. PayPal calls the connection “Default Application”.',
-      'Worth only reads your activity to keep your plan up to date. It can’t pay or move money.',
-      'Sandbox accounts only. Disconnect any time in Settings.',
+      'You’ll sign in on PayPal’s own page, not here. PayPal shows the connection as “Default Application”: that’s PayPal’s connector name.',
+      'PayPal’s permission list is broader than what Worth uses. Worth only reads your activity; it can’t pay or move money.',
+      'This demo works with PayPal test (sandbox) accounts. Disconnect any time in Settings.',
     ])
     expect(screen.getByRole('button', { name: 'Continue to PayPal' })).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Not now' }))
     expect(screen.getByRole('button', { name: 'Connect PayPal' })).toBeTruthy()
+  })
+
+  it('closes on Escape or Not now and gives focus back to what opened it', async () => {
+    render(<ConnectPayPalButton pop />)
+    const button = screen.getByRole('button', { name: 'Connect PayPal' })
+    await userEvent.click(button)
+    expect(screen.getByRole('group', { name: 'Connect PayPal' })).toBeTruthy()
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('group', { name: 'Connect PayPal' })).toBeNull()
+    expect(document.activeElement).toBe(button)
+    expect(button.getAttribute('aria-expanded')).toBe('false')
+    await userEvent.click(button)
+    await userEvent.click(screen.getByRole('button', { name: 'Not now' }))
+    expect(screen.queryByRole('group', { name: 'Connect PayPal' })).toBeNull()
+    expect(document.activeElement).toBe(button)
+  })
+
+  it('closes on Escape where the note replaces the button, focusing the button again', async () => {
+    render(<ConnectPayPalButton />)
+    await userEvent.click(screen.getByRole('button', { name: 'Connect PayPal' }))
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('group', { name: 'Connect PayPal' })).toBeNull()
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Connect PayPal' }))
   })
 
   it('in the start strip, opens the same line under the button and keeps the button', async () => {

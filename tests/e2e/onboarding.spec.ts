@@ -31,7 +31,7 @@ test('the sample PayPal export builds a believable month with its calm note', as
   await expect(page.getByText('The day after Maple Court rent.', { exact: true })).toBeVisible()
 })
 
-test('the Connect PayPal popover sits above the Saved column, so its buttons take the click', async ({
+test('the Connect PayPal note opens inside its row, covers nothing, and its buttons take the click', async ({
   page,
 }, testInfo) => {
   // Saved sits beside the hero only where the columns don't stack.
@@ -45,10 +45,10 @@ test('the Connect PayPal popover sits above the Saved column, so its buttons tak
   })
   await page.goto(`${origins.worth}/`)
   const hero = page.getByRole('region', { name: 'Safe to spend today' })
-  // Saved has items, so a popover under it would lose its clicks to them.
+  // Saved has items, so a note laid over them would hide them and lose its clicks to them.
   await expect(page.getByRole('heading', { name: 'Saved' })).toBeVisible()
   // Pull the columns up under the hero, as on a page where Saved starts higher (the judge's case:
-  // a notice at the top of the column), so the popover overlaps the Saved rows.
+  // a notice at the top of the column). The note still opens in its row and pushes them down.
   await page.addStyleTag({ content: '.home-band { margin-bottom: -150px }' })
   await hero.getByRole('button', { name: /Connect PayPal/ }).click()
   const overlap = await page.evaluate(() => {
@@ -58,7 +58,7 @@ test('the Connect PayPal popover sits above the Saved column, so its buttons tak
       return r.top < pop.bottom && r.bottom > pop.top && r.left < pop.right && r.right > pop.left
     })
   })
-  expect(overlap, 'the popover overlaps a Saved row').toBe(true)
+  expect(overlap, 'the note covers a Saved row').toBe(false)
   for (const name of ['Continue to PayPal', 'Not now']) {
     const button = page.getByRole('button', { name })
     await expect(button).toBeVisible()
