@@ -111,10 +111,16 @@ async function sendMessage(user: User, text: string) {
   await user.type(screen.getByRole('textbox', { name: 'Message Worth' }), text)
   await user.click(screen.getByRole('button', { name: 'Send' }))
 }
+/** "Ask Worth" in the nav opens the panel over the current screen; the address doesn't change. */
 async function openAsk(user: User) {
   const nav = await screen.findByRole('navigation', { name: 'Main' }, { timeout: 3000 })
-  await user.click(within(nav).getAllByRole('link', { name: 'Ask Worth' })[0]!)
-  await waitFor(() => expect(window.location.hash).toBe('#ask'))
+  const button = within(nav).getByRole('button', { name: 'Ask Worth' })
+  if (button.getAttribute('aria-expanded') !== 'true') await user.click(button)
+  await screen.findByRole('dialog', { name: 'Ask Worth' })
+}
+/** The privacy table and the assistant switch sit behind one disclosure under the composer. */
+async function openWhatItSees(user: User) {
+  await user.click(screen.getByRole('button', { name: /what (?:the assistant|it would) see/i }))
 }
 function purchase(state: AppState, patch: Partial<Purchase> = {}): Purchase {
   const product = state.products[0]!
@@ -214,7 +220,12 @@ describe('conversation isolation across sessions', () => {
     })
     await user.click(await screen.findByRole('button', { name: 'Delete my data now' }))
     await user.click(screen.getByRole('button', { name: 'Delete and start over' }))
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    // The Ask Worth panel is a non-modal dialog and may stay open; the confirmation is gone.
+    await waitFor(() =>
+      expect(
+        screen.queryAllByRole('dialog').filter((d) => d.getAttribute('aria-modal') !== 'false'),
+      ).toEqual([]),
+    )
     expect(screen.queryByText(question)).toBeNull()
     expect(screen.queryByText(answer)).toBeNull()
     await act(async () => {
@@ -289,6 +300,10 @@ describe('conversation isolation across sessions', () => {
     await user.click(screen.getByRole('button', { name: /Import and review my plan/ }))
     await screen.findByRole('heading', { name: 'How much money do you have right now?' })
     expect(screen.queryByText(oldAnswer)).toBeNull()
+    // The plan wizard owns the screen and hides the panel; back on Home it opens again.
+    act(() => {
+      window.location.hash = 'home'
+    })
     await openAsk(user)
     await sendMessage(user, 'What should I confirm now?')
     await screen.findByText('Review your plan first.')
@@ -351,6 +366,7 @@ describe('Claude consent in chat', () => {
     routeApi(() => saved.promise)
     const onUpdate = vi.fn()
     render(<Ask {...askProps} state={state} onUpdate={onUpdate} />)
+    await openWhatItSees(user)
     const toggle = screen.getAllByRole('switch', {
       name: 'Use the assistant (powered by Claude)',
     })[0]!
@@ -401,6 +417,7 @@ describe('Claude consent in chat', () => {
     })
     const onUpdate = vi.fn()
     render(<Ask {...askProps} state={state} onUpdate={onUpdate} />)
+    await openWhatItSees(user)
     const toggle = screen.getAllByRole('switch', {
       name: 'Use the assistant (powered by Claude)',
     })[0]!
@@ -1370,12 +1387,16 @@ describe('iteration 2 fixes', () => {
     expect(within(rail).queryByText('Studio headphones')).toBeNull()
   })
 
-  it('shows nothing as sent to Anthropic while the assistant is off', () => {
+  it('shows nothing as sent to Anthropic while the assistant is off', async () => {
+    const user = userEvent.setup()
     const state = makeState('import')
     render(<Ask {...askProps} state={state} />)
-    const rail = screen.getByRole('complementary', { name: 'Assistant and suggestions' })
-    expect(within(rail).getAllByText('Not sent').length).toBe(3)
-    expect(within(rail).getByText('Never')).toBeTruthy()
+    const toggle = screen.getByRole('button', { name: 'Assistant off · what it would see' })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    await user.click(toggle)
+    const details = document.getElementById(toggle.getAttribute('aria-controls')!)!
+    expect(within(details).getAllByText('Not sent').length).toBe(3)
+    expect(within(details).getByText('Never')).toBeTruthy()
   })
 })
 

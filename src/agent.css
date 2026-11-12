@@ -1,0 +1,418 @@
+/* ---------- Worth, the guide: the launcher, its nudge and the Ask Worth panel ---------- */
+
+/* Above the tab bar (30) and below the dialog scrim (50), so Checkout still covers it. */
+.agent-dock,
+.agent-panel {
+  z-index: 45;
+}
+.agent-dock {
+  position: fixed;
+  right: 24px;
+  bottom: calc(24px + var(--safe-bottom));
+  display: flex;
+  align-items: flex-end;
+  gap: var(--s-3);
+  pointer-events: none;
+}
+.agent-dock > * {
+  pointer-events: auto;
+}
+/* A white disc with a navy ring and a shadow reads on the warm canvas, white tiles and navy. */
+.agent-fab {
+  width: 56px;
+  height: 56px;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid #142c8e;
+  background: #fff;
+  box-shadow:
+    0 0 0 3px #fff,
+    var(--e-3);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  cursor: pointer;
+  transition: transform var(--d-action) var(--ease-move);
+}
+.agent-fab:hover {
+  transform: translateY(-2px);
+}
+.agent-fab:focus-visible {
+  outline: 3px solid var(--c-focus);
+  outline-offset: 4px;
+}
+
+/* The blink: the pupils close for a moment. Still under reduced motion. */
+.guide .guide-eyes {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 90ms ease-in-out;
+}
+.guide-blink .guide-eyes {
+  transform: scaleY(0.1);
+}
+.guide circle {
+  transition:
+    cx 160ms ease-out,
+    cy 160ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .guide-blink .guide-eyes {
+    transform: none;
+  }
+  .guide circle,
+  .agent-fab {
+    transition: none;
+  }
+}
+
+.agent-nudge {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-1);
+  max-width: 280px;
+  margin-bottom: 4px;
+  padding: var(--s-1) var(--s-1) var(--s-1) 0;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-xl) var(--r-xl) 4px var(--r-xl);
+  box-shadow: var(--e-3);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .agent-nudge {
+    animation: enter var(--d-enter) var(--ease-enter) both;
+  }
+}
+.agent-nudge-text {
+  flex: 1;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  font-size: var(--fs-meta);
+  line-height: 1.35;
+  color: var(--c-text-strong);
+  padding: var(--s-3) 0 var(--s-3) var(--s-4);
+}
+.agent-nudge-who {
+  display: block;
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-bold);
+  color: var(--c-text-2);
+  margin-bottom: 2px;
+}
+.agent-nudge .icon-btn {
+  width: 36px;
+  height: 36px;
+}
+
+/* The panel: anchored bottom-right on desktop; the page behind stays usable. */
+.agent-panel {
+  position: fixed;
+  right: 24px;
+  bottom: calc(24px + var(--safe-bottom));
+  width: 420px;
+  height: min(680px, calc(100vh - 112px));
+  display: flex;
+  flex-direction: column;
+  background: var(--c-canvas);
+  border: 1px solid var(--c-border);
+  border-radius: 20px;
+  box-shadow: 0 8px 40px rgba(0, 20, 53, 0.18);
+  overflow: hidden;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .agent-panel {
+    animation: enter var(--d-enter) var(--ease-enter) both;
+  }
+}
+.agent-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-2) var(--s-3) var(--s-4);
+  background: var(--c-surface);
+  border-bottom: 1px solid var(--c-divider);
+  flex: none;
+}
+.agent-title {
+  flex: 1;
+  min-width: 0;
+}
+.agent-title h2 {
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: 1.3;
+  font-weight: var(--fw-bold);
+  color: var(--c-text-strong);
+}
+.agent-title .caption {
+  margin: 0;
+  color: var(--c-text-2);
+}
+
+/* Ask inside the panel: the thread scrolls, the composer stays put. */
+.ask-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.ask-panel .thread {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--s-4);
+  gap: var(--s-4);
+}
+.ask-panel .bot,
+.ask-panel .bubble-user {
+  scroll-margin-top: var(--s-2);
+}
+.ask-panel .bubble-user {
+  max-width: 88%;
+}
+.ask-panel .verdict {
+  font-size: 1.125rem;
+  line-height: 1.5rem;
+}
+.ask-panel .tile {
+  padding: var(--s-4) !important;
+}
+.ask-panel .chips {
+  gap: var(--s-2);
+}
+.ask-panel .askdock {
+  position: static;
+  flex: none;
+  margin: 0;
+  padding: var(--s-3) var(--s-4) var(--s-2);
+  background: var(--c-surface);
+  border-top: 1px solid var(--c-divider);
+}
+.ask-panel .askdock .composer {
+  height: 48px;
+}
+.panel-more {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s-1);
+}
+.panel-more .link {
+  font-size: var(--fs-meta);
+}
+
+/* The bot's avatar is the guide itself. */
+.bot-av:has(.guide) {
+  background: none;
+  width: 28px;
+  height: 28px;
+}
+
+/* The item on the screen behind, offered to ask about. */
+.offer-chip {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  margin-bottom: var(--s-2);
+  padding: 2px 2px 2px var(--s-3);
+  background: var(--c-info);
+  border-radius: var(--r-lg);
+  font-size: var(--fs-meta);
+  line-height: 1.35;
+  font-weight: var(--fw-semibold);
+  color: var(--c-text-strong);
+}
+.offer-chip > span {
+  flex: 1;
+  min-width: 0;
+  padding: var(--s-1) 0;
+}
+.offer-chip .caption {
+  font-weight: var(--fw-medium);
+  color: var(--c-text-2);
+  margin-right: 2px;
+}
+.offer-chip .icon-btn {
+  width: 36px;
+  height: 36px;
+}
+.bubble-about {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  color: var(--c-text-2);
+  font-weight: var(--fw-medium);
+  margin-bottom: 4px;
+}
+.bubble-about .ico {
+  width: 12px;
+  height: 12px;
+  margin-top: 3px;
+  flex: none;
+}
+
+/* "What the assistant sees": one line under the composer, the details on request. */
+.dock-line.sees {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+}
+.sees-toggle {
+  min-height: 32px;
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-semibold);
+  color: var(--c-text-2);
+  align-self: flex-start;
+}
+.sees-toggle .ico {
+  width: 14px;
+  height: 14px;
+  transition: transform var(--d-action) var(--ease-move);
+}
+.sees[data-open='true'] .sees-toggle .ico {
+  transform: rotate(180deg);
+}
+.sees-body {
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 0 0 var(--s-2);
+  font-size: var(--fs-meta);
+}
+.sees-body .kvlist > div {
+  padding: var(--s-2) 0;
+  min-height: 0;
+}
+
+/* Claude's picked facts fold away under a verdict that already shows its options. */
+.picked-toggle {
+  background: none;
+  border: 0;
+  padding: 0;
+  min-height: 32px;
+  cursor: pointer;
+  font: inherit;
+}
+.picked-toggle .chev {
+  transition: transform var(--d-action) var(--ease-move);
+}
+.picked-toggle[aria-expanded='true'] .chev {
+  transform: rotate(180deg);
+}
+
+/* The nav's "Ask Worth" and the tab bar's "Ask" open the panel, so they are buttons. */
+.nav .nav-ask {
+  color: var(--c-nav-text);
+  font: inherit;
+  font-weight: var(--fw-regular);
+  height: 48px;
+  padding: 0 var(--s-4);
+  border: 0;
+  border-radius: 24px;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.nav .nav-ask:hover,
+.nav .nav-ask[aria-expanded='true'] {
+  background: var(--c-nav-active);
+  color: #fff;
+}
+
+@media (max-width: 767px) {
+  .agent-dock {
+    right: 16px;
+    bottom: calc(12px + 64px + 12px + var(--safe-bottom));
+  }
+  /* Detail screens have no tab bar but a sticky action bar; the launcher sits above it. */
+  .agent-dock.lifted {
+    bottom: calc(132px + var(--safe-bottom));
+  }
+  .tabbar button {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    border: 0;
+    background: transparent;
+    border-radius: var(--r-pill);
+    color: var(--c-text-strong);
+    font: inherit;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: var(--fw-semibold);
+    letter-spacing: 0;
+    cursor: pointer;
+  }
+  .tabbar button[aria-expanded='true'] {
+    background: var(--c-fill);
+    color: var(--c-navy);
+  }
+  /* A full-height bottom sheet over the tab bar. */
+  .agent-panel {
+    z-index: 46;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: 48px;
+    width: auto;
+    height: auto;
+    border-radius: 20px 20px 0 0;
+    border-bottom: 0;
+  }
+  .ask-panel .askdock {
+    padding-bottom: calc(var(--s-2) + var(--safe-bottom));
+  }
+}
+
+/* While the panel is open on a wide screen, the page makes room for it, so the actions in a
+   right rail (Save for a date, Buy today anyway, Back to the store) stay reachable. */
+@media (min-width: 1024px) {
+  .panel-open main {
+    padding-right: calc(420px + 24px);
+  }
+}
+/* Phones: the last control on a page stays clear of the launcher. */
+@media (max-width: 767px) {
+  main {
+    padding-bottom: 72px;
+  }
+}
+/* With the room taken, Decision's main column is as narrow as at 1024–1279, so its option cards
+   stack as rows the same way (index.css, "1024–1279"). */
+@media (min-width: 1024px) {
+  .panel-open .options {
+    grid-template-columns: 1fr;
+    gap: var(--s-2);
+  }
+  .panel-open .opt {
+    min-height: 0;
+    gap: 4px;
+    padding: var(--s-3) var(--s-4);
+  }
+  .panel-open .opt .head {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+  .panel-open .opt .kv {
+    margin-top: 0;
+    flex-direction: row;
+    align-items: baseline;
+    gap: var(--s-2);
+  }
+  .panel-open .opt .v {
+    font-size: var(--fs-body);
+    line-height: var(--lh-body);
+    font-weight: var(--fw-bold);
+  }
+}

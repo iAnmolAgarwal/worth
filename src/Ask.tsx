@@ -4,9 +4,12 @@ import {
   ArrowUp,
   Bookmark,
   BookmarkCheck,
+  ChevronDown,
   CircleAlert,
   ListChecks,
+  Quote,
   Sparkles,
+  X,
 } from 'lucide-react'
 import { addDays } from '../shared/finance'
 import { linkIn } from '../shared/link'
@@ -30,9 +33,11 @@ import { ASSESSMENT_ONLY, claudeUses } from './copy'
 import { optionStatus, type DecisionRequest, type Explanation } from './Decision'
 import { claudeOn, envLabel, fits, missingFix, useComparison } from './engine'
 import { capitalize, cx, dayLabel, fromMoney, money, signed } from './format'
+import type { AskOffer } from './AgentLauncher'
+import { Guide, type GuideExpression } from './Guide'
 import { countedHold, ReservationNote } from './Reservation'
 import { LinkCheck } from './PasteLink'
-import { Alert, Button, Field, Pill, ReadAsChip, Toggle, type Tone } from './ui'
+import { Alert, Button, Field, IconButton, Pill, ReadAsChip, Toggle, type Tone } from './ui'
 
 type OnSave = (target: SaveTarget, plan?: SavePlan) => Promise<SavedItem | undefined>
 /** "Read as Everyday camera · $1,199.00 (Larkspur price) · today" for a store price (fix #3). */
@@ -53,7 +58,31 @@ type LinkTurn = {
   cancelled?: boolean
 }
 /** `trace` is fixed when the answer arrives, so a later switch change never relabels it. */
-type Entry = ChatMessage & { reply?: ChatReply; id: number; trace?: string; link?: LinkTurn }
+type Entry = ChatMessage & {
+  reply?: ChatReply
+  id: number
+  trace?: string
+  link?: LinkTurn
+  /** The item the screen behind offered, sent with this question as quoted data. */
+  about?: AskOffer
+}
+
+const offerKey = (offer: AskOffer) => `${offer.itemName}|${offer.amountCents}`
+export const offerLabel = (offer: AskOffer) =>
+  [offer.itemName, money(offer.amountCents), offer.store, offer.verdict].filter(Boolean).join(' · ')
+/** Questions about the item on screen: each names it or a timing, so the server keeps to it. */
+export const offerStarters = (offer: AskOffer) => [
+  `Can I afford the ${offer.itemName} today?`,
+  'What if I wait a week?',
+  'What bills are due before then?',
+]
+
+/** The guide's face for a conversation: thinking while Worth works, then the latest verdict. */
+export function moodFor(entries: Entry[], busy: boolean): GuideExpression {
+  if (busy) return 'thinking'
+  const outcome = entries.at(-1)?.reply?.assessment?.outcome
+  return outcome === 'tight' ? 'warning' : outcome === 'fits' ? 'happy' : 'neutral'
+}
 
 export const ASK_STARTERS = [
   'Can I afford a $1,199 camera?',
@@ -165,6 +194,12 @@ function requestFor(reply: ChatReply, state: AppState): DecisionRequest {
   return product
     ? { productId: product.id, ...budget }
     : { amountCents, itemName: name.slice(0, 150), ...budget }
+}
+
+/** The verdict's first sentence as the headline, and the rest. "$1,199.00" never splits. */
+export function splitVerdict(verdict: string): [string, string] {
+  const match = /^(.+?[.!?])\s+(?=[A-Z])/.exec(verdict)
+  return match ? [match[1]!, verdict.slice(match[0].length)] : [verdict, '']
 }
 
 const status = (option: OptionResult) => {
@@ -282,6 +317,7 @@ function VerdictTile({
     ? { kind: 'catalog', productId: stored.id }
     : { kind: 'custom', name: name.slice(0, 120), amountCents }
   const hold = countedHold(state, { productId: product?.id, itemName: name, amountCents })
+  const [headline, rest] = splitVerdict(reply.verdict ?? paragraphs(reply)[0] ?? '')
   async function save() {
     if (!onSave) return
     setSaving(true)
@@ -302,7 +338,9 @@ function VerdictTile({
       style={{ width: '100%', padding: 'var(--s-5)' }}
       aria-label="Purchase assessment"
     >
-      <p className="verdict">{minus(reply.verdict ?? paragraphs(reply)[0] ?? '')}</p>
+      <p className="verdict">{minus(headline)}</p>
+      {/* The rest of the verdict repeats the option rows; it shows only when they can't. */}
+      {rest && !comparison && <p className="meta">{minus(rest)}</p>}
       <Explanation reply={reply} />
       {stale && (
         <div style={{ marginTop: 12 }}>
@@ -323,9 +361,8 @@ function VerdictTile({
           <span className="sk" style={{ width: '60%' }} />
         </div>
       ) : null}
-      {reply.payIn4 && !reply.payIn4.asked && (
-        <PayIn4Row p4={reply.payIn4} onCompare={() => onOpen(request)} />
-      )}
+      {/* "See the comparison" below is the one link to the comparison. */}
+      {reply.payIn4 && !reply.payIn4.asked && <PayIn4Row p4={reply.payIn4} />}
       {hold && (
         <div style={{ marginTop: 'var(--s-2)' }}>
           <ReservationNote purchase={hold} onReview={(p) => onOpenCheckout(p.id)} />
@@ -599,10 +636,19 @@ export function Ask({
   onOpenCheckout,
   onNavigate,
   onSave,
+  layout = 'page',
+  offer,
+  onMood,
 }: {
   state: AppState
   initialPrompt?: { text: string; id: number }
   visible: boolean
+  /** `panel`: inside the guide's floating panel, with no side rail and compact spacing. */
+  layout?: 'page' | 'panel'
+  /** The item on the screen behind the panel, offered as a chip to ask about. */
+  offer?: AskOffer
+  /** Called when the guide's face should change. */
+  onMood?: (mood: GuideExpression) => void
   onUpdate?: (state: AppState) => void
   onSessionChange?: () => void
   onOpenDecision: (request: DecisionRequest, explanation?: Explanation) => void
@@ -618,6 +664,8 @@ export function Ask({
   const [error, setError] = useState('')
   const [editing, setEditing] = useState<number>()
   const [context, setContext] = useState<PurchaseContext>()
+  /** The offered item this conversation already asked about, or the person removed. */
+  const [usedOffer, setUsedOffer] = useState<string>()
   const lastPrompt = useRef(0)
   const inFlight = useRef(false)
   const input = useRef<HTMLInputElement>(null)
@@ -667,13 +715,19 @@ export function Ask({
         .filter((entry) => !entry.link)
         .slice(-12)
         .map(({ role, content }) => ({ role, content: content.slice(0, 4000) }))
-      setEntries((prev) => [...prev, { role: 'user', content: text, id: Date.now() }])
+      // The item on screen goes with the question as quoted data, never as the question's words.
+      const about = !explicit && offer && usedOffer !== offerKey(offer) ? offer : undefined
+      if (about) setUsedOffer(offerKey(about))
+      const purchase: PurchaseContext | undefined =
+        explicit ??
+        (about ? { amountCents: about.amountCents, itemName: about.itemName } : contextRef.current)
+      setEntries((prev) => [...prev, { role: 'user', content: text, id: Date.now(), about }])
       try {
         const reply = (await api<ChatReply>('/chat', {
           message: text,
           sessionKey: state.sessionKey,
           history,
-          context: explicit ?? contextRef.current,
+          context: purchase,
           ...(remembered.current.length ? { items: remembered.current } : {}),
         })) as ChatReply
         // The server signs each assessed item; only signed items count when sent back.
@@ -731,7 +785,7 @@ export function Ask({
         setBusy(false)
       }
     },
-    [state.sessionKey, onSessionChange],
+    [state.sessionKey, onSessionChange, offer, usedOffer],
   )
   useEffect(() => {
     if (initialPrompt && lastPrompt.current !== initialPrompt.id && !inFlight.current) {
@@ -749,210 +803,228 @@ export function Ask({
       })
   }, [entries.length, busy, visible])
 
+  const mood = moodFor(entries, busy)
+  useEffect(() => {
+    onMood?.(mood)
+  }, [mood, onMood])
+
   const update = (id: number, link: LinkTurn) =>
     setEntries((prev) => prev.map((entry) => (entry.id === id ? { ...entry, link } : entry)))
+  const startOver = () => {
+    // A fresh conversation offers the item on screen again.
+    setUsedOffer(undefined)
+    setEntries([])
+    setContext(undefined)
+    remembered.current = []
+    setError('')
+  }
   const lastId = entries.at(-1)?.id
+  const panel = layout === 'panel'
+  const offered = offer && usedOffer !== offerKey(offer) ? offer : undefined
+  const head = (
+    <div className="bot-head">
+      <span className="bot-av" aria-hidden="true">
+        <Guide size={28} expression="neutral" />
+      </span>
+      Worth
+    </div>
+  )
+  const conversation = (
+    <>
+      <div className="thread" aria-live="polite" aria-relevant="additions">
+        {entries.length === 0 && (
+          <div className="bot">
+            {head}
+            <p>
+              {offered
+                ? `Ask about the ${offered.itemName}, or anything else.`
+                : 'What are you thinking of buying?'}
+            </p>
+            <div className="chips">
+              {(offered ? offerStarters(offered) : ASK_STARTERS).map((text) => (
+                <button
+                  type="button"
+                  key={text}
+                  className="chip-suggest"
+                  onClick={() => void send(text)}
+                >
+                  {curly(text)}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {entries.map((entry) =>
+          entry.role === 'user' ? (
+            <div className="bubble-user" key={entry.id}>
+              {entry.about && (
+                <span className="bubble-about">
+                  <Quote className="ico" aria-hidden="true" />
+                  <span className="sr">About </span>
+                  {offerLabel(entry.about)}
+                </span>
+              )}
+              {entry.content}
+            </div>
+          ) : (
+            <div
+              className="bot enter"
+              key={entry.id}
+              ref={entry.id === lastId ? latest : undefined}
+            >
+              {head}
+              {entry.link ? (
+                <LinkAnswer
+                  turn={entry.link}
+                  onConfirm={(request) => {
+                    update(entry.id, { ...entry.link, confirmed: request })
+                    // Follow-up questions are about the confirmed item, as data only.
+                    setContext({
+                      amountCents: request.amountCents,
+                      itemName: request.itemName,
+                    })
+                    onOpenDecision(request)
+                  }}
+                  onCancel={() => {
+                    update(entry.id, { ...entry.link, cancelled: true })
+                    input.current?.focus()
+                  }}
+                  onOpen={onOpenDecision}
+                />
+              ) : (
+                <Answer
+                  entry={entry}
+                  state={state}
+                  busy={busy}
+                  last={entry.id === lastId}
+                  panel={panel}
+                  editing={editing === entry.id}
+                  onEdit={() => setEditing(entry.id)}
+                  onCancelEdit={() => setEditing(undefined)}
+                  onSend={(text, next) => void send(text, next)}
+                  onAnswer={() => input.current?.focus()}
+                  onOpenDecision={onOpenDecision}
+                  onOpenCheckout={onOpenCheckout}
+                  onNavigate={onNavigate}
+                  onSave={onSave}
+                />
+              )}
+            </div>
+          ),
+        )}
+        {busy && (
+          <div className="bot" role="status">
+            {head}
+            <div className="tile" style={{ width: '100%' }} aria-hidden="true">
+              <div className="stack tight">
+                <span className="sk" style={{ width: '70%', height: 18 }} />
+                <span className="sk" style={{ width: '45%' }} />
+                <span className="sk" style={{ width: '55%' }} />
+              </div>
+            </div>
+            <p className="caption">Checking your plan…</p>
+          </div>
+        )}
+        {error && (
+          <div className="tile" role="alert">
+            <div className="co-head">
+              <span className="co-icon bad" aria-hidden="true">
+                <CircleAlert className="ico" />
+              </span>
+              <div>
+                <h2 className="h-section">Worth couldn’t answer that</h2>
+                <p className="meta">{error} Your question is still in the box.</p>
+              </div>
+            </div>
+            {message.trim() && (
+              <div className="actions" style={{ marginTop: 12 }}>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    const text = message
+                    // Drop the unanswered question so the retry doesn't repeat it.
+                    setEntries((prev) => (prev.at(-1)?.role === 'user' ? prev.slice(0, -1) : prev))
+                    setTimeout(() => void send(text), 0)
+                  }}
+                >
+                  Try again
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+        {panel && entries.length > 0 && !busy && (
+          <div className="panel-more">
+            <div className="chips">
+              {(matchingSuggestions(entries.at(-1)?.reply).length
+                ? matchingSuggestions(entries.at(-1)?.reply)
+                : ASK_STARTERS
+              ).map((text) => (
+                <button
+                  type="button"
+                  key={text}
+                  className="chip-suggest"
+                  onClick={() => void send(text)}
+                >
+                  {curly(text)}
+                </button>
+              ))}
+            </div>
+            <button type="button" className="link" onClick={startOver}>
+              Start over
+            </button>
+          </div>
+        )}
+        <div ref={bottom} />
+      </div>
+      <div className="askdock">
+        {offered && (
+          <div className="offer-chip">
+            <span>
+              <span className="caption">Ask about</span> {offerLabel(offered)}
+            </span>
+            <IconButton
+              label={`Don’t ask about ${offered.itemName}`}
+              icon={X}
+              quiet
+              onClick={() => setUsedOffer(offerKey(offered))}
+            />
+          </div>
+        )}
+        <form
+          className="composer"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void send(message)
+          }}
+        >
+          <label className="sr" htmlFor="ask-q">
+            Message Worth
+          </label>
+          <input
+            id="ask-q"
+            ref={input}
+            value={message}
+            maxLength={2000}
+            placeholder="Ask, or paste a product link"
+            onChange={(event) => setMessage(event.target.value)}
+          />
+          <button className="send" type="submit" aria-label="Send" disabled={busy}>
+            <ArrowUp className="ico" strokeWidth={2} aria-hidden="true" />
+          </button>
+        </form>
+        <WhatItSees state={state} onUpdate={onUpdate} />
+      </div>
+    </>
+  )
+  if (panel) return <div className="ask-panel">{conversation}</div>
   return (
     <div className="page ask-page">
       <div className="wrap">
         <h1 className="sr">Ask Worth</h1>
         <div className="grid">
-          <div>
-            <div className="thread" aria-live="polite" aria-relevant="additions">
-              {entries.length === 0 && (
-                <div className="bot">
-                  <div className="bot-head">
-                    <span className="bot-av" aria-hidden="true">
-                      <Sparkles className="ico" />
-                    </span>
-                    Worth
-                  </div>
-                  <p>
-                    Ask about something you want to buy. Worth checks it against your money, your
-                    bills and the cushion you keep.
-                  </p>
-                  <div className="chips">
-                    {ASK_STARTERS.map((text) => (
-                      <button
-                        type="button"
-                        key={text}
-                        className="chip-suggest"
-                        onClick={() => void send(text)}
-                      >
-                        {curly(text)}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {entries.map((entry) =>
-                entry.role === 'user' ? (
-                  <div className="bubble-user" key={entry.id}>
-                    {entry.content}
-                  </div>
-                ) : (
-                  <div
-                    className="bot enter"
-                    key={entry.id}
-                    ref={entry.id === lastId ? latest : undefined}
-                  >
-                    <div className="bot-head">
-                      <span className="bot-av" aria-hidden="true">
-                        <Sparkles className="ico" />
-                      </span>
-                      Worth
-                    </div>
-                    {entry.link ? (
-                      <LinkAnswer
-                        turn={entry.link}
-                        onConfirm={(request) => {
-                          update(entry.id, { ...entry.link, confirmed: request })
-                          // Follow-up questions are about the confirmed item, as data only.
-                          setContext({
-                            amountCents: request.amountCents,
-                            itemName: request.itemName,
-                          })
-                          onOpenDecision(request)
-                        }}
-                        onCancel={() => {
-                          update(entry.id, { ...entry.link, cancelled: true })
-                          input.current?.focus()
-                        }}
-                        onOpen={onOpenDecision}
-                      />
-                    ) : (
-                      <Answer
-                        entry={entry}
-                        state={state}
-                        busy={busy}
-                        last={entry.id === lastId}
-                        editing={editing === entry.id}
-                        onEdit={() => setEditing(entry.id)}
-                        onCancelEdit={() => setEditing(undefined)}
-                        onSend={(text, next) => void send(text, next)}
-                        onAnswer={() => input.current?.focus()}
-                        onOpenDecision={onOpenDecision}
-                        onOpenCheckout={onOpenCheckout}
-                        onNavigate={onNavigate}
-                        onSave={onSave}
-                      />
-                    )}
-                  </div>
-                ),
-              )}
-              {busy && (
-                <div className="bot" role="status">
-                  <div className="bot-head">
-                    <span className="bot-av" aria-hidden="true">
-                      <Sparkles className="ico" />
-                    </span>
-                    Worth
-                  </div>
-                  <div className="tile" style={{ width: '100%' }} aria-hidden="true">
-                    <div className="stack tight">
-                      <span className="sk" style={{ width: '70%', height: 18 }} />
-                      <span className="sk" style={{ width: '45%' }} />
-                      <span className="sk" style={{ width: '55%' }} />
-                    </div>
-                  </div>
-                  <p className="caption">Checking your plan…</p>
-                </div>
-              )}
-              {error && (
-                <div className="tile" role="alert">
-                  <div className="co-head">
-                    <span className="co-icon bad" aria-hidden="true">
-                      <CircleAlert className="ico" />
-                    </span>
-                    <div>
-                      <h2 className="h-section">Worth couldn’t answer that</h2>
-                      <p className="meta">{error} Your question is still in the box.</p>
-                    </div>
-                  </div>
-                  {message.trim() && (
-                    <div className="actions" style={{ marginTop: 12 }}>
-                      <Button
-                        variant="secondary"
-                        onClick={() => {
-                          const text = message
-                          // Drop the unanswered question so the retry doesn't repeat it.
-                          setEntries((prev) =>
-                            prev.at(-1)?.role === 'user' ? prev.slice(0, -1) : prev,
-                          )
-                          setTimeout(() => void send(text), 0)
-                        }}
-                      >
-                        Try again
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              )}
-              <div ref={bottom} />
-            </div>
-            <div className="askdock">
-              <form
-                className="composer"
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  void send(message)
-                }}
-              >
-                <label className="sr" htmlFor="ask-q">
-                  Message Worth
-                </label>
-                <input
-                  id="ask-q"
-                  ref={input}
-                  value={message}
-                  maxLength={2000}
-                  placeholder="Ask, or paste a product link"
-                  onChange={(event) => setMessage(event.target.value)}
-                />
-                <button className="send" type="submit" aria-label="Send" disabled={busy}>
-                  <ArrowUp className="ico" strokeWidth={2} aria-hidden="true" />
-                </button>
-              </form>
-              <div className="dock-line">
-                <span className="caption hide-m" style={{ color: 'var(--c-text-2)' }}>
-                  {claudeOn(state)
-                    ? 'The assistant sees your plan totals, never your login. '
-                    : 'The assistant is off. Answers use Worth’s own calculation. '}
-                  <a href="#settings" style={{ fontSize: 'inherit' }}>
-                    What’s shared
-                  </a>
-                </span>
-                <a className="show-m" href="#settings" style={{ fontSize: 'var(--fs-meta)' }}>
-                  What it sees
-                </a>
-                <span className="show-m">
-                  <ClaudeSwitch state={state} onUpdate={onUpdate} compact />
-                </span>
-              </div>
-            </div>
-          </div>
-          <aside className="rail hide-m" aria-label="Assistant and suggestions">
-            <section aria-labelledby="claude-uses">
-              <div className="sec-head">
-                <h2 className="h-section" id="claude-uses">
-                  What the assistant can use
-                </h2>
-              </div>
-              <dl className="kvlist">
-                {claudeUses(claudeOn(state)).map(([label, value]) => (
-                  <div key={label}>
-                    <dt>{label}</dt>
-                    <dd>{value}</dd>
-                  </div>
-                ))}
-              </dl>
-              <div style={{ marginTop: 'var(--s-3)' }}>
-                <ClaudeSwitch state={state} onUpdate={onUpdate} />
-              </div>
-              <a href="#settings" style={{ fontSize: 'var(--fs-meta)' }}>
-                Everything sent to Anthropic (Claude)
-              </a>
-            </section>
+          <div>{conversation}</div>
+          <aside className="rail hide-m" aria-label="Suggestions">
             {/* The empty thread already offers the starters; the rail adds follow-ups later. */}
             {entries.length > 0 && (
               <section aria-labelledby="try-asking">
@@ -960,21 +1032,9 @@ export function Ask({
                   <h2 className="h-section" id="try-asking">
                     Try asking
                   </h2>
-                  {entries.length > 0 && (
-                    <button
-                      type="button"
-                      className="link"
-                      disabled={busy}
-                      onClick={() => {
-                        setEntries([])
-                        setContext(undefined)
-                        remembered.current = []
-                        setError('')
-                      }}
-                    >
-                      Start over
-                    </button>
-                  )}
+                  <button type="button" className="link" disabled={busy} onClick={startOver}>
+                    Start over
+                  </button>
                 </div>
                 <div className="chips">
                   {(matchingSuggestions(entries.at(-1)?.reply).length
@@ -1009,11 +1069,55 @@ export function Ask({
   )
 }
 
+/**
+ * What the assistant sees, behind one disclosure under the composer: the table of what Claude
+ * receives and the switch. It no longer takes a rail on desktop or a permanent dock row on phones.
+ */
+function WhatItSees({
+  state,
+  onUpdate,
+}: {
+  state: AppState
+  onUpdate?: (state: AppState) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const id = useId()
+  return (
+    <div className="dock-line sees" data-open={open}>
+      <button
+        type="button"
+        className="link sees-toggle"
+        aria-expanded={open}
+        aria-controls={id}
+        onClick={() => setOpen(!open)}
+      >
+        {claudeOn(state) ? 'What the assistant sees' : 'Assistant off · what it would see'}
+        <ChevronDown className="ico chev" aria-hidden="true" />
+      </button>
+      <div className="sees-body" id={id} hidden={!open}>
+        <dl className="kvlist">
+          {claudeUses(claudeOn(state)).map(([label, value]) => (
+            <div key={label}>
+              <dt>{label}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
+        <ClaudeSwitch state={state} onUpdate={onUpdate} />
+        <a href="#settings" style={{ fontSize: 'var(--fs-meta)' }}>
+          Everything sent to Anthropic (Claude)
+        </a>
+      </div>
+    </div>
+  )
+}
+
 function Answer({
   entry,
   state,
   busy,
   last,
+  panel,
   editing,
   onEdit,
   onCancelEdit,
@@ -1028,6 +1132,7 @@ function Answer({
   state: AppState
   busy: boolean
   last: boolean
+  panel?: boolean
   editing: boolean
   onEdit: () => void
   onCancelEdit: () => void
@@ -1040,6 +1145,9 @@ function Answer({
 }) {
   const reply = entry.reply!
   const [allFacts, setAllFacts] = useState(false)
+  // Under a verdict with its option rows, Claude's picked facts repeat them, so they fold away.
+  const [factsOpen, setFactsOpen] = useState(!reply.assessment)
+  const factsId = useId()
   // An answer that can't go further says where to fix it instead of dead-ending.
   const unresolved = (state.foreignPayments ?? []).some((payment) => !payment.resolution)
   const blocked =
@@ -1151,27 +1259,43 @@ function Answer({
       )}
       {!!picked.length && (
         <section className="picked" aria-label="Picked for your question">
-          <span className="claude">
-            <Sparkles className="ico" aria-hidden="true" />
-            Picked for your question
-          </span>
-          {reply.lead && <p style={{ marginTop: 8 }}>{reply.lead}</p>}
-          <ul>
-            {(allFacts ? picked : picked.slice(0, 2)).map((point) => (
-              <li key={point.id}>{minus(point.text)}</li>
-            ))}
-          </ul>
-          {picked.length > 2 && (
+          {reply.assessment ? (
             <button
               type="button"
-              className="link"
-              aria-expanded={allFacts}
-              onClick={() => setAllFacts(!allFacts)}
-              style={{ fontSize: 'var(--fs-meta)' }}
+              className="claude picked-toggle"
+              aria-expanded={factsOpen}
+              aria-controls={factsId}
+              onClick={() => setFactsOpen(!factsOpen)}
             >
-              {allFacts ? 'Less' : `More (${picked.length - 2})`}
+              <Sparkles className="ico" aria-hidden="true" />
+              Picked for your question ({picked.length})
+              <ChevronDown className="ico chev" aria-hidden="true" />
             </button>
+          ) : (
+            <span className="claude">
+              <Sparkles className="ico" aria-hidden="true" />
+              Picked for your question
+            </span>
           )}
+          <div id={factsId} hidden={!factsOpen}>
+            {reply.lead && <p style={{ marginTop: 8 }}>{reply.lead}</p>}
+            <ul>
+              {(allFacts ? picked : picked.slice(0, 2)).map((point) => (
+                <li key={point.id}>{minus(point.text)}</li>
+              ))}
+            </ul>
+            {picked.length > 2 && (
+              <button
+                type="button"
+                className="link"
+                aria-expanded={allFacts}
+                onClick={() => setAllFacts(!allFacts)}
+                style={{ fontSize: 'var(--fs-meta)' }}
+              >
+                {allFacts ? 'Less' : `More (${picked.length - 2})`}
+              </button>
+            )}
+          </div>
         </section>
       )}
       {reply.alternatives && (
@@ -1195,7 +1319,7 @@ function Answer({
           {entry.trace ?? traceText(reply, state)}
         </div>
       )}
-      {last && matchingSuggestions(reply).length > 0 && (
+      {last && !panel && matchingSuggestions(reply).length > 0 && (
         // Desktop shows these in the rail; the thread keeps them only on mobile.
         <div className="chips show-m">
           {matchingSuggestions(reply).map((text) => (

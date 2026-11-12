@@ -34,6 +34,10 @@ The demo store lists two real products under its own name, Larkspur Supply (demo
 
 Product names ("MacBook Pro 14-inch", "AirPods 4") are used only to name the item, as a retailer would. They appear in text, never as a logo.
 
+## The guide character
+
+Worth's guide (`src/assets/guide/*.svg`, drawn inline by `src/Guide.tsx`) is an original character made for this project: a tear-off calendar page with wire spectacles whose binder rings read as ears. The concept came from an AI image model; the vector was hand-built, including a simplified, thicker-stroke drawing for 32 px and below.
+
 ## Fonts and icons
 
 - **Figtree** (`@fontsource-variable/figtree`), SIL Open Font License 1.1. It stands in for PayPal Open, which is licensed only to PayPal and is not self-hosted.

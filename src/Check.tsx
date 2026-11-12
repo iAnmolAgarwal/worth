@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent } from 'react'
 import { Bookmark, CircleAlert, Clock, Info } from 'lucide-react'
 import { payIn4InRange } from '../shared/finance'
 import type { AppState, HandoffOpened, HandoffQuote, SavedItem } from '../shared/types'
+import type { AskOffer } from './AgentLauncher'
 import { api, ApiError } from './api'
 import { Decision, EditPurchase, type DecisionRequest } from './Decision'
 import { dayLabel, money } from './format'
@@ -161,6 +162,7 @@ export function Check({
   onToast,
   onOpenDecision,
   onNavigate,
+  onOffer,
 }: {
   state: AppState
   token?: string
@@ -170,6 +172,8 @@ export function Check({
   /** Opens the normal decision for an item the shopper typed in. */
   onOpenDecision: (request: DecisionRequest) => void
   onNavigate: (hash: string) => void
+  /** Offers the store's item and Worth's verdict to the Ask Worth panel. */
+  onOffer?: (offer: AskOffer | undefined) => void
 }) {
   const [view, setView] = useState<View>(() =>
     shown && (!token || opening.has(token)) ? { kind: 'ok', quote: shown } : { kind: 'loading' },
@@ -222,6 +226,7 @@ export function Check({
         onUpdate={onUpdate}
         onToast={onToast}
         onNavigate={onNavigate}
+        onOffer={onOffer}
       />
     )
   return (
@@ -297,6 +302,7 @@ function Quote({
   onUpdate,
   onToast,
   onNavigate,
+  onOffer,
 }: {
   quote: HandoffQuote
   state: AppState
@@ -304,6 +310,7 @@ function Quote({
   onUpdate: (next: AppState) => void
   onToast: (message: string) => void
   onNavigate: (hash: string) => void
+  onOffer?: (offer: AskOffer | undefined) => void
 }) {
   /** The shopper's correction: a user-claimed price, judged instead of the store's. */
   const [claimed, setClaimed] = useState<{ itemName: string; amountCents: number }>()
@@ -432,6 +439,7 @@ function Quote({
       onBuy={() => undefined}
       onSave={() => undefined}
       onViewActivity={() => onNavigate('activity')}
+      onOffer={onOffer}
       handoff={{
         edit: (
           <button

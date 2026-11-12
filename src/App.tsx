@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import type { InstalmentPlanProposal, Product, SavedItem } from '../shared/types'
 import { Activity } from './Activity'
+import { AgentLauncher, nudgeLine, type AskOffer } from './AgentLauncher'
 import { api } from './api'
 import { Ask } from './Ask'
 import { Check, handoffToken, reloadForNewToken } from './Check'
@@ -24,7 +25,8 @@ import type { AppState, Purchase, SavePlan, SaveTarget } from './contract'
 import { alternativeTarget, decisionRequestFrom, saveRequest } from './contract'
 import { Decision, type DecisionRequest, type Explanation } from './Decision'
 import { envLabel } from './engine'
-import { dayLabel, fullDate, money } from './format'
+import { cx, dayLabel, fullDate, money } from './format'
+import type { GuideExpression } from './Guide'
 import { Home, HomeSkeleton } from './Home'
 import { ImportDialog } from './Import'
 import { ImportReview, type ChosenFile } from './Onboarding'
@@ -37,7 +39,6 @@ import { Alert, Button, IconButton, Wordmark } from './ui'
 
 type Screen =
   | 'home'
-  | 'ask'
   | 'activity'
   | 'plan'
   | 'plan-edit'
@@ -48,19 +49,27 @@ type Screen =
   | 'import'
 const LEGACY: Record<string, Screen> = {
   overview: 'home',
-  assistant: 'ask',
   recurring: 'plan',
   wishlist: 'saved',
 }
-const NAV: { screen: Screen; label: string; tabLabel?: string; icon: LucideIcon; tab: boolean }[] =
-  [
-    { screen: 'home', label: 'Home', icon: House, tab: true },
-    { screen: 'ask', label: 'Ask Worth', tabLabel: 'Ask', icon: Sparkles, tab: true },
-    { screen: 'activity', label: 'Activity', icon: ReceiptText, tab: true },
-    { screen: 'plan', label: 'Plan', icon: SlidersHorizontal, tab: true },
-    { screen: 'saved', label: 'Saved', icon: Bookmark, tab: true },
-  ]
+/** `ask` is not a screen: it opens the Ask Worth panel over the current one. */
+const NAV: {
+  screen: Screen | 'ask'
+  label: string
+  tabLabel?: string
+  icon: LucideIcon
+  tab: boolean
+}[] = [
+  { screen: 'home', label: 'Home', icon: House, tab: true },
+  { screen: 'ask', label: 'Ask Worth', tabLabel: 'Ask', icon: Sparkles, tab: true },
+  { screen: 'activity', label: 'Activity', icon: ReceiptText, tab: true },
+  { screen: 'plan', label: 'Plan', icon: SlidersHorizontal, tab: true },
+  { screen: 'saved', label: 'Saved', icon: Bookmark, tab: true },
+]
 const DETAIL: Screen[] = ['decision', 'plan-edit', 'settings', 'check', 'import']
+
+/** `#ask` and the old `#assistant` open the Ask Worth panel; they are no longer screens. */
+const isAskRoute = () => /^#(?:ask|assistant)(?:\?|$)/.test(window.location.hash)
 
 function parseRoute(): { screen: Screen; params: URLSearchParams } {
   const [path = '', query = ''] = window.location.hash.slice(1).split('?')
@@ -72,7 +81,7 @@ function parseRoute(): { screen: Screen; params: URLSearchParams } {
       ? 'plan-edit'
       : (LEGACY[path] ??
         ((
-          ['home', 'ask', 'activity', 'plan', 'saved', 'settings', 'decision', 'import'] as string[]
+          ['home', 'activity', 'plan', 'saved', 'settings', 'decision', 'import'] as string[]
         ).includes(path)
           ? (path as Screen)
           : 'home'))
@@ -95,6 +104,14 @@ export default function App() {
   const [state, setState] = useState<AppState>()
   const [error, setError] = useState('')
   const [route, setRoute] = useState(parseRoute)
+  /** The Ask Worth panel; a first load on `#ask` opens it over Home. */
+  const [panelOpen, setPanelOpen] = useState(isAskRoute)
+  const [mood, setMood] = useState<GuideExpression>('neutral')
+  /** The item Decision or /check offers the panel while it is on screen. */
+  const [offer, setOffer] = useState<AskOffer>()
+  const launcher = useRef<HTMLButtonElement>(null)
+  /** The address of the screen behind the panel, restored when `#ask` opens it. */
+  const behind = useRef(isAskRoute() ? '' : window.location.hash)
   const [menu, setMenu] = useState(false)
   /** The data chip's details: whose data this is, assistant state and PayPal mode. */
   const [envOpen, setEnvOpen] = useState(false)
@@ -193,6 +210,17 @@ export default function App() {
     void load()
     const onHash = () => {
       if (reloadForNewToken()) return
+      // An old `#ask` link opens the panel over the screen already showing.
+      if (isAskRoute()) {
+        history.replaceState(
+          null,
+          '',
+          window.location.pathname + window.location.search + behind.current,
+        )
+        setPanelOpen(true)
+        return
+      }
+      behind.current = window.location.hash
       setRoute(parseRoute())
       setMenu(false)
       setEnvOpen(false)
@@ -306,13 +334,16 @@ export default function App() {
     else window.location.hash = hash
     setMenu(false)
   }, [])
-  const ask = useCallback(
-    (text?: string) => {
-      if (text) setPrompt({ text, id: Date.now() })
-      navigate('ask')
-    },
-    [navigate],
-  )
+  // A first load on `#ask` drops it from the address bar; Home shows behind the panel.
+  useEffect(() => {
+    if (isAskRoute())
+      history.replaceState(null, '', window.location.pathname + window.location.search)
+  }, [])
+  /** Opens the Ask Worth panel over the current screen, asking `text` when given. */
+  const ask = useCallback((text?: string) => {
+    if (text) setPrompt({ text, id: Date.now() })
+    setPanelOpen(true)
+  }, [])
   const openDecision = useCallback(
     (request: DecisionRequest, explanation?: Explanation, from = 'ask') => {
       const params = new URLSearchParams()
@@ -419,7 +450,9 @@ export default function App() {
   const detail = DETAIL.includes(screen)
   const current: Screen =
     screen === 'decision'
-      ? ((params.get('from') as Screen) ?? 'ask')
+      ? params.get('from') === 'saved'
+        ? 'saved'
+        : 'home'
       : screen === 'plan-edit'
         ? 'plan'
         : screen
@@ -430,12 +463,12 @@ export default function App() {
   const decisionProduct = decisionRequest?.productId
     ? state.products.find((p) => p.id === decisionRequest.productId)
     : undefined
-  const from = (params.get('from') ?? 'ask') as Screen
+  // Decisions opened from the panel, or from an old `from=ask` link, go back to Home.
   const backTo: Screen =
     screen === 'decision'
-      ? ['home', 'saved', 'ask'].includes(from)
-        ? from
-        : 'ask'
+      ? params.get('from') === 'saved'
+        ? 'saved'
+        : 'home'
       : screen === 'plan-edit'
         ? 'plan'
         : 'home'
@@ -453,7 +486,7 @@ export default function App() {
   const checkoutProduct = checkout && state.products.find((p) => p.id === checkout.productId)
 
   return (
-    <div className={detail ? 'detail' : undefined}>
+    <div className={cx(detail && 'detail', panelOpen && 'panel-open') || undefined}>
       <a
         className="skip"
         href="#main"
@@ -475,15 +508,27 @@ export default function App() {
           <p className="mtitle">{mobileTitle}</p>
           <Wordmark />
           <nav className="nav" aria-label="Main">
-            {NAV.map((item) => (
-              <a
-                key={item.screen}
-                href={`#${item.screen}`}
-                aria-current={current === item.screen ? 'page' : undefined}
-              >
-                {item.label}
-              </a>
-            ))}
+            {NAV.map((item) =>
+              item.screen === 'ask' ? (
+                <button
+                  key="ask"
+                  type="button"
+                  className="nav-ask"
+                  aria-expanded={panelOpen}
+                  onClick={() => setPanelOpen(!panelOpen)}
+                >
+                  {item.label}
+                </button>
+              ) : (
+                <a
+                  key={item.screen}
+                  href={`#${item.screen}`}
+                  aria-current={current === item.screen ? 'page' : undefined}
+                >
+                  {item.label}
+                </a>
+              ),
+            )}
           </nav>
           <div className="right">
             <span
@@ -569,17 +614,33 @@ export default function App() {
                   </div>
                   <div className="caption">{env}</div>
                 </div>
-                {NAV.filter((item) => !item.tab || true).map((item) => (
-                  <a
-                    key={item.screen}
-                    role="menuitem"
-                    className={item.tab ? 'show-t' : undefined}
-                    href={`#${item.screen}`}
-                  >
-                    <item.icon className="ico" aria-hidden="true" />
-                    {item.label}
-                  </a>
-                ))}
+                {NAV.map((item) =>
+                  item.screen === 'ask' ? (
+                    <button
+                      key="ask"
+                      type="button"
+                      role="menuitem"
+                      className="show-t"
+                      onClick={() => {
+                        setMenu(false)
+                        setPanelOpen(true)
+                      }}
+                    >
+                      <item.icon className="ico" aria-hidden="true" />
+                      {item.label}
+                    </button>
+                  ) : (
+                    <a
+                      key={item.screen}
+                      role="menuitem"
+                      className={item.tab ? 'show-t' : undefined}
+                      href={`#${item.screen}`}
+                    >
+                      <item.icon className="ico" aria-hidden="true" />
+                      {item.label}
+                    </a>
+                  ),
+                )}
                 <a role="menuitem" href="#plan/edit">
                   <SlidersHorizontal className="ico" aria-hidden="true" />
                   Edit your plan
@@ -677,24 +738,6 @@ export default function App() {
             }}
           />
         )}
-        <div hidden={screen !== 'ask'}>
-          <Ask
-            key={epoch}
-            state={state}
-            initialPrompt={prompt}
-            visible={screen === 'ask'}
-            onUpdate={replaceState}
-            onSessionChange={() => void load()}
-            onOpenDecision={(request, explanation) => openDecision(request, explanation, 'ask')}
-            onSave={saveItem}
-            onOpenCheckout={(purchaseId) => {
-              const purchase = state.purchases.find((p) => p.id === purchaseId)
-              if (purchase) openCheckout(purchase)
-              else void load()
-            }}
-            onNavigate={navigate}
-          />
-        </div>
         {screen === 'decision' &&
           (decisionRequest ? (
             <Decision
@@ -717,6 +760,7 @@ export default function App() {
               onSaveAlternative={(item) => void saveItem(alternativeTarget(item))}
               onEditPlan={() => navigate('plan/edit')}
               onViewActivity={() => navigate('activity')}
+              onOffer={setOffer}
             />
           ) : (
             <div className="page plain">
@@ -736,6 +780,7 @@ export default function App() {
             onToast={setToast}
             onOpenDecision={(request) => openDecision(request, undefined, 'home')}
             onNavigate={navigate}
+            onOffer={setOffer}
           />
         )}
         {screen === 'activity' && (
@@ -799,17 +844,67 @@ export default function App() {
         )}
       </main>
       <nav className="tabbar" aria-label="Tab bar">
-        {NAV.filter((item) => item.tab).map((item) => (
-          <a
-            key={item.screen}
-            href={`#${item.screen}`}
-            aria-current={current === item.screen ? 'page' : undefined}
-          >
-            <item.icon className="ico" strokeWidth={2} aria-hidden="true" />
-            {item.tabLabel ?? item.label}
-          </a>
-        ))}
+        {NAV.filter((item) => item.tab).map((item) =>
+          item.screen === 'ask' ? (
+            <button
+              key="ask"
+              type="button"
+              aria-expanded={panelOpen}
+              onClick={() => setPanelOpen(!panelOpen)}
+            >
+              <item.icon className="ico" strokeWidth={2} aria-hidden="true" />
+              {item.tabLabel ?? item.label}
+            </button>
+          ) : (
+            <a
+              key={item.screen}
+              href={`#${item.screen}`}
+              aria-current={current === item.screen ? 'page' : undefined}
+            >
+              <item.icon className="ico" strokeWidth={2} aria-hidden="true" />
+              {item.tabLabel ?? item.label}
+            </a>
+          ),
+        )}
       </nav>
+      <AgentLauncher
+        open={panelOpen}
+        onOpenChange={setPanelOpen}
+        mood={mood}
+        launcher={launcher}
+        nudge={nudgeLine(state)}
+        // Wizards and dialogs own the screen; the conversation stays mounted underneath.
+        hidden={
+          screen === 'import' || screen === 'plan-edit' || Boolean(checkout || review || importing)
+        }
+        lifted={detail}
+      >
+        <Ask
+          key={epoch}
+          layout="panel"
+          state={state}
+          initialPrompt={prompt}
+          visible={panelOpen}
+          offer={screen === 'decision' || screen === 'check' ? offer : undefined}
+          onMood={setMood}
+          onUpdate={replaceState}
+          onSessionChange={() => void load()}
+          onOpenDecision={(request, explanation) => {
+            setPanelOpen(false)
+            openDecision(request, explanation, screen === 'saved' ? 'saved' : 'home')
+          }}
+          onSave={saveItem}
+          onOpenCheckout={(purchaseId) => {
+            const purchase = state.purchases.find((p) => p.id === purchaseId)
+            if (purchase) openCheckout(purchase)
+            else void load()
+          }}
+          onNavigate={(hash) => {
+            setPanelOpen(false)
+            navigate(hash)
+          }}
+        />
+      </AgentLauncher>
       {checkout && checkoutProduct && (
         <Checkout
           key={`${checkout.productId}-${checkout.purchaseId ?? 'new'}`}
