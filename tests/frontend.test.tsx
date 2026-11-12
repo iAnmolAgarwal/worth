@@ -1103,6 +1103,33 @@ describe('after a purchase', () => {
     )
   })
 
+  it('imports with the down arrow and exports with the up arrow, import first', async () => {
+    const user = userEvent.setup()
+    const onImport = vi.fn()
+    render(
+      <Activity
+        state={makeState()}
+        onUpdate={vi.fn()}
+        onAsk={vi.fn()}
+        onOpenCheckout={vi.fn()}
+        onConfirmPlan={vi.fn()}
+        onReviewRefund={vi.fn()}
+        onImport={onImport}
+      />,
+    )
+    const importButton = screen.getByRole('button', { name: 'Import PayPal activity' })
+    const exportButton = screen.getByRole('button', { name: 'Export activity' })
+    expect(importButton.querySelector('svg')?.getAttribute('class')).toContain('lucide-download')
+    expect(exportButton.querySelector('svg')?.getAttribute('class')).toContain('lucide-upload')
+    expect(importButton.getAttribute('title')).toBe('Import PayPal activity')
+    expect(exportButton.getAttribute('title')).toBe('Export activity as CSV')
+    expect(
+      importButton.compareDocumentPosition(exportButton) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    await user.click(importButton)
+    expect(onImport).toHaveBeenCalled()
+  })
+
   it('lists pending checkouts, refund reviews and unconfirmed plans in Activity', async () => {
     const user = userEvent.setup()
     const state = makeState()

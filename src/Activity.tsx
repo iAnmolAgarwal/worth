@@ -246,24 +246,27 @@ export function Activity({
           >
             <SlidersHorizontal className="ico" aria-hidden="true" />
           </button>
-          <button
-            type="button"
-            className="round-btn"
-            aria-label="Download activity as CSV"
-            onClick={download}
-          >
-            <Download className="ico" aria-hidden="true" />
-          </button>
+          {/* Down into Worth is import; up and out of Worth is export. */}
           {onImport && (
             <button
               type="button"
               className="round-btn"
               aria-label="Import PayPal activity"
+              title="Import PayPal activity"
               onClick={onImport}
             >
-              <Upload className="ico" aria-hidden="true" />
+              <Download className="ico" aria-hidden="true" />
             </button>
           )}
+          <button
+            type="button"
+            className="round-btn"
+            aria-label="Export activity"
+            title="Export activity as CSV"
+            onClick={download}
+          >
+            <Upload className="ico" aria-hidden="true" />
+          </button>
         </div>
         <div style={{ marginTop: 'var(--s-6)' }}>
           <p
