@@ -35,6 +35,8 @@ import './chart.css'
 export type Tone = 'amber' | 'violet' | 'teal'
 const TONES: Tone[] = ['amber', 'violet', 'teal']
 const NO_DAYS: ForecastPoint[] = []
+/** What the cushion is, in the words Home uses: the label's tooltip and the text alternative. */
+const CUSHION_MEANS = 'Cushion: the least you want to keep in your account.'
 /** The key of the line drawn when no pill is pressed. */
 const NONE = 'no-purchase'
 
@@ -415,7 +417,7 @@ export function BalanceChart({
     .filter((option) => option.note && shown.has(option.key) && shown.has(selected))
     .map((option) => `${option.note} `)
     .join('')
-  const alt = `${label} ${notes}${series.map((s) => `${s.name}: ${s.text}`).join(' ')}`
+  const alt = `${label} ${notes}${series.map((s) => `${s.name}: ${s.text}`).join(' ')} ${CUSHION_MEANS}`
   const axisY = g.height - 6
 
   return (
@@ -643,6 +645,8 @@ export function BalanceChart({
               </g>
             )}
             <g className="wchart-level cushion">
+              {/* The definition Home gives the word, as the label's tooltip. */}
+              <title>{CUSHION_MEANS}</title>
               <line x1={plot.x} x2={plot.x + plot.w} y1={cushionY} y2={cushionY} />
               <text x={plot.x + plot.w + 8} y={cushionY + (anyNegative ? -1 : 4)}>
                 {narrow ? money(cushionCents, false) : `Cushion ${money(cushionCents, false)}`}

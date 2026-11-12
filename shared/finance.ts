@@ -912,7 +912,7 @@ function payIn4Comparison(
           ? `An instalment would dip below your cushion on ${shortDay(firstDip.date)}`
           : baselineDip
             ? `Your plan dips below your cushion on ${shortDay(baselineDip.date)} even without this purchase`
-            : 'Instalment scenario stays above your cushion',
+            : 'Payment plan scenario stays above your cushion',
     instalments,
     stacking: stackingWarning(
       activePlanPayments(profile, purchases, today, days),

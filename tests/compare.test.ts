@@ -277,7 +277,7 @@ describe('Pay in 4 comparison (acceptance 16)', () => {
   it('labels a scenario that stays above the cushion and one that dips, with the dip date', () => {
     const above = payIn4(compare(profile({ balanceCents: 500000 }), 119900))
     expect(above.outcome).toBe('fits')
-    expect(above.label).toBe('Instalment scenario stays above your cushion')
+    expect(above.label).toBe('Payment plan scenario stays above your cushion')
     expect(above.instalments.every((item) => !item.belowCushion)).toBe(true)
     const dips = payIn4(compare(rentNearby, 119900))
     expect(dips.outcome).toBe('tight')

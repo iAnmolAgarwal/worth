@@ -212,7 +212,7 @@ describe('Pay in 4 in chat (judge #2)', () => {
       expect(payment.nearestBill!.date >= '2026-10-20').toBe(true)
       expect(payment.belowCushion).toBe(false)
     }
-    expect(reply.payIn4!.label).toBe('Instalment scenario stays above your cushion')
+    expect(reply.payIn4!.label).toBe('Payment plan scenario stays above your cushion')
     expect(reply.message).toContain('about every 2 weeks starting on Fri, Oct 23')
     expect(reply.message).not.toMatch(/apartment rent|Oct 21/)
   })
