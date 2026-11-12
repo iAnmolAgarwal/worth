@@ -96,6 +96,8 @@ export interface Transaction {
 export interface Product {
   id: string
   name: string
+  /** A short line under the name, such as the kind of item a model name stands for. */
+  subtitle?: string
   description: string
   priceCents: number
   category: string

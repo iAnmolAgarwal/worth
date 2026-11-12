@@ -165,8 +165,8 @@ describe('store pages', () => {
     }
     expect(html).toContain('$1,199.00')
     expect(html).toContain('Larkspur Supply is a demo store · PayPal sandbox · nothing ships')
-    expect(html).toContain('<p class="lk-catalog__count">6 products</p>')
-    expect(html).toContain('<span class="lk-card__no">No. 02</span>')
+    expect(html).toContain('<p class="lk-catalog__count">7 products</p>')
+    expect(html).toContain('<span class="lk-card__no">No. 03</span>')
     expect(html).toContain('<title>Larkspur Supply</title>')
   })
 
@@ -201,7 +201,7 @@ describe('store pages', () => {
     expect((await request(app).get('/')).text).not.toContain('worth-check.js')
     expect(html).not.toContain('lk-buy__worth-result')
     // The spec sheet: stock number, breadcrumb, facts and four other products.
-    expect(html).toContain('<span class="lk-product__no">No. 02</span>Cameras')
+    expect(html).toContain('<span class="lk-product__no">No. 03</span>Cameras')
     expect(html).toContain('<span class="lk-product__crumb">Cameras</span>')
     expect(html).toContain('<dt>Payment</dt><dd>PayPal sandbox</dd>')
     const more = html.slice(html.indexOf('class="lk-more"'))

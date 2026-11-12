@@ -165,6 +165,7 @@ export function productPage(view: ProductView, options: PageOptions) {
   <div class="lk-product__info">
     <p class="lk-product__category"><span class="lk-product__no">${esc(stockNumber(product))}</span>${esc(product.category)}</p>
     <h1 class="lk-product__name">${esc(product.name)}</h1>
+    ${product.subtitle ? `<p class="lk-product__subtitle">${esc(product.subtitle)}</p>` : ''}
     <p class="lk-product__price">${esc(formatPrice(product.priceCents))}</p>
     <p class="lk-product__description">${esc(product.description)}</p>
     <section class="lk-buy" id="checkout" aria-label="Checkout"

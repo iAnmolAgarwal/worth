@@ -379,6 +379,7 @@ describe('synthetic persona: Maya at Larkspur Supply', () => {
   it('sells every item, real brands included, from one separately branded store', () => {
     expect(new Set(PRODUCTS.map((item) => item.merchant))).toEqual(new Set(['Larkspur Supply']))
     expect(PRODUCTS.map((item) => [item.id, item.priceCents])).toEqual([
+      ['halden-x5', 189900],
       ['headphones', 34900],
       ['camera', 119900],
       ['chair', 44900],

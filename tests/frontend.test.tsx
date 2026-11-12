@@ -123,7 +123,7 @@ async function openWhatItSees(user: User) {
   await user.click(screen.getByRole('button', { name: /what (?:the assistant|it would) see/i }))
 }
 function purchase(state: AppState, patch: Partial<Purchase> = {}): Purchase {
-  const product = state.products[0]!
+  const product = state.products.find((p) => p.id === 'headphones')!
   return {
     id: 'reservation',
     productId: product.id,
@@ -147,7 +147,7 @@ const askProps = {
 function checkoutProps(state: AppState) {
   return {
     state,
-    product: state.products[0]!,
+    product: state.products.find((p) => p.id === 'headphones')!,
     onClose: vi.fn(),
     onUpdate: vi.fn(),
     onViewActivity: vi.fn(),
