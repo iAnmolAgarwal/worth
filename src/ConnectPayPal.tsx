@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 import { CircleAlert, FileUp, LoaderCircle, LogIn } from 'lucide-react'
 import { api, ApiError } from './api'
@@ -9,8 +9,9 @@ import { Alert, Button } from './ui'
 
 /**
  * Connect PayPal (final-day plan §2): log in at PayPal and Worth reads the activity through PayPal's
- * MCP server, then the same review step as a CSV export. The server holds PayPal's access for one
- * read and never sends it here; this file only navigates to the login and asks for the activity.
+ * MCP server, then the same review step as a CSV export. The server keeps PayPal's access so it
+ * can re-read the activity later, and never sends it here; this file only navigates to the login,
+ * asks for the activity and asks the server to re-read it.
  */
 
 /** What the server read, as /api/paypal/activity reports it. */
@@ -57,6 +58,84 @@ export function returnToCheck() {
     return value === 'check'
   } catch {
     return false
+  }
+}
+
+/** What a background PayPal read changed, as /api/paypal/sync reports it. */
+export interface SyncChanges {
+  transactions: number
+  plans: number
+  paid: number
+}
+/** A connected plan is re-read in the background once its last read is older than this. */
+export const SYNC_AFTER_MS = 15 * 60_000
+
+/** "Updated from PayPal: 1 new Pay in 4 plan", or undefined when nothing changed. */
+export function syncSentence(changes: SyncChanges) {
+  const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+  const parts = [
+    changes.plans && count(changes.plans, 'new Pay in 4 plan', 'new Pay in 4 plans'),
+    changes.paid && count(changes.paid, 'Pay in 4 payment made', 'Pay in 4 payments made'),
+    changes.transactions && count(changes.transactions, 'new transaction', 'new transactions'),
+  ].filter(Boolean)
+  return parts.length ? `Updated from PayPal: ${parts.join(', ')}.` : undefined
+}
+
+/**
+ * One background read at a time for this page, shared by the app (on load) and the hero's refresh
+ * button. The server also refuses a second read for the same session.
+ */
+let syncing = false
+const listeners = new Set<() => void>()
+let handlers: { onState: (state: AppState) => void; onToast: (text: string) => void } | undefined
+function setSyncing(value: boolean) {
+  syncing = value
+  for (const listener of listeners) listener()
+}
+/** The app's way to apply a sync's result: its new state and the toast. */
+export function setSyncHandlers(next: typeof handlers) {
+  handlers = next
+}
+export function useSyncing() {
+  return useSyncExternalStore(
+    (listener) => {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    () => syncing,
+  )
+}
+/** Whether a connected plan's last read is old enough for a background re-read. */
+export function syncDue(state: AppState, now = Date.now()) {
+  const at = state.profile.importedAt ? Date.parse(state.profile.importedAt) : Number.NaN
+  return (
+    Boolean(state.config.paypalLinked) &&
+    state.profile.source === 'import' &&
+    state.profile.importedFrom === 'paypal' &&
+    (!Number.isFinite(at) || now - at > SYNC_AFTER_MS)
+  )
+}
+/**
+ * Re-reads the connected PayPal activity without a login and applies it. A link PayPal no longer
+ * honours returns the row to Connect PayPal (the plan is untouched); other failures are silent and
+ * the next visit tries again.
+ */
+export async function syncFromPayPal() {
+  if (syncing) return
+  setSyncing(true)
+  try {
+    const result = await api<{ state: AppState; changes: SyncChanges }>('/paypal/sync', {})
+    handlers?.onState(result.state)
+    const sentence = syncSentence(result.changes)
+    if (sentence) handlers?.onToast(sentence)
+  } catch (failure) {
+    if (failure instanceof ApiError && failure.code === 'NOT_CONNECTED')
+      await api<AppState>('/state').then(
+        (state) => handlers?.onState(state),
+        () => undefined,
+      )
+  } finally {
+    setSyncing(false)
   }
 }
 
@@ -125,10 +204,14 @@ export function ConnectPayPalButton({
       role="group"
       aria-label="Connect PayPal"
     >
+      <p>
+        Sign in on PayPal and choose Agree. PayPal calls the connection “Default Application”.
+      </p>
       <p className="caption">
-        PayPal’s screen will name <b>“Default Application”</b> (PayPal’s MCP connector) and ask to
-        access your transaction data. Worth reads your activity once, then forgets the access. It
-        can’t pay, invoice or move money. Sandbox accounts only.
+        Worth only reads your activity to keep your plan up to date. It can’t pay or move money.
+      </p>
+      <p className="caption">
+        Sandbox accounts only. Disconnect any time in Settings.
       </p>
       <div className="connect-ask-actions">
         <Button
@@ -309,7 +392,7 @@ export function ConnectedSource({ summary }: { summary: ConnectedSummary }) {
               , {shortDate(summary.first)} to {shortDate(summary.last)}
             </>
           )}
-          . Worth has already forgotten PayPal’s access.
+          . Worth keeps the connection to refresh it; disconnect in Settings.
         </span>
       </p>
       {days < SHORT_HISTORY_DAYS && (

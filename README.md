@@ -114,7 +114,7 @@ and 47% of BNPL users say they paid late in the past year
   cheaper, Worth lists up to four similar products from other stores priced within what keeps the
   cushion today, found through Channel3. They link out; Worth does not sell them.
 - **Your own PayPal activity.** **Connect PayPal** reads your sandbox account's activity through
-  PayPal's MCP server (see [Try it](#connect-your-paypal-sandbox-account)), or **Import a file**
+  PayPal's MCP server and keeps it up to date (see [Try it](#connect-your-paypal-sandbox-account)), or **Import a file**
   takes a PayPal activity CSV (personal or business export, up to 1 MB and 10,000 rows; a
   fictional sample export in `src/sample/` runs through the same import). Worth proposes
   recurring bills, categories and existing Pay in 4 plans for you to confirm in one review
@@ -173,17 +173,25 @@ Open https://worth.onrender.com. No sign-in; each browser gets its own anonymous
    (PayPal's US Pay Later takes the first payment at the time of the transaction). **Cancel** or
    **Back** on this screen returns to Home.
 5. Enter money available, a cushion and everyday spending (add a payday too, if you can), then
-   **Continue**. Home shows "PayPal connected · updated today".
+   **Continue**. Home shows "PayPal connected · updated today". From then on Worth keeps the plan
+   up to date without another login: when you open it and the last read is over 15 minutes old,
+   it re-reads PayPal in the background and adds what is new (transactions, a new Pay in 4 plan,
+   a Pay in 4 payment made). It never changes what you entered. **Settings → Disconnect PayPal**
+   ends the connection and keeps the plan: it deletes Worth's only copy of the token and asks
+   PayPal to revoke it (Worth can't guarantee PayPal honours that; to be sure, remove the
+   connection in the PayPal account's settings). PayPal's own transaction index can lag by up to
+   about three hours.
 6. To return to Alex: **Settings → Delete my data now → Delete and start over**.
 
 A sandbox account holds only what was done in that sandbox, so it has no payday or bills, and
 Worth does not invent any. Until money available and a payday are added (in the review, or later
 under Plan), Home can read "$0 · Short by … on <date>": with no income, everyday spending and the
 remaining Pay in 4 payments draw the projected balance below your cushion, and the figure is how
-far below. Worth keeps
-PayPal's access for one read only, and cannot pay, invoice or move money with it.
+far below. Worth keeps the PayPal connection only to refresh your activity, calls only
+`list_transactions`, and cannot pay, invoice or move money with it; disconnect any time in
+Settings.
 
-![Connect PayPal's review step for a sandbox account: 3 transactions read through PayPal's MCP server, Worth has already forgotten PayPal's access, too little history for repeating bills, no repeating pay found, an Add a bill PayPal doesn't see button, and the heading for the one Pay in 4 plan in progress](docs/img/connect-review.png)
+![Connect PayPal's review step for a sandbox account: 3 transactions read through PayPal's MCP server, Worth keeps the connection to refresh it, too little history for repeating bills, no repeating pay found, an Add a bill PayPal doesn't see button, and the heading for the one Pay in 4 plan in progress](docs/img/connect-review.png)
 
 Pay in 4 itself is chosen inside PayPal's checkout. A sandbox buyer can pick it there; Worth
 cannot see which funding the buyer chose (PayPal's order and capture do not say), so after a
@@ -232,9 +240,19 @@ credentials and the browser receives only the public client ID.
   turns the rows into the same CSV text a personal export holds, and the browser reviews it in the
   usual import step. Event codes become export types: `T1600` (buyer-credit funding) becomes a Pay
   Later funding row, so the existing Pay in 4 detection finds the plan. The rows carry no merchant
-  name, so the order description names each one. The access token stays in server memory until one
-  read, or at most 10 minutes after the login, and is never sent to the browser. The same token could create and
-  send invoices, so the server allow-lists `list_transactions` and refuses every other tool.
+  name, so the order description names each one. Connect once: Worth keeps PayPal's refresh token
+  server-side, sealed with AES-256-GCM under `PAYPAL_TOKEN_KEY` and stored with the session (or in
+  memory only when the key is unset), and access tokens in memory for under an hour. It refreshes
+  one at a time, keeps only the newest refresh token PayPal issues, and re-reads in the background
+  when the last read is over 15 minutes old, only adding rows and plans and dropping Pay in 4
+  payments PayPal shows as made once they are due. No token reaches the
+  browser, a log or Claude. **Settings → Disconnect PayPal** or **Delete my data now** deletes
+  Worth's only copy and asks PayPal to revoke it; Worth can't guarantee PayPal honours that, and
+  earlier tokens PayPal issued may stay valid there until they expire (to be sure, remove the
+  connection in the PayPal account's settings). A refresh token PayPal refuses quietly returns
+  Home to Connect PayPal. The same token could
+  create and send invoices, so the server allow-lists `list_transactions` and refuses every other
+  tool.
   Opening a session takes PayPal about 12 s and each window about 11 s (the six run side by side);
   from Continue to the review screen it took about 35–40 s in our checks. If a session doesn't
   open in 25 s, Connect is hidden for that visitor's visit (and for everyone for a minute after
@@ -313,7 +331,7 @@ The [evaluation](#evaluation) runs these paths live against the real model.
 | PayPal Messages (`paypal-messages`) | PayPal's own Pay in 4 message next to Worth's instalment comparison |
 | PayPal `find-eligible-methods` | Server-side Pay Later eligibility for the price before the Pay in 4 comparison is offered |
 | PayPal Webhooks | Raw-body signature verification; order events reconcile, refunds and reversals become review items |
-| PayPal MCP server (`mcp.sandbox.paypal.com`) | Connect PayPal: OAuth with PKCE, then only its `list_transactions` tool reads the logged-in user's own activity for the import review |
+| PayPal MCP server (`mcp.sandbox.paypal.com`) | Connect PayPal: OAuth with PKCE, then only its `list_transactions` tool reads the logged-in user's own activity for the import review, and again in the background to keep a connected plan up to date |
 | PayPal sandbox accounts and negative testing | A US sandbox merchant and buyer; `PayPal-Mock-Response` for the decline and re-approve path |
 | Claude Sonnet 5.5 (Anthropic API) | Interprets questions, picks engine facts, writes one checked sentence, picks chart facts and the chart view (`show_on_chart`), may link to Worth's comparison for an item, suggests import categories |
 | Claude Opus 5.5 (Anthropic API) | Offline only: the independent judge in the live AI eval (`eval/judge.ts`); never called by the app |
@@ -453,6 +471,7 @@ the webhook ID in `PAYPAL_WEBHOOK_ID`. Localhost alone cannot receive them.
 | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | PayPal **sandbox** REST app credentials. Without them checkout is simulated |
 | `PAYPAL_WEBHOOK_ID` | ID of the registered sandbox webhook; required to accept webhook deliveries |
 | `PAYPAL_CONNECT` | `on` or `off`. Connect PayPal through PayPal's MCP server; on by default when `PAYPAL_CLIENT_ID` is set |
+| `PAYPAL_TOKEN_KEY` | 32 random bytes, base64. Seals the refresh token that keeps Connect PayPal connected (AES-256-GCM) so it is stored with the session and survives a restart. Unset: kept in memory only, and visitors reconnect after a restart |
 | `PAYPAL_MCP_CLIENT_ID` | Optional: a client already registered on PayPal's MCP server for `<APP_ORIGIN>/api/paypal/connect/callback`. Without it Worth registers one at first use |
 | `PAYPAL_BRAND_NAME` | The payee PayPal's approval page and Activity show for Worth's own sandbox checkout; default `Sandbox demo merchant` |
 | `PAYPAL_NEGATIVE_TESTING` | Allows the sandbox decline demo. On in development unless `false`; off in production unless `true` |
@@ -504,7 +523,11 @@ plan, a 1 GB disk at `/var/data` for SQLite, health check `/api/health`, auto-de
    Render.
 3. Register `https://<host>/api/paypal/webhook` in the PayPal sandbox app and set
    `PAYPAL_WEBHOOK_ID`.
-4. `GET /api/health` answers `{ ok, service, channel3 }`.
+4. For Connect PayPal to stay connected across deploys, set `PAYPAL_TOKEN_KEY` (generate it with
+   `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`). Changing or
+   removing it disconnects everyone. Logins in progress (their `state` and PKCE verifier) are held
+   in memory, so the service stays one instance and a restart mid-login means connecting again.
+5. `GET /api/health` answers `{ ok, service, channel3 }`.
 
 A disk rules out zero-downtime deploys: each deploy shows about 30 seconds of 502 while the
 instance restarts, so deploys stop during judging.

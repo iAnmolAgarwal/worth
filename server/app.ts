@@ -49,6 +49,8 @@ import {
 import type { PayPalGateway, PayPalOrder } from './paypal.ts'
 import { checkoutGuards } from './checkoutGuards.ts'
 import { createPayPalConnect, mountPayPalConnect } from './paypalConnect.ts'
+import { applyConnectedRead } from './paypalSync.ts'
+import { databaseVault, memoryVault, tokenKey } from './paypalVault.ts'
 import type { PayPalConnect } from './paypalConnect.ts'
 import {
   AgentTokenError,
@@ -408,6 +410,11 @@ export function createApp(options: AppOptions = {}) {
       clientId: config.paypalMcpClientId,
       enabled: config.paypalConnect,
       now: () => now().getTime(),
+      // The refresh token that keeps PayPal connected: sealed with the session when there is a
+      // key, otherwise in memory only.
+      vault: config.paypalTokenKey
+        ? databaseVault(store.db, tokenKey(config.paypalTokenKey)!, () => now().getTime())
+        : memoryVault(config.maxSessions),
     })
   const chat =
     options.chat ??
@@ -443,7 +450,13 @@ export function createApp(options: AppOptions = {}) {
   // Behind a proxy, req.ip must be the client address the proxy appended, not the proxy itself.
   if (config.trustProxy) app.set('trust proxy', config.trustProxy)
   app.locals.store = store
-  app.locals.cleanup = () => store.cleanup(now().getTime())
+  app.locals.cleanup = () => {
+    const time = now().getTime()
+    const deleted = store.cleanup(time)
+    // PayPal links held in memory go with the sessions that expired.
+    paypalConnect.cleanup((id) => store.isLive(id, time))
+    return deleted
+  }
   /** For payment webhooks: records a refund for the user to review, once per refund ID. */
   app.locals.recordRefund = (
     sessionId: string,
@@ -585,6 +598,9 @@ export function createApp(options: AppOptions = {}) {
         alternatives: channel3.health(),
         handoff: handoff ? 'on' : 'off',
         paypalConnect: paypalConnect.status(),
+        ...(paypalConnect.status() !== 'off' && paypalConnect.linked(id)
+          ? { paypalLinked: true }
+          : {}),
         sample: config.samplePersona,
       },
     }
@@ -1155,6 +1171,46 @@ export function createApp(options: AppOptions = {}) {
     timezone: (res) => dataFor(res).profile.timezone,
     now: () => now().getTime(),
     onRead: (res, csv) => connectedReads.set(sessionId(res), csvHash(csv)),
+    onSync: (res, activity) => {
+      const id = sessionId(res)
+      const data = dataFor(res)
+      // Only a plan the user built from Connect PayPal and confirmed is kept up to date.
+      if (data.profile.source !== 'import' || data.profile.importedFrom !== 'paypal')
+        return undefined
+      // An open checkout holds its own reservation; history waits until it is settled.
+      const changes = active(id)
+        ? undefined
+        : applyConnectedRead(
+            data,
+            parsePayPalCsv(activity.csv, retainedHistory(data), {
+              today: today(data.profile.timezone),
+              foreignPayments: data.foreignPayments,
+              storeNames: storeNames(id),
+            }),
+            {
+              today: today(data.profile.timezone),
+              merge: mergeTransactions,
+              maxTransactions: config.maxTransactions,
+            },
+          )
+      // Up to date as of now only when the read was applied (or rightly found nothing new). A
+      // skipped read (rows the import can't use, over the limit, a checkout open) keeps the old
+      // time, so the row never says "updated" untruthfully and a later visit tries again.
+      if (changes) {
+        data.profile.importedAt = now().toISOString()
+        store.save(id, data)
+      }
+      return {
+        state: state(id),
+        changes: changes ?? { transactions: 0, plans: 0, paid: 0 },
+        ...(changes ? {} : { skipped: true }),
+      }
+    },
+    canSync: (res) => {
+      const { profile } = dataFor(res)
+      return profile.source === 'import' && profile.importedFrom === 'paypal'
+    },
+    onDisconnect: (res) => state(sessionId(res)),
   })
   /**
    * PayPal's redirect back to Worth. It records whether the buyer approved or cancelled, then
@@ -1668,6 +1724,8 @@ export function createApp(options: AppOptions = {}) {
     const previous = sessionId(res)
     noActive(previous)
     const id = startSession(req, res, true)
+    // Deleting the data deletes the PayPal connection too (a stored link also goes with the session).
+    paypalConnect.disconnect(previous)
     store.delete(previous)
     res.json(state(id))
   })

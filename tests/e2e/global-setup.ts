@@ -26,24 +26,28 @@ export default async function globalSetup() {
     },
     stdio: ['ignore', 'pipe', 'inherit'],
   })
-  const ready = await new Promise<{ worthOrigin: string; storeOrigin: string; offOrigin: string }>(
-    (done, fail) => {
-      const timer = setTimeout(
-        () => fail(new Error('The E2E servers did not start in 60 s.')),
-        60_000,
-      )
-      child.once('exit', (code) => fail(new Error(`The E2E servers exited (${code}).`)))
-      createInterface({ input: child.stdout! }).on('line', (line) => {
-        if (!line.startsWith('{"ready"')) return void process.stdout.write(`${line}\n`)
-        clearTimeout(timer)
-        done(JSON.parse(line))
-      })
-    },
-  )
+  const ready = await new Promise<{
+    worthOrigin: string
+    storeOrigin: string
+    offOrigin: string
+    connectOrigin: string
+  }>((done, fail) => {
+    const timer = setTimeout(
+      () => fail(new Error('The E2E servers did not start in 60 s.')),
+      60_000,
+    )
+    child.once('exit', (code) => fail(new Error(`The E2E servers exited (${code}).`)))
+    createInterface({ input: child.stdout! }).on('line', (line) => {
+      if (!line.startsWith('{"ready"')) return void process.stdout.write(`${line}\n`)
+      clearTimeout(timer)
+      done(JSON.parse(line))
+    })
+  })
   process.env.E2E_HANDOFF_SECRET = secret
   process.env.E2E_WORTH = ready.worthOrigin
   process.env.E2E_STORE = ready.storeOrigin
   process.env.E2E_WORTH_OFF = ready.offOrigin
+  process.env.E2E_WORTH_CONNECT = ready.connectOrigin
   return async () => {
     if (child.exitCode !== null) return
     const exited = new Promise((done) => child.once('exit', done))
