@@ -27,6 +27,8 @@ import './chart.css'
 export type Tone = 'amber' | 'violet' | 'teal'
 const TONES: Tone[] = ['amber', 'violet', 'teal']
 const NO_DAYS: ForecastPoint[] = []
+/** The key of the line drawn when no pill is pressed. */
+const NONE = 'no-purchase'
 
 /** One way to make the purchase (or the plan as it stands), as a line on the chart. */
 export interface ChartOption {
@@ -93,6 +95,7 @@ export function BalanceChart({
   cushionCents,
   label,
   named = options.length > 1,
+  baseline,
 }: {
   options: ChartOption[]
   /** The option the page is showing. */
@@ -102,6 +105,11 @@ export function BalanceChart({
   label: string
   /** Every summary row leads with its option's name; by default only when there is a choice. */
   named?: boolean
+  /**
+   * The engine's projection with nothing bought, drawn when no pill is pressed. Without it one
+   * pill always stays pressed.
+   */
+  baseline?: { name: string; points: ForecastPoint[] }
 }) {
   const id = useId().replace(/:/g, '')
   const [wrap, width] = useWidth()
@@ -128,9 +136,12 @@ export function BalanceChart({
     setSeen({ window, defaults })
   }
 
-  // The bold line is the page's option while it is pressed, otherwise the first pressed one.
+  // The bold line is the page's option while it is pressed, otherwise the first pressed one;
+  // with no pill pressed it is the balance with nothing bought.
   const pressed = options.filter((option) => shown.has(option.key))
-  const primary = pressed.find((option) => option.key === selected) ?? pressed[0] ?? options[0]
+  const none: ChartOption | undefined = baseline && { key: NONE, ...baseline }
+  const primary =
+    pressed.find((option) => option.key === selected) ?? pressed[0] ?? none ?? options[0]
   const points = primary?.points ?? NO_DAYS
   if (!primary || !points.length) return null
   const ranges = rangeOptions(points)
@@ -144,9 +155,11 @@ export function BalanceChart({
   const allValues = points.map((point) => point.minimumCents)
   const values = allValues.slice(0, days)
   const toneOf = (option: ChartOption) =>
-    option.key === selected
-      ? 'tone-main'
-      : `tone-${option.tone ?? TONES[options.filter((o) => o.key !== selected).indexOf(option) % 3]}`
+    option.key === NONE
+      ? 'tone-none'
+      : option.key === selected
+        ? 'tone-main'
+        : `tone-${option.tone ?? TONES[options.filter((o) => o.key !== selected).indexOf(option) % 3]}`
   const series = (primary ? [primary, ...pressed.filter((option) => option !== primary)] : []).map(
     (option) => {
       const byDate = new Map(option.points.map((point) => [point.date, point]))
@@ -215,12 +228,12 @@ export function BalanceChart({
     setPinned(index)
     setSpoken('')
   }
-  /** At least one pill always stays pressed. */
+  /** Any pill can be unpressed; the last one too, when there is a no-purchase line to show. */
   const toggle = (key: string) =>
     setShown((previous) => {
       const next = new Set(previous)
       if (!next.delete(key)) next.add(key)
-      return next.size ? next : previous
+      return next.size || baseline ? next : previous
     })
   const onKey = (event: KeyboardEvent<HTMLDivElement>) => {
     const step: Record<string, number> = {
@@ -320,35 +333,37 @@ export function BalanceChart({
   return (
     <div className="wchart">
       <ul className="wchart-summary">
-        {series.map((s, index) => (
-          <li key={s.key} className={cx(s.runs.length > 0 && 'dips')}>
-            <span className="words">
-              {(named || series.length > 1) && <b>{s.name}: </b>}
-              {amounts(s.text)}
-            </span>
-            <span className="jumps">
-              {s.runs.map((run) => (
-                <button
-                  type="button"
-                  className="wchart-jump bad"
-                  key={run.from}
-                  onClick={() => jump(s.own[run.from]!.date)}
-                >
-                  Below cushion {stretchDates(run, s.own)}
-                </button>
-              ))}
-              {index === 0 && (
-                <button
-                  type="button"
-                  className="wchart-jump"
-                  onClick={() => jump(points[low]!.date)}
-                >
-                  Lowest point {shortDate(points[low]!.date)}
-                </button>
-              )}
-            </span>
-          </li>
-        ))}
+        {series
+          .filter((s) => s.key !== NONE)
+          .map((s, index) => (
+            <li key={s.key} className={cx(s.runs.length > 0 && 'dips')}>
+              <span className="words">
+                {(named || series.length > 1) && <b>{s.name}: </b>}
+                {amounts(s.text)}
+              </span>
+              <span className="jumps">
+                {s.runs.map((run) => (
+                  <button
+                    type="button"
+                    className="wchart-jump bad"
+                    key={run.from}
+                    onClick={() => jump(s.own[run.from]!.date)}
+                  >
+                    Below cushion {stretchDates(run, s.own)}
+                  </button>
+                ))}
+                {index === 0 && (
+                  <button
+                    type="button"
+                    className="wchart-jump"
+                    onClick={() => jump(points[low]!.date)}
+                  >
+                    Lowest point {shortDate(points[low]!.date)}
+                  </button>
+                )}
+              </span>
+            </li>
+          ))}
       </ul>
 
       <div className="wchart-controls">
@@ -709,66 +724,119 @@ export function BalanceChart({
         {spoken}
       </div>
 
-      <details className="wchart-table">
-        <summary>View as table</summary>
-        <div
-          className="wchart-scroll"
-          tabIndex={0}
-          role="region"
-          aria-label="Balance by day, as a table"
-        >
-          <table>
-            <caption>
-              Projected balance each day at its low, with that day’s bills taken out before pay
-              arrives, against your {money(cushionCents)} cushion.{' '}
-              {series.map((s) => `${s.name}: ${s.text}`).join(' ')}
-            </caption>
-            <thead>
-              <tr>
-                <th scope="col">Day</th>
-                <th scope="col">
-                  {series.length > 1 ? `${main.name} (day’s low)` : 'Balance (day’s low)'}
+      <DayTable
+        id={id}
+        points={points}
+        cushionCents={cushionCents}
+        columns={series.map((s) => ({
+          key: s.key,
+          name: s.name,
+          low: s.low,
+          cents: s.all.map((point) => point?.minimumCents),
+          instalments: s.instalments,
+        }))}
+      />
+    </div>
+  )
+}
+
+/** How a balance sits, in the words the table puts under an amount; nothing when it is fine. */
+const stateNote = (cents: number, cushionCents: number) =>
+  cents < 0 ? 'below zero' : cents < cushionCents ? 'below cushion' : ''
+
+/**
+ * The same days as a table, and the chart's alternative for anyone who would rather read than
+ * look: one row a day for the whole window, what happens that day, and each pressed option's
+ * balance at that day's low. Text runs left and amounts right, so the decimal points line up;
+ * an amount is red only when it is itself below the cushion, and says so in words under it.
+ */
+function DayTable({
+  id,
+  points,
+  cushionCents,
+  columns,
+}: {
+  id: string
+  points: ForecastPoint[]
+  cushionCents: number
+  columns: {
+    key: string
+    name: string
+    /** The option's own lowest day. */
+    low: number
+    cents: (number | undefined)[]
+    instalments?: InstalmentDetail[]
+  }[]
+}) {
+  // Fixed, balanced widths: the day, then what happens takes what the balances leave.
+  const balance = columns.length > 2 ? 19 : columns.length === 2 ? 21 : 24
+  return (
+    <details className="wchart-table">
+      <summary>View as table</summary>
+      <p className="wchart-table-title" id={`${id}-table`}>
+        Each day’s lowest balance, {shortDate(points[0]!.date)} to {shortDate(points.at(-1)!.date)}
+      </p>
+      <div className="wchart-scroll" tabIndex={0} role="region" aria-labelledby={`${id}-table`}>
+        <table aria-labelledby={`${id}-table`}>
+          <colgroup>
+            <col style={{ width: '17%' }} />
+            <col />
+            {columns.map((column) => (
+              <col key={column.key} style={{ width: `${balance}%` }} />
+            ))}
+          </colgroup>
+          <thead>
+            <tr>
+              <th scope="col">Day</th>
+              <th scope="col">What happens</th>
+              {columns.map((column) => (
+                <th scope="col" className="num" key={column.key}>
+                  {column.name}
                 </th>
-                <th scope="col">Against cushion</th>
-                <th scope="col">What happens</th>
-                {others.map((s) => (
-                  <th scope="col" key={s.key}>
-                    {s.name} (day’s low)
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {points.map((point, index) => (
-                // Each balance is red only when it is itself below the cushion, and says so in
-                // words: every column is judged on its own value, as the engine judges it.
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {points.map((point, index) => {
+              const events = namedEvents(point).map(eventText)
+              return (
                 <tr key={point.date}>
                   <th scope="row">{dayLabel(point.date)}</th>
-                  <td className={cx('num', allValues[index]! < cushionCents && 'below')}>
-                    {signed(allValues[index]!)}
-                    {index === low ? ' · lowest point' : ''}
-                  </td>
-                  <td>{STATE_WORDS[dayState(allValues[index]!, cushionCents)]}</td>
-                  <td>{namedEvents(point).map(eventText).join(', ') || '—'}</td>
-                  {others.map((s) => {
-                    const cents = s.all[index]?.minimumCents
-                    if (cents === undefined) return <td key={s.key}>—</td>
-                    const instalment = s.instalments?.find((i) => i.date === point.date)
+                  <td className={cx(!events.length && 'none')}>{events.join(', ') || '—'}</td>
+                  {columns.map((column) => {
+                    const cents = column.cents[index]
+                    if (cents === undefined)
+                      return (
+                        <td className="num none" key={column.key}>
+                          —
+                        </td>
+                      )
+                    const instalment = column.instalments?.find((i) => i.date === point.date)
+                    const notes = [
+                      instalment ? `payment ${instalment.number} of 4` : '',
+                      index === column.low ? 'lowest point' : '',
+                      stateNote(cents, cushionCents),
+                    ].filter(Boolean)
                     return (
-                      <td className={cx('num', cents < cushionCents && 'below')} key={s.key}>
-                        {signed(cents)}
-                        {instalment ? ` · payment ${instalment.number} of 4` : ''}
-                        {index === s.low ? ' · lowest point' : ''}
-                        {cents < cushionCents ? ' · below cushion' : ''}
+                      // Red only when this balance is itself below the cushion: every column is
+                      // judged on its own value, as the engine judges it.
+                      <td className={cx('num', cents < cushionCents && 'below')} key={column.key}>
+                        <span className="amount">{signed(cents)}</span>
+                        {notes.length > 0 && (
+                          <span className="note">
+                            <span className="sep"> · </span>
+                            {notes.join(' · ')}
+                          </span>
+                        )}
                       </td>
                     )
                   })}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </details>
-    </div>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </details>
   )
 }

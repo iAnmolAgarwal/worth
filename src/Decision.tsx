@@ -278,6 +278,17 @@ function OptionCard({
 
 type P4 = Extract<PayIn4, { available: true }>
 
+/**
+ * The plan with nothing bought, as the engine projects it beside every option: each day's
+ * baseline low, and the day's events without the purchase.
+ */
+export const noPurchase = (c: Comparison) =>
+  c.buyToday.points.map((point) => ({
+    ...point,
+    minimumCents: point.baselineMinimumCents,
+    events: point.events.filter((event) => event.kind !== 'purchase'),
+  }))
+
 export function ChartTile({
   c,
   k,
@@ -332,6 +343,7 @@ export function ChartTile({
         selected={options.some((o) => o.key === k) ? k : 'buyToday'}
         cushionCents={c.cushionCents}
         named
+        baseline={{ name: 'No purchase', points: noPurchase(c) }}
         label={`Projected balance, ${shortDate(c.window.start)} to ${shortDate(c.window.end)}. Each day shows its low, with that day’s bills taken out before pay arrives.`}
       />
     </section>

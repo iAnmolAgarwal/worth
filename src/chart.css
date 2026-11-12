@@ -37,6 +37,9 @@
   display: grid;
   gap: var(--s-2);
 }
+.wchart-summary:empty {
+  display: none;
+}
 .wchart-summary li {
   display: flex;
   flex-wrap: wrap;
@@ -89,6 +92,11 @@
 .wchart .tone-main {
   --tone: var(--w-line);
   --tone-ink: var(--c-primary);
+}
+/* The balance with nothing bought: neutral, never an option's colour. */
+.wchart .tone-none {
+  --tone: #44546f;
+  --tone-ink: #44546f;
 }
 .wchart .tone-amber {
   --tone: #b85c00;
@@ -530,7 +538,7 @@
   background: color-mix(in srgb, var(--w-bad) 22%, var(--c-surface));
 }
 
-/* The same days as a table. */
+/* The same days as a table: text runs left, amounts right, one row height, hairlines only. */
 .wchart-table {
   margin-top: var(--s-2);
 }
@@ -557,7 +565,6 @@
   border-right: 1.5px solid currentColor;
   border-bottom: 1.5px solid currentColor;
   transform: translateY(-2px) rotate(45deg);
-  transition: transform var(--d-action) var(--ease-move);
 }
 .wchart-table[open] > summary::after {
   transform: translateY(1px) rotate(-135deg);
@@ -568,55 +575,99 @@
 .wchart-table > summary:focus {
   outline: none;
 }
-.wchart-table > summary:focus-visible {
-  outline: 2px solid var(--c-focus);
-  outline-offset: 2px;
-}
-.wchart-scroll {
-  margin-top: var(--s-2);
-  max-height: 320px;
-  overflow: auto;
-  border: 1px solid var(--c-border);
-  border-radius: var(--r-md);
-}
+.wchart-table > summary:focus-visible,
 .wchart-scroll:focus-visible {
   outline: 2px solid var(--c-focus);
   outline-offset: 2px;
 }
+.wchart-table-title {
+  margin: var(--s-3) 0 var(--s-2);
+  text-align: left;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
+  font-weight: var(--fw-medium);
+  color: var(--c-text-2);
+}
+.wchart-scroll {
+  max-height: 392px;
+  overflow: auto;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  background: var(--c-surface);
+}
 .wchart-scroll table {
   width: 100%;
-  border-collapse: collapse;
-  font-size: var(--fs-caption);
-  line-height: var(--lh-caption);
+  min-width: 520px;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--fs-meta);
+  line-height: var(--lh-meta);
   font-feature-settings: 'tnum' 1;
+  color: var(--c-text);
 }
 .wchart-scroll th,
 .wchart-scroll td {
+  height: 56px;
+  padding: 10px var(--s-3);
   text-align: left;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--c-divider);
   vertical-align: top;
+  font-weight: var(--fw-medium);
+  border-bottom: 1px solid var(--c-divider);
+  overflow-wrap: anywhere;
+}
+.wchart-scroll tr > :first-child {
+  padding-left: var(--s-4);
+}
+.wchart-scroll tr > :last-child {
+  padding-right: var(--s-4);
+}
+.wchart-scroll tbody tr:last-child > * {
+  border-bottom: 0;
 }
 .wchart-scroll thead th {
   position: sticky;
   top: 0;
+  z-index: 1;
+  height: auto;
+  padding-top: var(--s-3);
+  padding-bottom: var(--s-3);
+  vertical-align: bottom;
   background: var(--c-surface-2);
   color: var(--c-text-2);
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
   font-weight: var(--fw-semibold);
+}
+.wchart-scroll .num {
+  text-align: right;
 }
 .wchart-scroll tbody th {
-  font-weight: var(--fw-semibold);
   color: var(--c-text-strong);
+  font-weight: var(--fw-semibold);
   white-space: nowrap;
 }
-.wchart-scroll td.num {
+.wchart-scroll td .amount {
+  display: block;
   white-space: nowrap;
   font-weight: var(--fw-semibold);
   color: var(--c-text-strong);
 }
-.wchart-scroll td.num.below {
-  background: rgba(213, 1, 2, 0.04);
+/* The one accent: an amount that is itself below the cushion, with the words under it. */
+.wchart-scroll td.below .amount {
   color: var(--c-danger);
+}
+.wchart-scroll td .note {
+  display: block;
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  color: var(--c-text-2);
+}
+.wchart-scroll td .sep {
+  display: none;
+}
+.wchart-scroll td.none {
+  color: var(--c-text-3);
 }
 
 /* Wide cards: the day in focus sits beside the plot. */

@@ -6,9 +6,9 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it } from 'vitest'
 import { BalanceChart } from '../src/BalanceChart'
 import { isBill, stretches } from '../src/chartModel'
-import { ChartTile } from '../src/Decision'
+import { ChartTile, noPurchase } from '../src/Decision'
 import { fullPayName, payIn4Lines, payIn4Thesis } from '../src/payIn4Text'
-import { compareOptions } from '../shared/finance'
+import { assessPurchase, compareOptions } from '../shared/finance'
 import {
   ALEX_CAMERA_ID,
   ALEX_DEMO_DAY,
@@ -144,29 +144,31 @@ describe('the default view', () => {
       `Projected balance, Nov 13 to Jan 12. Each day shows its low, with that day’s bills taken out before pay arrives. ${WAIT}: ${SENTENCES.wait}`,
     )
     await user.click(screen.getByText('View as table'))
-    const table = screen.getByRole('table')
+    // The table says what it is in a few words, left-aligned above it, and names itself by them.
+    const table = screen.getByRole('table', {
+      name: 'Each day’s lowest balance, Nov 13 to Jan 12',
+    })
+    expect(table.querySelector('caption')).toBeNull()
     expect(within(table).getAllByRole('row')).toHaveLength(DAYS + 1)
-    expect(table.querySelector('caption')!.textContent).toContain(
-      'Projected balance each day at its low, with that day’s bills taken out before pay arrives, against your $300.00 cushion.',
-    )
-    expect(
-      within(table)
-        .getAllByRole('columnheader')
-        .map((header) => header.textContent),
-    ).toEqual(['Day', 'Balance (day’s low)', 'Against cushion', 'What happens'])
+    // Day, what happens, then one balance column per pressed option, amounts to the right.
+    const headers = within(table).getAllByRole('columnheader')
+    expect(headers.map((header) => header.textContent)).toEqual(['Day', 'What happens', WAIT])
+    expect(headers.map((header) => header.className)).toEqual(['', '', 'num'])
     const row = (day: string) =>
       [...within(table).getByRole('rowheader', { name: day }).closest('tr')!.cells].map(
         (cell) => cell.textContent,
       )
     expect(row('Thu, Dec 31')).toEqual([
       'Thu, Dec 31',
-      '$458.78 · lowest point',
-      'Above cushion',
       'Salary +$3,900.00',
+      '$458.78 · lowest point',
     ])
-    expect(row('Tue, Dec 1')[3]).toContain('Rent −$1,750.00')
-    for (const tr of within(table).getAllByRole('row').slice(1))
-      expect((tr as HTMLTableRowElement).cells[2]!.textContent).toBe('Above cushion')
+    expect(row('Tue, Dec 1')[1]).toContain('Rent −$1,750.00')
+    // A quiet day says so with a dash; a fine balance carries no note and no red.
+    expect(row('Sat, Nov 14')).toEqual(['Sat, Nov 14', '—', expect.stringMatching(/^\$[\d,.]+$/)])
+    expect(table.querySelectorAll('td.below')).toHaveLength(0)
+    // No option colour anywhere in the table.
+    expect(table.querySelector('[class*="tone-"]')).toBeNull()
   })
 
   it('uses solid colours for every line but the cushion, which is the one dotted line', () => {
@@ -211,26 +213,81 @@ describe('the pills are the options', () => {
     ])
   })
 
-  it('always keeps one pill pressed', async () => {
+  it('lets the last pill be unpressed, and then draws the balance with nothing bought', async () => {
     const user = userEvent.setup()
     render(tile())
     await user.click(pill(WAIT))
-    expect(pill(WAIT).getAttribute('aria-pressed')).toBe('true')
-    expect(svg().querySelectorAll('.wchart-line')).toHaveLength(1)
-    // With another pressed, the page's option can go; the one left becomes the bold line.
-    await user.click(pill('Buy today'))
-    await user.click(pill(WAIT))
     expect(pills().map((button) => button.getAttribute('aria-pressed'))).toEqual([
-      'true',
+      'false',
       'false',
       'false',
     ])
+    // One neutral line, no summary box, no purchase marker; the legend names it.
+    expect(svg().querySelectorAll('.wchart-line')).toHaveLength(1)
+    expect(
+      svg().querySelector('.wchart-line')!.parentElement!.classList.contains('tone-none'),
+    ).toBe(true)
+    expect(svg().querySelectorAll('.wchart-alt')).toHaveLength(0)
+    expect(summaryRows()).toHaveLength(0)
+    expect(svg().querySelector('.wchart-buy')).toBeNull()
+    expect(svg().querySelector('.wchart-mark.fits, .wchart-mark.buy')).toBeNull()
+    expect(legend()[0]).toBe('No purchase')
+    expect(svg().querySelectorAll('.wchart-money.in')).toHaveLength(3)
+    expect(svg().getAttribute('aria-label')).toBe(
+      'Projected balance, Nov 13 to Jan 12. Each day shows its low, with that day’s bills taken out before pay arrives. No purchase: Stays above your $300.00 cushion. Lowest $1,172.26 on Mon, Nov 30.',
+    )
+    // The focus panel works on that line, starting at its lowest point over the whole window.
+    expect(focus().querySelector('.eyebrow')!.textContent).toBe('Lowest point')
+    expect(focus().querySelector('.date')!.textContent).toBe('Mon, Nov 30')
+    expect(focus().querySelector('.amount')!.textContent).toBe('$1,172.26')
+    fireEvent.click(slider(), { clientX: clientX(dayOf('2026-12-15')) })
+    expect(focus().querySelector('.date')!.textContent).toBe('Tue, Dec 15')
+    expect(focus().querySelector('.words')!.textContent).toMatch(
+      /^You are \$[\d,.]+ above your cushion\.$/,
+    )
+    // Pressing a pill from the empty state brings its line and box back.
+    await user.click(pill('Buy today'))
     expect(
       svg().querySelector('.wchart-line')!.parentElement!.classList.contains('tone-amber'),
     ).toBe(true)
     expect(sentences()).toEqual([`Buy today: ${SENTENCES.buy}`])
     await user.click(pill('Buy today'))
-    expect(pill('Buy today').getAttribute('aria-pressed')).toBe('true')
+    expect(summaryRows()).toHaveLength(0)
+  })
+
+  it('takes the no-purchase line from the engine’s own projection, lowest point included', () => {
+    const profile = createCameraScenario(ALEX_DEMO_DAY).profile
+    const engine = assessPurchase(profile, [], {
+      amountCents: 0,
+      today: ALEX_DEMO_DAY,
+      findEarliest: false,
+    })
+    const byDate = new Map(engine.points.map((point) => [point.date, point.minimumCents]))
+    const line = noPurchase(alex)
+    expect(line).toHaveLength(DAYS)
+    for (const point of line) expect(point.minimumCents).toBe(byDate.get(point.date))
+    expect(Math.min(...line.map((point) => point.minimumCents))).toBe(117_226)
+    expect(engine.baselineLowestCents).toBe(117_226)
+    expect(line.flatMap((point) => point.events).some((event) => event.kind === 'purchase')).toBe(
+      false,
+    )
+  })
+
+  it('keeps one pill pressed where there is no no-purchase line to fall back on', async () => {
+    const user = userEvent.setup()
+    render(
+      <BalanceChart
+        options={[
+          { key: 'a', name: 'Buy today', points: alex.buyToday.points },
+          { key: 'b', name: 'Wait', points: alexWait.points },
+        ]}
+        selected="b"
+        cushionCents={alex.cushionCents}
+        label="Projected balance."
+      />,
+    )
+    await user.click(pill('Wait'))
+    expect(pill('Wait').getAttribute('aria-pressed')).toBe('true')
   })
 
   it('adds Buy today as its own line and summary row, with its dip shaded red', async () => {
@@ -549,55 +606,72 @@ describe('the chart alone, as Plan draws it', () => {
 })
 
 describe('the table with Pay in 4 open', () => {
-  it('gives Pay in 4 its own column, judged on its own balance, in words as well as colour', async () => {
+  it('gives each pressed option its own column, judged on its own balance, in words as well as colour', async () => {
     const user = userEvent.setup()
     render(tile('wait', true))
+    await user.click(pill('Buy today'))
     await user.click(screen.getByText('View as table'))
     const table = screen.getByRole('table')
     expect(
       within(table)
         .getAllByRole('columnheader')
         .map((header) => header.textContent),
-    ).toEqual([
-      'Day',
-      'Wait until Tue, Dec 15 (day’s low)',
-      'Against cushion',
-      'What happens',
-      'Pay in 4 (day’s low)',
-    ])
-    expect(table.querySelector('caption')!.textContent).toContain(`Pay in 4: ${SENTENCES.p4}`)
+    ).toEqual(['Day', 'What happens', WAIT, 'Buy today', 'Pay in 4'])
     expect(table.textContent).toContain('payment 2 of 4')
     const row = (day: string) =>
       [...within(table).getByRole('rowheader', { name: day }).closest('tr')!.cells].map(
         (cell) => cell.textContent,
       )
-    expect(row('Thu, Dec 31')[1]).toBe('$458.78 · lowest point')
-    expect(row('Mon, Nov 30')[4]).toBe('$222.76 · lowest point · below cushion')
+    expect(row('Thu, Dec 31')[2]).toBe('$458.78 · lowest point')
+    expect(row('Mon, Nov 30').slice(2)).toEqual([
+      expect.stringMatching(/^\$1,172\.26$/),
+      '−$726.74 · lowest point · below zero',
+      '$222.76 · lowest point · below cushion',
+    ])
     expect(row('Sun, Nov 29')[4]).toMatch(/^\$[\d.]+ · below cushion$/)
-    expect(row('Mon, Nov 30')[1]).not.toMatch(/lowest|below/)
-    // Each balance cell is red only when that balance is below the cushion (audit B1).
+    // Each balance cell is red only when that balance is below the cushion (audit B1), and
+    // says which in words: below cushion, or below zero.
     const cushion = alex.cushionCents
     const tableRows = [...table.querySelectorAll('tbody tr')]
+    const cents = (cell: Element) =>
+      Math.round(
+        Number(
+          cell
+            .textContent!.split(' ·')[0]!
+            .replace(/[^\d.−-]/g, '')
+            .replace('−', '-'),
+        ) * 100,
+      )
     tableRows.forEach((tr) => {
-      const [full, , , p4] = [...tr.querySelectorAll('td')]
-      const cents = (cell: Element) =>
-        Math.round(
-          Number(
-            cell
-              .textContent!.split(' ·')[0]!
-              .replace(/[^\d.−-]/g, '')
-              .replace('−', '-'),
-          ) * 100,
+      for (const cell of [...tr.querySelectorAll('td')].slice(1)) {
+        expect(cell.classList.contains('below')).toBe(cents(cell) < cushion)
+        expect(cell.textContent!.includes('below cushion')).toBe(
+          cents(cell) < cushion && cents(cell) >= 0,
         )
-      expect(full!.classList.contains('below')).toBe(cents(full!) < cushion)
-      expect(p4!.classList.contains('below')).toBe(cents(p4!) < cushion)
-      // Words too, not colour alone.
-      expect(p4!.textContent!.includes('below cushion')).toBe(cents(p4!) < cushion)
+        expect(cell.textContent!.includes('below zero')).toBe(cents(cell) < 0)
+      }
     })
-    expect(tableRows.filter((tr) => tr.querySelectorAll('td.below').length === 1)).toHaveLength(2)
+    // Buy today is below on 17 days and Pay in 4 on 2; waiting never is.
+    expect(table.querySelectorAll('td.below')).toHaveLength(19)
+    expect(tableRows.filter((tr) => tr.querySelectorAll('td.below').length === 2)).toHaveLength(2)
     // The table always lists the whole window, whatever range is drawn.
     await user.click(screen.getByRole('button', { name: 'To payday' }))
     expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(DAYS + 1)
+  })
+
+  it('shows the no-purchase balance when no pill is pressed', async () => {
+    const user = userEvent.setup()
+    render(tile())
+    await user.click(pill(WAIT))
+    await user.click(screen.getByText('View as table'))
+    const table = screen.getByRole('table')
+    expect(
+      within(table)
+        .getAllByRole('columnheader')
+        .map((header) => header.textContent),
+    ).toEqual(['Day', 'What happens', 'No purchase'])
+    const low = within(table).getByRole('rowheader', { name: 'Mon, Nov 30' }).closest('tr')!
+    expect(low.cells[2]!.textContent).toBe('$1,172.26 · lowest point')
   })
 })
 
