@@ -179,7 +179,7 @@ confirmed fact afterwards, never as a prediction.
   fails the comparison is shown as range-only. The browser's `findEligibleMethods` decides only
   whether to render the button and `<paypal-message>`.
 - **Schedule.** `payIn4Schedule` splits the total into four whole-cent payments on days 0, 14,
-  28 and 42, with any remainder on the first ($1,199.00 is 4 × $299.75). The sandbox's real
+  28 and 42, with any remainder on the first ($1,899.00 is 4 × $474.75). The sandbox's real
   schedule used 16-day gaps, so every date is "about".
 - **Collisions.** Each payment is paired with the nearest bill, subscription or other plan's
   payment at most three days away (`shared/collision.ts`), and instalment plans already running

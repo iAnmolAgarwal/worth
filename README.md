@@ -52,7 +52,8 @@ session with a sample plan (Alex, on the demo day Fri, Nov 13, 2026), kept for 2
 
 A balance says what is in the account, not what is already spoken for. Rent, a car payment and
 the last Pay in 4 plan are all still coming, and the question at checkout is not "do I have
-$1,199?" but "what does $1,199 today do to the rest of my month?". Pay in 4 makes the question
+$1,899?" but "what does $1,899 today do to the rest of my month?". Alex has $2,540, but only
+$872.26 of it is safe to spend on Fri, Nov 13; the $1,899 Halden X5 fits on Tue, Dec 15. Pay in 4 makes the question
 harder: the same total arrives as four payments, and one of them may land the day after rent.
 
 Worth answers that question for one purchase at a time, with the dates. The US numbers say it is
@@ -87,7 +88,7 @@ and 47% of BNPL users say they paid late in the past year
 - **Checkout prepared, never taken.** "Buy" (or "Go ahead and buy the studio headphones" in Ask
   Worth) prepares a PayPal sandbox order behind server guards. You approve in PayPal; Worth
   captures only when you confirm in Worth, and the payment shows up in Activity once.
-- **Save it for the day it fits.** "Save for Fri, Oct 23" keeps the item with its date. When the
+- **Save it for the day it fits.** "Save for Tue, Dec 15" keeps the item with its date. When the
   day comes, Saved says the plan suggests it may fit, you confirm today's funds, Worth checks
   again, and only then does Buy with PayPal open.
 - **Something cheaper, from real stores.** Under Spend less, and when you ask for something
@@ -144,7 +145,7 @@ credentials and the browser receives only the public client ID.
   the server's approval link is used instead.
 - **PayPal Messages.** The `paypal-messages` component renders `<paypal-message>` pinned to the
   short-term Pay in 4 offer next to Worth's comparison. On the hosted US sandbox merchant it reads
-  "Pay in 4 interest-free payments of $299.75" for the $1,199 camera.
+  "Pay in 4 interest-free payments of $474.75" for the $1,899 Halden X5.
 - **Pay Later eligibility.** The server calls `POST /v2/payments/find-eligible-methods` (US buyer,
   USD amount) and caches the answer per price band; Worth's own $10–$2,000 range check applies on
   top. The browser's `findEligibleMethods` decides only whether to show the button and message.
@@ -276,8 +277,8 @@ boundary, the payment state machine, Channel3, saved plans, sessions and privacy
 
 Worth runs its own Model Context Protocol server, Worth guardrail MCP, at `/mcp` (Streamable
 HTTP, stateless) with a stdio relay for local clients. Create a revocable agent token in **Settings → Connect an agent**, paste
-the generated config into Claude Desktop or any MCP client, and ask "Can I afford the $1,199
-camera?" in your own assistant.
+the generated config into Claude Desktop or any MCP client, and ask "Can I afford the $1,899
+Halden X5?" in your own assistant.
 
 - `check_affordability` is the guardrail for any store. It returns Worth's decision (affordable
   now, later, or not; the safe amount; the earliest date; the low point and the bill behind it;
