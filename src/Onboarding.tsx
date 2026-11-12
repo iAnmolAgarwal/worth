@@ -623,10 +623,13 @@ function PlanRow({
   plan,
   today,
   note,
+  error,
   disabled,
   onChange,
 }: {
   plan: DraftPlan
+  /** Why Continue stopped here: shown under the question, never under the sticky bar. */
+  error?: string
   today: string
   note?: string
   disabled: boolean
@@ -641,7 +644,7 @@ function PlanRow({
     ]
     const label = `plan-${plan.id}`
     return (
-      <div className="found-row plan check-plan">
+      <div className="found-row plan check-plan" id={`check-plan-${plan.id}`}>
         <Disc icon={CalendarCheck} kind="plan" />
         <div className="body">
           <div className="t" id={label}>
@@ -661,6 +664,12 @@ function PlanRow({
             labelledBy={label}
             disabled={disabled}
           />
+          {error && (
+            <p className="co-error" role="alert">
+              <CircleAlert size={16} aria-hidden="true" style={{ flex: 'none', marginTop: 2 }} />
+              {error}
+            </p>
+          )}
           {plan.left ? (
             <p className="caption">
               Next about {dayLabel(dates[0]!)}
@@ -861,6 +870,8 @@ export function ImportReview({
   const dated = plans.filter((plan) => plan.merchant !== null)
   const toCheck = plans.filter((plan) => plan.merchant === null)
   const blocked = Boolean(preview && (preview.errors.length || preview.needsDateOrder))
+  /** Pay in 4 questions still open: Continue names them instead of failing out of view. */
+  const unanswered = toCheck.filter((plan) => plan.left === undefined).length
   const update = (next: ScheduledFlow) => {
     setError(undefined)
     setFlows((all) => all.map((flow) => (flow.id === next.id ? next : flow)))
@@ -889,10 +900,17 @@ export function ImportReview({
     if (dailyCents === undefined)
       return setError({ text: 'Enter your everyday spending a day, such as 35.00.' })
     const open = toCheck.find((plan) => plan.left === undefined)
-    if (open)
-      return setError({
+    if (open) {
+      setError({
         text: `Choose how many payments of ${money(open.paymentCents)} are left, or All paid.`,
+        field: `plan-${open.id}`,
       })
+      // The question may be far above the sticky Continue bar: bring it to the middle of the view.
+      const row = document.getElementById(`check-plan-${open.id}`)
+      row?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
+      row?.querySelector<HTMLElement>('[role="radio"], button')?.focus({ preventScroll: true })
+      return
+    }
     setBusy(true)
     try {
       imported.current ??= (await api<AppState>('/import/commit', {
@@ -929,7 +947,7 @@ export function ImportReview({
       <div className="wrap narrow">
         <form onSubmit={(event) => event.preventDefault()} aria-busy={busy || !preview}>
           <div className="sec-head">
-            <span className="meta">Step 2 of 3</span>
+            <span className="meta">Step 2 of 2</span>
             <button type="button" className="link" onClick={onCancel} disabled={busy}>
               Cancel
             </button>
@@ -939,7 +957,6 @@ export function ImportReview({
             <li className="on" aria-current="step">
               Check what Worth found
             </li>
-            <li>Your month</li>
           </ol>
           <h1 className="title wizard-step-head" ref={heading} tabIndex={-1}>
             Check what Worth found
@@ -1098,8 +1115,12 @@ export function ImportReview({
                         plan={plan}
                         today={today}
                         note={notes.get(`paypal-plan:${plan.id}`.slice(0, 90))}
+                        error={error?.field === `plan-${plan.id}` ? error.text : undefined}
                         disabled={busy}
-                        onChange={updatePlan}
+                        onChange={(next) => {
+                          if (error?.field === `plan-${plan.id}`) setError(undefined)
+                          updatePlan(next)
+                        }}
                       />
                     ))}
                   </div>
@@ -1214,7 +1235,7 @@ export function ImportReview({
               {error.text}
             </p>
           )}
-          {error?.field && (
+          {error?.field && !error.field.startsWith('plan-') && (
             <p className="sr" role="alert">
               {error.text}
             </p>
@@ -1228,7 +1249,9 @@ export function ImportReview({
               loading={busy}
               disabled={!preview || blocked || activeCheckout}
             >
-              Continue
+              {unanswered
+                ? `Answer ${unanswered === 1 ? 'the question' : `${unanswered} questions`} above`
+                : 'Continue'}
             </Button>
           </div>
         </form>
