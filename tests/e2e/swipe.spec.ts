@@ -127,8 +127,16 @@ test.describe('the swipe button', () => {
 test.describe('on a touch screen', () => {
   test.skip(({ hasTouch }) => !hasTouch, 'touch only')
 
-  /** One finger from `from` to `to`, through CDP's touch events. */
-  async function touch(page: Page, from: [number, number], to: [number, number]) {
+  /**
+   * One finger from `from` to `to`, through CDP's touch events. `beforeLift` runs with the finger
+   * still down, so a test can wait on the component's own state before the release.
+   */
+  async function touch(
+    page: Page,
+    from: [number, number],
+    to: [number, number],
+    beforeLift?: () => Promise<void>,
+  ) {
     const cdp = await page.context().newCDPSession(page)
     const point = ([x, y]: [number, number]) => [{ x, y, id: 1 }]
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: point(from) })
@@ -139,12 +147,38 @@ test.describe('on a touch screen', () => {
       ]
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: point(at) })
     }
+    await beforeLift?.()
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  }
+
+  /**
+   * Waits until the page has stopped scrolling. A touch scroll ends in a fling that can run on for
+   * a while on a slow machine; a finger that lands mid-fling only stops the fling, as on a real
+   * phone, and the tab it was aimed at has moved on by then. This was the CI flake.
+   */
+  async function scrollSettled(page: Page) {
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            () =>
+              new Promise<boolean>((done) => {
+                const start = window.scrollY
+                setTimeout(() => done(window.scrollY === start), 250)
+              }),
+          ),
+        { timeout: 10_000 },
+      )
+      .toBe(true)
   }
 
   test('a vertical drag on the tab scrolls the page; a sideways swipe opens Worth', async ({
     page,
   }) => {
+    if (process.env.E2E_CPU_THROTTLE)
+      await (
+        await page.context().newCDPSession(page)
+      ).send('Emulation.setCPUThrottlingRate', { rate: Number(process.env.E2E_CPU_THROTTLE) })
     const { row, box } = await swipeRow(page)
     const x = box.x + box.width / 2
     const y = box.y + box.height / 2
@@ -152,9 +186,17 @@ test.describe('on a touch screen', () => {
     await touch(page, [x, y], [x, y - 200])
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(before + 50)
     expect(page.url()).toBe(`${origins.store}/p/camera`)
+    // The vertical drag never started a swipe.
+    await expect(page.locator('worth-check .swipe')).not.toHaveClass(/dragging|committing/)
+    // Aim at the tab only once the page is still, and listen for the navigation before the swipe.
+    await scrollSettled(page)
     const moved = (await page.locator('worth-check .tab').boundingBox())!
     const at = moved.y + moved.height / 2
-    await touch(page, [x, at], [x - 0.7 * (row.width - box.width), at])
-    await page.waitForURL(`${origins.worth}/check`)
+    const opened = page.waitForURL(`${origins.worth}/check`)
+    await touch(page, [x, at], [x - 0.7 * (row.width - box.width), at], () =>
+      // The sideways move is the component's drag, recognised before the finger lifts.
+      expect(page.locator('worth-check .swipe')).toHaveClass(/dragging/),
+    )
+    await opened
   })
 })
