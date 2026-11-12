@@ -8,7 +8,7 @@ Worth guardrail MCP is Worth's own [Model Context Protocol](https://modelcontext
 
 ## Two use cases
 
-**1. Bring your own AI.** Someone with a Claude Desktop subscription (or any MCP client) connects it to their Worth plan and asks "Can I afford the $1,199 camera?" in their own assistant. Their model writes the reply; Worth supplies every number. Each result carries a ready-to-quote `summary` rendered by Worth's own templates (the same wording the app uses), with `source: "Worth engine"` and the `as_of` date. The tool descriptions tell the model to quote it and never recompute or round.
+**1. Bring your own AI.** Someone with a Claude Desktop subscription (or any MCP client) connects it to their Worth plan and asks "Can I afford the $1,899 Halden X5?" in their own assistant. Their model writes the reply; Worth supplies every number. Each result carries a ready-to-quote `summary` rendered by Worth's own templates (the same wording the app uses), with `source: "Worth engine"` and the `as_of` date. The tool descriptions tell the model to quote it and never recompute or round.
 
 **2. A guardrail for shopping agents, at any store.** An agent that shops and checks out for someone calls `check_affordability` before it buys, wherever the item is sold. Worth answers from the person's own plan: buy today, wait until a dated day, or spend less, with PayPal Pay in 4 as a comparison only. The person then buys on the store's own site. For one of Worth's listed items, `purchase_check_link` returns a link to Worth's own comparison with the same verdict, so the agent can hand the person a link instead of a checkout.
 
@@ -47,7 +47,7 @@ Claude Desktop launches local commands, so a remote server is reached through th
 1. Install Node.js 20 or later (for `npx`; mcp-remote 0.14 needs Node 20).
 2. In Claude Desktop, open **Settings → Developer → Edit Config**. This opens `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS (`%APPDATA%\Claude\claude_desktop_config.json` on Windows).
 3. Merge the `worth` entry into `mcpServers` (do not paste the whole snippet inside `mcpServers`; if the file is empty, use the whole snippet), save, and quit and reopen Claude Desktop.
-4. In a new chat, check that **worth** and its three tools appear under the tools (hammer) menu, then ask: "Can I afford the $1,199 camera?"
+4. In a new chat, check that **worth** and its three tools appear under the tools (hammer) menu, then ask: "Can I afford the $1,899 Halden X5?"
 
 Notes:
 
@@ -160,7 +160,7 @@ A link to Worth's own comparison for one of its listed items. Read-only: it retu
 
 - **Returns** `catalog_item_id`, `item`, `amount_usd`, `currency`, `check_url`, `affordability_status`, `recommended_action`, `amount_safe_to_pay`, `earliest_date_for_full_payment`, `explanation`, `order_created: false`, `human_steps` and `guards`. The `summary` is Worth's verdict, then "The person can compare buying the … today, waiting or saving it in Worth, and decide there: <check_url>", then "Worth prepared no order and nothing has been paid."
 - **Below the cushion** it still returns the link; the verdict says so (for example `affordable_later` with the date that fits). There is no acknowledgement flag, because there is nothing to approve through the agent.
-- Catalog: `headphones`, `camera`, `chair`, `backpack`, `macbook-pro-14`, `airpods-4`. Any other item is refused with `UNKNOWN_ITEM`; `check_affordability` works for it instead.
+- Catalog: `halden-x5`, `headphones`, `camera`, `chair`, `backpack`, `macbook-pro-14`, `airpods-4`. Any other item is refused with `UNKNOWN_ITEM`; `check_affordability` works for it instead.
 
 Before decision 0.2 this tool was `prepare_order` and created a PayPal sandbox order for the person to approve; later it was `store_checkout_link` and linked to the example store's product page. It was renamed each time rather than kept, because no client config names a tool: the Claude Desktop snippets above list only the server.
 
@@ -209,25 +209,25 @@ HTTP-level refusals are JSON-RPC errors: `401` (with `WWW-Authenticate: Bearer`)
 
 ## Example transcript (abridged)
 
-Abridged from the sample persona on the video day (`/?replay=video`).
+Abridged from Alex's sample plan on Fri, Nov 13, 2026 (the default for a new session), run against a local server.
 
-> **Person:** Buy me the $1,199 camera.
+> **Person:** Buy me the $1,899 Halden X5.
 >
-> **Agent** → `check_affordability({"item":"camera","amount_usd":1199})`
+> **Agent** → `check_affordability({"item":"Halden X5","amount_usd":1899})`
 >
-> **Worth:** `affordable_later` · `wait` · earliest `2026-10-23` · safe today `$440.01` · low point `-$458.99` on **Thu, Oct 22** (paying in full). Summary: "Everyday camera at $1,199 would dip below your cushion if you buy it today. The earliest date that fits is Fri, Oct 23. The most you could spend today and keep your cushion is $440.01. … Apartment rent ($1,450) is due Fri, Oct 16, before that low point. If you compared PayPal Pay in 4 (illustrative): … payment 2 would land about 1 day after your apartment rent …"
+> **Worth:** `affordable_later` · `wait` · earliest `2026-12-15` · safe today `$872.26` · low point `-$726.74` on **Mon, Nov 30** (paying in full). Summary: "Halden X5 at $1,899 would dip below your cushion if you buy it today. The earliest date that fits is Tue, Dec 15. The most you could spend today and keep your cushion is $872.26. Your lowest balance would be -$726.74 on Mon, Nov 30, $1,026.74 below your $300 cushion. Laptop · Pay in 4 ($324.75) is due Fri, Nov 20, before that low point. If you compared PayPal Pay in 4 (illustrative): payment 2 would land about 2 days after your car insurance; … These figures are Worth's; the decision is yours."
 >
-> **Agent:** quotes the summary and asks whether to wait until Fri, Oct 23.
+> **Agent:** quotes the summary and asks whether to wait until Tue, Dec 15.
 >
-> (`pay_in_4_comparison.label` says "An instalment would dip below your cushion on Oct 21". That date belongs only to the Pay in 4 comparison. The full-payment low point is Thu, Oct 22. Video captions and voice-over should quote Worth's summary: "lowest −$458.99 on Thu, Oct 22 … the earliest date that fits is Fri, Oct 23". They should not say Oct 21.)
+> (`pay_in_4_comparison.label` says "An instalment would dip below your cushion on Nov 29". That date belongs only to the Pay in 4 comparison; the full-payment low point is Mon, Nov 30.)
 >
 > **Person:** Send me the link anyway; I'll decide.
 >
-> **Agent** → `purchase_check_link({"catalog_item_id":"camera"})`
+> **Agent** → `purchase_check_link({"catalog_item_id":"halden-x5"})`
 >
-> **Worth:** `affordable_later` · `check_url: https://<worth>/#decision?product=camera` · `order_created: false`. Summary: the same verdict, then "The person can compare buying the everyday camera today, waiting or saving it in Worth, and decide there: … Worth prepared no order and nothing has been paid."
+> **Worth:** `affordable_later` · `check_url: https://<worth>/#decision?product=halden-x5` · `order_created: false`. Summary: the same verdict, then "The person can compare buying the … today, waiting or saving it in Worth, and decide there: … Worth prepared no order and nothing has been paid."
 >
-> **Person** opens Worth's comparison and taps "Save for Fri, Oct 23", or "Buy today anyway" to open Worth's PayPal sandbox checkout.
+> **Person** opens Worth's comparison and taps "Save for Tue, Dec 15", or "Buy today anyway" to open Worth's PayPal sandbox checkout.
 
 ## Limits
 

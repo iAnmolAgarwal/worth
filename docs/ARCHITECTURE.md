@@ -51,9 +51,11 @@ the model name and the Channel3 status).
 | `server/app.ts` | Sessions, validation, routes, ownership, plan rules, checkout reservation, capture, cancel, webhooks and reconciliation. |
 | `server/store.ts` | SQLite tables, atomic operations, uniqueness constraints, expiry and deletion. |
 | `server/chat.ts` | The Claude tool loop, tool schemas, the answer's trace, and the deterministic local fallback. |
+| `server/chartGuide.ts` | Chart questions: the facts from the engine in the chart's words, `show_on_chart`, its checks, and the rules used without Claude. |
+| `server/paypalConnect.ts` | Connect PayPal: OAuth with PKCE against PayPal's MCP server, the allow-listed `list_transactions` read, timeouts and the health gate. |
 | `server/interpret.ts`, `server/money.ts`, `server/dates.ts` | Checks Claude's reading against the user's own words: amounts, currencies, timing phrases and which item a follow-up means. |
 | `server/narration.ts` | Every sentence the user reads: verdict templates, fact catalogs, the Pay in 4 wording and `checkSentence` for Claude's one sentence. |
-| `server/checkoutGuards.ts` | `checkoutGuards` for the saved-plan Buy button. Agents (Ask Worth and MCP) never prepare orders; they link to the store's own page. |
+| `server/checkoutGuards.ts` | `checkoutGuards` for the saved-plan Buy button. Agents (Ask Worth and MCP) never prepare orders; they link to Worth's own comparison. |
 | `server/paypal.ts` | Sandbox OAuth, Orders v2 create/get/capture, refunds, `find-eligible-methods`, webhook signature verification and order validation. |
 | `server/channel3.ts`, `server/alternatives.ts` | The Channel3 adapter (band, parsing, URL lookup, cache, back-off, limits, recorded fallback) and what Worth searches for. |
 | `server/outcome.ts` | A store's verified report-back (C4): idempotent on captureId, recorded once with consent and `returnedAt`. |
@@ -62,8 +64,11 @@ the model name and the Channel3 status).
 | `server/mcp.ts`, `server/mcpDecision.ts`, `server/mcpStdio.ts` | The MCP server, its decision contract with coherence invariants, and the stdio relay. |
 | `server/config.ts`, `server/csp.ts`, `server/limits.ts` | Environment parsing with production guards, the Content-Security-Policy, and fixed-window rate limiters. |
 | `src/App.tsx` | Routing, state refresh, toasts and the `?replay=` entry. |
-| `src/Home.tsx`, `src/Ask.tsx`, `src/AskTrace.tsx` | Room to spend today, the conversation, and "How Ask Worth read this". |
-| `src/Decision.tsx`, `src/BalanceChart.tsx`, `src/chartLayout.ts` | The option comparison, the Pay in 4 panel and the SVG balance chart with its label layout. |
+| `src/Home.tsx`, `src/Hero.tsx` | Home: the "Safe to spend today" card and its Free / Needed by / Cushion bar (or "Short by …"), the Check a purchase and Connect PayPal rows, Coming up and Saved. |
+| `src/Ask.tsx`, `src/AskTrace.tsx`, `src/AgentLauncher.tsx` | The conversation, "How Ask Worth read this", and the guide's launcher, panel and per-screen nudge. |
+| `src/Tour.tsx` | The six-step first-visit tour of Home (`?tour=1` forces it, `?tour=0` suppresses it; "Take the tour" in the panel replays it). |
+| `src/ConnectPayPal.tsx` | Connect PayPal: the note before the redirect and the reading screen. |
+| `src/Decision.tsx`, `src/BalanceChart.tsx`, `src/chartModel.ts`, `src/chartLayout.ts`, `src/chartControl.ts` | The option comparison, the Pay in 4 panel, the SVG balance chart (model and layout), and the guide's view-only hold on the chart. |
 | `src/Checkout.tsx`, `src/paypal.tsx`, `src/paypalSdk.ts` | The checkout dialog and the SDK v6 loader, button, eligibility and Messages. |
 | `src/Saved.tsx`, `src/Alternatives.tsx`, `src/Activity.tsx`, `src/Reviews.tsx` | Saved items and wait plans, similar items, activity, and the "how did you pay" and refund reviews. |
 | `src/Plan.tsx`, `src/Import.tsx`, `src/ForeignPayments.tsx` | The four-step plan editor, CSV import preview and unresolved foreign payments. |
@@ -102,6 +107,23 @@ The financial-picture editor separates Funds, Income, Bills & subscriptions, and
 - Completed foreign spending with no conversion is stored with the session as an unresolved payment. While any remain, the profile carries a missing-information entry that saving the plan cannot remove, so every assessment is `incomplete`. `POST /api/import/unresolved/:paymentId` resolves one with `{ amountCents }` (its USD cost, added to the imported history) or `{ oneOff: true }`; if the added cost raises the history-based daily estimate above the plan's, the user is asked to review it. A later export that pairs the payment marks it `matched` and its USD leg replaces any entered cost; resolving a payment already in history returns `409 ALREADY_IN_HISTORY`.
 - Recurring suggestions carry `anchorDay` (1–31 or `last`), which `occurrence()` follows for monthly and yearly items while it agrees with `nextDate`.
 
+## Connect PayPal
+
+`GET /api/paypal/connect` starts OAuth 2.1 (authorization code, PKCE S256, a single-use `state`
+bound to the session, 10 minutes) against PayPal's MCP server at `https://mcp.sandbox.paypal.com`,
+with a client Worth registers there (or `PAYPAL_MCP_CLIENT_ID`). The callback keeps the access
+token in server memory for one read, at most 10 minutes; it never reaches the browser.
+`POST /api/paypal/activity` opens an MCP session (25 s limit; about 12 s measured) and calls only
+`list_transactions`, over six 31-day windows side by side (about 186 days); every other tool is
+refused. The rows become the same CSV text a personal export holds, with `T1600` (buyer-credit
+funding) mapped to a Pay Later row, and the browser shows them in the usual import review. A
+purchase funded by Pay Later with no payment rows is drafted as "1 of 4 paid", because PayPal
+takes the first payment at checkout. Committing the review sets the server-owned
+`importedFrom` (`paypal` only when the CSV is the exact text built from that login, else `file`)
+and `importedAt`, which Home shows as "PayPal connected · updated today"; a profile save never
+changes them. Two session timeouts in a row hide Connect for everyone for a minute;
+`PAYPAL_CONNECT=off` turns it off.
+
 ## AI boundary
 
 Ask Worth calls `claude-sonnet-5-5` through `@anthropic-ai/sdk` with a fixed system prompt
@@ -118,7 +140,7 @@ Tools, all read-only:
 | `interpret_purchase` | Items in the user's words, stated price in cents, ISO currency, quantity, whether it continues the previous item, the timing phrase copied verbatim and its date, and the option (check, earliest date, most to spend) | Checks every amount and date against the message (`server/money.ts`, `server/dates.ts`); asks instead of guessing when the price is missing, not USD, ambiguous, or the date is vague, past or beyond 35 days; then runs `assessPurchase` and, when asked, the Pay in 4 scenario |
 | `list_commitments` | Subscriptions, bills or both | Lists confirmed obligations due in the next 30 days |
 | `spending_summary` | — | Totals completed USD spending by category for 30 days |
-| `get_plan_summary` | — | Room to spend today, the baseline low point and its cause |
+| `get_plan_summary` | — | Safe to spend today, the baseline low point and its cause |
 | `find_alternatives` | A generic kind of item and a ceiling the user wrote | Refuses for "cheaper" about timing, payment method or services; otherwise searches Channel3 within the room today; only the outcome returns to Claude, never product names or prices |
 | `open_purchase_check` | A catalog item ID, when the person asks to buy it | Assesses the item at its catalog price today and links to Worth's own comparison, `#decision?product=<id>`. Worth prepares no order; Claude receives only whether a link was shown |
 | `show_on_chart` | Offered only when the request carries a chart view and the question is about the chart: one to three fact ids, and the pills, range (`payday`, `30`, `60`) and focus day the chart should show, all from enums built for this item | Rebuilds the item's comparison, writes each fact in the chart's own words (`src/chartModel.ts`), drops any option, range or day outside this item and window, and returns the view change as `chart` in the reply. View state only: it cannot navigate, save, buy or edit the plan. Without Claude the same facts and view come from Worth's own rules (`server/chartGuide.ts`) |
@@ -147,7 +169,7 @@ client shows it under "How Ask Worth read this".
 
 **Buying a listed item.** Ask Worth never prepares an order (decision 0.2 of the checkout
 pivot). When the person asks to buy a catalog item, `open_purchase_check` shows the engine's
-assessment of buying it today and an "Open Worth's comparison" link to the Decision view for that
+assessment of buying it today and an "Open Worth's comparison" link to the purchase answer page for that
 item. The link, name and price come from the server's catalog, never from Claude. On the
 comparison the person presses "Buy today anyway" or "Save for <date>" themselves, and Worth's own
 PayPal sandbox checkout opens only behind `checkoutGuards`. The Worth app never names or links to
@@ -192,15 +214,21 @@ confirmed fact afterwards, never as a prediction.
 
 ## Balance chart
 
-`src/BalanceChart.tsx` draws the forecast as inline SVG with no chart library:
-`src/chartLayout.ts` computes the geometry and places labels without collisions. The chart shows
-the daily lowest balance as a step line, the cushion, hatching below it, and every payday and
-bill of $100 or more as a full-height line where it moves the balance; the two behind the
-answer are drawn at full strength. A line opens a card (amount, balance after, one sentence) on
-click, tap or Enter, and arrow keys move between lines. A day scrubber works with mouse, touch
-and keyboard and announces through an `aria-live` region, and "View as table" lists the same
-values. With Pay in 4 open, the instalment path is drawn dotted with numbered payments. Every
-value is read from engine output; the chart computes no money of its own.
+`src/BalanceChart.tsx` draws the forecast as inline SVG with no chart library, on the purchase
+answer page; `src/chartModel.ts` turns engine output into the chart's series, stretches and
+sentences, and `src/chartLayout.ts` computes the geometry and label placement.
+
+- **Pills are the options.** Buy today, Wait until <date> and Pay in 4 (Something cheaper when it
+  applies) are toggle pills. Worth's recommendation is pressed on load; any pill can be unpressed,
+  and with none pressed the chart shows the "No purchase" line. Each pressed option gets one
+  summary box with its below-cushion stretches.
+- **What is drawn.** Each pressed option's daily low as a line, the cushion as a dotted line, red
+  shading wherever a line is below the cushion (and a zero line when one goes below zero), thin
+  green lines on days money comes in and thin red lines on days money goes out.
+- **Reading it.** A range control (To payday, 30 days, 60 days); a day-in-focus panel for the day
+  under the pointer or pinned with the arrow keys (Escape unpins), with the other pressed
+  options' value on the same day; an `aria-live` region; and "View as table" with the same
+  values. Every value is read from engine output; the chart computes no money of its own.
 
 Ask Worth's guide can read and steer the chart through `src/chartControl.ts`: the chart publishes
 what it shows (options offered and pressed, range, pinned day, the item) and applies a
@@ -334,8 +362,7 @@ responses on every run, and run live against the real model on demand; see
 Provider behaviour verified against the real sandbox, outside the suite: SDK v6 popup approval
 with exactly one capture and one activity row; cancellation and recovery; a US sandbox buyer
 completing Pay in 4 for $1,199 inside PayPal's checkout; PayPal Messages rendering on the US
-sandbox merchant; and, on the hosted app, a capture followed by a $50 refund whose webhook was
-delivered, verified and turned into a review item.
+sandbox merchant; these were checked by hand in October, before the Alex sample.
 
 Not covered: production payments, automatic access to personal PayPal history, goods
 fulfilment, more than one server instance, and encryption at rest.
