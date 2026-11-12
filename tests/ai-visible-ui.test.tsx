@@ -160,7 +160,7 @@ describe('Ask Worth shows its work', () => {
     expect(screen.getAllByRole('button', { name: /See the comparison/ })).toHaveLength(1)
   })
 
-  it('puts Claude’s checked sentence under the verdict and opens the trace on request', async () => {
+  it('puts Claude’s checked sentence under the verdict, with the caption but no trace expander', async () => {
     const state = makeState()
     const answer = await claudeReply(state, 'Can I afford it?', [
       interpret({
@@ -169,30 +169,19 @@ describe('Ask Worth shows its work', () => {
       }),
       note('Most of the pressure is {cause_bill} on {cause_day}, even after {income_name}.'),
     ])
-    const user = await ask(state, answer)
+    await ask(state, answer)
     const sentence = await screen.findByText(
       'Most of the pressure is Apartment rent on Fri, Oct 16, even after Biweekly paycheck.',
     )
     expect(sentence.previousElementSibling?.className).toBe('verdict')
     // Claude's own words are marked where they appear (judge F5).
     expect(sentence.textContent).toContain('Claude’s note · Worth’s numbers')
-    const toggle = screen.getByRole('button', { name: 'How Ask Worth read this' })
-    expect(toggle.getAttribute('aria-expanded')).toBe('false')
-    await user.click(toggle)
-    expect(toggle.getAttribute('aria-expanded')).toBe('true')
-    const trace = document.getElementById(toggle.getAttribute('aria-controls')!)!
-    expect(trace.hidden).toBe(false)
-    expect(trace.textContent).toContain('Everyday camera · $1,199.00 (earlier in this chat)')
-    expect(trace.textContent).toContain('Kept from earlier in this chat → today')
-    expect(trace.textContent).toContain('interpret_purchase · ran')
-    expect(trace.textContent).toContain('Your low point · answers what you asked')
-    expect(trace.textContent).toContain('What drives it · explains the result')
-    expect(trace.textContent).toContain('The amount is the one Worth read earlier in this chat')
-    expect(trace.textContent).toContain('The verdict sentence is Worth’s template')
-    expect(trace.textContent).toContain(
-      'Claude wrote “Most of the pressure is {cause_bill} on {cause_day}, even after {income_name}.”',
-    )
-    expect(within(trace).getAllByLabelText('Passed').length).toBeGreaterThan(2)
+    // No "How Ask Worth read this" expander (user review): only its caption stays.
+    expect(screen.queryByRole('button', { name: 'How Ask Worth read this' })).toBeNull()
+    expect(screen.getByText('Claude read your question · every number is Worth’s')).toBeTruthy()
+    // The server still records how it read the question.
+    expect(answer.trace?.tools).toEqual([{ name: 'interpret_purchase', outcome: 'ran' }])
+    expect(answer.trace?.sentence?.source).toBe('claude')
   })
 
   it('adds one neutral Pay in 4 row to a purchase answer that didn’t ask', async () => {
@@ -212,9 +201,9 @@ describe('Ask Worth shows its work', () => {
     await user.click(screen.getByRole('button', { name: /See the comparison/ }))
     expect(onOpenDecision).toHaveBeenCalledWith({ productId: 'camera' }, expect.anything())
     expect(row.textContent).not.toMatch(/recommend/i)
-    // Local mode: the trace says no tool ran and Claude was not used.
-    await user.click(screen.getByRole('button', { name: 'How Ask Worth read this' }))
-    expect(screen.getByText('None: Worth’s own rules read this, without Claude')).toBeTruthy()
+    // Local mode: the server's trace says no tool ran and Claude was not used.
+    expect(answer.trace?.tools).toEqual([])
+    expect(answer.trace?.reader).toBe('local')
   })
 
   it('says what the assistant does, without claiming it explains every answer', async () => {

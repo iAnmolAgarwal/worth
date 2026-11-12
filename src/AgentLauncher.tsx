@@ -352,7 +352,6 @@ export function AgentLauncher({
             </p>
           </div>
           <span className="agent-close">
-            <kbd aria-hidden="true">Esc</kbd>
             <IconButton label="Close Ask Worth" icon={X} quiet onClick={close} />
           </span>
         </div>

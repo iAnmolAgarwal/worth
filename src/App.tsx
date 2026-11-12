@@ -36,7 +36,7 @@ import { PlanPage, PlanWizard } from './Plan'
 import { ConfirmPlanDialog, RefundDialog } from './Reviews'
 import { migratePlanned, Saved, Settings } from './Saved'
 import { Tour, tourOnLoad } from './Tour'
-import { ASSESSMENT_ONLY, paypalModeLine, pinnedSample, replayToast, SAMPLE_WHO } from './copy'
+import { ASSESSMENT_ONLY, pinnedSample, replayToast } from './copy'
 import { usePayPalSdk } from './paypal'
 import { Alert, Button, IconButton, Wordmark } from './ui'
 
@@ -119,28 +119,6 @@ export default function App() {
   const [menu, setMenu] = useState(false)
   /** The tour is about to start or running: the guide's nudge waits until it is over. */
   const [touring, setTouring] = useState(tourOnLoad)
-  /** The data chip's details: whose data this is, assistant state and PayPal mode. */
-  const [envOpen, setEnvOpen] = useState(false)
-  const envButton = useRef<HTMLButtonElement>(null)
-  // Escape anywhere closes the chip's details and returns focus to it; so does a click outside.
-  useEffect(() => {
-    if (!envOpen) return
-    const close = (event: Event) => {
-      if (event instanceof KeyboardEvent) {
-        if (event.key !== 'Escape') return
-        setEnvOpen(false)
-        envButton.current?.focus()
-        return
-      }
-      if (!envButton.current?.parentElement?.contains(event.target as Node)) setEnvOpen(false)
-    }
-    document.addEventListener('keydown', close)
-    document.addEventListener('mousedown', close)
-    return () => {
-      document.removeEventListener('keydown', close)
-      document.removeEventListener('mousedown', close)
-    }
-  }, [envOpen])
   const [toast, setToast] = useState('')
   const [checkout, setCheckout] = useState<CheckoutState>()
   const [review, setReview] = useState<ReviewState>()
@@ -229,7 +207,6 @@ export default function App() {
       behind.current = window.location.hash
       setRoute(parseRoute())
       setMenu(false)
-      setEnvOpen(false)
       // A dialog belongs to the screen it opened on; leaving the screen closes it.
       setCheckout(undefined)
       setReview(undefined)
@@ -401,7 +378,6 @@ export default function App() {
       const next = (await api<AppState>('/demo-clock', { preset })) as AppState
       clearConversation()
       replaceState(next)
-      setEnvOpen(false)
       setToast(replayToast(next))
       navigate('home')
     } catch (failure) {
@@ -467,9 +443,7 @@ export default function App() {
       : screen === 'plan-edit'
         ? 'plan'
         : screen
-  const demo = state.profile.source === 'demo'
-  // One label at every width: it names whose month this is (third-party feedback F1).
-  const sample = demo ? `Sample: ${state.profile.name}` : 'Your data'
+  // Whose data, the assistant and the PayPal mode, in the account menu's header.
   const env = envLabel(state)
   const decisionProduct = decisionRequest?.productId
     ? state.products.find((p) => p.id === decisionRequest.productId)
@@ -542,61 +516,6 @@ export default function App() {
             )}
           </nav>
           <div className="right">
-            <span
-              className="env-wrap"
-              onBlur={(event) => {
-                // Focus leaving the chip and its details, by Tab or otherwise, closes them.
-                if (!event.currentTarget.contains(event.relatedTarget as Node)) setEnvOpen(false)
-              }}
-            >
-              <button
-                type="button"
-                className="env env-btn"
-                aria-expanded={envOpen}
-                aria-controls="env-details"
-                ref={envButton}
-                onClick={() => setEnvOpen(!envOpen)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Escape' && envOpen) {
-                    event.stopPropagation()
-                    setEnvOpen(false)
-                  }
-                }}
-              >
-                {sample}
-              </button>
-              {envOpen && (
-                <span className="env-pop" id="env-details">
-                  <span className="env-about">
-                    {demo
-                      ? `This is ${SAMPLE_WHO}. No real money moves, and ${paypalModeLine(state.config.paypal)}.`
-                      : `This is the PayPal activity you imported. ${paypalModeLine(state.config.paypal)}.`}
-                  </span>
-                  {/* The sentence above already says it is sample data. */}
-                  {env
-                    .split(' · ')
-                    .filter((part) => !(demo && part === 'Sample data'))
-                    .map((part) => (
-                      <span key={part}>{part}</span>
-                    ))}
-                  {demo && (
-                    <button
-                      type="button"
-                      className="link"
-                      onClick={() => {
-                        setEnvOpen(false)
-                        setImporting(true)
-                      }}
-                    >
-                      Use your own PayPal activity
-                    </button>
-                  )}
-                  <a href="#settings" onClick={() => setEnvOpen(false)}>
-                    About this demo
-                  </a>
-                </span>
-              )}
-            </span>
             <a className="icon-btn hide-m" href="#settings" aria-label="Settings and privacy">
               <SettingsIcon className="ico" strokeWidth={1.75} aria-hidden="true" />
             </a>
