@@ -199,7 +199,7 @@ describe('the default view', () => {
     const user = userEvent.setup()
     render(tile())
     expect(svg().getAttribute('aria-label')).toBe(
-      `Projected balance, Nov 13 to Jan 12. Each day shows its low, with that day’s bills taken out before pay arrives. ${WAIT}: ${SENTENCES.wait}`,
+      `Projected balance, Nov 13 to Jan 12. Each day shows its low, with that day’s bills taken out before pay arrives. ${WAIT}: ${SENTENCES.wait} Cushion: the least you want to keep in your account.`,
     )
     await user.click(screen.getByText('View as table'))
     // The table says what it is in a few words, left-aligned above it, and names itself by them.
@@ -352,7 +352,7 @@ describe('the pills are the options', () => {
     expect(legend()[0]).toBe('No purchase')
     expect(svg().querySelectorAll('.wchart-money.in')).toHaveLength(3)
     expect(svg().getAttribute('aria-label')).toBe(
-      'Projected balance, Nov 13 to Jan 12. Each day shows its low, with that day’s bills taken out before pay arrives. No purchase: Stays above your $300.00 cushion. Lowest $1,172.26 on Mon, Nov 30.',
+      'Projected balance, Nov 13 to Jan 12. Each day shows its low, with that day’s bills taken out before pay arrives. No purchase: Stays above your $300.00 cushion. Lowest $1,172.26 on Mon, Nov 30. Cushion: the least you want to keep in your account.',
     )
     // The focus panel works on that line, starting at its lowest point over the whole window.
     expect(focus().querySelector('.eyebrow')!.textContent).toBe('Lowest point')
@@ -905,5 +905,16 @@ describe('Pay in 4 comparison: its point and its two low dates', () => {
       'Buy today',
       'Wait until Fri, Oct 23',
     ])
+  })
+})
+
+describe('the cushion label', () => {
+  it('carries Home’s definition as its tooltip, unchanged at rest', () => {
+    render(tile())
+    const cushion = document.querySelector('.wchart-level.cushion')!
+    expect(cushion.querySelector('title')!.textContent).toBe(
+      'Cushion: the least you want to keep in your account.',
+    )
+    expect(cushion.querySelector('text')!.textContent).toBe('Cushion $300')
   })
 })
