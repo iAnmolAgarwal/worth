@@ -11,6 +11,7 @@ import {
   lowestIndex,
   moneyDays,
   namedEvents,
+  paymentDays,
   rangeOptions,
   seriesSummary,
   smoothPath,
@@ -177,6 +178,7 @@ export function BalanceChart({
         key: option.key,
         name: option.name,
         short: option.short ?? option.name,
+        purchaseDate: option.purchase?.date,
         style: toneOf(option),
         instalments: option.instalments,
         all,
@@ -280,7 +282,20 @@ export function BalanceChart({
 
   // Money in and money out: a green line on every day pay or other income lands, a red one on
   // every day a bill, subscription or plan payment leaves. A day with both draws both.
-  const flows = moneyDays(visible)
+  // A drawn option's own later payments (Pay in 4) are money out on their days too.
+  const shared = moneyDays(visible)
+  const flows = [
+    ...shared,
+    ...[...new Set(series.flatMap((s) => paymentDays(s.all.slice(0, days), s.purchaseDate)))]
+      .filter((index) => !shared.some((day) => day.kind === 'out' && day.index === index))
+      .map((index) => ({
+        index,
+        date: visible[index]!.date,
+        kind: 'out' as const,
+        cents: 0,
+        name: '',
+      })),
+  ]
   const both = new Set(
     flows
       .filter(
@@ -297,31 +312,41 @@ export function BalanceChart({
     ...(buyIndex >= 0
       ? [
           {
+            index: buyIndex,
             x: g.x(buyIndex),
             kind: primary.purchase!.fits ? 'fits' : 'buy',
             text: `${primary.purchase!.fits ? 'Fits' : 'Buy'} ${shortDate(primary.purchase!.date)}`,
           },
         ]
       : []),
-    ...(buyIndex !== 0 ? [{ x: g.x(0), kind: 'today', text: 'Today' }] : []),
+    ...(buyIndex !== 0 ? [{ index: 0, x: g.x(0), kind: 'today', text: 'Today' }] : []),
     ...flows
       .filter((day) => day.kind === 'in')
       .map((day) => {
         const text = incomeKind(visible[day.index]!, points) ?? 'Payday'
-        return { x: moneyX(day), kind: text.toLowerCase(), text }
+        return { index: day.index, x: moneyX(day), kind: text.toLowerCase(), text }
       }),
     ...flows
       .filter((day) => day.kind === 'out' && -day.cents >= BIG_BILL_CENTS)
       .sort((a, b) => a.cents - b.cents)
-      .map((day) => ({ x: moneyX(day), kind: 'bill', text: day.name })),
+      .map((day) => ({ index: day.index, x: moneyX(day), kind: 'bill', text: day.name })),
   ]
   const taken: [number, number][] = []
+  /** Money-in days whose label found no room: nothing else may be named beside them. */
+  const unnamed: number[] = []
   const lane = marks.map((mark) => {
     const w = textWidth(mark.text, 11, 600)
     const x = Math.max(plot.x + w / 2, Math.min(plot.x + plot.w - w / 2, mark.x))
     const span: [number, number] = [x - w / 2 - 5, x + w / 2 + 5]
-    const labelled = taken.every(([a, b]) => span[1] < a || span[0] > b)
+    const flow = mark.kind === 'payday' || mark.kind === 'income' || mark.kind === 'bill'
+    const labelled =
+      taken.every(([a, b]) => span[1] < a || span[0] > b) &&
+      // A money label sits on its own line or not at all, and a bill is never named next to
+      // an unnamed payday, where it would read as the payday's label.
+      (!flow || Math.abs(x - mark.x) <= 4) &&
+      (mark.kind !== 'bill' || unnamed.every((index) => Math.abs(index - mark.index) > 1))
     if (labelled) taken.push(span)
+    else if (mark.kind === 'payday' || mark.kind === 'income') unnamed.push(mark.index)
     return { ...mark, labelX: x, labelled }
   })
 
@@ -735,7 +760,7 @@ export function BalanceChart({
           key: s.key,
           name: s.short,
           low: s.low,
-          cents: s.all.map((point) => point?.minimumCents),
+          days: s.all,
           instalments: s.instalments,
         }))}
       />
@@ -767,7 +792,8 @@ function DayTable({
     name: string
     /** The option's own lowest day. */
     low: number
-    cents: (number | undefined)[]
+    /** The option's own day, for its balance and its own purchase or payment. */
+    days: (ForecastPoint | undefined)[]
     instalments?: InstalmentDetail[]
   }[]
 }) {
@@ -801,22 +827,33 @@ function DayTable({
           </thead>
           <tbody>
             {points.map((point, index) => {
-              const events = namedEvents(point).map(eventText)
+              // What happens to the plan whatever is bought: bills, pay, other income. An
+              // option's own purchase or payment is a note under its own amount.
+              const events = namedEvents(point)
+                .filter((event) => event.kind !== 'purchase')
+                .map(eventText)
               return (
                 <tr key={point.date}>
                   <th scope="row">{dayLabel(point.date)}</th>
                   <td className={cx(!events.length && 'none')}>{events.join(', ') || '—'}</td>
                   {columns.map((column) => {
-                    const cents = column.cents[index]
-                    if (cents === undefined)
+                    const own = column.days[index]
+                    const cents = own?.minimumCents
+                    if (!own || cents === undefined)
                       return (
                         <td className="num none" key={column.key}>
                           —
                         </td>
                       )
                     const instalment = column.instalments?.find((i) => i.date === point.date)
+                    const paid = own.events.filter((event) => event.kind === 'purchase')
                     const notes = [
-                      instalment ? `payment ${instalment.number} of 4` : '',
+                      ...paid.map((event) =>
+                        instalment
+                          ? `payment ${instalment.number} of 4 ${signed(event.amountCents)}`
+                          : `buys ${event.name} ${signed(event.amountCents)}`,
+                      ),
+                      instalment && !paid.length ? `payment ${instalment.number} of 4` : '',
                       index === column.low ? 'lowest point' : '',
                       stateNote(cents, cushionCents),
                     ].filter(Boolean)

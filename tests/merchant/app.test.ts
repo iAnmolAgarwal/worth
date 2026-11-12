@@ -459,7 +459,17 @@ describe('anti-forwarding (contract §5)', () => {
     const t = setup()
     const agent = request.agent(t.app)
     const qid = t.worth.open('quote', quoteToken((await agent.get('/p/camera')).text))!.qid
-    const forged = `${t.worth.sign('result', { v: 1, kid: '1', mid: 'larkspur', qid, verdict: 'buy_today', iat: T0, exp: T0 + 900 }).slice(0, -2)}AA`
+    const signed = t.worth.sign('result', {
+      v: 1,
+      kid: '1',
+      mid: 'larkspur',
+      qid,
+      verdict: 'buy_today',
+      iat: T0,
+      exp: T0 + 900,
+    })
+    // Never the signature's own ending, or the "forgery" would be the valid token.
+    const forged = signed.slice(0, -2) + (signed.endsWith('AA') ? 'BB' : 'AA')
     await agent.get(`/p/camera?worth=${forged}`)
     const valid = t.worth.sign('result', {
       v: 1,

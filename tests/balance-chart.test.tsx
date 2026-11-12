@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it } from 'vitest'
 import { BalanceChart } from '../src/BalanceChart'
-import { isBill, stretches } from '../src/chartModel'
+import { stretches } from '../src/chartModel'
 import { ChartTile, noPurchase } from '../src/Decision'
 import { fullPayName, payIn4Lines, payIn4Thesis } from '../src/payIn4Text'
 import { assessPurchase, compareOptions } from '../shared/finance'
@@ -105,22 +105,78 @@ describe('the default view', () => {
     expect(svg().querySelector('.wchart-track')).toBeNull()
   })
 
-  it('puts a green line on every day money comes in and a red one on every day it goes out', () => {
+  it('puts a green line on every day money comes in and a red one on every day it goes out', async () => {
+    const user = userEvent.setup()
     render(tile())
-    const days = (wanted: (kind: string) => boolean) =>
-      alexWait.points
-        .filter((point) => point.events.some((event) => wanted(event.kind)))
+    // Expected days come straight from the engine's events, not from the chart's own rules.
+    const daysWith = (points: OptionResult['points'], kinds: string[]) =>
+      points
+        .filter((point) => point.events.some((event) => kinds.includes(event.kind)))
         .map((point) => point.date)
-    const credits = days((kind) => kind === 'income')
-    const debits = alexWait.points
-      .filter((point) => point.events.some(isBill))
-      .map((point) => point.date)
+    const credits = daysWith(alexWait.points, ['income'])
+    const debits = daysWith(alexWait.points, ['bill', 'subscription', 'installment'])
     expect(credits).toEqual(['2026-11-30', '2026-12-14', '2026-12-31'])
+    expect(debits).toHaveLength(19)
     expect(moneyLines('in')).toEqual(credits)
     expect(moneyLines('out')).toEqual(debits)
-    expect(debits.length).toBeGreaterThan(5)
-    // The purchase itself is the option's marker, never a money-out line.
+    // Waiting pays once, on Dec 15: that day is the option's marker, never a money-out line.
     expect(moneyLines('out')).not.toContain('2026-12-15')
+    expect(debits).not.toContain('2026-12-11')
+
+    // With Pay in 4 drawn, its later payments are money out on their days too. The engine
+    // tags them as the purchase's own events; the first is the purchase day and keeps its
+    // "Buy" marker.
+    const payments = daysWith(alexP4.points, ['purchase'])
+    expect(payments).toEqual(alexP4.instalments.map((instalment) => instalment.date))
+    expect(payments).toEqual(['2026-11-13', '2026-11-27', '2026-12-11', '2026-12-25'])
+    const withPayments = [...new Set([...debits, ...payments.slice(1)])].sort()
+    await user.click(pill('Pay in 4'))
+    expect(moneyLines('out').sort()).toEqual(withPayments)
+    expect(moneyLines('out')).toContain('2026-12-11')
+    // The same when Pay in 4 is the only line drawn.
+    await user.click(pill(WAIT))
+    expect(pills().map((button) => button.getAttribute('aria-pressed'))).toEqual([
+      'false',
+      'false',
+      'true',
+    ])
+    expect(moneyLines('out').sort()).toEqual(withPayments)
+    expect(moneyLines('out')).not.toContain('2026-11-13')
+    expect(svg().querySelector('.wchart-mark.buy text')!.textContent).toBe('Buy Nov 13')
+    // Switched off again, its payment days go with it.
+    await user.click(pill('Pay in 4'))
+    expect(moneyLines('out')).toEqual(debits)
+  })
+
+  it('never names a bill beside a payday, where it would read as the payday’s label', () => {
+    // Rent leaves on Dec 1, the day after the Nov 30 salary: whether or not "Payday" finds
+    // room, "Rent" must not take the slot over the salary's jump. Checked wide and at a
+    // phone's width.
+    const labels = () =>
+      [...svg().querySelectorAll('.wchart-mark text')].map((text) => text.textContent)
+    render(tile())
+    expect(labels()).toContain('Payday')
+    expect(labels()).not.toContain('Rent')
+    cleanup()
+    const box = HTMLElement.prototype.getBoundingClientRect
+    HTMLElement.prototype.getBoundingClientRect = function () {
+      return { ...box.call(this), width: 316 }
+    }
+    try {
+      render(tile())
+      expect(svg().getAttribute('width')).toBe('316')
+      expect(labels()).not.toContain('Rent')
+      // Every money label sits on its own line.
+      for (const text of svg().querySelectorAll('.wchart-mark:is(.payday, .income, .bill) text')) {
+        const x = Number(text.getAttribute('x'))
+        const lines = [...svg().querySelectorAll('.wchart-money')].map((line) =>
+          Number(line.getAttribute('x1')),
+        )
+        expect(Math.min(...lines.map((line) => Math.abs(line - x)))).toBeLessThanOrEqual(4)
+      }
+    } finally {
+      HTMLElement.prototype.getBoundingClientRect = box
+    }
   })
 
   it('says the answer in words above the chart and in the focus panel', () => {
@@ -169,6 +225,13 @@ describe('the default view', () => {
       '$458.78 · lowest point',
     ])
     expect(row('Tue, Dec 1')[1]).toContain('Rent −$1,750.00')
+    // The purchase is a note under the option's own amount, not something that happens to
+    // the plan.
+    expect(row('Tue, Dec 15')).toEqual([
+      'Tue, Dec 15',
+      '—',
+      expect.stringMatching(/^\$[\d,.]+ · buys Halden X5 −\$1,899\.00$/),
+    ])
     // A quiet day says so with a dash; a fine balance carries no note and no red.
     expect(row('Sat, Nov 14')).toEqual(['Sat, Nov 14', '—', expect.stringMatching(/^\$[\d,.]+$/)])
     expect(table.querySelectorAll('td.below')).toHaveLength(0)
@@ -683,6 +746,23 @@ describe('the table with Pay in 4 open', () => {
       '$222.76 · lowest point · below cushion',
     ])
     expect(row('Sun, Nov 29')[4]).toMatch(/^\$[\d.]+ · below cushion$/)
+    // Each option's own purchase or payment sits under its own amount on its own day, and
+    // never in "What happens", which is the plan's shared events only.
+    expect(row('Fri, Nov 13')).toEqual([
+      'Fri, Nov 13',
+      '—',
+      '$2,500.00',
+      '$601.00 · buys Halden X5 −$1,899.00',
+      '$2,025.25 · payment 1 of 4 −$474.75',
+    ])
+    const dec15 = row('Tue, Dec 15')
+    expect(dec15[1]).toBe('—')
+    expect(dec15[2]).toMatch(/^\$[\d,.]+ · buys Halden X5 −\$1,899\.00$/)
+    expect(dec15[3]).toMatch(/^\$[\d,.]+$/)
+    expect(dec15[4]).toMatch(/^\$[\d,.]+$/)
+    expect(row('Fri, Dec 11')[4]).toMatch(/^\$[\d,.]+ · payment 3 of 4 −\$474\.75$/)
+    for (const tr of table.querySelectorAll('tbody tr'))
+      expect((tr as HTMLTableRowElement).cells[1]!.textContent).not.toMatch(/Halden|payment/)
     // Each balance cell is red only when that balance is below the cushion (audit B1), and
     // says which in words: below cushion, or below zero.
     const cushion = alex.cushionCents

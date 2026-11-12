@@ -46,6 +46,17 @@ export function moneyDays(points: ForecastPoint[]): MoneyDay[] {
   )
 }
 
+/**
+ * The days an option's own payments leave after its purchase day (Pay in 4's later payments):
+ * money out for that option's line. The purchase day itself carries the option's marker.
+ */
+export const paymentDays = (points: (ForecastPoint | undefined)[], purchaseDate?: string) =>
+  points.flatMap((point, index) =>
+    point && point.date !== purchaseDate && point.events.some((e) => e.kind === 'purchase')
+      ? [index]
+      : [],
+  )
+
 /** Named events, income first, then the largest outflow; everyday spending is left out. */
 export const namedEvents = (point: ForecastPoint) =>
   point.events
