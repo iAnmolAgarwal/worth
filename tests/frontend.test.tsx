@@ -1438,25 +1438,42 @@ describe('iteration 2 fixes', () => {
   })
 })
 
+describe('the top bar’s "Take the tour"', () => {
+  it.each(['home', 'saved'])('starts the tour from Home when clicked on %s', async (from) => {
+    const user = userEvent.setup()
+    const state = makeState()
+    routeApi((path, data) => (path === '/state' ? state : compare(state, data)))
+    window.location.hash = from
+    const started = vi.fn()
+    window.addEventListener('worth:tour', started)
+    render(<App />)
+    const avatar = await screen.findByRole('button', { name: /account menu/ })
+    const header = avatar.closest('header')!
+    const button = within(header).getByRole('button', { name: 'Take the tour' })
+    // A labelled pill, before the settings gear in the header's order.
+    expect(button.textContent).toBe('Take the tour')
+    const gear = within(header).getByRole('link', { name: 'Settings and privacy' })
+    expect(button.compareDocumentPosition(gear) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    await user.click(button)
+    expect(started).toHaveBeenCalledOnce()
+    await waitFor(() => expect(window.location.hash).toBe('#home'))
+    window.removeEventListener('worth:tour', started)
+  })
+})
+
 describe('the account menu', () => {
   it.each(['demo', 'import'] as const)(
-    'offers the tour in place of the import (%s data), starting it from Home',
+    'offers neither the import nor the tour (%s data): the top bar has the tour',
     async (source) => {
       const user = userEvent.setup()
       const state = makeState(source)
       routeApi((path, data) => (path === '/state' ? state : compare(state, data)))
-      window.location.hash = 'saved'
-      const started = vi.fn()
-      window.addEventListener('worth:tour', started)
       render(<App />)
       await user.click(await screen.findByRole('button', { name: /account menu/ }))
       const menu = screen.getByRole('menu', { name: 'Account' })
-      expect(within(menu).queryByRole('menuitem', { name: /Import/ })).toBeNull()
-      await user.click(within(menu).getByRole('menuitem', { name: 'Take the tour' }))
-      expect(started).toHaveBeenCalledOnce()
-      expect(screen.queryByRole('menu', { name: 'Account' })).toBeNull()
-      await waitFor(() => expect(window.location.hash).toBe('#home'))
-      window.removeEventListener('worth:tour', started)
+      expect(within(menu).queryByRole('menuitem', { name: /Import|tour/ })).toBeNull()
+      expect(within(menu).getByRole('menuitem', { name: 'Edit your plan' })).toBeTruthy()
+      expect(within(menu).getByRole('menuitem', { name: 'Settings and privacy' })).toBeTruthy()
     },
   )
 })

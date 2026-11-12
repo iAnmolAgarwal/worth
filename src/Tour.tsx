@@ -509,7 +509,20 @@ export function Tour({
           className="tour-pane"
           style={style}
           aria-hidden="true"
-          onClick={() => finish()}
+          // The top bar's "Take the tour" stays under the dim; a click on it starts over at step 1
+          // instead of only ending the tour.
+          onClick={(event) => {
+            finish()
+            const button = document.querySelector('.tour-btn')?.getBoundingClientRect()
+            if (
+              button &&
+              event.clientX >= button.left &&
+              event.clientX <= button.right &&
+              event.clientY >= button.top &&
+              event.clientY <= button.bottom
+            )
+              startTour()
+          }}
         />
       ))}
       {hole && (

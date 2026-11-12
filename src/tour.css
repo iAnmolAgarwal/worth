@@ -145,3 +145,35 @@
     opacity: 0;
   }
 }
+
+/* The top bar's "Take the tour": the old data chip's outlined pill on navy, with a compass. */
+.tour-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* Hard to miss: white words and border, a little larger than the old chip. */
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.75);
+  font-size: var(--fs-meta);
+  font-weight: var(--fw-semibold);
+  min-height: 36px;
+  padding: 4px 14px 4px 12px;
+}
+.tour-btn .ico {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.tour-btn:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+/* Beside a full nav there is room for the words only from 1280; narrower, the compass alone. */
+@media (max-width: 1279px) {
+  .tour-btn {
+    padding: 4px 8px;
+  }
+  .tour-btn-label {
+    display: none;
+  }
+}
