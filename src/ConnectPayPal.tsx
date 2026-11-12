@@ -27,6 +27,8 @@ export const CONNECTED_FILE_NAME = 'Your PayPal sandbox activity'
 const SHORT_HISTORY_DAYS = 45
 /** Set for the rest of the visit once PayPal's MCP server didn't answer in time: the health gate. */
 const HIDDEN_KEY = 'worth.paypalConnect.hidden'
+/** Set when the login began on /check, so the verdict follows the import. One fixed value only. */
+const RETURN_KEY = 'worth.paypalConnect.return'
 
 function hiddenForVisit() {
   try {
@@ -40,6 +42,20 @@ function hideForVisit() {
     sessionStorage.setItem(HIDDEN_KEY, '1')
   } catch {
     // Without storage the button simply stays; the CSV path is shown either way.
+  }
+}
+
+/**
+ * After an import that began on /check: true once, and the caller goes back to /check, which
+ * reopens the store's item from this tab's remembered quote. Never a URL from anywhere else.
+ */
+export function returnToCheck() {
+  try {
+    const value = sessionStorage.getItem(RETURN_KEY)
+    sessionStorage.removeItem(RETURN_KEY)
+    return value === 'check'
+  } catch {
+    return false
   }
 }
 
@@ -58,7 +74,14 @@ export function historyDays(summary: ConnectedSummary) {
  * The card's primary action. The first click shows what PayPal's screen will say, honestly, before
  * leaving Worth; "Continue to PayPal" starts the login on the server.
  */
-export function ConnectPayPalButton({ disabled }: { disabled?: boolean }) {
+export function ConnectPayPalButton({
+  disabled,
+  returnTo,
+}: {
+  disabled?: boolean
+  /** Come back to the store's item on /check after the import. */
+  returnTo?: 'check'
+}) {
   const [asking, setAsking] = useState(false)
   const [leaving, setLeaving] = useState(false)
   if (!asking)
@@ -86,6 +109,12 @@ export function ConnectPayPalButton({ disabled }: { disabled?: boolean }) {
           disabled={disabled || leaving}
           onClick={() => {
             setLeaving(true)
+            try {
+              if (returnTo) sessionStorage.setItem(RETURN_KEY, returnTo)
+              else sessionStorage.removeItem(RETURN_KEY)
+            } catch {
+              // Without storage the import ends on Home, as it does from Home.
+            }
             window.location.assign('/api/paypal/connect')
           }}
         >
@@ -96,6 +125,19 @@ export function ConnectPayPalButton({ disabled }: { disabled?: boolean }) {
         </button>
       </div>
     </div>
+  )
+}
+
+/**
+ * On /check while the sample plan is showing: one line and Connect PayPal, so the store's item is
+ * judged against the shopper's own PayPal activity instead.
+ */
+export function ConnectOnCheck() {
+  return (
+    <span className="check-connect">
+      <span>This answer uses the sample plan. Connect PayPal to check it against your own.</span>
+      <ConnectPayPalButton returnTo="check" />
+    </span>
   )
 }
 

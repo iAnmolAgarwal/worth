@@ -30,7 +30,7 @@ import type { GuideExpression } from './Guide'
 import { Home, HomeSkeleton } from './Home'
 import { ImportDialog } from './Import'
 import { ImportReview, type ChosenFile } from './Onboarding'
-import { ConnectProgress } from './ConnectPayPal'
+import { ConnectProgress, returnToCheck } from './ConnectPayPal'
 import { PlanPage, PlanWizard } from './Plan'
 import { ConfirmPlanDialog, RefundDialog } from './Reviews'
 import { migratePlanned, Saved, Settings } from './Saved'
@@ -741,6 +741,8 @@ export default function App() {
               clearConversation()
               replaceState(next)
               setChosenFile(undefined)
+              // Connect PayPal began on /check: back to the store's item for its verdict.
+              if (chosenFile?.connected && returnToCheck()) return window.location.assign('/check')
               setToast('Your month from PayPal is ready.')
               navigate('home')
             }}

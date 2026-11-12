@@ -600,3 +600,15 @@ html:has(.import-review) {
     flex: 1 1 100%;
   }
 }
+
+/* On /check, under the store's item: the sample-plan line and Connect PayPal. */
+.check-connect {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2) var(--s-3);
+  margin-top: var(--s-2);
+}
+.check-connect .connect-ask {
+  order: 0;
+}

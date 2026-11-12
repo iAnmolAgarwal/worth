@@ -4,9 +4,11 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   connectAvailable,
+  ConnectOnCheck,
   ConnectedSource,
   ConnectPayPalButton,
   ConnectProgress,
+  returnToCheck,
 } from '../src/ConnectPayPal'
 import { api, ApiError } from '../src/api'
 import type { AppState } from '../src/contract'
@@ -118,5 +120,21 @@ describe('The review’s source line', () => {
       <ConnectedSource summary={{ ...summary, first: '2026-06-01', last: '2026-10-04' }} />,
     )
     expect(container.textContent).not.toContain('too short')
+  })
+})
+
+describe('From /check', () => {
+  it('offers Connect PayPal against the sample plan', () => {
+    const { container } = render(<ConnectOnCheck />)
+    expect(container.textContent).toContain('This answer uses the sample plan.')
+    expect(screen.getByRole('button', { name: 'Connect PayPal' })).toBeTruthy()
+  })
+  it('returns to /check once, and only for its own fixed value', () => {
+    expect(returnToCheck()).toBe(false)
+    sessionStorage.setItem('worth.paypalConnect.return', 'check')
+    expect(returnToCheck()).toBe(true)
+    expect(returnToCheck()).toBe(false)
+    sessionStorage.setItem('worth.paypalConnect.return', 'https://evil.example')
+    expect(returnToCheck()).toBe(false)
   })
 })
