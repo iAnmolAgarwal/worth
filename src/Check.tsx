@@ -4,6 +4,7 @@ import { payIn4InRange } from '../shared/finance'
 import type { AppState, HandoffOpened, HandoffQuote, SavedItem } from '../shared/types'
 import type { AskOffer } from './AgentLauncher'
 import { api, ApiError } from './api'
+import { connectAvailable, ConnectOnCheck } from './ConnectPayPal'
 import { Decision, EditPurchase, type DecisionRequest } from './Decision'
 import { dayLabel, money } from './format'
 import type { PayPalSdkInstance } from './paypalSdk'
@@ -415,6 +416,7 @@ function Quote({
       </button>
     </p>
   )
+  const connect = state.profile.source === 'demo' && connectAvailable(state)
   const footer = quote.canConsent && (
     <label className="check">
       <input
@@ -457,7 +459,13 @@ function Quote({
           </button>
         ),
         editor: editor || undefined,
-        note: note || undefined,
+        note:
+          note || connect ? (
+            <>
+              {note}
+              {connect && <ConnectOnCheck />}
+            </>
+          ) : undefined,
         payLater: payLaterLine(quote, amountCents),
         footer,
         merchant: quote.merchant,

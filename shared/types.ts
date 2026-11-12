@@ -531,6 +531,8 @@ export interface AppState {
     alternatives?: AlternativesStatus
     /** Whether signed store hand-offs (/check) can be verified: off until both settings are set. */
     handoff?: 'on' | 'off'
+    /** Connect PayPal (PayPal's MCP server, sandbox): unavailable after PayPal didn't answer in time. */
+    paypalConnect?: 'on' | 'off' | 'unavailable'
   }
 }
 export interface ChatMessage {

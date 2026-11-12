@@ -155,6 +155,48 @@ describe('Check what Worth found', () => {
     )
   }
 
+  it('leaves everyday spending for the user when connected activity covers only a few days', async () => {
+    const calls = reviewApi()
+    const base = apiMock.getMockImplementation()!
+    apiMock.mockImplementation(((path: string, data: unknown, method?: string) =>
+      path === '/import/preview'
+        ? Promise.resolve({ ...preview, coverageDays: 4, suggestedDailySpendCents: 107400 })
+        : base(path, data, method)) as typeof api)
+    const onDone = vi.fn()
+    renderReview(onDone, {
+      ...FILE,
+      name: 'Your PayPal sandbox activity',
+      connected: {
+        transactions: 39,
+        first: '2026-10-06',
+        last: '2026-10-09',
+        searchedDays: 186,
+        skipped: 0,
+        truncated: false,
+      },
+    })
+    const user = userEvent.setup()
+    const field = await screen.findByRole('textbox', { name: /Everyday spending/ })
+    expect((field as HTMLInputElement).value).toBe('')
+    expect(
+      screen.getByText(/PayPal shows about \$1,074\.00 a day over 4 days; too short to rely on\./),
+    ).toBeTruthy()
+    await user.type(screen.getByRole('textbox', { name: /Money available today/ }), '2600')
+    await user.type(screen.getByRole('textbox', { name: /Cushion/ }), '300')
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(screen.getByRole('alert').textContent).toContain('Enter your everyday spending a day')
+    expect(calls.some((call) => call.path === '/import/commit')).toBe(false)
+
+    await user.type(field, '35')
+    await user.click(screen.getByRole('radio', { name: '1 left' }))
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await waitFor(() => expect(onDone).toHaveBeenCalled())
+    const { profile } = calls.find((call) => call.path === '/profile')!.data as {
+      profile: FinancialProfile
+    }
+    expect(profile).toMatchObject({ dailySpendCents: 3500, dailySpendOrigin: 'you' })
+  })
+
   it('lists what PayPal shows, ticked and tagged, with the estimate labelled', async () => {
     reviewApi()
     renderReview()

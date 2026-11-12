@@ -30,6 +30,13 @@ export interface AppConfig {
    * default in development; production needs PAYPAL_NEGATIVE_TESTING=true.
    */
   paypalNegativeTesting: boolean
+  /**
+   * Connect PayPal: log in at PayPal and read activity through PayPal's MCP server (sandbox). On by
+   * default when the sandbox client ID is set; PAYPAL_CONNECT=off hides it and the CSV path remains.
+   */
+  paypalConnect: boolean
+  /** A client already registered on the MCP server for this origin's callback; else one is registered. */
+  paypalMcpClientId?: string
   /** Sends the full Content-Security-Policy. On in production; the Vite dev server needs it off. */
   contentSecurityPolicy: boolean
   anthropicKey?: string
@@ -127,6 +134,13 @@ function merchantOrigin(value: string, production: boolean) {
   return url.origin
 }
 
+function paypalConnect(env: Env, clientId: string | undefined) {
+  const value = setting(env, 'PAYPAL_CONNECT')
+  if (value === undefined) return Boolean(clientId)
+  if (value === 'on' || value === 'off') return value === 'on'
+  throw new ConfigError(`PAYPAL_CONNECT must be on or off; received “${value}”.`)
+}
+
 function channel3Mode(env: Env): AppConfig['channel3Mode'] {
   const value = setting(env, 'CHANNEL3_MODE')
   if (value === undefined) return undefined
@@ -163,6 +177,11 @@ export function loadConfig(env: Env = process.env, overrides: Partial<AppConfig>
     paypalNegativeTesting: production
       ? setting(env, 'PAYPAL_NEGATIVE_TESTING') === 'true'
       : setting(env, 'PAYPAL_NEGATIVE_TESTING') !== 'false',
+    paypalConnect: paypalConnect(
+      env,
+      'paypalClientId' in overrides ? overrides.paypalClientId : setting(env, 'PAYPAL_CLIENT_ID'),
+    ),
+    paypalMcpClientId: setting(env, 'PAYPAL_MCP_CLIENT_ID'),
     contentSecurityPolicy: production,
     anthropicKey: setting(env, 'ANTHROPIC_API_KEY'),
     anthropicModel: setting(env, 'ANTHROPIC_MODEL') ?? 'claude-sonnet-5-5',

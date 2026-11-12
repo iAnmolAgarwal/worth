@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { ArrowRight, CircleAlert, FileText } from 'lucide-react'
+import { connectAvailable, ConnectPayPalButton } from './ConnectPayPal'
 import type { AppState } from './contract'
 import { isActive } from './contract'
 import { cx } from './format'
@@ -115,6 +116,7 @@ export function StartStrip({
       <div className="start-strip-actions">
         {onFile ? (
           <>
+            {connectAvailable(state) && <ConnectPayPalButton disabled={busy} pop />}
             <SampleExportAction state={state} onFile={onFile} onError={setError} disabled={busy} />
             <CsvAction read={(file) => void read(file)} disabled={busy || reading} />
             <StripMore onEnterYourself={onEnterYourself} />

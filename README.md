@@ -154,6 +154,22 @@ credentials and the browser receives only the public client ID.
 - **Declines.** An `INSTRUMENT_DECLINED` or `PAYER_ACTION_REQUIRED` capture sends the buyer back
   to PayPal to choose another way to pay, keeping the same order. The sandbox decline demo
   (`PayPal-Mock-Response`) is off in production unless `PAYPAL_NEGATIVE_TESTING=true`.
+- **Connect PayPal (PayPal's MCP server).** No public API gives third-party apps a consumer's
+  PayPal activity; Worth reads it through PayPal's MCP server after you log in (sandbox), or from
+  a CSV export. "Connect PayPal" runs OAuth 2.1 (authorization code with PKCE S256, a single-use
+  `state` bound to the Worth session) against `https://mcp.sandbox.paypal.com`, with a client
+  Worth registers there itself. PayPal's consent screen names "Default Application" (PayPal's
+  connector) and asks for transaction data; Worth says so before redirecting. The server then
+  calls one MCP tool, `list_transactions`, over six 31-day windows (about 186 days) side by side,
+  turns the rows into the same CSV text a personal export holds, and the browser reviews it in the
+  usual import step. Event codes become export types: `T1600` (buyer-credit funding) becomes a Pay
+  Later funding row, so the existing Pay in 4 detection finds the plan. The rows carry no merchant
+  name, so the order description names each one. The access token stays in server memory until one
+  read, or at most 10 minutes after the login, and is never sent to the browser. The same token could create and
+  send invoices, so the server allow-lists `list_transactions` and refuses every other tool.
+  Opening a session takes PayPal about 12 s and each window about 11 s, so a read takes about
+  25 s; if a session doesn't open in 25 s, Connect is hidden for that visitor's visit (and
+  for everyone for a minute after two such timeouts in a row), and the CSV path remains. `PAYPAL_CONNECT=off` turns it off.
 
 Verified against the sandbox: SDK v6 popup approval followed by exactly one capture; a US sandbox
 buyer paying $1,199 with Pay in 4 inside PayPal's checkout (4 × $299.75); and, on the hosted
@@ -202,6 +218,7 @@ The [evaluation](#evaluation) runs these paths live against the real model.
 | PayPal Messages (`paypal-messages`) | PayPal's own Pay in 4 message next to Worth's instalment comparison |
 | PayPal `find-eligible-methods` | Server-side Pay Later eligibility for the price before the Pay in 4 comparison is offered |
 | PayPal Webhooks | Raw-body signature verification; order events reconcile, refunds and reversals become review items |
+| PayPal MCP server (`mcp.sandbox.paypal.com`) | Connect PayPal: OAuth with PKCE, then only its `list_transactions` tool reads the logged-in user's own activity for the import review |
 | PayPal sandbox accounts and negative testing | A US sandbox merchant and buyer; `PayPal-Mock-Response` for the decline and re-approve path |
 | Claude Sonnet 5.5 (Anthropic API) | Interprets questions, picks engine facts, writes one checked sentence, may link to the demo store's product page, suggests import categories |
 | Claude Opus 5.5 (Anthropic API) | Offline only: the independent judge in the live AI eval (`eval/judge.ts`); never called by the app |
@@ -279,9 +296,12 @@ plan and rate-limited. Setup, the tool contract and the security model are in
 
 - **Sandbox only.** No real money moves and no goods ship. The demo store (Larkspur Supply) has
   six items; `open_store_checkout` and `store_checkout_link` link only to those.
-- **USD only, CSV only.** There is no consumer API for PayPal activity, so history comes from a
-  CSV export or the sample plan. Foreign-currency rows without a USD conversion block positive
-  answers until resolved.
+- **USD only.** No public API gives third-party apps a consumer's PayPal activity; Worth reads it
+  through PayPal's MCP server after you log in (sandbox), or from a CSV export. A sandbox account
+  holds only what was done in the sandbox (rows can't be backdated), so its history is short.
+  Foreign-currency rows without a USD conversion block positive answers until resolved.
+- **Connect PayPal depends on PayPal's hosted MCP server**, which names "Default Application" on
+  its consent screen, and has had outages. When it is slow or down, the CSV export still works.
 - **Pay in 4 is illustrative.** Worth's schedule uses 14-day gaps; the sandbox's real schedule for
   the camera used 16. PayPal sets the terms at checkout, and the order does not say whether Pay
   in 4 was used, so the user confirms it afterwards.
@@ -334,6 +354,8 @@ the webhook ID in `PAYPAL_WEBHOOK_ID`. Localhost alone cannot receive them.
 | `ANTHROPIC_MODEL` | Model ID; default `claude-sonnet-5-5` |
 | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | PayPal **sandbox** REST app credentials. Without them checkout is simulated |
 | `PAYPAL_WEBHOOK_ID` | ID of the registered sandbox webhook; required to accept webhook deliveries |
+| `PAYPAL_CONNECT` | `on` or `off`. Connect PayPal through PayPal's MCP server; on by default when `PAYPAL_CLIENT_ID` is set |
+| `PAYPAL_MCP_CLIENT_ID` | Optional: a client already registered on PayPal's MCP server for `<APP_ORIGIN>/api/paypal/connect/callback`. Without it Worth registers one at first use |
 | `PAYPAL_NEGATIVE_TESTING` | Allows the sandbox decline demo. On in development unless `false`; off in production unless `true` |
 | `CHANNEL3_API_KEY` | Channel3 key for similar items. Without it the panel is hidden |
 | `CHANNEL3_MODE` | `live` (default with a key), `fixture` (recorded results, no credits) or `off` |
