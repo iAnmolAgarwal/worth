@@ -724,3 +724,33 @@ html:has(.import-review) {
 .import-note {
   text-align: center;
 }
+
+/* Outside Home's row the note replaces the button in place; the wrapper adds no box. */
+.connect-wrap {
+  display: contents;
+}
+/*
+ * On Home's source row the note opens inside the row, on a line of its own: the row grows and
+ * pushes what follows down, so the note never covers the cards or banners below it.
+ */
+.hero-act:has(> .connect-pop-wrap > .connect-pop) {
+  flex-wrap: wrap;
+  align-content: center;
+  padding-top: var(--s-4);
+  padding-bottom: var(--s-4);
+}
+.hero-act > .connect-pop-wrap:has(> .connect-pop) {
+  display: contents;
+}
+.hero-act > .connect-pop-wrap > .connect-ask.connect-pop {
+  position: static;
+  order: 10;
+  flex: 1 1 100%;
+  width: auto;
+  margin-top: var(--s-2);
+  padding: var(--s-3) 0 0;
+  border-top: 1px solid var(--c-border);
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}

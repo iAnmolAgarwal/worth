@@ -176,10 +176,31 @@ export function ConnectPayPalButton({
   const [asking, setAsking] = useState(false)
   const [leaving, setLeaving] = useState(false)
   const popover = useRef<HTMLDivElement>(null)
-  // A strip near the fold would hide the popover's lower half; bring all of it into view.
+  const root = useRef<HTMLSpanElement>(null)
+  /** Set when the note is dismissed, so focus goes back to what opened it. */
+  const refocus = useRef(false)
+  const close = () => {
+    refocus.current = true
+    setAsking(false)
+  }
+  // A row near the fold would hide the note's lower half; bring all of it into view.
   useEffect(() => {
     if (pop && asking) popover.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
   }, [pop, asking])
+  // Escape dismisses the note, as Not now does.
+  useEffect(() => {
+    if (!asking || leaving) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') close()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [asking, leaving])
+  useEffect(() => {
+    if (asking || !refocus.current) return
+    refocus.current = false
+    root.current?.querySelector<HTMLElement>('button')?.focus()
+  }, [asking])
   const button = trigger ? (
     trigger({
       onClick: () => setAsking(pop ? !asking : true),
@@ -205,13 +226,15 @@ export function ConnectPayPalButton({
       aria-label="Connect PayPal"
     >
       <p>
-        Sign in on PayPal and choose Agree. PayPal calls the connection “Default Application”.
+        You’ll sign in on PayPal’s own page, not here. PayPal shows the connection as “Default
+        Application”: that’s PayPal’s connector name.
       </p>
       <p className="caption">
-        Worth only reads your activity to keep your plan up to date. It can’t pay or move money.
+        PayPal’s permission list is broader than what Worth uses. Worth only reads your activity; it
+        can’t pay or move money.
       </p>
       <p className="caption">
-        Sandbox accounts only. Disconnect any time in Settings.
+        This demo works with PayPal test (sandbox) accounts. Disconnect any time in Settings.
       </p>
       <div className="connect-ask-actions">
         <Button
@@ -231,7 +254,7 @@ export function ConnectPayPalButton({
         >
           Continue to PayPal
         </Button>
-        <button type="button" className="link" onClick={() => setAsking(false)} disabled={leaving}>
+        <button type="button" className="link" onClick={close} disabled={leaving}>
           Not now
         </button>
       </div>
@@ -239,12 +262,16 @@ export function ConnectPayPalButton({
   )
   if (pop)
     return (
-      <span className="connect-pop-wrap">
+      <span className="connect-pop-wrap" ref={root}>
         {button}
         {asking && ask}
       </span>
     )
-  return asking ? ask : button
+  return (
+    <span className="connect-wrap" ref={root}>
+      {asking ? ask : button}
+    </span>
+  )
 }
 
 /**
