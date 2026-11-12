@@ -166,9 +166,10 @@ export function verdictTitle(c: Comparison) {
 }
 
 /** The sentence under the headline: the margin it leaves and what buying today would do. */
-export function AnswerDetail({ c }: { c: Comparison }) {
+export function AnswerDetail({ c, now = c }: { c: Comparison; now?: Comparison }) {
   const cushion = money(c.cushionCents)
-  const breach = firstBelow(c.buyToday.points, c.cushionCents)
+  // "Buying today …" is about today, even when the first card is a day agreed in Ask.
+  const breach = firstBelow(now.buyToday.points, c.cushionCents)
   const bill = billOn(breach)
   const today = breach && (
     <>
@@ -1050,7 +1051,7 @@ export function Decision({
                 {verdictTitle(c)}
               </h1>
               <p className="lead">
-                <AnswerDetail c={c} />
+                <AnswerDetail c={c} now={raw} />
               </p>
             </section>
             {/* Why the answer is what it is, read straight after it, always open. */}

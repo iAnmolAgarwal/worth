@@ -414,5 +414,9 @@ describe('a day agreed in Ask, on the comparison page', () => {
     expect(radios[0]!.textContent).toContain('Buy Fri, Nov 20')
     expect(radios[1]!.textContent).toContain('Wait until Tue, Dec 15')
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Wait until Tue, Dec 15')
+    // "Buying today …" still describes today, not the agreed day.
+    expect(document.querySelector('.verdict-block .lead')!.textContent).toContain(
+      'Buying today puts you below it from Thu, Nov 19',
+    )
   })
 })
