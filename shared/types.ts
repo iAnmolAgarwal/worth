@@ -518,7 +518,7 @@ export interface AppState {
    * The labelled demo clock: set only on the synthetic persona, never on imported data. `today`
    * above already follows it.
    */
-  demoClock?: { today: string; preset?: 'video' }
+  demoClock?: { today: string; preset?: DemoPreset }
   /**
    * Synthetic persona only, when its funds snapshot is older than today: the balance the sample
    * plan projects for the start of today, offered when confirming today's funds.
@@ -535,8 +535,17 @@ export interface AppState {
     handoff?: 'on' | 'off'
     /** Connect PayPal (PayPal's MCP server, sandbox): unavailable after PayPal didn't answer in time. */
     paypalConnect?: 'on' | 'off' | 'unavailable'
+    /** Who a new session starts as (SAMPLE_PERSONA): Alex on the demo day, or Maya on today. */
+    sample?: SamplePersona
   }
 }
+/**
+ * A pinned sample day: `video` is Maya on the day the first video was recorded; `demo` is Alex
+ * on the demo day (Fri Nov 13 2026) and `demo-dec15` his return visit on Tue Dec 15.
+ */
+export type DemoPreset = 'video' | 'demo' | 'demo-dec15'
+/** The sample person a new session starts as. Maya stays only as the tests' fixture. */
+export type SamplePersona = 'alex' | 'maya'
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string

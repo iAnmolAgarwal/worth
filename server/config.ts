@@ -1,10 +1,16 @@
 import { secretBytes } from '../shared/handoff.ts'
+import type { SamplePersona } from '../shared/types.ts'
 
 type Env = Record<string, string | undefined>
 
 export interface AppConfig {
   /** Public browser origin. PayPal returns here and state-changing requests must come from it. */
   origin: string
+  /**
+   * Who a new session starts as (SAMPLE_PERSONA): `alex`, the default, pinned to the demo day, or
+   * `maya` dated today, which only the tests use because their numbers are hers.
+   */
+  samplePersona: SamplePersona
   production: boolean
   port: number
   host: string
@@ -141,6 +147,12 @@ function paypalConnect(env: Env, clientId: string | undefined) {
   throw new ConfigError(`PAYPAL_CONNECT must be on or off; received “${value}”.`)
 }
 
+function samplePersona(env: Env): SamplePersona {
+  const value = setting(env, 'SAMPLE_PERSONA')
+  if (value === undefined || value === 'alex' || value === 'maya') return value ?? 'alex'
+  throw new ConfigError(`SAMPLE_PERSONA must be alex or maya; received “${value}”.`)
+}
+
 function channel3Mode(env: Env): AppConfig['channel3Mode'] {
   const value = setting(env, 'CHANNEL3_MODE')
   if (value === undefined) return undefined
@@ -196,6 +208,7 @@ export function loadConfig(env: Env = process.env, overrides: Partial<AppConfig>
     handoffSecret: setting(env, 'HANDOFF_SECRET'),
     merchantOrigin: setting(env, 'MERCHANT_ORIGIN'),
     handoffMerchantId: setting(env, 'HANDOFF_MERCHANT_ID') ?? 'larkspur',
+    samplePersona: samplePersona(env),
     ...overrides,
   }
   config.origin = publicOrigin(config.origin, config.production)

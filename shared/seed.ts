@@ -1,4 +1,11 @@
-import type { FinancialProfile, Product, Purchase, ScheduledFlow, Transaction } from './types.ts'
+import type {
+  DemoPreset,
+  FinancialProfile,
+  Product,
+  Purchase,
+  ScheduledFlow,
+  Transaction,
+} from './types.ts'
 import { addDays, daysBetween, forecast, todayInTimezone } from './finance.ts'
 
 /** Time zone for the synthetic persona when the viewer's own zone is unknown. */
@@ -385,6 +392,11 @@ export function createDemoState(
 export const ALEX_DEMO_DAY = '2026-11-13'
 /** The return visit: the day the camera fits, after the Dec 14 invoice is paid. */
 export const ALEX_RETURN_DAY = '2026-12-15'
+/** The pinned sample days a `?replay=` link can ask for, on Worth and on the store. */
+export const DEMO_PRESETS = ['video', 'demo', 'demo-dec15'] as const satisfies DemoPreset[]
+/** A `?replay=` value when it names a preset; anything else is ignored. */
+export const demoPreset = (value: unknown): DemoPreset | undefined =>
+  DEMO_PRESETS.find((preset) => preset === value)
 /** The camera Alex wants, in the catalog above. */
 export const ALEX_CAMERA_ID = 'halden-x5'
 

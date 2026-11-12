@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import type {
+  DemoPreset,
   FinancialProfile,
   ForeignPayment,
   Purchase,
@@ -24,7 +25,7 @@ export interface SessionData {
   /** Opt-in 30-day retention (D-9 a). Absent: the 24-hour default. */
   keep30?: boolean
   /** The labelled demo clock. Only the synthetic persona may carry one. */
-  demoClock?: { today: string; preset?: 'video' }
+  demoClock?: { today: string; preset?: DemoPreset }
 }
 export interface StoredPurchase extends Purchase {
   approvalUrl?: string
