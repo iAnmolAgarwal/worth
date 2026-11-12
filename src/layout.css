@@ -1,0 +1,21 @@
+/* =====================================================================
+   The banners above a page (the sample month, the demo clock, a refresh
+   error) sit in <main> before the page itself. Behind them, <main> takes
+   the colour of the page below, so a white page or a white rail never
+   has a band of the canvas colour across its top.
+   ===================================================================== */
+main:has(> .page.activity) {
+  background: var(--c-surface);
+}
+/* A page whose rail paints the white panel to the window's right edge (Decision): the band is
+   canvas over the main column and white over the rail, split where the rail's panel starts
+   (24 px left of the rail, as .rail::before draws it). */
+@media (min-width: 1024px) {
+  main:has(> .page:not(.plain):not(.home-page) .grid > .rail) {
+    background: linear-gradient(
+      90deg,
+      var(--c-canvas) min(calc(50% + 176px), calc(100% - 416px)),
+      var(--c-surface) 0
+    );
+  }
+}
