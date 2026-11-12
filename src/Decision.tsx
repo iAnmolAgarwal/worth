@@ -294,9 +294,12 @@ export function ChartTile({
   k,
   payIn4,
   scaleWith,
+  productId,
 }: {
   c: Comparison
   k: OptionKey
+  /** The catalog item, so the guide's chart commands reach only this item's chart. */
+  productId?: string
   payIn4?: P4
   /** The Pay in 4 scenario, open or not, so the chart can offer it as a line. */
   scaleWith?: P4
@@ -345,6 +348,7 @@ export function ChartTile({
         cushionCents={c.cushionCents}
         named
         baseline={{ name: 'No purchase', points: noPurchase(c) }}
+        item={{ name: c.itemName, amountCents: c.amountCents, ...(productId ? { productId } : {}) }}
         label={`Projected balance, ${shortDate(c.window.start)} to ${shortDate(c.window.end)}. Each day shows its low, with that day’s bills taken out before pay arrives.`}
       />
     </section>
@@ -1068,7 +1072,13 @@ export function Decision({
             instance={instance}
             note={handoff?.payLater}
           />
-          <ChartTile c={c} k={selected} payIn4={p4Open ? p4 : undefined} scaleWith={p4} />
+          <ChartTile
+            c={c}
+            k={selected}
+            payIn4={p4Open ? p4 : undefined}
+            scaleWith={p4}
+            productId={product?.id}
+          />
         </div>
         <aside className="rail decision-rail" aria-label="Item and reasons">
           {/* Something cheaper swaps the item for the similar items; the actions stay. */}

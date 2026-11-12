@@ -16,7 +16,7 @@ import {
 } from 'lucide-react'
 import type { InstalmentPlanProposal, Product, SavedItem } from '../shared/types'
 import { Activity } from './Activity'
-import { AgentLauncher, nudgeLine, type AskOffer } from './AgentLauncher'
+import { AgentLauncher, screenNudge, type AskOffer } from './AgentLauncher'
 import { api } from './api'
 import { Ask } from './Ask'
 import { Check, handoffToken, reloadForNewToken } from './Check'
@@ -907,7 +907,8 @@ export default function App() {
         onOpenChange={setPanelOpen}
         mood={mood}
         launcher={launcher}
-        nudge={nudgeLine(state)}
+        nudge={screenNudge(screen, state)}
+        onNudge={(question) => ask(question)}
         touring={touring}
         // Wizards and dialogs own the screen; the conversation stays mounted underneath.
         hidden={

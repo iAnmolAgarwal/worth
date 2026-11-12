@@ -33,6 +33,13 @@ import {
   wantsAlternatives,
 } from './alternatives.ts'
 import { PRICE_BUCKET_CENTS } from './channel3.ts'
+import {
+  CHART_SYSTEM,
+  chartPrompt,
+  showOnChartTool,
+  type ChartFacts,
+  type ChartView,
+} from './chartGuide.ts'
 import { dateLabel, readTiming } from './dates.ts'
 import {
   clarificationText,
@@ -116,6 +123,11 @@ export interface ChatActions {
 }
 export interface ChatProvider {
   reply(input: ChatInput, data: ChatData, actions?: ChatActions): Promise<ChatReply>
+  /**
+   * A question about the balance chart on screen: Claude calls `show_on_chart` once, choosing
+   * Worth's facts and the view (server/chartGuide.ts). Returns the tool's raw input, unchecked.
+   */
+  chooseChart?(message: string, facts: ChartFacts, view: ChartView): Promise<unknown>
   categorize?(transactions: Transaction[]): Promise<CategoryReply>
 }
 export interface ChatOptions {
@@ -1637,6 +1649,25 @@ export function createChatProvider(
     return templateFor(answer, data, checked.reason)
   }
   return {
+    async chooseChart(message, facts, view) {
+      const tool = showOnChartTool(facts)
+      const response = await client.messages.create(
+        {
+          model,
+          max_tokens: 600,
+          system: CHART_SYSTEM,
+          tools: [tool as Anthropic.Tool],
+          tool_choice: { type: 'tool', name: tool.name },
+          messages: [{ role: 'user', content: chartPrompt(message, facts, view) }],
+        },
+        { signal: AbortSignal.timeout(deadlineMs), timeout: deadlineMs, maxRetries: 0 },
+      )
+      const use = response.content.find(
+        (block) => block.type === 'tool_use' && block.name === tool.name,
+      )
+      if (!use || use.type !== 'tool_use') throw new Error('No chart choice')
+      return use.input
+    },
     async categorize(transactions) {
       const rows = categoryCandidates(transactions)
       if (!rows.length)
