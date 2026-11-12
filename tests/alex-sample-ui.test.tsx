@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
 import { fitStatus, Saved, Settings } from '../src/Saved'
 import { api } from '../src/api'
-import { lowerName } from '../src/engine'
+import { belowWords, lowerName, lowestSentence } from '../src/engine'
 import { nameInSentence } from '../shared/text'
 import { payIn4Lines } from '../src/payIn4Text'
 import { compareOptions } from '../shared/finance'
@@ -260,5 +260,14 @@ describe('Home’s Coming up list', () => {
       within(coming).getByRole('button', { name: /^And \d+ more in the next 30 days$/ }),
     ).toBeTruthy()
     expect(within(coming).queryByRole('button', { name: 'Show all' })).toBeNull()
+  })
+})
+
+describe('below zero reads as overdrawn', () => {
+  it('names under $0 "Overdrawn" and keeps "Below cushion" for between $0 and the cushion', () => {
+    expect(belowWords(-72674)).toBe('Overdrawn')
+    expect(belowWords(22276)).toBe('Below cushion')
+    expect(lowestSentence(-72674, '2026-11-30')).toBe('Overdrawn by $726.74 on Mon, Nov 30')
+    expect(lowestSentence(45878, '2026-12-31')).toBe('Lowest $458.78 on Thu, Dec 31')
   })
 })

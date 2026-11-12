@@ -41,7 +41,9 @@ import {
   billOn,
   firstBelow,
   fits,
+  belowWords,
   lower,
+  lowestSentence,
   lowerName,
   missingFix,
   optionTitle,
@@ -100,7 +102,8 @@ export interface Explanation {
 /** One state set everywhere: above the cushion, exactly at it, or below it. Words, never colour alone. */
 export function optionStatus(option: OptionResult): { tone: Tone; text: string } {
   if (option.outcome === 'incomplete') return { tone: 'info', text: 'More info needed' }
-  if (option.outcome === 'tight') return { tone: 'bad', text: 'Below cushion' }
+  if (option.outcome === 'tight')
+    return { tone: 'bad', text: belowWords(option.lowestBalanceCents) }
   return option.headroomCents === 0
     ? { tone: 'warn', text: 'At your limit' }
     : { tone: 'ok', text: 'Above cushion' }
@@ -1150,8 +1153,7 @@ export function Decision({
                   {billOn(breach) ? `, when ${lower(billOn(breach)!)} is due` : ''}.
                 </b>
                 <br />
-                Your lowest balance would be {signed(c.buyToday.lowestBalanceCents)} on{' '}
-                {dayLabel(c.buyToday.lowestDate)}.
+                {lowestSentence(c.buyToday.lowestBalanceCents, c.buyToday.lowestDate)}.
               </>
             ) : (
               <b>Buying today takes you below your cushion.</b>

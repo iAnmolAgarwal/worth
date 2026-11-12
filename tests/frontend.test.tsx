@@ -1399,7 +1399,9 @@ describe('iteration 2 fixes', () => {
       />,
     )
     const group = await screen.findByRole('radiogroup', { name: 'Your options' })
-    expect(within(group).getByText('Below cushion')).toBeTruthy()
+    // Buying today goes under $0 here, so it reads "Overdrawn", not "Below cushion".
+    expect(within(group).getByText('Overdrawn')).toBeTruthy()
+    expect(within(group).queryByText('Below cushion')).toBeNull()
     expect(within(group).getByText('Above cushion')).toBeTruthy()
     // Something cheaper is the alternative, not a competing verdict: up to its limit fits today.
     expect(within(group).getByText('Fits today')).toBeTruthy()

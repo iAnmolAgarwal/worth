@@ -24,7 +24,7 @@ import { nameInSentence } from '../shared/text'
 import type { ForecastPoint, OptionResult, ScheduledFlow } from '../shared/types'
 import { api } from './api'
 import type { AppState, Comparison } from './contract'
-import { dayLabel } from './format'
+import { dayLabel, money } from './format'
 
 /** The first day the balance goes below the cushion, if it does. */
 export const firstBelow = (points: ForecastPoint[], cushionCents: number) =>
@@ -49,6 +49,18 @@ export const lowestPoint = (option: OptionResult) =>
   option.points.find((point) => point.date === option.lowestDate)
 
 export const fits = (option: OptionResult) => option.outcome === 'fits'
+
+/**
+ * A low point in words: under $0 is "Overdrawn", between $0 and the cushion "Below cushion". The
+ * engine's own classification (fits or tight) is unchanged; this only names how far it goes.
+ */
+export const belowWords = (lowestCents: number) => (lowestCents < 0 ? 'Overdrawn' : 'Below cushion')
+
+/** "Overdrawn by $726.74 on Mon, Nov 30", or "Lowest $458.78 on Thu, Dec 31" above $0. */
+export const lowestSentence = (lowestCents: number, date: string) =>
+  lowestCents < 0
+    ? `Overdrawn by ${money(-lowestCents)} on ${dayLabel(date)}`
+    : `Lowest ${money(lowestCents)} on ${dayLabel(date)}`
 
 /** Readable label for a bill name inside a sentence: "rent" from "Apartment rent" stays as is. */
 export const lower = (name: string) => name.charAt(0).toLowerCase() + name.slice(1)

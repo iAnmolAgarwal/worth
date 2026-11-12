@@ -43,10 +43,10 @@ import {
 import { SettingsAction, SettingsGroup, SettingsMore, SettingsRow } from './SettingsList'
 import { startTour } from './Tour'
 import type { DecisionRequest } from './Decision'
-import { claudeOn, fits, useComparison } from './engine'
+import { claudeOn, fits, lowestSentence, useComparison } from './engine'
 import type { AppState, Purchase } from './contract'
 import { isActive, savedSource, saveRequest } from './contract'
-import { dayLabel, fromMoney, fullDate, money, sampleDate, shortDate, signed } from './format'
+import { dayLabel, fromMoney, fullDate, money, sampleDate, shortDate } from './format'
 import { Alert, Button, DateStepper, Dialog, Disc, Field, Pill, Toggle } from './ui'
 
 /** The browser's old per-device wait dates, from before plans moved to the server (G5-6). */
@@ -568,7 +568,7 @@ function ReadyPlan({
           {fresh && c && (
             <p className="meta" style={{ marginTop: 4 }} role="status">
               {fitsNow
-                ? `Checked just now: buying today keeps your ${money(c.cushionCents)} cushion. Lowest ${signed(c.buyToday.lowestBalanceCents)} on ${dayLabel(c.buyToday.lowestDate)}.`
+                ? `Checked just now: buying today keeps your ${money(c.cushionCents)} cushion. ${lowestSentence(c.buyToday.lowestBalanceCents, c.buyToday.lowestDate)}.`
                 : c.wait.date
                   ? `Checked just now: not yet. Your plan now suggests ${dayLabel(c.wait.date)}.`
                   : `Checked just now: it doesn’t fit in the next ${WAIT_SEARCH_DAYS} days.`}
