@@ -609,3 +609,37 @@ describe('the comparison keeps a stated budget (judge B8 #7)', () => {
     expect((await compareOn({ productId: 'camera', budgetCents: 0 })).status).toBe(400)
   })
 })
+
+describe('Pay in 4 is never called credit (cold judge #2)', () => {
+  it('drops the borrowing refusal Claude chose for a question about Pay in 4', async () => {
+    const reply = await model([
+      interpret({
+        items: [cameraItem(null)],
+        refers_to_previous_item: true,
+        points: ['low_point'],
+        lead_in: 'no_credit',
+      }),
+    ]).reply(ask('Should I just use Pay in 4?', { context: camera }), demo())
+    expect(reply.assessment?.amountCents).toBe(119900)
+    expect(reply.verdict).toMatch(/^Camera at \$1,199/)
+    expect(reply.refusal).toBeUndefined()
+    expect(reply.lead ?? '').not.toMatch(/credit|instalments/)
+    // The answer leads with the verdict; the only word on interest is that PayPal charges none.
+    expect(paragraphs(reply.message)[0]).toBe(reply.verdict)
+    expect(reply.message.replaceAll('PayPal charges no interest', '')).not.toMatch(/interest/i)
+    expect(reply.message).not.toMatch(/borrow|use credit/i)
+    expect(reply.trace?.guards.map((guard) => guard.id)).not.toContain('no_credit')
+  })
+
+  it('keeps it for real borrowing, even next to Pay in 4', async () => {
+    const reply = await model([
+      interpret({
+        items: [cameraItem(null)],
+        refers_to_previous_item: true,
+        points: ['low_point'],
+        lead_in: 'no_credit',
+      }),
+    ]).reply(ask('Should I put it on my credit card or use Pay in 4?', { context: camera }), demo())
+    expect(reply.refusal).toBe(CREDIT)
+  })
+})

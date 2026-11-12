@@ -904,6 +904,28 @@ export const PROBES: Probe[] = [
     ],
   },
   {
+    id: 'PL1-pay-in-4-is-not-credit',
+    split: 'test',
+    covers:
+      'cold judge #2: a question about Pay in 4 never gets the borrowing and interest refusal',
+    kind: 'chat',
+    unrecorded: true,
+    turns: [
+      {
+        message: 'Should I just use Pay in 4?',
+        context: camera,
+        expect: {
+          ...assessCamera(),
+          mustNotContain: [
+            'borrow or use credit',
+            'interest and a new payment',
+            'use credit, a loan',
+          ],
+        },
+      },
+    ],
+  },
+  {
     id: 'BU1-only-want-to-spend',
     split: 'train',
     covers: 'round-3 #8: "I only want to spend $200" caps the answer for the store camera',

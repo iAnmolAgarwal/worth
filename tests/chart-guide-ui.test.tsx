@@ -158,6 +158,51 @@ describe('chart commands', () => {
   })
 })
 
+describe('a chart change off screen', () => {
+  it('brings the chart card into view below the top bar, without gliding under reduced motion', () => {
+    const scrollTo = vi.fn()
+    vi.stubGlobal('scrollTo', scrollTo)
+    vi.stubGlobal(
+      'matchMedia',
+      vi
+        .fn()
+        .mockImplementation((query: string) => ({
+          matches: query.includes('reduce'),
+          media: query,
+        })),
+    )
+    render(
+      <>
+        <header className="topbar" />
+        {tile()}
+      </>,
+    )
+    const header = document.querySelector('.topbar')!
+    header.getBoundingClientRect = () => ({ bottom: 88 }) as DOMRect
+    const card = document.querySelector('.wchart')!.closest('section')!
+    card.getBoundingClientRect = () => ({ top: 900, bottom: 1500 }) as DOMRect
+    const item = { name: 'Halden X5', amountCents: 189900, productId: ALEX_CAMERA_ID }
+    const reply = {
+      message: '',
+      mode: 'demo',
+      intent: 'overview',
+      suggestions: [],
+      toolCalls: [],
+    } as unknown as ChatReply
+    act(() => {
+      expect(applyChart({ ...reply, chart: { item, options: ['buyToday'] } })).toBe('moved')
+    })
+    expect(scrollTo).toHaveBeenCalledWith({ top: 900 - 88 - 12, behavior: 'instant' })
+    // Already in view: it stays put.
+    scrollTo.mockClear()
+    card.getBoundingClientRect = () => ({ top: 120, bottom: 700 }) as DOMRect
+    act(() => {
+      applyChart({ ...reply, chart: { item, focusDay: '2026-11-30' } })
+    })
+    expect(scrollTo).not.toHaveBeenCalled()
+  })
+})
+
 describe('Ask on the chart', () => {
   const state = (): AppState => {
     const seed = createDemoState(ALEX_DEMO_DAY)

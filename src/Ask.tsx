@@ -96,7 +96,28 @@ export function applyChart(reply: ChatReply): ChartResult {
     ...(focusDay ? { focusDay } : {}),
   }
   if (!Object.keys(command).length) return 'unchanged'
-  return sendChartCommand(command) ? 'moved' : 'absent'
+  if (!sendChartCommand(command)) return 'absent'
+  showChart()
+  return 'moved'
+}
+
+/**
+ * Brings the chart card into view below the sticky top bar, so its change is seen beside the
+ * open panel; it stays put when already in view, and jumps instead of gliding under reduced motion.
+ */
+function showChart() {
+  const chart = document.querySelector('.wchart')
+  const card = chart?.closest('section') ?? chart
+  if (!card) return
+  const top = document.querySelector('.topbar')?.getBoundingClientRect().bottom ?? 0
+  const box = card.getBoundingClientRect()
+  if (box.top >= top && box.bottom <= window.innerHeight) return
+  window.scrollTo?.({
+    top: window.scrollY + box.top - top - 12,
+    behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+      ? 'instant'
+      : 'smooth',
+  })
 }
 
 const offerKey = (offer: AskOffer) => `${offer.itemName}|${offer.amountCents}`
@@ -789,6 +810,9 @@ export function Ask({
           ...(chartView() ? { view: chartView() } : {}),
         })) as ChatReply
         const chartApplied = reply.chart ? applyChart(reply) : undefined
+        // Later questions stay about the chart's item, as they would after a purchase answer.
+        if (reply.chart && !reply.interpretation && !reply.assessment)
+          setContext({ amountCents: reply.chart.item.amountCents, itemName: reply.chart.item.name })
         // The server signs each assessed item; only signed items count when sent back.
         if (reply.remember) {
           const item = reply.remember

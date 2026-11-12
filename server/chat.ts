@@ -1037,6 +1037,27 @@ const findSchema = z.object({
 })
 const purchaseCheckSchema = z.object({ item_id: z.string().max(100) }).strict()
 /** The person asked about Pay in 4 or paying later, so its availability may be shown. */
+// Money the person might bring in, asked as a what-if about buying sooner: "if I sell my old lens
+// for $400", "if I get a $500 bonus", "with an extra $300 from a side job".
+const INCOME_WHAT_IF =
+  /\b(?:if|when|once)\s+i\s+(?:sell|sold|earn|make|receive|get\s+(?:a|an|my)\s+(?:\$[\d,.]+\s+)?(?:bonus|refund|raise|tax\s+refund))\b|\b(?:extra|more|additional)\s+(?:\$[\d,.]+\s+)?(?:income|money|cash)\b|\bside\s+(?:job|gig|hustle)\b/i
+const SOONER = /\b(?:sooner|earlier|faster|quicker|fit|afford|buy|get)\b/i
+/**
+ * A what-if about extra income. Chat can't try one yet, so it points to where the money goes in;
+ * the amount is never read as a price, and no figure is given.
+ */
+export function incomeWhatIfReply(message: string): ChatReply | undefined {
+  if (!INCOME_WHAT_IF.test(message) || !SOONER.test(message)) return undefined
+  return {
+    message:
+      'Worth can’t try out extra income in chat yet. Add the money in Plan, under Income, with the day you expect it, and every answer, including this one, updates.',
+    mode: 'demo',
+    intent: 'overview',
+    suggestions: [],
+    toolCalls: [],
+  }
+}
+
 const ASKS_PAY_IN_4 = /\bpay\s*(?:in\s*(?:4|four)|later)\b|\binstal+ments?\b|\bbnpl\b/i
 const FINAL_FORMAT = {
   type: 'json_schema' as const,
@@ -1823,6 +1844,15 @@ export function createChatProvider(
         if (!turn.calls.length && !turn.clarify) throw error
       }
       const answer: Answer = { ...answerFor(turn, final), refusal: refusalFor(input.message) }
+      // PayPal Pay in 4 is interest-free and only ever compared, never borrowing: a question about
+      // it never opens with the credit refusal, whatever Claude chose. Real borrowing ("a loan",
+      // "my credit card") still gets it, from the user's own words above.
+      if (
+        !answer.refusal &&
+        answer.presentation?.lead === 'no_credit' &&
+        ASKS_PAY_IN_4.test(input.message)
+      )
+        answer.presentation.lead = 'none'
       // A clear request for a cheaper product is still searched when the model only asked a
       // question or summarised the plan. Any other reading the model chose (Pay in 4, waiting,
       // the options, bills) stands; the override is logged so evals can count it.
