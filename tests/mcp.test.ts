@@ -651,7 +651,7 @@ describe('check_affordability', () => {
     const bad = async (args: object) => (await check(app, token, args)).body.error?.code
     expect(await bad({ item: 'camera', amount_usd: 12.345 })).toBe('INVALID_AMOUNT')
     expect(await bad({ item: 'camera', amount_usd: 100, date: '2026-10-02' })).toBe('INVALID_DATE')
-    expect(await bad({ item: 'camera', amount_usd: 100, date: '2026-11-03' })).toBe('INVALID_DATE')
+    expect(await bad({ item: 'camera', amount_usd: 100, date: '2026-11-08' })).toBe('INVALID_DATE')
     // Schema violations are refused by the SDK before any tool code runs.
     for (const args of [
       { item: '', amount_usd: 100 },

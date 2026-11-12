@@ -327,7 +327,13 @@ async function runConsentOff(probe: Probe): Promise<ProbeResult> {
       store,
       chat: spy,
       now: () => new Date(`${EVAL_TODAY}T16:00:00Z`),
-      config: { production: false, origin: 'http://localhost:5173', anthropicKey: undefined },
+      config: {
+        production: false,
+        origin: 'http://localhost:5173',
+        anthropicKey: undefined,
+        // The probes' numbers are Maya's, the test fixture persona.
+        samplePersona: 'maya',
+      },
     })
     const agent = request.agent(app)
     const state = (await agent.get('/api/state')).body

@@ -453,10 +453,10 @@ describe('who is who: Worth is the shopper’s side, Larkspur Supply is the demo
     expect(screen.getByText(/Worth sells nothing and never holds your money/)).toBeTruthy()
   })
 
-  it('labels the store on Saved as a demo store standing in for any shop', () => {
+  it('keeps the demo store out of Saved: items read as what they are, not where they are sold', () => {
     render(<Saved {...savedProps} state={makeState()} />)
-    expect(screen.getByRole('heading', { name: 'Demo store · Larkspur Supply' })).toBeTruthy()
-    expect(screen.getByText(/standing in for any shop that takes PayPal/)).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'More to check' })).toBeTruthy()
+    expect(document.body.textContent).not.toMatch(/Larkspur|Demo store/)
   })
 })
 

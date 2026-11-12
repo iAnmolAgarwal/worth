@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test'
-import { analyseLink, expect, origins, pay, test } from './fixtures.ts'
+import { analyseLink, expect, expectCamera, origins, pay, test } from './fixtures.ts'
 
 // The store's swipe button (<worth-check mode="swipe">, shared/worthSwipe.ts) in a real browser:
 // PayPal's own button with Worth's W tab docked on its right. Every test also fails on any
@@ -74,9 +74,7 @@ test.describe('the swipe button', () => {
     await expect(page.locator('worth-check .words')).toHaveText('Analyse with Worth')
     await release()
     await page.waitForURL(`${origins.worth}/check`)
-    await expect(
-      page.getByRole('group', { name: 'From Larkspur Supply · Everyday camera · $1,199.00' }),
-    ).toBeVisible()
+    await expectCamera(page)
   })
 
   test('a short swipe springs back and goes nowhere', async ({ page }) => {

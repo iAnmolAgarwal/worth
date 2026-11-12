@@ -26,7 +26,7 @@ import {
   type ChartInput,
   type EventRule,
 } from './chartLayout'
-import { lower } from './engine'
+import { lower, lowerName } from './engine'
 import { dayLabel, money, shortDate, signed } from './format'
 
 /** Chart ticks are the one place money drops its cents: "$1k", "−$1k" (brief §7). */
@@ -214,7 +214,7 @@ export function BalanceChart({
         .flatMap((point) => point.events.filter(isBill))
       const big = between.filter((event) => -event.amountCents >= BIG_BILL_CENTS)
       const parts = [
-        ...big.map((event) => `your ${lower(event.name)} (${signed(event.amountCents)})`),
+        ...big.map((event) => `your ${lowerName(event.name)} (${signed(event.amountCents)})`),
         ...(between.length > big.length ? ['smaller bills'] : []),
       ]
       const by = `${signed(lowValue)} by ${dayLabel(points[low.index]!.date)}${beforePay}`

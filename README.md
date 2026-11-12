@@ -14,16 +14,18 @@ prepares a PayPal sandbox order that you approve in PayPal and confirm in Worth.
 [![Live demo](https://img.shields.io/badge/live-worth.onrender.com-0070e0.svg)](https://worth.onrender.com)
 
 **Live:** https://worth.onrender.com, no sign-in needed. Each browser gets its own anonymous
-session with a sample plan (Maya), kept for 24 hours.
+session with a sample plan (Alex, on the demo day Fri, Nov 13, 2026), kept for 24 hours.
 
 **Demo video:** <!-- TODO(coordinator): YouTube link --> _link added at submission_.
 
 ## Judge quick facts
 
-- **Hosted app:** https://worth.onrender.com opens on Maya's sample plan; nothing to install.
-  Want the exact numbers from the video? Open https://worth.onrender.com/?replay=video (sample
-  data only; "Back to today" exits). Otherwise dates follow your own today, so they will not
-  match the video.
+- **Hosted app:** https://worth.onrender.com opens on Alex's sample plan on the demo day,
+  Fri, Nov 13, 2026: the same person and numbers as the video; nothing to install. He has
+  $2,540 available, but the $1,899 Halden X5 camera does not fit that day (room to spend today
+  is $872.26); Worth says wait until Tue, Dec 15, the day after a PayPal invoice pays him.
+  https://worth.onrender.com/?replay=demo-dec15 opens his return visit, with the camera saved
+  and ready.
 <!-- TODO(coordinator): fill in a dedicated judge sandbox buyer account, never the team's own. -->
 - **PayPal sandbox buyer** for the checkout step: email `TODO`, password `TODO`. If these still
   read `TODO`, ask the maintainer.
@@ -39,7 +41,7 @@ session with a sample plan (Maya), kept for 24 hours.
 - **What AI does:** Claude Sonnet 5.5 interprets the question, picks up to three engine facts
   and writes one placeholder-only sentence the server checks; it can ask for a PayPal order,
   which the server prepares only behind the same guards as the Buy button. It never pays.
-- **Three clicks:** Home → "Can I afford a $1,199 camera?" → "See the comparison" →
+- **Three clicks:** Home → "Can I afford the $1,899 Halden X5?" → "See the comparison" →
   "Compare with PayPal Pay in 4". Then the checkout path in [Try it](#try-it).
 
 ![Ask Worth answering "If I put the $1,199 camera on PayPal Pay in 4, which bills would the payments land next to?": the engine's verdict, Claude's checked note, the three options, and four illustrative Pay in 4 payments, one landing about a day after rent](docs/img/ask-pay-in-4.png)
@@ -50,7 +52,8 @@ session with a sample plan (Maya), kept for 24 hours.
 
 A balance says what is in the account, not what is already spoken for. Rent, a car payment and
 the last Pay in 4 plan are all still coming, and the question at checkout is not "do I have
-$1,199?" but "what does $1,199 today do to the rest of my month?". Pay in 4 makes the question
+$1,899?" but "what does $1,899 today do to the rest of my month?". Alex has $2,540, but only
+$872.26 of it is safe to spend on Fri, Nov 13; the $1,899 Halden X5 fits on Tue, Dec 15. Pay in 4 makes the question
 harder: the same total arrives as four payments, and one of them may land the day after rent.
 
 Worth answers that question for one purchase at a time, with the dates. The US numbers say it is
@@ -66,7 +69,7 @@ and 47% of BNPL users say they paid late in the past year
 - **Home: room to spend today.** The most you could spend today and still keep your cushion
   through the forecast, the next payday, what is coming up, and a warning when a running Pay in 4
   payment lands next to a bill.
-- **Ask Worth.** Ask in your own words ("Can I afford a $1,199 camera?", "What's coming up?",
+- **Ask Worth.** Ask in your own words ("Can I afford the $1,899 Halden X5?", "What's coming up?",
   "If I put it on Pay in 4, which bills would the payments land next to?"). The answer shows how
   Worth read the question, the engine's verdict, Claude's checked note, the facts Claude picked
   and, under **How Ask Worth read this**, the tool that ran, why each fact was picked and every
@@ -85,7 +88,7 @@ and 47% of BNPL users say they paid late in the past year
 - **Checkout prepared, never taken.** "Buy" (or "Go ahead and buy the studio headphones" in Ask
   Worth) prepares a PayPal sandbox order behind server guards. You approve in PayPal; Worth
   captures only when you confirm in Worth, and the payment shows up in Activity once.
-- **Save it for the day it fits.** "Save for Fri, Oct 23" keeps the item with its date. When the
+- **Save it for the day it fits.** "Save for Tue, Dec 15" keeps the item with its date. When the
   day comes, Saved says the plan suggests it may fit, you confirm today's funds, Worth checks
   again, and only then does Buy with PayPal open.
 - **Something cheaper, from real stores.** Under Spend less, and when you ask for something
@@ -108,7 +111,7 @@ and 47% of BNPL users say they paid late in the past year
 
 On https://worth.onrender.com (no sign-in):
 
-1. On Home, click **Can I afford a $1,199 camera?** Ask Worth answers with the engine's verdict.
+1. On Home, click **Can I afford the $1,899 Halden X5?** Ask Worth answers with the engine's verdict.
    Open **How Ask Worth read this** to see what Claude chose and what the server checked. Then
    ask: "If I put it on Pay in 4, which bills would the payments land next to?"
 2. Click **See the comparison**, then **Compare with PayPal Pay in 4**: four payments, the bill
@@ -142,7 +145,7 @@ credentials and the browser receives only the public client ID.
   the server's approval link is used instead.
 - **PayPal Messages.** The `paypal-messages` component renders `<paypal-message>` pinned to the
   short-term Pay in 4 offer next to Worth's comparison. On the hosted US sandbox merchant it reads
-  "Pay in 4 interest-free payments of $299.75" for the $1,199 camera.
+  "Pay in 4 interest-free payments of $474.75" for the $1,899 Halden X5.
 - **Pay Later eligibility.** The server calls `POST /v2/payments/find-eligible-methods` (US buyer,
   USD amount) and caches the answer per price band; Worth's own $10–$2,000 range check applies on
   top. The browser's `findEligibleMethods` decides only whether to show the button and message.
@@ -186,7 +189,7 @@ Claude is the interface and the narrator; the engine is the decision-maker.
 - **Read the question.** `interpret_purchase` reports the item, the price the user wrote, its
   currency, quantity, the user's own timing words and the date they resolve to. The server checks
   each against the user's words: an amount that is not in the message, a non-USD price or a date
-  outside the next 30 days stops the answer with a question instead. Catalog prices are read only
+  outside the next 35 days stops the answer with a question instead. Catalog prices are read only
   when the message names a catalog item as a whole phrase.
 - **Choose what to show.** Every tool (`interpret_purchase`, `list_commitments`,
   `spending_summary`, `get_plan_summary`, `find_alternatives`) also asks Claude for up to three
@@ -257,8 +260,8 @@ The [evaluation](#evaluation) runs these paths live against the real model.
 - **The engine** (`shared/finance.ts`, `shared/collision.ts`) is pure: data in, data out. It
   starts from today's confirmed funds, adds dated income, subtracts bills, subscriptions,
   everyday spending, running instalments and reserved purchases, and keeps the intraday low.
-  Bills come before income on the same day. Waiting is searched over the next 30 days and each
-  candidate is projected 30 days past its purchase.
+  Bills come before income on the same day. Waiting is searched over the next 35 days, and each
+  candidate is judged over the same window, today through today + 60.
 - **The server** (`server/`) owns the catalog, the session, every guard and every PayPal call.
   A checkout is reserved in SQLite before the remote call, at most one is active per session,
   and a per-purchase lock serialises capture, webhook and cancel.
@@ -274,8 +277,8 @@ boundary, the payment state machine, Channel3, saved plans, sessions and privacy
 
 Worth runs its own Model Context Protocol server, Worth guardrail MCP, at `/mcp` (Streamable
 HTTP, stateless) with a stdio relay for local clients. Create a revocable agent token in **Settings → Connect an agent**, paste
-the generated config into Claude Desktop or any MCP client, and ask "Can I afford the $1,199
-camera?" in your own assistant.
+the generated config into Claude Desktop or any MCP client, and ask "Can I afford the $1,899
+Halden X5?" in your own assistant.
 
 - `check_affordability` is the guardrail for any store. It returns Worth's decision (affordable
   now, later, or not; the safe amount; the earliest date; the low point and the bill behind it;
@@ -305,9 +308,9 @@ plan and rate-limited. Setup, the tool contract and the security model are in
 - **Pay in 4 is illustrative.** Worth's schedule uses 14-day gaps; the sandbox's real schedule for
   the camera used 16. PayPal sets the terms at checkout, and the order does not say whether Pay
   in 4 was used, so the user confirms it afterwards.
-- **Dates follow your today.** The sample plan is dated relative to the viewer's day. The video
-  numbers are reproducible at https://worth.onrender.com/?replay=video (sample data only; "Back
-  to today" exits).
+- **The sample day is pinned.** Alex's sample plan is fixed to Fri, Nov 13, 2026 (and Tue,
+  Dec 15 for the return visit), the days its story is tuned for, so it reads the same whenever
+  it is opened. Imported data always uses your real today.
 - **Without Claude** (no key, a provider error, the hourly or daily cap, or AI sharing off),
   answers are labelled local calculations; every engine feature keeps working.
 - **Without PayPal credentials**, checkout runs in a labelled simulated mode. If the SDK cannot
@@ -371,6 +374,7 @@ the webhook ID in `PAYPAL_WEBHOOK_ID`. Localhost alone cannot receive them.
 | `MERCHANT_ORIGIN` | The demo store's origin, the only place a hand-off may return to. HTTPS only in production |
 | `HANDOFF_MERCHANT_ID` | The store's `mid` claim; default `larkspur` |
 | `DATABASE_PATH` | SQLite file; default `.data/worth.sqlite` |
+| `SAMPLE_PERSONA` | Who a new session starts as: `alex` (default) on the pinned demo day, or `maya`, the test fixture dated today. The test setups set `maya` |
 | `MAX_HEAP_MB` | Node heap for `npm start` (384); set in the host environment, not `.env` |
 | `NODE_ENV` | `production` turns on the CSP, HSTS, the `__Host-` secure cookie and the public HTTPS origin requirement |
 
@@ -429,10 +433,11 @@ after them are in [docs/EVALUATION.md](docs/EVALUATION.md).
 
 ## Data sources and attribution
 
-- **Sample plan and catalog** (`shared/seed.ts`) are synthetic: Maya, her bills and the
-  Larkspur Supply demo store are invented. Product names are used to name items, never as logos.
+- **Sample plan and catalog** (`shared/seed.ts`) are synthetic: Alex, his bills, the Halden
+  camera brand and the Larkspur Supply demo store are invented. Product names are used to name items, never as logos.
 - **Product photos** are from [Unsplash](https://unsplash.com/license), credited per photo in
-  [docs/DESIGN-SOURCES.md](docs/DESIGN-SOURCES.md).
+  [docs/DESIGN-SOURCES.md](docs/DESIGN-SOURCES.md); the Halden X5 photo is AI-generated for this
+  project and shows no brand mark.
 - **Similar items** are live Channel3 results, linking to the retailer; Worth keeps them only in
   a short cache and in the rows a user saves.
 - **PayPal marks** appear only inside PayPal's own SDK components. Worth is an independent

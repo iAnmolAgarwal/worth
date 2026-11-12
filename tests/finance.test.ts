@@ -192,7 +192,7 @@ describe('deterministic purchase assessment', () => {
   it('rejects fractional cents, negative amounts, invalid dates, and dates outside the search window', () => {
     for (const amount of [-1, 1.5, NaN, Infinity]) expect(() => assess(profile(), amount)).toThrow()
     expect(() => assess(profile(), 100, { purchaseDate: '2026-02-30' })).toThrow()
-    expect(() => assess(profile(), 100, { purchaseDate: addDays(TODAY, 31) })).toThrow()
+    expect(() => assess(profile(), 100, { purchaseDate: addDays(TODAY, 36) })).toThrow()
     expect(() => assess(profile(), 100, { purchaseDate: addDays(TODAY, -1) })).toThrow()
   })
 

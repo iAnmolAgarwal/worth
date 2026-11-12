@@ -177,10 +177,11 @@ test('the Decision page names the third card Something cheaper too', async ({ pa
 })
 
 test('/check leads with the answer and says what the item is once', async ({ page }) => {
-  await analyse(page, 'chair')
+  // Pinned to the video day (Sat, Oct 3, 2026), so the date never drifts with the calendar.
+  await analyse(page, 'chair', 'video')
   const h1 = page.locator('h1:visible')
   await expect(h1).toHaveCount(1)
-  await expect(h1).toHaveText('Wait until Fri, Oct 30')
+  await expect(h1).toHaveText('Wait until Fri, Oct 23')
   // The verdict, bold, and the engine's sentence, regular, alone in the chip's light blue.
   const block = page.locator('.verdict-block')
   await expect(block.locator('> *')).toHaveCount(2)

@@ -8,6 +8,7 @@ import {
   type TestInfo,
 } from '@playwright/test'
 import { createHandoff, type QuotePayload } from '../../shared/handoff.ts'
+import type { DemoPreset } from '../../shared/types.ts'
 
 /** Where the store's page loads PayPal's SDK from (src/paypalSdk.ts). */
 const PAYPAL_SDK_URL = 'https://www.sandbox.paypal.com/web-sdk/v6/core'
@@ -180,8 +181,8 @@ const tokenOf = (href: string | null) => decodeURIComponent(new URL(href!).hash.
  * The store's Analyse link on a product page, and its token, once settled: <worth-check> asks the
  * store's PayPal SDK about Pay in 4 and swaps in a fresh quote that carries the yes (§3.2).
  */
-export async function analyseLink(page: Page, productId = 'camera') {
-  await page.goto(`${origins.store}/p/${productId}`)
+export async function analyseLink(page: Page, productId = 'camera', replay?: DemoPreset) {
+  await page.goto(`${origins.store}/p/${productId}${replay ? `?replay=${replay}` : ''}`)
   const link = page.locator('worth-check').getByRole('link', { name: /Analyse with Worth/ })
   await expect(link).toBeVisible()
   await expect
@@ -191,9 +192,12 @@ export async function analyseLink(page: Page, productId = 'camera') {
   return { link, href, token: tokenOf(href) }
 }
 
-/** Store product page → Analyse with Worth → /check with the store's quote shown. */
-export async function analyse(page: Page, productId = 'camera') {
-  const { link, token } = await analyseLink(page, productId)
+/**
+ * Store product page → Analyse with Worth → /check with the store's quote shown. A `replay` preset
+ * pins the sample to its day, so a test can expect exact dates whatever the real today.
+ */
+export async function analyse(page: Page, productId = 'camera', replay?: DemoPreset) {
+  const { link, token } = await analyseLink(page, productId, replay)
   // A real link in the same tab: no target, no popup.
   expect(await link.getAttribute('target')).toBeNull()
   await link.click()

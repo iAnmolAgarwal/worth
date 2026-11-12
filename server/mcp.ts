@@ -15,7 +15,13 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
-import { addDays, assessPurchase, money, withoutOwnHold } from '../shared/finance.ts'
+import {
+  addDays,
+  assessPurchase,
+  money,
+  WAIT_SEARCH_DAYS,
+  withoutOwnHold,
+} from '../shared/finance.ts'
 import { PRODUCTS } from '../shared/seed.ts'
 import type {
   AgentToken,
@@ -291,7 +297,7 @@ const checkOutput = {
   affordability_status: z
     .enum(STATUSES)
     .describe(
-      'affordable_now: the full amount keeps the cushion on request.date. affordable_later: a later day in the next 30 days does. not_affordable: no day in the next 30 days does.',
+      'affordable_now: the full amount keeps the cushion on request.date. affordable_later: a later day in the next 35 days does. not_affordable: no day in the next 35 days does.',
     ),
   recommended_action: z
     .enum(ACTIONS)
@@ -305,7 +311,7 @@ const checkOutput = {
     .string()
     .nullable()
     .describe(
-      'The first day the full amount keeps the cushion as one payment; null if none in 30 days.',
+      'The first day the full amount keeps the cushion as one payment; null if none in 35 days.',
     ),
   payment_plan: z
     .array(z.object({ date: z.string(), amount_usd: dollars }))
@@ -453,7 +459,7 @@ async function checkAffordability(
       {},
       today,
     )
-  const last = addDays(today, 30)
+  const last = addDays(today, WAIT_SEARCH_DAYS)
   const purchaseDate = args.date ?? today
   if (purchaseDate < today || purchaseDate > last)
     return failure(
@@ -777,7 +783,7 @@ export function buildMcpServer(ctx: McpContext, caller: Caller) {
         date: isoDate
           .optional()
           .describe(
-            'The day they would buy, as YYYY-MM-DD, from today to 30 days ahead. Default: today.',
+            'The day they would buy, as YYYY-MM-DD, from today to 35 days ahead. Default: today.',
           ),
       },
       outputSchema: checkOutput,

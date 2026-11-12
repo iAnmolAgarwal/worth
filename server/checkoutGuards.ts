@@ -1,4 +1,4 @@
-import { compareOptions, money } from '../shared/finance.ts'
+import { compareOptions, money, WAIT_SEARCH_DAYS } from '../shared/finance.ts'
 import type { FinancialProfile, Product, Purchase } from '../shared/types.ts'
 import { dateLabel } from './dates.ts'
 
@@ -60,7 +60,7 @@ export function checkoutGuards(input: {
         'WAIT_NOT_REACHED',
         comparison.wait.date
           ? `Your plan suggests waiting until ${dateLabel(comparison.wait.date, today)}. Worth prepares the order on or after that day, after a fresh check.`
-          : 'No day in the next 30 days keeps your cushion for this price, so there is no wait date to buy on.',
+          : `No day in the next ${WAIT_SEARCH_DAYS} days keeps your cushion for this price, so there is no wait date to buy on.`,
       )
     fits = comparison.wait.outcome === 'fits'
   } else if (request.option === 'spendLess') {

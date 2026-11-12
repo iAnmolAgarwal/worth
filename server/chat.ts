@@ -6,6 +6,7 @@ import {
   compareOptions,
   money,
   payIn4InRange,
+  WAIT_SEARCH_DAYS,
   withoutOwnHold,
 } from '../shared/finance.ts'
 import { PRODUCTS } from '../shared/seed.ts'
@@ -296,7 +297,7 @@ const CLARIFY_GUARD: Record<NonNullable<Answer['clarify']>['reason'], string> = 
   date_unresolved: 'The timing didn’t resolve to one day, so Worth asked which day',
   date_vague: 'The timing was too vague for one day, so Worth asked which day',
   date_past: 'The timing has already passed, so Worth asked for another day',
-  date_window: 'The date is outside the next 30 days, so Worth asked for another day',
+  date_window: `The date is outside the next ${WAIT_SEARCH_DAYS} days, so Worth asked for another day`,
   payday_missing: 'No confirmed payday in your plan, so Worth asked for a day',
   alternatives: 'You named more than one item to choose between, so Worth asked which one',
   items_unclear: 'More than one amount could be the price, so Worth asked which one',
@@ -334,7 +335,7 @@ function traceFor(answer: Answer, data: ChatData, shown: FactId[]): AnswerTrace 
       { id: 'usd', label: 'The price is in US dollars; nothing was converted', passed: true },
       {
         id: 'date_window',
-        label: `The date is between today and ${dateLabel(addDays(data.today, 30), data.today)}`,
+        label: `The date is between today and ${dateLabel(addDays(data.today, WAIT_SEARCH_DAYS), data.today)}`,
         passed: true,
       },
     )
@@ -1124,7 +1125,7 @@ function requestContext(input: ChatInput, data: ChatData) {
   const current = context
     ? `${JSON.stringify(merchantLabel(context.itemName ?? 'unnamed item', 60))}, ${context.amountCents} cents USD${context.purchaseDate ? `, planned for ${context.purchaseDate}` : ', date not chosen yet'}`
     : 'none'
-  return `<request_context>\nToday: ${weekday}, ${data.today}. Purchase dates can be from ${data.today} to ${addDays(data.today, 30)}.\nPurchase being discussed: ${current}.\n</request_context>`
+  return `<request_context>\nToday: ${weekday}, ${data.today}. Purchase dates can be from ${data.today} to ${addDays(data.today, WAIT_SEARCH_DAYS)}.\nPurchase being discussed: ${current}.\n</request_context>`
 }
 function history(input: ChatInput): Anthropic.MessageParam[] {
   const turns = input.history

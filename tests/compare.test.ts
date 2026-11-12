@@ -292,7 +292,7 @@ describe('Pay in 4 comparison (acceptance 16)', () => {
       cushionCents: 0,
       flows: [
         flow({ id: 'pay-1', kind: 'income', amountCents: 30000, nextDate: addDays(TODAY, 20) }),
-        flow({ id: 'pay-2', kind: 'income', amountCents: 30000, nextDate: addDays(TODAY, 34) }),
+        flow({ id: 'pay-2', kind: 'income', amountCents: 30000, nextDate: addDays(TODAY, 36) }),
       ],
     })
     const result = compare(p, 119900)
@@ -379,6 +379,7 @@ describe('synthetic persona: Maya at Larkspur Supply', () => {
   it('sells every item, real brands included, from one separately branded store', () => {
     expect(new Set(PRODUCTS.map((item) => item.merchant))).toEqual(new Set(['Larkspur Supply']))
     expect(PRODUCTS.map((item) => [item.id, item.priceCents])).toEqual([
+      ['halden-x5', 189900],
       ['headphones', 34900],
       ['camera', 119900],
       ['chair', 44900],

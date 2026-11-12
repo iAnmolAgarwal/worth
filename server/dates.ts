@@ -1,4 +1,4 @@
-import { addDays } from '../shared/finance.ts'
+import { addDays, WAIT_SEARCH_DAYS } from '../shared/finance.ts'
 
 // Timing phrases in the user's own words. Claude resolves them to ISO dates; this
 // reader decides whether timing was stated at all, which dates a known phrase may
@@ -468,7 +468,7 @@ export function groundedPhrase(phrase: string | null | undefined, message: strin
   return false
 }
 
-/** The purchase window the engine supports: today through 30 days ahead. */
+/** The purchase window the engine supports: today through WAIT_SEARCH_DAYS ahead. */
 export function inWindow(date: string, today: string) {
-  return validIsoDate(date) && date >= today && date <= addDays(today, 30)
+  return validIsoDate(date) && date >= today && date <= addDays(today, WAIT_SEARCH_DAYS)
 }

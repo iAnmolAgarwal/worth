@@ -150,6 +150,7 @@ describe('HTTP sessions, profiles, and calculations', () => {
       alternatives: 'off',
       handoff: 'off',
       paypalConnect: 'off',
+      sample: 'maya',
     })
     const cookie = (await request(app).get('/api/state')).headers['set-cookie'][0]
     expect(cookie).toContain('HttpOnly')

@@ -11,7 +11,7 @@ import {
   Sparkles,
   X,
 } from 'lucide-react'
-import { addDays } from '../shared/finance'
+import { addDays, WAIT_SEARCH_DAYS } from '../shared/finance'
 import { linkIn } from '../shared/link'
 import type {
   Assessment,
@@ -85,7 +85,7 @@ export function moodFor(entries: Entry[], busy: boolean): GuideExpression {
 }
 
 export const ASK_STARTERS = [
-  'Can I afford a $1,199 camera?',
+  'Can I afford the $1,899 Halden X5?',
   'How much can I spend today?',
   'What bills are coming up?',
 ]
@@ -239,7 +239,7 @@ function OptionRows({ c, at, budget }: { c: Comparison; at?: Assessment; budget?
             sub: `${lowest(c.wait)}${c.wait.stressLowestCents < c.cushionCents ? ' · tight' : ''}`,
             pill: status(c.wait),
           }
-        : { key: 'wait', title: 'Wait', sub: 'No date in the next 30 days fits' },
+        : { key: 'wait', title: 'Wait', sub: 'No date in the next 35 days fits' },
     maxCents > 0
       ? {
           key: 'spendLess',
@@ -462,7 +462,7 @@ function AskEdit({
           type="date"
           required
           min={today}
-          max={addDays(today, 30)}
+          max={addDays(today, WAIT_SEARCH_DAYS)}
           value={date}
           onChange={(e) => setDate(e.target.value)}
         />

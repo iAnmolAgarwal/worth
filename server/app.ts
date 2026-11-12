@@ -12,15 +12,10 @@ import {
   normalizeTimezone,
   payIn4InRange,
   purchaseReviews,
+  WAIT_SEARCH_DAYS,
   withoutOwnHold,
 } from '../shared/finance.ts'
-import {
-  createDemoState,
-  DEMO_MERCHANT,
-  DEMO_TIMEZONE,
-  PRODUCTS,
-  rebaseDemoState,
-} from '../shared/seed.ts'
+import { DEMO_MERCHANT, DEMO_TIMEZONE, PRODUCTS, rebaseDemoState } from '../shared/seed.ts'
 import {
   analyzeHistory,
   foreignPaymentTransaction,
@@ -103,6 +98,8 @@ import {
   demoClockSchema,
   demoToday,
   fundsProjection,
+  ownSaved,
+  sampleSession,
 } from './demoClock.ts'
 
 export type { AppConfig } from './config.ts'
@@ -424,15 +421,15 @@ export function createApp(options: AppOptions = {}) {
   /**
    * The demo store's own page for a catalog item (decision 0.2): where Ask Worth and outside agents
    * send someone who wants to buy it. Worth prepares no order; the store sells it. Undefined while
-   * the hand-off is off. The video replay carries over, so both origins show the same dates.
+   * the hand-off is off. A pinned sample day carries over, so both origins show the same dates.
    */
   function storeProductUrl(sessionId: string, productId: string) {
     const product = PRODUCTS.find((p) => p.id === productId && p.merchant === DEMO_MERCHANT)
     if (!handoff || !product) return undefined
     const url = new URL(`/p/${encodeURIComponent(product.id)}`, handoff.merchantOrigin)
     const data = store.get(sessionId)
-    if (data?.profile.source === 'demo' && data.demoClock?.preset === 'video')
-      url.searchParams.set('replay', 'video')
+    if (data?.profile.source === 'demo' && data.demoClock?.preset)
+      url.searchParams.set('replay', data.demoClock.preset)
     return url.href
   }
   const app = express()
@@ -581,7 +578,22 @@ export function createApp(options: AppOptions = {}) {
         alternatives: channel3.health(),
         handoff: handoff ? 'on' : 'off',
         paypalConnect: paypalConnect.status(),
+        sample: config.samplePersona,
       },
+    }
+  }
+  /** Alex's pinned day (`demo`, `demo-dec15`), on which his plan can be edited. */
+  function pinnedDay(data: SessionData) {
+    const preset = data.demoClock?.preset
+    return data.profile.source === 'demo' && (preset === 'demo' || preset === 'demo-dec15')
+      ? data.demoClock!.today
+      : undefined
+  }
+  /** The persona switch and the clock for a demo-clock request. */
+  function demoClockOptions() {
+    return {
+      persona: config.samplePersona,
+      now: now(),
     }
   }
   function startSession(req: Request, res: Response, replacing = false) {
@@ -600,11 +612,8 @@ export function createApp(options: AppOptions = {}) {
         'SESSION_RATE_LIMITED',
       )
     const timezone = viewerTimezone(req) ?? DEMO_TIMEZONE
-    const seed = createDemoState(today(timezone), timezone)
     const data: SessionData = {
-      profile: seed.profile,
-      transactions: seed.transactions,
-      wishlist: seed.wishlist,
+      ...sampleSession(config.samplePersona, today(timezone), timezone, now()),
       createdAt: time,
     }
     savedOf(data, now())
@@ -1162,11 +1171,12 @@ export function createApp(options: AppOptions = {}) {
     const current = state(sessionId(res))
     if (
       input.purchaseDate &&
-      (input.purchaseDate < current.today || input.purchaseDate > addDays(current.today, 30))
+      (input.purchaseDate < current.today ||
+        input.purchaseDate > addDays(current.today, WAIT_SEARCH_DAYS))
     )
       throw new HttpError(
         400,
-        'Choose a purchase date from today through 30 days ahead.',
+        `Choose a purchase date from today through ${WAIT_SEARCH_DAYS} days ahead.`,
         'INVALID_DATE',
       )
     res.json(
@@ -1254,16 +1264,22 @@ export function createApp(options: AppOptions = {}) {
     const time = now().getTime()
     const opened = store.openQuote(storedQuote(verified.payload, id, time), time)
     const mine = opened.sessionId === id
-    // The video replay follows /?replay=video: the sample persona only, never imported data.
+    // A pinned sample day follows the store's ?replay=: the sample persona only, never imported data.
     let replay = false
     const data = dataFor(res)
+    const preset = verified.payload.replay
     if (
-      verified.payload.replay === 'video' &&
+      preset &&
       data.profile.source === 'demo' &&
-      data.demoClock?.preset !== 'video' &&
+      data.demoClock?.preset !== preset &&
       !active(id)
     ) {
-      const next = applyDemoClock(data, { preset: 'video' }, today(data.profile.timezone))
+      const next = applyDemoClock(
+        data,
+        { preset },
+        today(data.profile.timezone),
+        demoClockOptions(),
+      )
       store.atomic(() => {
         for (const purchase of store.purchases(id))
           if (!purchase.archived) store.putPurchase(id, { ...purchase, archived: true })
@@ -1591,11 +1607,12 @@ export function createApp(options: AppOptions = {}) {
     noActive(id)
     const data = dataFor(res)
     // The demo clock replays the sample persona as it is: a hand-edited plan is the user's own
-    // numbers, which never run on the clock (pre-merge judge finding 4).
-    if (demoToday(data))
+    // numbers, which never run on a moving clock (pre-merge judge finding 4). Alex's pinned days
+    // are fixed, so his plan can be edited there and stays on that day.
+    if (demoToday(data) && !pinnedDay(data))
       throw new HttpError(
         409,
-        'The demo clock is replaying Maya’s sample plan as it is. Choose Back to today before editing a plan.',
+        `The demo clock is replaying ${data.profile.name}’s sample plan as it is. Choose Back to today before editing a plan.`,
         'DEMO_CLOCK_RUNNING',
       )
     if (input.version !== data.profile.version)
@@ -1613,7 +1630,8 @@ export function createApp(options: AppOptions = {}) {
         'Only completed purchases can be included in your balance snapshot.',
         'INVALID_SNAPSHOT',
       )
-    if (input.snapshotDate > today(input.timezone))
+    // On a pinned sample day, the future starts after that day, not after the real date.
+    if (input.snapshotDate > (pinnedDay(data) ?? today(input.timezone)))
       throw new HttpError(400, 'The balance snapshot cannot be in the future.', 'INVALID_SNAPSHOT')
     if (input.flows.some((flow) => flow.paidOn && flow.paidOn > input.snapshotDate))
       throw new HttpError(
@@ -1829,7 +1847,12 @@ export function createApp(options: AppOptions = {}) {
     const id = sessionId(res)
     noActive(id)
     const current = dataFor(res)
-    const { data, reset } = applyDemoClock(current, input, today(current.profile.timezone))
+    const { data, reset } = applyDemoClock(
+      current,
+      input,
+      today(current.profile.timezone),
+      demoClockOptions(),
+    )
     store.atomic(() => {
       if (reset)
         for (const purchase of store.purchases(id))
@@ -1903,8 +1926,9 @@ export function createApp(options: AppOptions = {}) {
     if (merged.length > config.maxTransactions)
       throw new HttpError(400, transactionLimitMessage(merged.length), 'TOO_MANY_TRANSACTIONS')
     const switching = data.profile.source === 'demo'
-    // Imported data is real: it never follows the demo clock.
+    // Imported data is real: it never follows the demo clock, nor keeps the sample's own saved items.
     delete data.demoClock
+    if (data.saved) data.saved = ownSaved(data.saved)
     if (switching) {
       data.profile = {
         ...data.profile,

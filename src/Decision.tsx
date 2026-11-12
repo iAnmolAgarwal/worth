@@ -22,7 +22,12 @@ import {
   TriangleAlert,
 } from 'lucide-react'
 import { PAY_IN_4_DATES_NOTE, PAY_IN_4_SPACING } from '../shared/collision'
-import { confirmedSchedule, PAY_IN_4_MAX_CENTS, PAY_IN_4_MIN_CENTS } from '../shared/finance'
+import {
+  confirmedSchedule,
+  PAY_IN_4_MAX_CENTS,
+  PAY_IN_4_MIN_CENTS,
+  WAIT_SEARCH_DAYS,
+} from '../shared/finance'
 import type { Alternative, OptionResult, Product } from '../shared/types'
 import { offerVerdict, type AskOffer } from './AgentLauncher'
 import { AlternativesLoading, SimilarItems, useSimilarItems } from './Alternatives'
@@ -37,6 +42,7 @@ import {
   firstBelow,
   fits,
   lower,
+  lowerName,
   missingFix,
   optionTitle,
   paydayOn,
@@ -130,7 +136,7 @@ export function optionWhy(c: Comparison, k: OptionKey, option: OptionResult) {
   if (k === 'spendLess')
     return c.spendLess.maxPriceCents <= 0
       ? 'Nothing fits today without going below your cushion.'
-      : `fits today if you skip the ${lower(c.itemName)}`
+      : `fits today if you skip the ${lowerName(c.itemName)}`
   if (option.headroomCents === 0)
     return `Leaves exactly your cushion on ${dayLabel(option.lowestDate)}`
   if (option.lowestBalanceCents >= c.cushionCents)
@@ -179,7 +185,11 @@ export function AnswerDetail({ c }: { c: Comparison }) {
     )
   if (c.spendLess.maxPriceCents <= 0)
     return <>Your plan already reaches your {cushion} cushion without this purchase.</>
-  return <>No date in the next 30 days keeps your {cushion} cushion at the full price.</>
+  return (
+    <>
+      No date in the next {WAIT_SEARCH_DAYS} days keeps your {cushion} cushion at the full price.
+    </>
+  )
 }
 
 function OptionCard({
@@ -218,7 +228,7 @@ function OptionCard({
         <span className="why">
           {notNeeded
             ? 'It fits today, so there’s nothing to wait for.'
-            : 'No date in the next 30 days keeps your cushion.'}
+            : `No date in the next ${WAIT_SEARCH_DAYS} days keeps your cushion.`}
         </span>
       </div>
     )
@@ -330,9 +340,9 @@ export function ChartTile({
           Lowest point: <b className="num">{signed(option.lowestBalanceCents)}</b> on{' '}
           {dayLabel(option.lowestDate)} ({cushionGap(option.lowestBalanceCents, c.cushionCents)})
           {cause && cause.date === option.lowestDate && payday
-            ? `: ${lower(cause.name)} leaves before your paycheck lands that day.`
+            ? `: ${lowerName(cause.name)} leaves before your paycheck lands that day.`
             : cause
-              ? `, after ${lower(cause.name)} on ${dayLabel(cause.date)}.`
+              ? `, after ${lowerName(cause.name)} on ${dayLabel(cause.date)}.`
               : '.'}
         </p>
       )}
@@ -753,7 +763,7 @@ export function Decision({
         <Button variant="text" onClick={() => setConfirmBuy(true)}>
           {/* Next to other stores' items, the action names the demo store's own product. */}
           {selected === 'spendLess'
-            ? `Buy the ${product!.name.toLowerCase()} anyway`
+            ? `Buy the ${lowerName(product!.name)} anyway`
             : 'Buy today anyway'}
         </Button>
       )}

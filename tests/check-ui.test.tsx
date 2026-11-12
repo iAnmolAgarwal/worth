@@ -334,7 +334,10 @@ describe('a verified quote on /check', () => {
   })
 
   it('starts the video replay toast when the quote asked for it and the sample persona took it', async () => {
-    route({ '/handoff/open': opened({}, { replay: true }) })
+    const replayed = makeState()
+    replayed.today = '2026-10-03'
+    replayed.demoClock = { today: '2026-10-03', preset: 'video' }
+    route({ '/handoff/open': opened({}, { replay: true, state: replayed }) })
     visit()
     expect(
       await screen.findByText('Showing the video scenario: Maya on Sat, Oct 3, 2026.'),

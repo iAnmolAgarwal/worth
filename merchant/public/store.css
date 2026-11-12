@@ -314,6 +314,12 @@ body.lk {
   line-height: 0.95;
   text-transform: uppercase;
 }
+.lk-product__subtitle {
+  margin: -6px 0 14px;
+  font-size: var(--lk-label);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
 .lk-product__price {
   display: inline-block;
   margin: 0 0 18px;

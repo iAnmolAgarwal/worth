@@ -1,5 +1,12 @@
-import type { FinancialProfile, Product, Purchase, ScheduledFlow, Transaction } from './types.ts'
-import { addDays, daysBetween, todayInTimezone } from './finance.ts'
+import type {
+  DemoPreset,
+  FinancialProfile,
+  Product,
+  Purchase,
+  ScheduledFlow,
+  Transaction,
+} from './types.ts'
+import { addDays, daysBetween, forecast, todayInTimezone } from './finance.ts'
 
 /** Time zone for the synthetic persona when the viewer's own zone is unknown. */
 export const DEMO_TIMEZONE = 'America/New_York'
@@ -8,6 +15,21 @@ export const DEMO_TIMEZONE = 'America/New_York'
 export const DEMO_MERCHANT = 'Larkspur Supply'
 
 export const PRODUCTS: Product[] = [
+  // The sample person's camera. Halden is an invented brand; the photo shows no brand mark.
+  {
+    id: 'halden-x5',
+    name: 'Halden X5',
+    subtitle: 'Full-frame mirrorless camera',
+    description:
+      'A full-frame mirrorless camera body for paid shoots: stills, video and low light.',
+    priceCents: 189900,
+    category: 'Cameras',
+    image: '/images/halden-x5.jpg',
+    color: '#f6a01a',
+    merchant: DEMO_MERCHANT,
+    tag: 'For the next shoot',
+    aliases: ['halden'],
+  },
   {
     id: 'headphones',
     name: 'Studio headphones',
@@ -364,6 +386,332 @@ export function createDemoState(
     purchases: [],
     wishlist: ['headphones', 'camera'],
   }
+}
+
+/** The demo day: Alex checks the camera on Fri Nov 13 2026. Every Alex date is absolute. */
+export const ALEX_DEMO_DAY = '2026-11-13'
+/** The return visit: the day the camera fits, after the Dec 14 invoice is paid. */
+export const ALEX_RETURN_DAY = '2026-12-15'
+/**
+ * The day the contest video was recorded. Pinning Maya to it reproduces that video exactly: rent
+ * on Fri Oct 16, wait until Fri Oct 23, buy-today low −$458.99 on Thu Oct 22.
+ */
+export const VIDEO_REPLAY_DAY = '2026-10-03'
+/** The day each pinned preset shows. */
+export const DEMO_PRESET_DAYS: Record<DemoPreset, string> = {
+  video: VIDEO_REPLAY_DAY,
+  demo: ALEX_DEMO_DAY,
+  'demo-dec15': ALEX_RETURN_DAY,
+}
+/** The pinned sample days a `?replay=` link can ask for, on Worth and on the store. */
+export const DEMO_PRESETS = ['video', 'demo', 'demo-dec15'] as const satisfies DemoPreset[]
+/** A `?replay=` value when it names a preset; anything else is ignored. */
+export const demoPreset = (value: unknown): DemoPreset | undefined =>
+  DEMO_PRESETS.find((preset) => preset === value)
+/** The camera Alex wants, in the catalog above. */
+export const ALEX_CAMERA_ID = 'halden-x5'
+
+type MonthlyItem = Omit<ScheduledFlow, 'nextDate' | 'cadence' | 'confirmed' | 'active'> & {
+  anchorDay: number | 'last'
+}
+type OnceItem = Omit<ScheduledFlow, 'cadence' | 'confirmed' | 'active'>
+
+const LAPTOP_PLAN = { id: 'laptop-plan', name: 'Laptop · Pay in 4', paymentCents: 32475 }
+
+const ALEX_MONTHLY: MonthlyItem[] = [
+  {
+    id: 'salary',
+    name: 'Salary',
+    amountCents: 390000,
+    anchorDay: 'last',
+    kind: 'income',
+    category: 'Income',
+    color: '#b6d58d',
+    icon: 'briefcase',
+  },
+  {
+    id: 'rent',
+    name: 'Rent',
+    amountCents: 175000,
+    anchorDay: 1,
+    kind: 'bill',
+    category: 'Home',
+    color: '#d6af8e',
+    icon: 'home',
+  },
+  {
+    id: 'phone',
+    name: 'Phone plan',
+    amountCents: 6500,
+    anchorDay: 18,
+    kind: 'bill',
+    category: 'Utilities',
+    color: '#c4bee0',
+    icon: 'smartphone',
+  },
+  {
+    id: 'internet',
+    name: 'Home internet',
+    amountCents: 7000,
+    anchorDay: 22,
+    kind: 'bill',
+    category: 'Home',
+    color: '#c4bee0',
+    icon: 'wifi',
+  },
+  {
+    id: 'car-insurance',
+    name: 'Car insurance',
+    amountCents: 13200,
+    anchorDay: 25,
+    kind: 'bill',
+    category: 'Transport',
+    color: '#b1c8d9',
+    icon: 'car',
+  },
+  {
+    id: 'utilities',
+    name: 'Electric and gas',
+    amountCents: 11000,
+    anchorDay: 5,
+    kind: 'bill',
+    category: 'Home',
+    color: '#d7b897',
+    icon: 'zap',
+  },
+  {
+    id: 'student-loan',
+    name: 'Student loan',
+    amountCents: 28000,
+    anchorDay: 10,
+    kind: 'bill',
+    category: 'Loans',
+    color: '#e7cbb1',
+    icon: 'graduation-cap',
+  },
+  {
+    id: 'gym',
+    name: 'Gym membership',
+    amountCents: 4000,
+    anchorDay: 20,
+    kind: 'subscription',
+    category: 'Health',
+    color: '#bfd49e',
+    icon: 'dumbbell',
+  },
+  {
+    id: 'video',
+    name: 'Video streaming',
+    amountCents: 1599,
+    anchorDay: 27,
+    kind: 'subscription',
+    category: 'Entertainment',
+    color: '#edb6a8',
+    icon: 'tv',
+  },
+  {
+    id: 'music',
+    name: 'Music streaming',
+    amountCents: 1199,
+    anchorDay: 9,
+    kind: 'subscription',
+    category: 'Entertainment',
+    color: '#b8d99c',
+    icon: 'music',
+  },
+]
+
+/** Dated one-off items: the photo-shoot invoice and the laptop plan's four payments. */
+const ALEX_ONCE: OnceItem[] = [
+  {
+    id: 'photo-invoice',
+    name: 'Photo shoot invoice · PayPal',
+    amountCents: 165000,
+    nextDate: '2026-12-14',
+    kind: 'income',
+    category: 'Income',
+    color: '#b6d58d',
+    icon: 'camera',
+    origin: 'paypal',
+  },
+  ...['2026-11-06', '2026-11-20', '2026-12-04', '2026-12-18'].map((nextDate, index): OnceItem => ({
+    id: `${LAPTOP_PLAN.id}-${index + 1}`,
+    name: LAPTOP_PLAN.name,
+    amountCents: LAPTOP_PLAN.paymentCents,
+    nextDate,
+    kind: 'installment',
+    category: 'Instalment plans',
+    color: '#c9c2e6',
+    icon: 'laptop',
+    planId: LAPTOP_PLAN.id,
+    planTotalCents: 129900,
+    origin: 'paypal',
+  })),
+]
+
+/** The `anchor` day of the month that `date` is in, clamped to the month's length. */
+function anchoredIn(date: string, anchor: number | 'last'): string {
+  const [year, month] = date.split('-').map(Number) as [number, number]
+  const lastDay = new Date(Date.UTC(year, month, 0, 12)).getUTCDate()
+  const day = anchor === 'last' ? lastDay : Math.min(anchor, lastDay)
+  return `${date.slice(0, 8)}${String(day).padStart(2, '0')}`
+}
+
+/** The first day on or after `from` that falls on `anchor`. */
+function nextAnchored(from: string, anchor: number | 'last'): string {
+  const here = anchoredIn(from, anchor)
+  if (here >= from) return here
+  const [year, month] = from.split('-').map(Number) as [number, number]
+  const next = new Date(Date.UTC(year, month, 1, 12)).toISOString().slice(0, 10)
+  return anchoredIn(next, anchor)
+}
+
+/** Alex's plan as it stands on `today`: monthly items from their next date, one-offs still ahead. */
+function alexFlows(today: string): ScheduledFlow[] {
+  return [
+    ...ALEX_MONTHLY.map((item): ScheduledFlow => ({
+      ...item,
+      cadence: 'monthly',
+      confirmed: true,
+      active: true,
+      nextDate: nextAnchored(today, item.anchorDay),
+    })),
+    ...ALEX_ONCE.filter((item) => item.nextDate >= today).map((item): ScheduledFlow => ({
+      ...item,
+      cadence: 'once',
+      confirmed: true,
+      active: true,
+    })),
+  ]
+}
+
+/**
+ * Alex is the sample person the demo and the video share: salaried at month end, rent on the 1st,
+ * a laptop on PayPal Pay in 4 and a photo-shoot invoice due Mon Dec 14. On Fri Nov 13 the $1,899
+ * Halden X5 does not fit; on Tue Dec 15 it does. Unlike Maya, every date is absolute, so the
+ * story holds only on the days it was tuned for: `today` is the demo day or a later day, and a
+ * later day starts from the funds the Nov 13 plan projects for that morning.
+ */
+export function createCameraScenario(
+  today: string = ALEX_DEMO_DAY,
+  timezone = DEMO_TIMEZONE,
+): {
+  profile: FinancialProfile
+  transactions: Transaction[]
+  purchases: Purchase[]
+  wishlist: string[]
+} {
+  if (today < ALEX_DEMO_DAY || daysBetween(ALEX_DEMO_DAY, today) > 60)
+    throw new Error(`Alex's plan starts on ${ALEX_DEMO_DAY} and runs 60 days.`)
+  const base: FinancialProfile = {
+    name: 'Alex',
+    balanceCents: 254000,
+    cushionCents: 30000,
+    dailySpendCents: 4000,
+    currency: 'USD',
+    timezone,
+    snapshotDate: ALEX_DEMO_DAY,
+    confirmedAt: `${ALEX_DEMO_DAY}T12:00:00.000Z`,
+    version: 1,
+    confirmed: true,
+    coverageDays: 90,
+    source: 'demo',
+    missingFields: [],
+    reflectedPurchaseIds: [],
+    aiConsent: false,
+    userEdited: false,
+    flows: alexFlows(ALEX_DEMO_DAY),
+  }
+  // A later day opens on the balance the demo-day plan projects for that morning.
+  const days = daysBetween(ALEX_DEMO_DAY, today)
+  const balanceCents = days
+    ? forecast(base, [], { today: ALEX_DEMO_DAY, days: days - 1 }).at(-1)!.baselineCents
+    : base.balanceCents
+  const profile: FinancialProfile = {
+    ...base,
+    balanceCents,
+    snapshotDate: today,
+    confirmedAt: `${today}T12:00:00.000Z`,
+    flows: alexFlows(today),
+  }
+  return { profile, transactions: alexHistory(today), purchases: [], wishlist: [] }
+}
+
+/** About 90 days of history before `today` that matches the plan: every item on its own day. */
+function alexHistory(today: string): Transaction[] {
+  const transactions: Transaction[] = []
+  const add = (
+    id: string,
+    date: string,
+    name: string,
+    amountCents: number,
+    category: string,
+    color?: string,
+  ) =>
+    transactions.push({
+      id: `demo:${id}:${date}`,
+      date,
+      name,
+      amountCents,
+      currency: 'USD',
+      category,
+      kind: amountCents > 0 ? 'income' : 'expense',
+      status: 'completed',
+      source: 'demo',
+      ...(color ? { color } : {}),
+    })
+  // Each shop spends within its own range; with a coffee every other day, about $38 a day.
+  const shops = [
+    { name: 'Grocery market', category: 'Groceries', color: '#b6ce9f', from: 6000, to: 9500 },
+    { name: 'City transit', category: 'Transport', color: '#b1c8d9', from: 275, to: 550 },
+    { name: 'Corner grocer', category: 'Groceries', color: '#b6ce9f', from: 2500, to: 4500 },
+    { name: 'Noodle house', category: 'Food & drink', color: '#e4c8aa', from: 1600, to: 3200 },
+    { name: 'Gas station', category: 'Transport', color: '#b1c8d9', from: 3500, to: 5500 },
+    {
+      name: 'Camera shop · film and batteries',
+      category: 'Hobbies',
+      color: '#c4c6bb',
+      from: 1500,
+      to: 4500,
+    },
+    { name: 'Neighborhood market', category: 'Groceries', color: '#b6ce9f', from: 4000, to: 7000 },
+    { name: 'Pharmacy', category: 'Health', color: '#bfd49e', from: 900, to: 2500 },
+  ]
+  for (let daysAgo = 90; daysAgo >= 1; daysAgo--) {
+    const date = addDays(today, -daysAgo)
+    // Keyed by the date itself, so the same day reads the same on every visit.
+    const index = daysBetween(ALEX_DEMO_DAY, date) + 1000
+    const { from, to, ...shop } = shops[index % shops.length]!
+    const amount = from + ((index * 719 + 113) % (to - from))
+    add('daily', date, shop.name, -amount, shop.category, shop.color)
+    if (index % 2)
+      add('coffee', date, 'Coffee bar', -(450 + (index % 5) * 90), 'Food & drink', '#d7b897')
+    for (const item of ALEX_MONTHLY)
+      if (anchoredIn(date, item.anchorDay) === date)
+        add(
+          item.id,
+          date,
+          item.name,
+          item.kind === 'income' ? item.amountCents : -item.amountCents,
+          item.category,
+          item.color,
+        )
+    for (const item of ALEX_ONCE)
+      if (item.nextDate === date)
+        add(
+          item.id,
+          date,
+          item.name,
+          item.kind === 'income' ? item.amountCents : -item.amountCents,
+          item.category,
+          item.color,
+        )
+  }
+  // An earlier shoot, paid the same way, so the invoice due Dec 14 is not a one-off out of nowhere.
+  const earlier = '2026-09-21'
+  if (earlier < today && earlier >= addDays(today, -90))
+    add('photo-invoice', earlier, 'Photo shoot invoice · PayPal', 90000, 'Income', '#b6d58d')
+  return transactions.sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id))
 }
 
 /**

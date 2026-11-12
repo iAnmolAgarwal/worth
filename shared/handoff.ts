@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { z } from 'zod'
+import { DEMO_PRESETS } from './seed.ts'
 import { plainText } from './text.ts'
 
 /**
@@ -107,7 +108,7 @@ export const quoteSchema = z
       .object({ eligible: z.boolean(), source: z.literal('merchant-sdk') })
       .strict()
       .optional(),
-    replay: z.literal('video').optional(),
+    replay: z.enum(DEMO_PRESETS).optional(),
     iat: seconds,
     exp: seconds,
   })

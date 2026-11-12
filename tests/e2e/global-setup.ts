@@ -20,6 +20,8 @@ export default async function globalSetup() {
       PATH: process.env.PATH,
       HOME: process.env.HOME,
       NODE_ENV: 'test',
+      // The E2E numbers are Maya's, the tests' fixture persona.
+      SAMPLE_PERSONA: 'maya',
       E2E_HANDOFF_SECRET: secret,
     },
     stdio: ['ignore', 'pipe', 'inherit'],

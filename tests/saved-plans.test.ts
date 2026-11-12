@@ -197,7 +197,7 @@ describe('saved items on the server', () => {
       { amountCents: 0 },
       { amountCents: 12.5 },
       { waitDate: '2026-10-03' },
-      { waitDate: '2026-11-04' },
+      { waitDate: '2026-11-09' },
       { waitDate: '2026-02-30' },
       { option: 'spendLess', waitDate: '2026-10-20' },
     ])

@@ -1,19 +1,78 @@
 import { z } from 'zod'
 import { addDays, daysBetween, forecast } from '../shared/finance.ts'
-import { createDemoState } from '../shared/seed.ts'
-import type { Purchase } from '../shared/types.ts'
+import { randomUUID } from 'node:crypto'
+import {
+  ALEX_CAMERA_ID,
+  ALEX_DEMO_DAY,
+  ALEX_RETURN_DAY,
+  createCameraScenario,
+  createDemoState,
+  DEMO_PRESET_DAYS,
+  DEMO_PRESETS,
+  PRODUCTS,
+} from '../shared/seed.ts'
+import type { Purchase, SamplePersona, SavedItem } from '../shared/types.ts'
 import type { SessionData } from './store.ts'
 
-/**
- * The day the contest video was recorded. Pinning the synthetic persona to it reproduces the
- * video exactly: rent on Fri Oct 16, wait until Fri Oct 23, buy-today low −$458.99 on Thu Oct 22.
- */
-export const VIDEO_REPLAY_DAY = '2026-10-03'
+export { VIDEO_REPLAY_DAY } from '../shared/seed.ts'
 /** How far the clock may move past the sample plan's funds date: the comparison window. */
 export const DEMO_CLOCK_MAX_DAYS = 60
+/** A new session's sample plan: Alex on the pinned demo day, or Maya on the viewer's today. */
+export function sampleSession(
+  persona: SamplePersona,
+  realToday: string,
+  timezone: string,
+  now = new Date(),
+): Pick<SessionData, 'profile' | 'transactions' | 'wishlist' | 'demoClock' | 'saved'> {
+  if (persona === 'maya') {
+    const { profile, transactions, wishlist } = createDemoState(realToday, timezone)
+    return { profile, transactions, wishlist }
+  }
+  const { profile, transactions, wishlist } = createCameraScenario(ALEX_DEMO_DAY, timezone)
+  return {
+    profile,
+    transactions,
+    wishlist,
+    saved: alexSaved('demo', now),
+    demoClock: { today: ALEX_DEMO_DAY, preset: 'demo' },
+  }
+}
+
+/** A catalog item Alex saved before the story starts: marked `seeded`, never a store's. */
+function seededItem(productId: string, now: Date, waitDate?: string): SavedItem {
+  const product = PRODUCTS.find((p) => p.id === productId)!
+  return {
+    id: randomUUID(),
+    kind: 'catalog',
+    productId,
+    name: product.name,
+    amountCents: product.priceCents,
+    ...(waitDate ? { option: 'wait' as const, waitDate } : {}),
+    createdAt: now.toISOString(),
+    status: 'active',
+    seeded: true,
+  }
+}
+
+/**
+ * Alex's Saved on a pinned day: the Halden X5 and the studio headphones. On the demo day the
+ * camera has no date yet (its check offers "Save for Tue, Dec 15"); on the return visit it is
+ * saved for Dec 15, so it is ready. Neither carries a store name or link.
+ */
+function alexSaved(preset: 'demo' | 'demo-dec15', now: Date): SavedItem[] {
+  return [
+    seededItem('headphones', now),
+    seededItem(ALEX_CAMERA_ID, now, preset === 'demo-dec15' ? ALEX_RETURN_DAY : undefined),
+  ]
+}
+
+/** The items the person saved themselves; seeded ones belong only to the sample they came with. */
+export function ownSaved(saved: SavedItem[] | undefined): SavedItem[] {
+  return (saved ?? []).filter((item) => !item.seeded)
+}
 
 export const demoClockSchema = z.union([
-  z.object({ preset: z.enum(['video', 'today']) }).strict(),
+  z.object({ preset: z.enum([...DEMO_PRESETS, 'today']) }).strict(),
   z
     .object({
       date: z
@@ -45,10 +104,17 @@ export function demoToday(data: SessionData): string | undefined {
 
 /**
  * A fresh synthetic persona dated `day`, keeping the session's saved items, retention and the
- * user's own choice about Claude. The plan version moves on, so any open editor is stale.
+ * user's own choice about Claude. The plan version moves on, so any open editor is stale. Maya
+ * can be dated any day; Alex only from his demo day on.
  */
-export function freshPersona(data: SessionData, day: string, timezone: string): SessionData {
-  const seed = createDemoState(day, timezone)
+export function freshPersona(
+  data: SessionData,
+  day: string,
+  timezone: string,
+  persona: SamplePersona = 'maya',
+): SessionData {
+  const seed =
+    persona === 'maya' ? createDemoState(day, timezone) : createCameraScenario(day, timezone)
   const previous = data.profile
   return {
     ...data,
@@ -64,15 +130,22 @@ export function freshPersona(data: SessionData, day: string, timezone: string): 
 }
 
 /**
- * Applies a demo-clock request. `video` pins a fresh persona to the recording day; a date moves
- * the clock forward from the persona's funds date without changing the plan, so today's funds
- * need confirming; `today` returns to the real date with a fresh persona. Imported data refuses.
+ * Applies a demo-clock request. A preset pins a fresh persona to its day: `video` is Maya on the
+ * recording day, `demo` and `demo-dec15` are Alex on Nov 13 and on Dec 15 with the camera saved
+ * and ready. A date moves the clock forward from the persona's funds date without changing the
+ * plan, so today's funds need confirming. `today` restarts the default sample: Maya on the real
+ * date, or Alex on his demo day, whose dates are fixed. Imported data refuses.
  */
 export function applyDemoClock(
   data: SessionData,
   input: DemoClockInput,
   realToday: string,
+  options: {
+    persona?: SamplePersona
+    now?: Date
+  } = {},
 ): { data: SessionData; reset: boolean } {
+  const persona = options.persona ?? 'alex'
   if (data.profile.source !== 'demo')
     throw new DemoClockError(
       409,
@@ -81,25 +154,31 @@ export function applyDemoClock(
     )
   const timezone = data.profile.timezone
   if ('preset' in input) {
-    if (input.preset === 'today') {
+    if (input.preset === 'today' && persona === 'maya') {
       const next = freshPersona(data, realToday, timezone)
       delete next.demoClock
       return { data: next, reset: true }
     }
-    return {
-      data: {
-        ...freshPersona(data, VIDEO_REPLAY_DAY, timezone),
-        demoClock: { today: VIDEO_REPLAY_DAY, preset: 'video' },
-      },
-      reset: true,
-    }
+    const preset = input.preset === 'today' ? 'demo' : input.preset
+    const day = DEMO_PRESET_DAYS[preset]
+    const next = freshPersona(data, day, timezone, preset === 'video' ? 'maya' : 'alex')
+    // A restart brings back the preset's own saved items; what the person saved stays.
+    const own = ownSaved(data.saved)
+    next.saved =
+      preset === 'video'
+        ? own
+        : [
+            ...own.filter((item) => item.productId !== ALEX_CAMERA_ID),
+            ...alexSaved(preset, options.now ?? new Date()),
+          ]
+    return { data: { ...next, demoClock: { today: day, preset } }, reset: true }
   }
   // A hand-edited plan holds the user's own numbers, which never run on the clock (re-judge N1).
   // The presets restart the untouched sample persona, so only a moved day is refused.
   if (data.profile.userEdited !== false)
     throw new DemoClockError(
       409,
-      'The demo clock moves only the untouched sample plan. Choose the video replay to start it again from Maya’s sample.',
+      'The demo clock moves only the untouched sample plan. Start the sample again to use it.',
       'DEMO_CLOCK_SAMPLE_ONLY',
     )
   const from = data.profile.snapshotDate

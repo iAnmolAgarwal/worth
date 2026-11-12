@@ -1,4 +1,4 @@
-import type { Product } from '../shared/types.ts'
+import type { DemoPreset, Product } from '../shared/types.ts'
 import { CATALOG, formatPrice, STORE_NAME } from './catalog.ts'
 import type { ResultPayload } from '../shared/handoff.ts'
 
@@ -22,12 +22,12 @@ export interface PageOptions {
   scriptSrc: string
   /** The <worth-check> module's URL, the same way; loaded on product pages only. */
   worthCheckSrc?: string
-  /** Keeps `?replay=video` on in-store links so the demo stays in replay. */
-  replay?: boolean
+  /** Keeps `?replay=<preset>` on in-store links so the demo stays on its sample day. */
+  replay?: DemoPreset
 }
 
 function layout(title: string, main: string, options: PageOptions) {
-  const home = options.replay ? '/?replay=video' : '/'
+  const home = options.replay ? `/?replay=${options.replay}` : '/'
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -65,8 +65,8 @@ ${main}
 /** The store's sprig mark, drawn inline so it follows the stylesheet's colours. */
 const MARK = `<svg class="lk-header__mark" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 22V9"/><circle cx="12" cy="5" r="2.2"/><circle cx="8.2" cy="9.2" r="1.9"/><circle cx="15.8" cy="9.2" r="1.9"/><circle cx="9" cy="13.6" r="1.6"/><circle cx="15" cy="13.6" r="1.6"/></svg>`
 
-function productHref(product: Product, replay?: boolean) {
-  return `/p/${encodeURIComponent(product.id)}${replay ? '?replay=video' : ''}`
+function productHref(product: Product, replay?: DemoPreset) {
+  return `/p/${encodeURIComponent(product.id)}${replay ? `?replay=${replay}` : ''}`
 }
 
 /** "No. 02": the item's stock number, from its place in the catalog. */
@@ -74,7 +74,7 @@ export function stockNumber(product: Product) {
   return `No. ${String(CATALOG.indexOf(product) + 1).padStart(2, '0')}`
 }
 
-function card(product: Product, replay?: boolean) {
+function card(product: Product, replay?: DemoPreset) {
   return `  <li class="lk-card">
     <a class="lk-card__link" href="${esc(productHref(product, replay))}">
       <span class="lk-card__media" style="--lk-swatch: ${esc(product.color)}"><img class="lk-card__image" src="${esc(product.image)}" alt="" width="480" height="360" loading="lazy"></span>
@@ -138,7 +138,7 @@ export function productPage(view: ProductView, options: PageOptions) {
   const { product, quote } = view
   const amount = (product.priceCents / 100).toFixed(2)
   const worthHref = `${view.worthOrigin}/check#q=${quote.token}`
-  const refresh = `/api/worth-quote?productId=${encodeURIComponent(product.id)}${options.replay ? '&replay=video' : ''}`
+  const refresh = `/api/worth-quote?productId=${encodeURIComponent(product.id)}${options.replay ? `&replay=${options.replay}` : ''}`
   const worthAttributes = `href="${esc(worthHref)}" merchant="${esc(STORE_NAME)}" amount="${esc(amount)}" refresh-url="${esc(refresh)}"`
   // Without JavaScript, the plain same-tab link inside <worth-check> still goes to Worth. In swipe
   // mode it sits in a slot the element never draws, so with JavaScript only PayPal's button shows.
@@ -158,13 +158,14 @@ export function productPage(view: ProductView, options: PageOptions) {
   return layout(
     `${product.name} · ${STORE_NAME}`,
     `<article class="lk-product">
-  <nav class="lk-product__back" aria-label="Breadcrumb"><a href="${options.replay ? '/?replay=video' : '/'}">All products</a><span class="lk-product__crumb">${esc(product.category)}</span></nav>
+  <nav class="lk-product__back" aria-label="Breadcrumb"><a href="${options.replay ? `/?replay=${options.replay}` : '/'}">All products</a><span class="lk-product__crumb">${esc(product.category)}</span></nav>
   <div class="lk-product__media" style="--lk-swatch: ${esc(product.color)}">
     <img class="lk-product__image" src="${esc(product.image)}" alt="${esc(product.name)}" width="960" height="720">
   </div>
   <div class="lk-product__info">
     <p class="lk-product__category"><span class="lk-product__no">${esc(stockNumber(product))}</span>${esc(product.category)}</p>
     <h1 class="lk-product__name">${esc(product.name)}</h1>
+    ${product.subtitle ? `<p class="lk-product__subtitle">${esc(product.subtitle)}</p>` : ''}
     <p class="lk-product__price">${esc(formatPrice(product.priceCents))}</p>
     <p class="lk-product__description">${esc(product.description)}</p>
     <section class="lk-buy" id="checkout" aria-label="Checkout"
@@ -192,7 +193,7 @@ export function productPage(view: ProductView, options: PageOptions) {
       <h2 class="lk-thanks__title">Thank you for your order</h2>
       <p class="lk-thanks__body">PayPal confirmed your sandbox payment for ${esc(product.name)}. This is a demo store, so nothing ships.</p>
       <p class="lk-thanks__ref">Order <span class="lk-thanks__order"></span></p>
-      <a class="lk-thanks__more" href="${options.replay ? '/?replay=video' : '/'}">Keep browsing</a>
+      <a class="lk-thanks__more" href="${options.replay ? `/?replay=${options.replay}` : '/'}">Keep browsing</a>
     </section>
   </div>
 </article>

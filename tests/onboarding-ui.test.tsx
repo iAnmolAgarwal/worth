@@ -538,7 +538,7 @@ describe('the month-led Home for imported PayPal activity', () => {
     expect(built.textContent).toContain('Money available today: $2,600.00 · cushion $300.00')
     // Maya's own pieces are not on this Home.
     expect(screen.queryByRole('region', { name: 'Coming up' })).toBeNull()
-    expect(screen.queryByText(/You’re viewing Maya’s sample month/)).toBeNull()
+    expect(screen.queryByText(/You’re viewing a sample month/)).toBeNull()
   })
 
   it('orders a phone screen: the answer, the plan summary, then the next days', async () => {

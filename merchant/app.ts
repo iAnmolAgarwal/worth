@@ -14,7 +14,8 @@ import {
   type PayPalGateway,
   type PayPalOrder,
 } from '../server/paypal.ts'
-import type { Product } from '../shared/types.ts'
+import { demoPreset } from '../shared/seed.ts'
+import type { DemoPreset, Product } from '../shared/types.ts'
 import { findProduct, STORE_NAME } from './catalog.ts'
 import { loadMerchantConfig, type MerchantConfig } from './config.ts'
 import { merchantContentSecurityPolicy } from './csp.ts'
@@ -107,7 +108,7 @@ export function createMerchantApp(options: MerchantAppOptions = {}) {
   const seenEvents = new Set<string>()
   const pageOptions = (req: Request): PageOptions => ({
     scriptSrc: options.scriptSrc ?? '/assets/store.js',
-    replay: req.query.replay === 'video',
+    replay: demoPreset(req.query.replay),
   })
   const cookieName = config.production ? '__Host-lk_session' : 'lk_session'
   const origins = new Set([config.origin])
@@ -166,7 +167,7 @@ export function createMerchantApp(options: MerchantAppOptions = {}) {
   function mintQuote(
     sessionId: string,
     product: Product,
-    extra: { payLater?: boolean; replay?: boolean } = {},
+    extra: { payLater?: boolean; replay?: DemoPreset } = {},
   ) {
     const iat = Math.floor(now() / 1000)
     const qid = sessions.quoteId(
@@ -185,12 +186,12 @@ export function createMerchantApp(options: MerchantAppOptions = {}) {
       amountCents: product.priceCents,
       currency: 'USD',
       merchant: STORE_NAME.slice(0, 60),
-      returnUrl: extra.replay ? `${productUrl}?replay=video` : productUrl,
+      returnUrl: extra.replay ? `${productUrl}?replay=${extra.replay}` : productUrl,
       imageUrl: `${config.origin}${product.image}`,
       ...(extra.payLater === undefined
         ? {}
         : { payLater: { eligible: extra.payLater, source: 'merchant-sdk' as const } }),
-      ...(extra.replay ? { replay: 'video' as const } : {}),
+      ...(extra.replay ? { replay: extra.replay } : {}),
       iat,
       exp: iat + QUOTE_TTL_S,
     })
@@ -267,7 +268,7 @@ export function createMerchantApp(options: MerchantAppOptions = {}) {
     // so payLater=false is read as unknown and the quote carries no answer.
     const quote = mintQuote(session(req, res), product, {
       ...(payLater === 'true' ? { payLater: true } : {}),
-      replay: req.query.replay === 'video',
+      replay: demoPreset(req.query.replay),
     })
     res.json(quote)
   })

@@ -23,6 +23,10 @@ Each image was checked at 2–6× zoom for brand marks before inclusion, cropped
 
 The files keep the paths the catalog in `shared/seed.ts` already uses, so the server needs no change. `weekend.jpg` now holds the backpack photo; the earlier coastline placeholder is gone.
 
+### AI-generated product image
+
+`public/images/halden-x5.jpg` (the Halden X5, the sample person's camera) was generated with an AI image model for this project on 2026-11-12. Halden is an invented brand: the image shows a generic full-frame mirrorless body with no maker's name, logo or model number, and it depicts no real product. 1000 × 1000, no other edits.
+
 ### Real-brand catalog items
 
 The demo store lists two real products under its own name, Larkspur Supply (demo store); it never presents itself as the brand, and their photos show no brand mark. Both photos come from Unsplash under the [Unsplash License](https://unsplash.com/license) (free photos, not Unsplash+), were viewed in full before inclusion, and were downloaded on 2026-10-04.

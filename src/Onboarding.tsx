@@ -69,7 +69,7 @@ export async function loadSampleExport(today: string): Promise<ChosenFile> {
   return { csv: shiftSampleExport(csv, today), name: SAMPLE_FILE_NAME, sample: true }
 }
 
-/** The plan's real calendar day: the demo clock pins only Maya's sample, never an import. */
+/** The plan's real calendar day: the demo clock pins only the sample, never an import. */
 export const realToday = (state: AppState) =>
   state.demoClock ? todayInTimezone(state.profile.timezone) : state.today
 
@@ -206,7 +206,7 @@ function DropZone({
 }
 
 /**
- * "Start with your PayPal activity": the first-run card on Maya's sample Home (P3a). Compact at every
+ * "Start with your PayPal activity": the first-run card on the sample Home (P3a). Compact at every
  * width, so the room-to-spend figure and the first starter stay above the fold; on a phone it is the
  * title and two short buttons. A CSV can also be dropped on it. PayPal's download steps, the
  * privacy line and, on a phone, "Enter your bills yourself" sit behind a disclosure.
@@ -246,7 +246,7 @@ export function StartCard({
           Start with your PayPal activity
         </h2>
         <p className="meta hide-m">
-          You’re viewing Maya’s sample month. Bring your PayPal activity to see your own.
+          You’re viewing a sample month. Bring your PayPal activity to see your own.
         </p>
       </div>
       {busy && (
