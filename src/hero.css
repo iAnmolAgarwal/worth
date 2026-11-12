@@ -590,3 +590,26 @@ button.hero-act-main::after,
 .home-page .rail .rows .top .amt {
   flex: none;
 }
+/* The sample Home's two columns end together: the rail's cards share the column's height with
+   equal gaps between them (never less than the cards' own 12 px), and "And N more" hangs below
+   the last Coming up card without adding to the column's height. */
+.coming-more {
+  margin-top: var(--s-2);
+}
+@media (min-width: 1024px) {
+  .home-page .grid:has(> .rail-fit) {
+    align-items: stretch;
+  }
+  .home-page .rail.rail-fit {
+    gap: var(--s-3);
+    justify-content: space-between;
+  }
+  .home-page .grid:has(> .rail-fit) section[aria-labelledby='coming-title'] {
+    position: relative;
+  }
+  .home-page .grid:has(> .rail-fit) .coming-more {
+    position: absolute;
+    left: 0;
+    top: 100%;
+  }
+}

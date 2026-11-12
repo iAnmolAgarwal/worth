@@ -10,7 +10,7 @@ import {
 } from 'lucide-react'
 import { mainCollision, nearPhrase, planLabel } from '../shared/collision'
 import { planCollisions } from '../shared/finance'
-import type { Product, SavedItem } from '../shared/types'
+import type { Product, SavedItem, ScheduledFlow } from '../shared/types'
 import type { AppState, Purchase } from './contract'
 import { isActive } from './contract'
 import { ASSESSMENT_ONLY, MAY_FIT_NOW } from './copy'
@@ -163,7 +163,7 @@ function ComingUp({ state, onShowAll }: { state: AppState; onShowAll: () => void
         </>
       )}
       {hidden > 0 && (
-        <button type="button" className="link" onClick={onShowAll} style={{ marginTop: 8 }}>
+        <button type="button" className="link coming-more" onClick={onShowAll}>
           And {hidden} more in the next 30 days
         </button>
       )}
@@ -215,6 +215,16 @@ export function SavedRows({
     </div>
   )
 }
+
+/** "Monthly paycheck", "Biweekly paycheck": the plan's own pay frequency, on one line. */
+const PAY_FREQUENCY: Record<ScheduledFlow['cadence'], string> = {
+  weekly: 'Weekly paycheck',
+  biweekly: 'Biweekly paycheck',
+  monthly: 'Monthly paycheck',
+  yearly: 'Yearly paycheck',
+  once: 'One-time pay',
+}
+const paycheckLabel = (flow: Pick<ScheduledFlow, 'cadence'>) => PAY_FREQUENCY[flow.cadence]
 
 /** The rail's way in to Settings › Connect an agent: Worth as a tool an AI shopping agent calls. */
 function AgentEntry({ onOpen }: { onOpen: () => void }) {
@@ -390,7 +400,7 @@ export function Home({
             {month ? nextDays : <ComingUp state={state} onShowAll={() => onNavigate('plan')} />}
           </div>
           <aside
-            className="rail"
+            className={month ? 'rail' : 'rail rail-fit'}
             aria-label={
               month
                 ? 'Your Pay in 4 plans, how your month was built and Saved'
@@ -425,11 +435,8 @@ export function Home({
                 <dl className="kvlist">
                   {income && (
                     <div>
-                      <dt>Paycheck</dt>
-                      <dd className="num">
-                        {money(income.amountCents)}
-                        <span className="caption">{cadenceLabel(income)}</span>
-                      </dd>
+                      <dt>{paycheckLabel(income)}</dt>
+                      <dd className="num">{money(income.amountCents)}</dd>
                     </div>
                   )}
                   <div>
