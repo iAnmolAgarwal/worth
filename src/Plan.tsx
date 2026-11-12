@@ -14,6 +14,7 @@ import { BalanceChart } from './BalanceChart'
 import type { AppState } from './contract'
 import { isActive } from './contract'
 import { DEMO_CLOCK_EDIT, pinnedSample } from './copy'
+import './plan.css'
 import { allPlans, cadenceLabel, flowIcon, kindLabel, runningPlans } from './engine'
 import { cx, dayLabel, money, signed, displayName } from './format'
 import { Alert, Button, DateStepper, Disc, Field, Pill, Ring, Toggle } from './ui'
@@ -1289,9 +1290,10 @@ export function PlanPage({
     ['income', 'Income'],
   ] as const
   return (
-    <div className="page plain">
+    <div className="page plain plan-page">
       <div className="wrap">
-        <div className="sec-head" style={{ flexWrap: 'wrap', marginBottom: 'var(--s-6)' }}>
+        {/* The head shares the grid below: the title over the list, the buttons over the rail. */}
+        <div className="plan-head">
           <h1 className="title">Your plan</h1>
           <div className="actions">
             <Button variant="secondary" icon={FileUp} onClick={onImport} className="hide-m">
@@ -1403,7 +1405,7 @@ export function PlanPage({
             </div>
           </div>
           <aside className="rail" aria-label="Plan summary">
-            <section>
+            <section className="plan-summary">
               <div className="sec-head">
                 <h2 className="h-section">Summary</h2>
               </div>
